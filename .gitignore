@@ -1,0 +1,25 @@
+# 依赖
+node_modules/
+
+# WXT 构建产物
+.output/
+.wxt/
+stats.html
+stats-*.json
+
+# 测试
+coverage/
+
+# 参考仓库（GPL 源码，只读，不入库）
+reference/
+
+# 本地配置与密钥
+.env
+.env.*
+.claude/settings.local.json
+
+# 系统 / 编辑器
+.DS_Store
+*.log
+.idea/
+.vscode/
