@@ -114,12 +114,14 @@ describe('runTranslation', () => {
     expect(requests.map(r => r.request.segments[0]?.id)).toEqual(['p3', 'p1', 'p2', 'T1#c0'])
   })
 
-  it('anchor 钩子包住每次渲染', async () => {
+  it('anchor 钩子每批包一次（文本批 + 表格批），不按块', async () => {
     const doc = docOf()
-    const { transport } = makeTransport()
+    const { transport, requests } = makeTransport()
     let wrapped = 0
     await run(doc, transport, { anchor: cb => { wrapped++; return cb() } })
-    expect(wrapped).toBe(4)
+    expect(requests).toHaveLength(2)
+    expect(wrapped).toBe(2)
+    expect(doc.querySelectorAll(`.${T_CLASS}`)).toHaveLength(4)
   })
 
   it('onProgress 每批回调', async () => {

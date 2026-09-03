@@ -33,7 +33,7 @@ export interface RunOptions {
   concurrency?: number
   /** 视口优先（§10）：取下一批时优先取含此谓词为真的块的批次 */
   isPriority?: (block: Block) => boolean
-  /** 插入译文时的滚动锚定；默认直接执行 */
+  /** 插入译文时的滚动锚定，每批调用一次（锚定要强制布局，MathML 重的页面按块锚定会卡住主线程）；默认直接执行 */
   anchor?: <T>(callback: () => T) => T
 }
 
@@ -131,28 +131,30 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
     const out: Outcome = new Map()
     await translateSegments(batch.segments, batch.sectionTitle, out)
     if (aborted()) return
-    if (batch.kind === 'table' && batch.block) {
-      const cells = new Map<Element, DocumentFragment>()
-      for (const [segment, fragment] of out) if (fragment && segment.cell) cells.set(segment.cell.el, fragment)
-      if (cells.size > 0) {
-        anchor(() => renderTable(batch.block!, cells))
-        progress.done++
-      } else {
-        setState(batch.block, 'failed')
-        progress.failed++
+    anchor(() => {
+      if (batch.kind === 'table' && batch.block) {
+        const cells = new Map<Element, DocumentFragment>()
+        for (const [segment, fragment] of out) if (fragment && segment.cell) cells.set(segment.cell.el, fragment)
+        if (cells.size > 0) {
+          renderTable(batch.block!, cells)
+          progress.done++
+        } else {
+          setState(batch.block, 'failed')
+          progress.failed++
+        }
+        return
       }
-    } else {
       for (const segment of batch.segments) {
         const fragment = out.get(segment)
         if (fragment) {
-          anchor(() => renderText(segment.block as TextBlock, fragment))
+          renderText(segment.block as TextBlock, fragment)
           progress.done++
         } else {
           setState(segment.block, 'failed')
           progress.failed++
         }
       }
-    }
+    })
     report()
   }
 
