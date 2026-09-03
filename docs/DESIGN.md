@@ -230,8 +230,8 @@ interface ProtectedBlock {
 
 ### 7.1 DOM 不变量 [决定]
 
-1. 译文节点是原块的**下一个兄弟**，带 `class="axt-t"`、`data-axt-for="<blockId>"`，标签名与原块相同（`.ltx_p` → `p.axt-t`）
-2. 原节点只允许追加 `data-axt-id`、`data-axt-state` 属性，**不改子树**
+1. 译文节点是原块的**下一个兄弟**，标签名与原块相同，class 是**原块的 class 加 `axt-t`**（`p.ltx_p` → `p.ltx_p.axt-t`），带 `data-axt-for="<blockId>"`。复制 class 是为了沿用站点样式：主标题居中与字号、参考文献条目的 grid 列、各级标题字号都由 `ltx_*` 类决定，不复制就全丢（2026-09-03 实测：主标题左对齐错位、`li.axt-t` 落进参考文献 12em 宽的第一列还带圆点）。克隆进译文的任何元素（表格整体、占位符回填的 `.ltx_note` 等）都要剥掉 `id` 与全部 `data-axt-*`
+2. 原节点只允许追加 `data-axt-id`、`data-axt-state`、`data-axt-inline` 属性，**不改子树**
 3. 全局状态只在 `<html>` 上：`data-axt-on`、`data-axt-mode="side|stack|only"`
 4. 恢复原文 = 删除所有 `.axt-t`、删除所有 `data-axt-*` 属性、移除注入的 `<style>`；恢复后 DOM 必须与翻译前逐节点相等（测试守护）
 
@@ -248,6 +248,8 @@ interface ProtectedBlock {
 
 默认布局，译文紧跟原块。不需要额外 CSS，只有译文样式。
 
+- **短标题同行** [决定]：`title` 单元里除文档主标题外、可见文本 ≤ 60 字符的标题，渲染时给原标题与译文都加 `data-axt-inline`，CSS 令两者 `display: inline-block`（inline-block 保留标题自身的上下 margin），译文左边距 0.5em，效果是 "Abstract 摘要" 同行。参考项目把译文塞进原元素内部达到同样效果，我们不改子树，所以用属性 + CSS。主标题保持上下堆叠：它靠 `text-align: center` 居中，inline 后无法居中
+
 ### 7.4 only（仅译文）
 
 - 原块 `display: none`（不是删除、不是替换文本节点）
@@ -257,7 +259,7 @@ interface ProtectedBlock {
 ### 7.5 译文样式
 
 - 参考 KISS 的做法：一组 CSS 预设（下划线、虚线、淡色、引用块、无样式），通过 `--axt-*` 变量实现，用户可自定义 CSS
-- 译文继承原块字体大小和行高，不引入新字体
+- 译文继承原块字体大小和行高，不引入新字体；译文节点复制原块 class（§7.1），字体、字号、对齐、grid 位置天然与原块一致，`--axt-*` 预设只做叠加装饰
 
 ---
 

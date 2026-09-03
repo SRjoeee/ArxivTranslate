@@ -13,6 +13,15 @@ li.axt-t {
   margin: 0.25em 0 0;
 }
 
+/* 短标题同行（§7.3）：inline-block 保留标题自身的上下 margin，译文紧跟其后 */
+[data-axt-inline] {
+  display: inline-block;
+  vertical-align: baseline;
+}
+.axt-t[data-axt-inline] {
+  margin-inline-start: 0.5em;
+}
+
 /* 翻译失败的块：左侧一条细提示线，原文照常可读（§7.4） */
 [data-axt-state="failed"] {
   box-shadow: inset 3px 0 0 var(--axt-failed-color, rgba(220, 38, 38, 0.6));

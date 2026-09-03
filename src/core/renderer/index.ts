@@ -2,7 +2,7 @@
 // 不变量：译文节点只作为原块的下一个兄弟插入；原节点只追加 data-axt-id / data-axt-state；
 // 全局状态只在 <html> 上；restore 后 DOM 与翻译前逐节点相等。
 import type { Block, TableBlock, TextBlock } from '@/core/extractor'
-import { TABLE_RULES } from '@/core/rules/latexml'
+import { TABLE_RULES, isInlineTitleCandidate, visibleText } from '@/core/rules/latexml'
 import modesCss from '@/styles/modes.css?inline'
 
 export type Mode = 'stack' | 'side' | 'only'
@@ -13,6 +13,10 @@ export const FOR_ATTR = 'data-axt-for'
 export const STATE_ATTR = 'data-axt-state'
 export const ON_ATTR = 'data-axt-on'
 export const MODE_ATTR = 'data-axt-mode'
+/** 短标题同行（§7.3）：原标题与译文都带此属性 */
+export const INLINE_ATTR = 'data-axt-inline'
+/** 原标题可见文本不超过这个长度才与译文同行 */
+export const INLINE_TITLE_MAX_CHARS = 60
 
 const STYLE_ATTR = 'data-axt'
 const STYLE_MARK = 'modes'
@@ -48,18 +52,38 @@ function removeExisting(block: Block): void {
   }
 }
 
-function stripIds(root: Element): void {
-  root.removeAttribute('id')
-  for (const el of Array.from(root.querySelectorAll('[id]'))) el.removeAttribute('id')
+/** 克隆进译文的内容剥掉 id 与全部 data-axt-*（原表、占位符回填的 .ltx_note 都可能带着块标记） */
+function stripCloned(root: Element, includeRoot: boolean): void {
+  const targets = Array.from(root.querySelectorAll('*'))
+  if (includeRoot) targets.unshift(root)
+  for (const el of targets) {
+    el.removeAttribute('id')
+    for (const name of el.getAttributeNames()) if (name.startsWith(AXT_ATTR_PREFIX)) el.removeAttribute(name)
+  }
+}
+
+/** 译文节点的 class：原块的 class 加 axt-t，沿用站点样式（§7.1） */
+function translationClass(el: Element): string {
+  const own = Array.from(el.classList).filter(c => c !== T_CLASS)
+  return [...own, T_CLASS].join(' ')
+}
+
+function shouldInline(block: TextBlock): boolean {
+  return isInlineTitleCandidate(block.el) && visibleText(block.el).trim().length <= INLINE_TITLE_MAX_CHARS
 }
 
 /** 文本块：与原块同标签名的新元素，内容是 protector 回填的 fragment（克隆已剥 id） */
 export function renderText(block: TextBlock, content: DocumentFragment): Element {
   removeExisting(block)
   const node = block.el.ownerDocument.createElement(block.el.tagName)
-  node.className = T_CLASS
-  node.setAttribute(FOR_ATTR, block.id)
   node.append(content)
+  stripCloned(node, false)
+  node.className = translationClass(block.el)
+  node.setAttribute(FOR_ATTR, block.id)
+  if (shouldInline(block)) {
+    block.el.setAttribute(INLINE_ATTR, '')
+    node.setAttribute(INLINE_ATTR, '')
+  }
   block.el.after(node)
   setState(block, 'translated')
   return node
@@ -72,7 +96,7 @@ export function renderText(block: TextBlock, content: DocumentFragment): Element
 export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragment>): Element {
   removeExisting(block)
   const clone = block.el.cloneNode(true) as Element
-  stripIds(clone)
+  stripCloned(clone, true)
   // 两棵树结构相同：原表的直接单元格与克隆表的直接单元格按同序对应
   const cloneCells = Array.from(clone.querySelectorAll(TABLE_RULES.cell)).filter(td => td.closest(TABLE_RULES.root) === clone)
   block.cells.forEach((cell, i) => {
