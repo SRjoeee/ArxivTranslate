@@ -312,7 +312,7 @@ export interface TranslateResult {
 - 用 AI SDK 7 的 `generateText` + `Output.object({ schema })`（`generateObject` 已被取代）+ zod schema `{ segments: { id, text }[] }`，让结构校验由 SDK 完成；SDK 自身 `maxRetries: 0`，重试交给移植的 retry policy
 - system prompt 固定要素：学术论文翻译；占位符标签必须原样保留、不可增删改；人名/期刊名/会议名保留原文；术语表优先；只返回译文
 - prompt 带版本号 `PROMPT_VERSION`，写入缓存键
-- 批次按章节切，单批不超过 `maxBatchChars`；附带 `sectionTitle` 作上下文
+- 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
 - 批次失败：对半拆分重试 → 单块 → 标记失败
 
 ### 8.3 免费引擎约定

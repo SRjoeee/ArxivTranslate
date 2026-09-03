@@ -1,10 +1,25 @@
 // 扩展内部消息协议。popup / content / background 之间只允许使用这里定义的类型。
 import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
+import type { Progress } from '@/core/pipeline/run'
+import type { Mode } from '@/core/renderer'
 import type { ProviderStatus, TranslateMessageRequest, TranslateMessageResponse } from '@/entrypoints/background/translate-handler'
+
+export interface PageStatus {
+  /** 当前页面的 arXiv id；不是 arXiv HTML 页面时为 null */
+  paper: string | null
+  mode: Mode
+  progress: Progress
+}
 
 /** 消息表：type → { request, response } */
 export interface AxtMessages {
+  /** popup → content：开始翻译当前页面 */
+  'axt:translate-page': { request: { mode?: Mode }; response: { started: boolean; reason?: string } }
+  /** popup → content：中止并恢复原文 */
+  'axt:restore-page': { request: Record<never, never>; response: { removedNodes: number } }
+  /** popup → content：进度 */
+  'axt:page-status': { request: Record<never, never>; response: PageStatus }
   /** popup → background：连通性 */
   'axt:ping': { request: Record<never, never>; response: { ok: true; version: string } }
   /** popup → content script：内存中 Block[] 的统计 */
