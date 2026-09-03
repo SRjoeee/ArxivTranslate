@@ -76,6 +76,14 @@ describe('extract：表格块', () => {
     expect(t.cells.map(c => c.numeric)).toEqual([false, false, false, true, true, true, false, true])
   })
 
+  it('没有任何含字母单元格的表（空排版表、纯公式表）不成块', () => {
+    expect(extract(docOf('<div class="ltx_para"><table class="ltx_tabular"><tbody><tr><td class="ltx_td"></td></tr></tbody></table></div>'))).toHaveLength(0)
+    expect(extract(docOf(
+      '<table class="ltx_tabular"><tbody><tr><td class="ltx_td"><math class="ltx_Math"><mi>x</mi></math></td><td class="ltx_td">1.5</td></tr></tbody></table>',
+    ))).toHaveLength(0)
+    expect(extract(docOf('<table class="ltx_tabular"><tbody><tr><td class="ltx_td">?</td><td class="ltx_td">1</td></tr></tbody></table>'))).toHaveLength(0)
+  })
+
   it('嵌套 tabular 只产出最外层，内层单元格不在外层 cells 里', () => {
     const nested =
       '<table class="ltx_tabular" id="outer"><tbody><tr><td class="ltx_td">Outer cell'
@@ -102,7 +110,7 @@ describe('extract：id', () => {
 describe('DOM 不变量', () => {
   const html =
     '<p class="ltx_p" id="p1">Text <a class="ltx_ref" href="#x">1</a>.</p>'
-    + '<table class="ltx_tabular" id="T"><tbody><tr><td class="ltx_td">1</td></tr></tbody></table>'
+    + '<table class="ltx_tabular" id="T"><tbody><tr><td class="ltx_td">Model</td><td class="ltx_td">1</td></tr></tbody></table>'
 
   it('extract 不修改 DOM', () => {
     const doc = docOf(html)

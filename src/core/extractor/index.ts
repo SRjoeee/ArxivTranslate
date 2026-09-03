@@ -56,6 +56,11 @@ function cellsOf(table: Element): Cell[] {
     .map(el => ({ el, numeric: isNumericCell(visibleText(el)) }))
 }
 
+/** 至少一个单元格既非数值格又含字母，这张表才有翻译的必要；空排版表、纯公式表不成块 */
+function hasTranslatableCell(cells: Cell[]): boolean {
+  return cells.some(c => !c.numeric && LETTER.test(visibleText(c.el)))
+}
+
 /** 从翻译根开始按文档序提取块；找不到翻译根返回空数组。不修改 DOM */
 export function extract(root: Document | Element): Block[] {
   const start = documentRoot(root)
@@ -82,10 +87,12 @@ export function extract(root: Document | Element): Block[] {
         case 'skip':
           descend = false
           break
-        case 'table':
-          blocks.push({ id: assignId(el), kind: 'table', el, unit: 'table', cells: cellsOf(el) })
+        case 'table': {
+          const cells = cellsOf(el)
+          if (hasTranslatableCell(cells)) blocks.push({ id: assignId(el), kind: 'table', el, unit: 'table', cells })
           descend = false
           break
+        }
         case 'unit':
           if (LETTER.test(ownText(el))) blocks.push({ id: assignId(el), kind: 'text', el, unit: c.rule })
           break

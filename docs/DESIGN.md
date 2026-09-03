@@ -97,7 +97,7 @@ interface Block {
 
 - `extract(doc): Block[]` 纯读，不写 DOM；`markBlocks(blocks)` 才写 `data-axt-id`。**页面加载时只 extract**，`#axt-debug` 或开始翻译时才 mark，未翻译前不动页面。popup 的统计来自 content script 内存中的 `Block[]`，不查 DOM。
 - **遍历策略与分类解耦**：从翻译根 DFS，按 `classify(el)` 的类别分别决定"是否产出"与"是否下钻"——`skip` 不产出不下钻；`table` 产出表格块、不下钻（表内 `.ltx_p` 属于单元格，不单独成块）；`unit` 在含可翻译文本时产出文本块、**继续下钻**以发现嵌套单元；`protect` 不产出、默认不下钻，但规则带 `descend: true` 的除外——`.ltx_note` 是 protect-but-descend 的第一例：对外层段落它是 void，内部的 `.ltx_note_content` 仍要被发现为独立块（fixture 中 56 个脚注有 51 个在 `.ltx_p` 内、3 个在 `.ltx_caption` 内）。
-- 可翻译文本 = 排除 protect / skip 子树后的文本含 Unicode 字母（`/\p{L}/u`）；只含公式、编号或标点的 `.ltx_p` 不成块。
+- 可翻译文本 = 排除 protect / skip 子树后的文本含 Unicode 字母（`/\p{L}/u`）；只含公式、编号或标点的 `.ltx_p` 不成块。表格同理：没有任何"非数值格且含字母"单元格的表（段落里的空排版 tabular、纯公式表）不成块。
 
 ---
 
