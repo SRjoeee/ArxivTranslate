@@ -1,0 +1,19 @@
+/* stack 模式与通用译文样式（DESIGN §7.3 / §7.5）。side / only 的规则在 Phase 3 补；预设颜色由 presets.css 的 --axt-* 变量提供 */
+.axt-t {
+  font: inherit;
+  line-height: inherit;
+  color: var(--axt-color, inherit);
+}
+
+p.axt-t,
+div.axt-t,
+h1.axt-t, h2.axt-t, h3.axt-t, h4.axt-t, h5.axt-t, h6.axt-t,
+figcaption.axt-t,
+li.axt-t {
+  margin: 0.25em 0 0;
+}
+
+/* 翻译失败的块：左侧一条细提示线，原文照常可读（§7.4） */
+[data-axt-state="failed"] {
+  box-shadow: inset 3px 0 0 var(--axt-failed-color, rgba(220, 38, 38, 0.6));
+}
