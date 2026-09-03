@@ -10,6 +10,8 @@ export interface OpenAICompatConfig {
 }
 
 export function createModel(config: OpenAICompatConfig): LanguageModel {
-  const provider = createOpenAICompatible({ name: 'openai-compat', baseURL: config.baseURL, apiKey: config.apiKey })
+  // supportsStructuredOutputs：把 zod schema 以 response_format: json_schema 发给端点（OpenRouter 上 DeepSeek / Gemini / GPT 系列均支持）；
+  // 不支持的模型靠 prompt 里写死的输出形状兜底
+  const provider = createOpenAICompatible({ name: 'openai-compat', baseURL: config.baseURL, apiKey: config.apiKey, supportsStructuredOutputs: true })
   return provider(config.model)
 }

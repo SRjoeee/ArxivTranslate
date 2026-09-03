@@ -13,6 +13,8 @@ describe('prompt', () => {
     expect(s).toContain('zh-CN')
     expect(s).toMatch(/人名|author|names/i)
     expect(s).toMatch(/只返回|only/i)
+    // 输出形状写死：不支持 json_schema 的端点也能给出正确的顶层键
+    expect(s).toContain('{"segments":[{"id":"<id>","text":"<translated text>"}]}')
   })
 
   it('user prompt 含全部 segment id、原文与章节上下文', () => {

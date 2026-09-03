@@ -11,7 +11,7 @@ export function systemPrompt(target: string): string {
     '2. Segments contain placeholder tags: void tags like <x id="3"/> stand for formulas, citations and references; paired tags like <t id="5">…</t> wrap styled text. Keep every tag exactly as written — same ids, same count, same nesting. Never add, drop, rename or translate a tag. Move tags only as far as word order requires.',
     '3. Keep author names, journal names, conference names, dataset names, code identifiers and URLs in the original language.',
     '4. Use precise academic terminology; prefer the terms given in the glossary when present.',
-    '5. Output only the translation in the requested JSON shape. No explanations, no extra keys.',
+    '5. Output only a JSON object of exactly this shape, with the same ids and the same number of segments as the input: {"segments":[{"id":"<id>","text":"<translated text>"}]}. No markdown fences, no explanations, no extra keys.',
   ].join('\n')
 }
 

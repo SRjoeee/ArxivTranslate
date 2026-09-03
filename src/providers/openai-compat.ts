@@ -68,7 +68,10 @@ function toProviderError(e: unknown): ProviderError {
     return attachRequestErrorMeta(err, { statusCode: status, responseHeaders: e.responseHeaders, isRetryable: e.isRetryable })
   }
   if (typeof name === 'string' && /NoObjectGenerated|NoOutputGenerated|TypeValidation|JSONParse/.test(name)) {
-    return new ProviderError('invalid-response', (e as Error).message, { cause: e })
+    // 把模型的原始输出带上一小段，排查"不符合 schema"时能看到它到底返回了什么
+    const raw = (e as { text?: unknown }).text
+    const snippet = typeof raw === 'string' && raw.trim() ? `；模型原始输出：${raw.trim().slice(0, 300)}` : ''
+    return new ProviderError('invalid-response', `${(e as Error).message}${snippet}`, { cause: e })
   }
   if (e instanceof TypeError) return attachRequestErrorMeta(new ProviderError('network', e.message, { cause: e }), { kind: 'network', isRetryable: true })
   return new ProviderError('unknown', e instanceof Error ? e.message : String(e), { cause: e })
