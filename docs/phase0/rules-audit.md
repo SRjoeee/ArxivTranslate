@@ -1,43 +1,50 @@
-<!-- 生成物：由 `pnpm fixtures:stats` 产生，勿手改；结论见 docs/RESEARCH.md §2。生成日期 2026-09-03，RULES_VERSION 0.1.0-phase0 -->
+<!-- 生成物：由 `pnpm fixtures:stats` 产生，勿手改；结论见 docs/RESEARCH.md §2。生成日期 2026-09-03，RULES_VERSION 0.2.0 -->
 
-## 规则覆盖率审计（RULES_VERSION 0.1.0-phase0，10 篇，112268 个文本节点）
+## 规则覆盖率审计（RULES_VERSION 0.2.0，10 篇，112268 个文本节点）
 
 ### 每篇概览
 
 | fixture | 解析 ms | 文本节点 | unit | protected | skipped | uncovered |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2312.17141 | 238 | 18375 | 19.6% | 51.2% | 29.1% | 14 (0.1%) |
-| 2312.17527 | 53 | 4294 | 21.9% | 47.9% | 30.2% | 0 (0.0%) |
-| 2401.00418 | 189 | 20524 | 14.5% | 82.4% | 3.2% | 0 (0.0%) |
-| 2401.00596 | 53 | 4044 | 49.4% | 47.7% | 3.0% | 1 (0.0%) |
-| 2410.00260 | 41 | 1750 | 52.9% | 25.9% | 21.1% | 2 (0.1%) |
-| 2507.00150 | 51 | 3551 | 49.1% | 49.7% | 0.8% | 13 (0.4%) |
-| 2608.29808 | 121 | 5891 | 59.3% | 10.5% | 30.2% | 0 (0.0%) |
-| 2608.30667 | 3 | 4 | 50.0% | 25.0% | 25.0% | 0 (0.0%) |
-| 2609.00245 | 618 | 37556 | 12.9% | 49.6% | 37.5% | 0 (0.0%) |
-| 2609.00246 | 263 | 16279 | 26.9% | 30.6% | 42.4% | 3 (0.0%) |
+| 2312.17141 | 233 | 18375 | 15.6% | 45.2% | 39.2% | 0 (0.0%) |
+| 2312.17527 | 55 | 4294 | 16.8% | 53.0% | 30.2% | 0 (0.0%) |
+| 2401.00418 | 193 | 20524 | 13.5% | 80.7% | 5.7% | 0 (0.0%) |
+| 2401.00596 | 54 | 4044 | 26.6% | 70.5% | 3.0% | 0 (0.0%) |
+| 2410.00260 | 61 | 1750 | 34.5% | 44.3% | 21.2% | 0 (0.0%) |
+| 2507.00150 | 50 | 3551 | 39.2% | 59.9% | 0.9% | 0 (0.0%) |
+| 2608.29808 | 134 | 5891 | 49.5% | 20.0% | 30.5% | 0 (0.0%) |
+| 2608.30667 | 9 | 4 | 50.0% | 25.0% | 25.0% | 0 (0.0%) |
+| 2609.00245 | 423 | 37556 | 9.2% | 52.9% | 37.9% | 0 (0.0%) |
+| 2609.00246 | 267 | 16279 | 23.8% | 33.8% | 42.4% | 0 (0.0%) |
 
 ### 规则命中（文本节点数 / 匹配元素数）
 
 | 类型 | id | selector | 文本节点 | 元素数 |
 | --- | --- | --- | --- | --- |
-| unit | p | `.ltx_p` | 16052 | 2296 |
-| unit | title | `.ltx_title` | 632 | 566 |
-| unit | abstract | `.ltx_abstract .ltx_p` | 0 | 13 |
-| unit | caption | `.ltx_caption` | 271 | 102 |
-| unit | item | `.ltx_item .ltx_p` | 0 | 331 |
-| unit | note | `.ltx_note_content` | 285 | 56 |
-| unit | td | `.ltx_td` | 4900 | 5487 |
-| unit | bibitem | `.ltx_bibitem` | 2761 | 530 |
-| unit | theorem | `.ltx_theorem .ltx_p, .ltx_proof .ltx_p` | 0 | 895 |
-| skip | math | `math, .ltx_Math` | 81947 | 8217 |
-| skip | equation | `.ltx_equation, .ltx_equationgroup` | 69 | 1145 |
-| skip | tag | `.ltx_tag` | 2090 | 2201 |
-| skip | code | `.ltx_listing, .ltx_listingline, .ltx_verbatim, pre, code` | 992 | 824 |
-| skip | tt | `.ltx_text.ltx_font_typewriter` | 2105 | 2488 |
-| skip | nav | `.ltx_page_navbar, .ltx_TOC` | 0 | 19 |
-| skip | authors | `.ltx_authors, .ltx_author, .ltx_contact, .ltx_date` | 127 | 50 |
+| unit | p | `.ltx_p` | 11753 | 2296 |
+| unit | title | `.ltx_title, .ltx_subtitle` | 569 | 567 |
+| unit | caption | `.ltx_caption` | 236 | 102 |
+| unit | footnote | `.ltx_note_content` | 166 | 56 |
+| unit | bibitem | `.ltx_bibitem` | 2303 | 530 |
+| unit | ack | `.ltx_acknowledgements` | 10 | 2 |
+| unit | keywords | `.ltx_keywords` | 2 | 2 |
+| table | table | `.ltx_tabular` | 4632 | 58 |
+| skip | equation | `.ltx_equation, .ltx_equationgroup` | 4 | 1145 |
+| skip | listing | `.ltx_listing, .ltx_listingline, .ltx_listing_data, .ltx_verbatim, pre, code` | 992 | 852 |
+| skip | authors | `.ltx_authors, .ltx_creator, .ltx_personname, .ltx_author_notes, .ltx_role_affiliation, .ltx_contact, .ltx_dates` | 130 | 135 |
+| skip | pubnotes | `.ltx_pubnotes` | 14 | 2 |
+| skip | picture | `svg, .ltx_picture` | 90 | 264 |
 | skip | error | `.ltx_ERROR` | 4 | 4 |
+| skip | nav | `.ltx_page_navbar, .ltx_TOC` | 0 | 19 |
+| protect | math | `math, .ltx_Math` | 81929 | 8217 |
+| protect | ref | `.ltx_ref` | 3253 | 3286 |
+| protect | cite | `.ltx_cite` | 1872 | 769 |
+| protect | tag | `.ltx_tag` | 2090 | 2201 |
+| protect | tt | `.ltx_text.ltx_font_typewriter` | 2105 | 2488 |
+| protect | note | `.ltx_note` | 0 | 56 |
+| protect | note-mark | `.ltx_note_mark, .ltx_note_type` | 114 | 114 |
+| protect | img | `img` | 0 | 73 |
+| protect | br | `br` | 0 | 69 |
 
 ### (a) 在所有 fixture 中都没有匹配元素的规则
 
@@ -47,34 +54,10 @@
 
 | 签名 | 文本节点 | fixture 数 | 样本 |
 | --- | --- | --- | --- |
-| `div.ltx_acknowledgements < section.ltx_section` | 6 | 1 | Multilateral Agreement. |
-| `span.ltx_pubnote.ltx_role_ccs < span.ltx_pubnotes_content < span.ltx_pubnotes.ltx_pubnotes_meta` | 3 | 1 | Theory of computation Denotational semantics |
-| `span.ltx_note_name < span.ltx_pubnote.ltx_role_ccs < span.ltx_pubnotes_content < span.ltx_pubnotes.ltx_pubnotes_meta` | 3 | 1 | CCS: |
-| `div.ltx_dates` | 3 | 3 | 2018 |
-| `span.ltx_font_italic.ltx_text < div.ltx_acknowledgements < section.ltx_section` | 3 | 1 | Gaia |
-| `sup.ltx_note_mark < span.ltx_note.ltx_role_footnotetext` | 2 | 1 | 1 |
-| `a.ltx_font_typewriter.ltx_ref.ltx_url < div.ltx_acknowledgements < section.ltx_section` | 2 | 1 | https://www.cosmos.esa.int/gaia |
-| `span.ltx_note_name < span.ltx_pubnote.ltx_role_doi < span.ltx_pubnotes_content < span.ltx_pubnotes.ltx_pubnotes_meta` | 1 | 1 | DOI: |
-| `a < span.ltx_pubnote.ltx_role_doi < span.ltx_pubnotes_content < span.ltx_pubnotes.ltx_pubnotes_meta` | 1 | 1 | XXXXXXX.XXXXXXX |
-| `span.ltx_pubnote.ltx_role_journal < span.ltx_pubnotes_content < span.ltx_pubnotes.ltx_pubnotes_meta` | 1 | 1 | JACM |
-| `span.ltx_note_name < span.ltx_pubnote.ltx_role_journal < span.ltx_pubnotes_content < span.ltx_pubnotes.ltx_pubnotes_meta` | 1 | 1 | Journal: |
-| `span.ltx_pubnote.ltx_role_number < span.ltx_pubnotes_content < span.ltx_pubnotes.ltx_pubnotes_meta` | 1 | 1 | 2 |
-| `span.ltx_pubnote.ltx_role_publicationmonth < span.ltx_pubnotes_content < span.ltx_pubnotes.ltx_pubnotes_meta` | 1 | 1 | 4 |
-| `div.ltx_acknowledgements < section.ltx_paragraph < section.ltx_subsection < section.ltx_section` | 1 | 1 | One starting point for this work was a question from Ohad Ka |
-| `span.ltx_font_bold.ltx_font_sansserif.ltx_text < div.ltx_keywords` | 1 | 1 | Galaxy:general –
-Stars: kinematics and dynamics – astrometry |
-| `div.ltx_subtitle` | 1 | 1 | (Extended Version) |
-| `div.ltx_keywords` | 1 | 1 | data races, concurrency, static program analysis, software v |
-| `span.ltx_font_sansserif.ltx_markedasmath.ltx_text < span.ltx_foreignobject_content < span.ltx_foreignobject_container < foreignobject < g < …` | 1 | 1 | initMT |
 
 ### 同一单元元素命中多条 unit 规则的组合
 
-| 组合 | 文本节点 |
-| --- | --- |
-| p+theorem | 30607 |
-| p+item+theorem | 9626 |
-| p+item | 1830 |
-| p+abstract | 150 |
+（无）
 
 ### (c) 只在部分 fixture 出现的 ltx_* 类名（共 255 个类名，253 个未全覆盖；全部 fixture 同为 oxide 0.7.6，此处反映的是内容分布而非版本差异）
 
