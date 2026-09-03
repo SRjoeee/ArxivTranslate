@@ -1,18 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
-import { sendMessage, sendToActiveTab } from '@/shared/messages'
+import type { ProviderStatus } from '@/entrypoints/background/translate-handler'
+import { sendMessage, sendToActiveTab, type PageStatus } from '@/shared/messages'
 
 const scriptStart = performance.now()
 
-// Phase 1：连通性 + 当前页面的块统计（来自 content script 内存中的 Block[]）。翻译控制从 Phase 2 起加入。
+// Phase 2：翻译 / 恢复 / 进度 + provider 状态；块统计保留在下方。模式切换、引擎选择在 Phase 3。
 export function App() {
   const [ping, setPing] = useState('连接后台…')
+  const [provider, setProvider] = useState<ProviderStatus | null>(null)
+  const [page, setPage] = useState<PageStatus | null>(null)
   const [stats, setStats] = useState<BlockStats | null>(null)
-  const [statsError, setStatsError] = useState<string | null>(null)
+  const [note, setNote] = useState('')
+
+  const refresh = useCallback(() => {
+    sendToActiveTab({ type: 'axt:page-status' }).then(setPage).catch(() => setPage(null))
+  }, [])
 
   useEffect(() => {
-    // 两行计时：回答"点图标卡一下"——首帧到挂载、background 冷启动往返
     console.debug(`[axt] popup mounted ${Math.round(performance.now() - scriptStart)} ms after script start`)
     const t0 = performance.now()
     sendMessage({ type: 'axt:ping' })
@@ -21,41 +27,91 @@ export function App() {
         console.debug(`[axt] ping round-trip ${Math.round(performance.now() - t0)} ms`)
       })
       .catch(e => setPing(`后台未响应：${String(e)}`))
-    sendToActiveTab({ type: 'axt:stats' })
-      .then(setStats)
-      .catch(() => setStatsError('当前标签页不是 arXiv HTML 页面，或扩展更新后页面尚未刷新'))
-  }, [])
+    sendMessage({ type: 'axt:provider-status' }).then(setProvider).catch(() => setProvider(null))
+    sendToActiveTab({ type: 'axt:stats' }).then(setStats).catch(() => setStats(null))
+    refresh()
+  }, [refresh])
+
+  // 翻译进行中每 500 ms 轮询进度
+  const running = page?.progress.state === 'running'
+  useEffect(() => {
+    if (!running) return
+    const id = setInterval(refresh, 500)
+    return () => clearInterval(id)
+  }, [running, refresh])
+
+  async function translate() {
+    setNote('')
+    try {
+      const r = await sendToActiveTab({ type: 'axt:translate-page' })
+      if (!r.started) setNote(r.reason ?? '无法开始')
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e))
+    }
+    refresh()
+  }
+
+  async function restorePage() {
+    setNote('')
+    try {
+      const r = await sendToActiveTab({ type: 'axt:restore-page' })
+      setNote(`已恢复原文（移除 ${r.removedNodes} 个译文节点）`)
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e))
+    }
+    refresh()
+  }
+
+  const canTranslate = !!page?.paper && !!provider?.available && !running
+  const canRestore = !!page && page.progress.state !== 'idle'
 
   return (
-    <main style={{ minWidth: 260, padding: 12, font: '13px system-ui, sans-serif' }}>
+    <main style={{ minWidth: 280, padding: 12, font: '13px system-ui, sans-serif' }}>
       <h1 style={{ fontSize: 14, margin: '0 0 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         arXiv HTML Translator
         <button style={{ font: 'inherit', fontSize: 12 }} onClick={() => browser.runtime.openOptionsPage()}>设置</button>
       </h1>
-      <p style={{ margin: '0 0 8px' }}>{ping}</p>
-      {stats && <StatsView stats={stats} />}
-      {statsError && <p style={{ margin: 0, color: '#666' }}>{statsError}</p>}
+      <p style={{ margin: '0 0 4px', color: '#666' }}>{ping}</p>
+      <p style={{ margin: '0 0 8px', color: '#666' }}>
+        {provider === null ? '引擎状态未知' : provider.available ? `引擎：${provider.providerId} · ${provider.model ?? ''}` : '未配置 API key，请先到设置页填写'}
+      </p>
+
+      {page === null
+        ? <p style={{ margin: 0, color: '#666' }}>当前标签页不是 arXiv HTML 页面，或扩展更新后页面尚未刷新</p>
+        : (
+          <section>
+            <p style={{ margin: '0 0 8px' }}>
+              <button onClick={translate} disabled={!canTranslate}>{running ? '翻译中…' : '翻译'}</button>
+              {' '}
+              <button onClick={restorePage} disabled={!canRestore}>恢复原文</button>
+            </p>
+            <ProgressLine page={page} />
+          </section>
+        )}
+      {note && <p style={{ margin: '8px 0 0', color: '#b00' }}>{note}</p>}
+      {stats && <StatsLine stats={stats} />}
     </main>
   )
 }
 
-function StatsView({ stats }: { stats: BlockStats }) {
-  const units = Object.entries(stats.byUnit).sort((a, b) => b[1] - a[1])
+function ProgressLine({ page }: { page: PageStatus }) {
+  const p = page.progress
+  const text = p.state === 'idle' ? '未翻译'
+    : p.state === 'running' ? `翻译中 ${p.done}/${p.total}${p.failed ? `，失败 ${p.failed}` : ''}`
+    : p.state === 'cancelled' ? `已中止（${p.done}/${p.total}）`
+    : `已翻译 ${p.done}/${p.total}${p.failed ? `，失败 ${p.failed}` : ''}，缓存命中 ${p.cached}`
   return (
-    <section>
-      <p style={{ margin: '0 0 4px' }}>
-        块 {stats.total}（文本 {stats.text}，表格 {stats.table}；单元格 {stats.cells}，数值格 {stats.numericCells}）
-      </p>
-      <table style={{ borderCollapse: 'collapse' }}>
-        <tbody>
-          {units.map(([unit, n]) => (
-            <tr key={unit}>
-              <td style={{ paddingRight: 12 }}>{unit}</td>
-              <td style={{ textAlign: 'right' }}>{n}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </section>
+    <p style={{ margin: 0 }}>
+      {text}
+      {p.fatal && <span style={{ color: '#b00' }}>｜{p.fatal}</span>}
+    </p>
+  )
+}
+
+function StatsLine({ stats }: { stats: BlockStats }) {
+  return (
+    <p style={{ margin: '8px 0 0', color: '#666', fontSize: 12 }}>
+      块 {stats.total}（文本 {stats.text}，表格 {stats.table}；单元格 {stats.cells}，数值格 {stats.numericCells}）
+    </p>
   )
 }
