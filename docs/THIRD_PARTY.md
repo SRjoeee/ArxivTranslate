@@ -14,6 +14,6 @@
 
 | 本项目文件 | 来源 | 修改说明 |
 |---|---|---|
-| （尚无；Phase 2 起登记） | | |
+| `src/providers/retry-policy.ts` | `reference/read-frog/src/utils/request/retry-policy.ts@9b44f82` | 整段移植；加文件头来源行，按本项目严格类型检查微调；由 `src/providers/retry.ts` 的 `withRetry` 驱动 |
 
 登记格式：`src/<path>` ← `reference/<repo>/<path>@<commit>`，一句话说明改了什么（改名、去掉配置依赖、适配块模型等）。改写幅度大到不再像原文件的也要登记。
