@@ -18,6 +18,7 @@ export default defineConfig({
       },
     },
     include: ['tests/**/*.test.ts'],
+    setupFiles: ['tests/setup.ts'],
     // fixture 级测试要遍历 1.8 MB 页面的全部元素，CI 机器上单例可达 6 s；默认 5 s 会误报
     testTimeout: 30_000,
   },

@@ -14,6 +14,7 @@
 
 | 本项目文件 | 来源 | 修改说明 |
 |---|---|---|
+| `src/cache/store.ts` | `reference/FluentRead/src/services/translation/cache.ts@536a819` | 移植并改造：键计算移到 `key.ts`（Web Crypto），记录加 `paper` 索引，TTL / 容量按论文场景放大，构造函数可注入库与容量；保留内存热层、事务内 LRU 淘汰与故障降级策略 |
 | `src/providers/retry-policy.ts` | `reference/read-frog/src/utils/request/retry-policy.ts@9b44f82` | 整段移植；加文件头来源行，按本项目严格类型检查微调；由 `src/providers/retry.ts` 的 `withRetry` 驱动 |
 
 登记格式：`src/<path>` ← `reference/<repo>/<path>@<commit>`，一句话说明改了什么（改名、去掉配置依赖、适配块模型等）。改写幅度大到不再像原文件的也要登记。
