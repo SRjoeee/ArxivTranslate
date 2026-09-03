@@ -1,0 +1,75 @@
+// openai-compat provider：OpenRouter / DeepSeek / Ollama 等 OpenAI 兼容端点，走 AI SDK 的结构化输出。
+// 请求拼装、JSON 解析与 schema 校验交给 SDK；重试交给 withRetry + 移植的 retry policy（SDK 自身 maxRetries 设 0）。
+import { APICallError, Output, generateText, type LanguageModel } from 'ai'
+import { z } from 'zod'
+import { createModel, type OpenAICompatConfig } from './model'
+import { systemPrompt, userPrompt } from './prompt'
+import { attachRequestErrorMeta } from './retry-policy'
+import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
+
+const outputSchema = z.object({
+  segments: z.array(z.object({ id: z.string(), text: z.string() })),
+})
+
+export function createOpenAICompatProvider(config: OpenAICompatConfig, deps: { model?: LanguageModel } = {}): TranslationProvider {
+  const hasKey = () => config.apiKey.trim().length > 0
+  return {
+    id: 'openai-compat',
+    displayName: 'OpenAI 兼容端点',
+    kind: 'llm',
+    preservesMarkup: true,
+    maxBatchChars: 6000,
+    concurrency: 3,
+    async isAvailable() {
+      return hasKey()
+    },
+    async translate(request: TranslateRequest): Promise<TranslateResult> {
+      if (!hasKey()) throw new ProviderError('no-key', '未配置 API key')
+      const model = deps.model ?? createModel(config)
+      let output: z.infer<typeof outputSchema>
+      try {
+        const result = await generateText({
+          model,
+          output: Output.object({ schema: outputSchema }),
+          system: systemPrompt(request.target),
+          prompt: userPrompt(request),
+          temperature: 0.2,
+          maxRetries: 0,
+          abortSignal: request.signal,
+        })
+        output = result.output
+      } catch (e) {
+        throw toProviderError(e)
+      }
+      return { segments: alignSegments(request, output.segments), provider: 'openai-compat', model: config.model }
+    },
+  }
+}
+
+/** 返回的 id 集合必须与请求完全一致；按请求顺序排列 */
+function alignSegments(request: TranslateRequest, returned: { id: string; text: string }[]) {
+  const byId = new Map(returned.map(s => [s.id, s.text]))
+  const missing = request.segments.filter(s => !byId.has(s.id)).map(s => s.id)
+  const extra = returned.filter(s => !request.segments.some(r => r.id === s.id)).map(s => s.id)
+  if (missing.length || extra.length || byId.size !== returned.length) {
+    throw new ProviderError('invalid-response', `返回的 segment 与请求不一致：缺少 [${missing.join(', ')}]，多出 [${extra.join(', ')}]`)
+  }
+  return request.segments.map(s => ({ id: s.id, text: byId.get(s.id)! }))
+}
+
+function toProviderError(e: unknown): ProviderError {
+  if (e instanceof ProviderError) return e
+  const name = (e as { name?: unknown })?.name
+  if (name === 'AbortError') return new ProviderError('aborted', '请求已中止', { cause: e })
+  if (APICallError.isInstance(e)) {
+    const status = e.statusCode
+    const kind = status === 429 ? 'rate-limit' : status === 401 || status === 403 ? 'auth' : status === undefined ? 'network' : 'unknown'
+    const err = new ProviderError(kind, e.message, { cause: e })
+    return attachRequestErrorMeta(err, { statusCode: status, responseHeaders: e.responseHeaders, isRetryable: e.isRetryable })
+  }
+  if (typeof name === 'string' && /NoObjectGenerated|NoOutputGenerated|TypeValidation|JSONParse/.test(name)) {
+    return new ProviderError('invalid-response', (e as Error).message, { cause: e })
+  }
+  if (e instanceof TypeError) return attachRequestErrorMeta(new ProviderError('network', e.message, { cause: e }), { kind: 'network', isRetryable: true })
+  return new ProviderError('unknown', e instanceof Error ? e.message : String(e), { cause: e })
+}
