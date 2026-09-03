@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
 import { sendMessage, sendToActiveTab } from '@/shared/messages'
 
@@ -27,7 +28,10 @@ export function App() {
 
   return (
     <main style={{ minWidth: 260, padding: 12, font: '13px system-ui, sans-serif' }}>
-      <h1 style={{ fontSize: 14, margin: '0 0 8px' }}>arXiv HTML Translator</h1>
+      <h1 style={{ fontSize: 14, margin: '0 0 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        arXiv HTML Translator
+        <button style={{ font: 'inherit', fontSize: 12 }} onClick={() => browser.runtime.openOptionsPage()}>设置</button>
+      </h1>
       <p style={{ margin: '0 0 8px' }}>{ping}</p>
       {stats && <StatsView stats={stats} />}
       {statsError && <p style={{ margin: 0, color: '#666' }}>{statsError}</p>}
