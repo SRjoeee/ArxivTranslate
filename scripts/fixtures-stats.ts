@@ -6,7 +6,8 @@ import { basename, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { Window, type Document, type Element, type Text } from 'happy-dom'
 import {
-  DOCUMENT_ROOT, FIGURE_SELECTORS, LTX_CLASS_PREFIX, RULES_VERSION, SKIP_RULES, UNIT_RULES, type Rule,
+  DOCUMENT_ROOT, FIGURE_SELECTORS, LTX_CLASS_PREFIX, PROTECT_RULES, RULES_VERSION, SKIP_RULES, TABLE_RULES, UNIT_RULES,
+  classify, type Classification,
 } from '../src/core/rules/latexml'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../tests/fixtures/arxiv')
@@ -80,18 +81,16 @@ function auditFixture(file: string): FixtureStats {
     svg: { total: 0, withText: 0, graphics: 0, figures: 0 },
   }
 
-  // 每个元素只算一次规则匹配
-  const matchCache = new WeakMap<Element, { skip: Rule[]; unit: Rule[] }>()
-  const matchesOf = (el: Element) => {
-    let m = matchCache.get(el)
-    if (!m) {
-      m = { skip: SKIP_RULES.filter(r => el.matches(r.selector)), unit: UNIT_RULES.filter(r => el.matches(r.selector)) }
-      matchCache.set(el, m)
-    }
-    return m
+  // 每个元素只分类一次；分类逻辑完全来自规则模块的 classify()，审计口径与运行时一致
+  const classCache = new WeakMap<Element, Classification | null>()
+  const classOf = (el: Element): Classification | null => {
+    // 脚本用的是 happy-dom 自带的 Element 类型，与规则模块的 DOM 类型仅在类型层面不同
+    if (!classCache.has(el)) classCache.set(el, classify(el as unknown as globalThis.Element))
+    return classCache.get(el) ?? null
   }
 
-  for (const r of [...UNIT_RULES, ...SKIP_RULES]) s.ruleElements[r.id] = doc.querySelectorAll(r.selector).length
+  for (const r of [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES]) s.ruleElements[r.id] = doc.querySelectorAll(r.selector).length
+  s.ruleElements['table'] = doc.querySelectorAll(TABLE_RULES.root).length
 
   const classSet = new Set<string>()
   for (const el of Array.from(root.querySelectorAll('*'))) {
@@ -103,22 +102,27 @@ function auditFixture(file: string): FixtureStats {
   for (const t of textNodes(root)) {
     if (!hasText(t)) continue
     s.textNodes++
-    let skipHit: { el: Element; rules: Rule[] } | null = null
-    let unitHit: { el: Element; rules: Rule[] } | null = null
+    let stop: { el: Element; rule: string } | null = null // 最近的 skip / protect 祖先
+    let unit: { el: Element; rule: string } | null = null // 最近的 unit / table 祖先
     for (let el: Element | null = t.parentElement; el; el = el === root ? null : el.parentElement) {
-      const m = matchesOf(el)
-      if (!skipHit && m.skip.length) skipHit = { el, rules: m.skip }
-      if (!unitHit && m.unit.length) unitHit = { el, rules: m.unit }
-      if (skipHit && unitHit) break
+      const c = classOf(el)
+      if (c) {
+        // protect-but-descend（脚注容器）之下若已找到单元，说明文本属于嵌套块，容器不算 stop
+        const isStop = c.kind === 'skip' || (c.kind === 'protect' && !(c.descend && unit))
+        if (!stop && isStop) stop = { el, rule: c.rule }
+        if (!unit && (c.kind === 'unit' || c.kind === 'table')) unit = { el, rule: c.rule }
+      }
+      if (stop && unit) break
     }
     let kind: Kind
-    if (unitHit && (!skipHit || (skipHit.el !== unitHit.el && unitHit.el.contains(skipHit.el)))) {
-      kind = skipHit ? 'protected' : 'unit'
-      inc(s.byRule, (skipHit ?? unitHit).rules[0]!.id)
-      if (unitHit.rules.length > 1) inc(s.multi, unitHit.rules.map(r => r.id).join('+'))
-    } else if (skipHit) {
+    if (unit && (!stop || (stop.el !== unit.el && unit.el.contains(stop.el)))) {
+      kind = stop ? 'protected' : 'unit'
+      inc(s.byRule, (stop ?? unit).rule)
+      const hits = UNIT_RULES.filter(r => unit!.el.matches(r.selector))
+      if (hits.length > 1) inc(s.multi, hits.map(r => r.id).join('+'))
+    } else if (stop) {
       kind = 'skipped'
-      inc(s.byRule, skipHit.rules[0]!.id)
+      inc(s.byRule, stop.rule)
     } else {
       kind = 'uncovered'
       const chain: string[] = []
@@ -178,10 +182,13 @@ function report(all: FixtureStats[]): string {
   out.push('### 规则命中（文本节点数 / 匹配元素数）', '', table(
     ['类型', 'id', 'selector', '文本节点', '元素数'],
     [...UNIT_RULES.map(r => ['unit', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0]),
-     ...SKIP_RULES.map(r => ['skip', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0])],
+     ['table', 'table', `\`${TABLE_RULES.root}\``, byRule['table'] ?? 0, ruleElements['table'] ?? 0],
+     ...SKIP_RULES.map(r => ['skip', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0]),
+     ...PROTECT_RULES.map(r => ['protect', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0])],
   ), '')
 
-  const dead = [...UNIT_RULES, ...SKIP_RULES].filter(r => (ruleElements[r.id] ?? 0) === 0)
+  const dead = [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES, { id: 'table', selector: TABLE_RULES.root }]
+    .filter(r => (ruleElements[r.id] ?? 0) === 0)
   out.push('### (a) 在所有 fixture 中都没有匹配元素的规则', '', dead.length ? dead.map(r => `- \`${r.selector}\` (${r.id})`).join('\n') : '（无）', '')
 
   const unc: Record<string, { count: number; sample: string; fixtures: Set<string> }> = {}

@@ -103,6 +103,15 @@ Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起
 - 翻译根之外的文本只有 `.ltx_page_navbar` 内的目录（`ltx_ref_title`、`ltx_tag_ref`、目录标题里的 math / italic）与 arXiv 页头页脚，验证了"根外一律不提取"。
 - 转换失败页 `2608.30667`：4 个文本节点，2 个 unit，脚本无异常；扩展应能在这类页面上安静工作。
 
+### 2.11 RULES_VERSION 0.2.0 复跑（Phase 1 `feat/rules`）
+
+审计脚本改为直接调用规则模块的 `classify()`（优先级 skip > table > unit > protect，`.ltx_note` 作 protect-but-descend），报表已重生成到 `docs/phase0/rules-audit.md`：
+
+- **漏网 0 / 112,268**：致谢、关键词、副标题进 unit；出版元数据、日期、SVG 进 skip；`.ltx_note_mark` 进 protect。
+- 无死规则；unit 规则两两互斥（`multi` 为空），"恰好一条"成立。
+- 归属变化：`.ltx_ref`（3,253 个文本节点）、`.ltx_cite`（1,872）、`.ltx_note_mark`（114）从段落正文转为受保护节点；表格单元格 4,632 个文本节点归到 `table`；脚注正文 166 个归到嵌套单元 `footnote`，`.ltx_note` 容器本身归属 0。
+- unit 占比因此下降（如 2401.00596 从 49.4% 到 26.6%），这是把引用与脚注标记从"待翻译文本"里剔除后的真实数字。
+
 ## 3. 容器与导航
 
 ### 3.1 页面骨架（oxide 0.7.6 + arXiv 主题 2026-08）
