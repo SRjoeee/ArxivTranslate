@@ -1,7 +1,7 @@
 /* stack 模式与通用译文样式（DESIGN §7.3 / §7.5）。side / only 的规则在 Phase 3 补；预设颜色由 presets.css 的 --axt-* 变量提供 */
+/* 译文节点复制了原块的 class（§7.1），字体、字号、行高由站点样式决定；这里不能再写 font: inherit，
+   我们的 <style> 排在站点样式之后，同等特异度会把 .ltx_title_abstract 的 1.4rem、.ltx_bibitem 的字体覆盖掉（实测 2609.00064） */
 .axt-t {
-  font: inherit;
-  line-height: inherit;
   color: var(--axt-color, inherit);
 }
 
