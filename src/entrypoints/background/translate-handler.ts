@@ -1,11 +1,18 @@
-// background 的翻译处理：每个 provider 一个 p-queue，按其 concurrency 限流；失败交给 withRetry + 移植的策略。
+// background 的翻译处理：先查缓存，只把未命中的段落交给 provider；每个 provider 一个 p-queue，
+// 按其 concurrency 限流；失败交给 withRetry + 移植的策略。
 import PQueue from 'p-queue'
+import { cacheKeyFor, type RenderPath, type TranslationCache } from '@/cache'
 import { withRetry, type RetryOptions } from '@/providers/retry'
 import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslateResult, type TranslationProvider } from '@/providers/types'
 
-export type TranslateMessageRequest = { request: Omit<TranslateRequest, 'signal'>; providerId?: string }
+export type TranslateMessageRequest = {
+  request: Omit<TranslateRequest, 'signal'>
+  providerId?: string
+  /** 不带即不缓存（如设置页的连接测试） */
+  cache?: { paper: string; renderPath: RenderPath }
+}
 export type TranslateMessageResponse =
-  | { ok: true; result: TranslateResult }
+  | { ok: true; result: TranslateResult; cached: number }
   | { ok: false; error: { kind: ProviderErrorKind; message: string } }
 export interface ProviderStatus {
   providerId: string
@@ -15,6 +22,8 @@ export interface ProviderStatus {
 
 export interface TranslateHandlerDeps {
   getProvider: (providerId?: string) => Promise<TranslationProvider>
+  getModel?: () => Promise<string | undefined>
+  cache?: TranslationCache
   retry?: RetryOptions
 }
 
@@ -28,11 +37,46 @@ export function createTranslateHandler(deps: TranslateHandlerDeps) {
     }
     return queue
   }
-  return async ({ request, providerId }: TranslateMessageRequest): Promise<TranslateMessageResponse> => {
+
+  return async ({ request, providerId, cache }: TranslateMessageRequest): Promise<TranslateMessageResponse> => {
     try {
       const provider = await deps.getProvider(providerId)
-      const result = await queueFor(provider).add(() => withRetry(() => provider.translate(request), deps.retry))
-      return { ok: true, result: result as TranslateResult }
+      const model = (await deps.getModel?.()) ?? ''
+      const store = cache && deps.cache ? deps.cache : null
+
+      // 1. 查缓存
+      const keys = new Map<string, string>()
+      const translated = new Map<string, string>()
+      if (store && cache) {
+        for (const segment of request.segments) {
+          const key = await cacheKeyFor({ providerId: provider.id, model, target: request.target, renderPath: cache.renderPath, text: segment.text })
+          keys.set(segment.id, key)
+          const hit = await store.get(key)
+          if (hit !== null) translated.set(segment.id, hit)
+        }
+      }
+      const cached = translated.size
+
+      // 2. 只翻译未命中的
+      const misses = request.segments.filter(s => !translated.has(s.id))
+      let resultProvider = provider.id
+      let resultModel: string | undefined = model || undefined
+      if (misses.length > 0) {
+        const result = (await queueFor(provider).add(() =>
+          withRetry(() => provider.translate({ ...request, segments: misses }), deps.retry),
+        )) as TranslateResult
+        resultProvider = result.provider
+        resultModel = result.model
+        for (const segment of result.segments) {
+          translated.set(segment.id, segment.text)
+          const key = keys.get(segment.id)
+          if (store && cache && key) await store.set(key, segment.text, cache.paper)
+        }
+      }
+
+      // 3. 按原顺序合并
+      const segments = request.segments.map(s => ({ id: s.id, text: translated.get(s.id) ?? '' }))
+      return { ok: true, result: { segments, provider: resultProvider, model: resultModel }, cached }
     } catch (e) {
       return { ok: false, error: toErrorInfo(e) }
     }
