@@ -19,6 +19,7 @@ describe('脚手架', () => {
 
   it('axt:ping 消息判定与处理', () => {
     expect(isAxtMessage({ type: 'axt:ping' })).toBe(true)
+    expect(isAxtMessage({ type: 'axt:stats' })).toBe(true)
     expect(isAxtMessage({ type: 'other' })).toBe(false)
     expect(isAxtMessage(null)).toBe(false)
     expect(handlePing('1.2.3')).toEqual({ ok: true, version: '1.2.3' })
