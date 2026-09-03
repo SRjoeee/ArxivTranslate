@@ -83,6 +83,22 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 8. `renderer` 把译文节点插为原块的下一个兄弟，写入缓存
 9. 模式切换、恢复原文，都不经过以上流程，纯 DOM/CSS 操作
 
+### 4.1 块模型 [决定]
+
+```ts
+interface Block {
+  id: string        // data-axt-id 的值：元素自带 id（LaTeXML 的 S3.p1.1 等，跨加载稳定）优先，否则按文档序 axt-b<n>；重复时加后缀
+  kind: 'text' | 'table'
+  el: Element       // 原节点，永不修改子树
+  unit: string      // 命中的规则 id（p / title / caption / note / bibitem / ack / keywords / table）
+  cells?: { el: Element; numeric: boolean }[]   // 仅 table：最外层 .ltx_tabular 内的 .ltx_td，numeric 由 §5.3 判定
+}
+```
+
+- `extract(doc): Block[]` 纯读，不写 DOM；`markBlocks(blocks)` 才写 `data-axt-id`。**页面加载时只 extract**，`#axt-debug` 或开始翻译时才 mark，未翻译前不动页面。popup 的统计来自 content script 内存中的 `Block[]`，不查 DOM。
+- **遍历策略与分类解耦**：从翻译根 DFS，按 `classify(el)` 的类别分别决定"是否产出"与"是否下钻"——`skip` 不产出不下钻；`table` 产出表格块、不下钻（表内 `.ltx_p` 属于单元格，不单独成块）；`unit` 在含可翻译文本时产出文本块、**继续下钻**以发现嵌套单元；`protect` 不产出、默认不下钻，但规则带 `descend: true` 的除外——`.ltx_note` 是 protect-but-descend 的第一例：对外层段落它是 void，内部的 `.ltx_note_content` 仍要被发现为独立块（fixture 中 56 个脚注有 51 个在 `.ltx_p` 内、3 个在 `.ltx_caption` 内）。
+- 可翻译文本 = 排除 protect / skip 子树后的文本含 Unicode 字母（`/\p{L}/u`）；只含公式、编号或标点的 `.ltx_p` 不成块。
+
 ---
 
 ## 5. 块模型与规则
@@ -99,7 +115,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 | `.ltx_title`, `.ltx_subtitle` | 各级标题与副标题。内含 `.ltx_tag`（章节号）需作 void 占位符；定理的 run-in 标题（"Theorem 1."）也在此列 |
 | `.ltx_caption` | 图表说明。内含 `.ltx_tag`（"Table 1: "，其中嵌套 `.ltx_text`）需作 void 占位符 |
 | `.ltx_note_content` | 脚注正文，作为独立块。脚注是**嵌套块**：整个 `.ltx_note`（标记 + `.ltx_note_outer > .ltx_note_content`）位于段落内部，外层段落把 `.ltx_note` 视为 void 占位符；`.ltx_note_content` 内部的第二个 `.ltx_note_mark` 与 `.ltx_note_type` 作 void |
-| `.ltx_td`（含散文的） | 表格单元格，文本直接在 `td` 内不包 `.ltx_p`，见 5.3 |
+| （表格） | 不走本表：整张最外层 `.ltx_tabular` 由 §5.3 的 TABLE 规则作为一个单元处理，单元格 `.ltx_td` 是表格块内的段，不是独立块 |
 | `.ltx_bibitem` | 参考文献条目，内含 `.ltx_tag`（可嵌套 `sup` / `span`）作 void，见 5.4 |
 | `.ltx_acknowledgements` | 致谢 |
 | `.ltx_keywords` | 关键词 |
@@ -121,11 +137,11 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 
 ### 5.3 表格 [决定]
 
-整张 `.ltx_tabular`（或其 `.ltx_table` 容器）作为一个单元处理：
+整张**最外层** `.ltx_tabular` 作为一个单元处理（fixture 中 58 个 tabular 有 15 个不在 `.ltx_table` 内，所以根不能用 `.ltx_table`；3 个嵌套在另一个 tabular 内，内层归外层单元格；`th` 全部带 `ltx_td`，单元格选择器 `.ltx_td` 即可；239 个 `.ltx_td` 属于公式对齐表，已由 `.ltx_equation` 跳过）：
 - side / stack 模式：在原表**下方**插入一份译文克隆表，克隆内逐格翻译，数值格原样复制
 - only 模式：隐藏原表，显示克隆表
 - 不在单元格内做左右对照
-- 数值格判定（Phase 0 用 5,487 个真实单元格校准，RESEARCH.md §2.6）：排除 MathML 子树后的可见文本满足以下任一即原样复制：
+- 数值格判定（Phase 0 用 5,487 个真实单元格校准，RESEARCH.md §2.6）：**排除 protect / skip 子树后的可见文本**（不能直接用 `textContent`，MathML 的 `annotation` 会混入 TeX 源码；单元格内的 `.ltx_p` 文本计入）满足以下任一即原样复制：
   - `^(?=.*\d)[\s\d.,+\-±×^%()/*eE−–—:;~<>=≤≥∼]+(\s*[a-zA-Zμ°%]{1,4})?$`——必须含数字，避免 `ERROR` 这类以 E 开头的词被当成指数误判
   - `^[✓✗✔✘–—−\-·×*]+$`——纯符号格
   - `^N/A$`
@@ -144,6 +160,15 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 - fixtures 覆盖多个领域与结构（`tests/fixtures/arxiv/README.md`），每篇记录生成器版本；任何规则改动必须通过全部 fixture 测试
 - arXiv 已用 LaTeXML oxide 0.7.6 重新生成全部历史文章，线上（含带版本号的 URL）不存在旧版本输出，**年份不是版本代理**；生成器版本变化时重抓 fixture（RESEARCH.md §1）
 - 若不同 LaTeXML 版本差异大到需要分叉，按 `rules/latexml-v1.ts`、`rules/latexml-v2.ts` + 探测函数处理，不要在一个文件里堆 if
+
+### 5.6 规则接口与优先级 [决定]
+
+`src/core/rules/latexml.ts` 只导出数据表与纯函数，不含遍历（遍历在 extractor，见 §4.1）：
+
+- 表：`UNIT_RULES`（§5.1）、`TABLE_RULES = { root: '.ltx_tabular', cell: '.ltx_td' }`（§5.3，根取最外层）、`SKIP_RULES`（§5.2 中块级整体不翻的部分）、`PROTECT_RULES`（§6.1 的 void 节点，每条可带 `descend` 标志）。`math` 只出现在 PROTECT——行间公式已由 `.ltx_equation` 整块跳过。paired 节点规则（§6.1）由 Phase 2 的 protector 加入本文件
+- 函数：`documentRoot(doc)`、`classify(el) → { kind: 'skip' | 'table' | 'unit' | 'protect'; rule: string } | null`、`isNumericCell(visibleText)`
+- **优先级**：同一元素命中多类时取 `skip > table > unit > protect`。`skip` 命中出现在翻译单元内部时（如段落里的 `.ltx_ERROR`，fixture 中有 1 例），对该单元等价于 void
+- `RULES_VERSION` 随任何表或函数的行为变化递增，进缓存键
 
 ---
 
@@ -348,8 +373,10 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 - [x] 验证 content script 内能否直接调 `Translator` API，模型下载是否需要用户手势
 - [x] 确认 arXiv 主容器与导航栏的选择器，以及 arXiv 自身 JS 是否会与我们冲突
 
-**Phase 1 — 骨架 + 规则（测试先行）**
-- WXT + React 脚手架；`extractor` + `rules` + fixture 测试
+**Phase 1 — 骨架 + 规则（测试先行，三个分支依次合入）**
+- `feat/scaffold`：WXT + React 脚手架，四个入口只是壳，Vitest + happy-dom 配好
+- `feat/rules`：`latexml.ts` 扩成 §5.6 的完整规则模块，谓词单测 + 数值格边界用例；`pnpm fixtures:stats` 改用 PROTECT_RULES
+- `feat/extractor`：§4.1 的块模型与遍历，10 篇 fixture 快照 + 不变量测试（id 唯一、不在 skip 内、有可翻译文本、`extract` 不改 DOM）；content script 加载只 extract，`#axt-debug` 时 mark + 虚线描边，popup 显示块统计
 
 **Phase 2 — 核心闭环**
 - `protector` + `validator` + `rehydrator`；`openai-compat` provider；stack 模式渲染；恢复；缓存
