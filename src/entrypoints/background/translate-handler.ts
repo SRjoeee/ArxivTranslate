@@ -18,6 +18,9 @@ export interface ProviderStatus {
   providerId: string
   available: boolean
   model?: string
+  /** content 侧规划批次与选择渲染路径要用（§2 第 3 条） */
+  maxBatchChars: number
+  preservesMarkup: boolean
 }
 
 export interface TranslateHandlerDeps {
@@ -86,7 +89,13 @@ export function createTranslateHandler(deps: TranslateHandlerDeps) {
 export function createStatusHandler(deps: { getProvider: () => Promise<TranslationProvider>; getModel: () => Promise<string | undefined> }) {
   return async (): Promise<ProviderStatus> => {
     const provider = await deps.getProvider()
-    return { providerId: provider.id, available: await provider.isAvailable(), model: await deps.getModel() }
+    return {
+      providerId: provider.id,
+      available: await provider.isAvailable(),
+      model: await deps.getModel(),
+      maxBatchChars: provider.maxBatchChars,
+      preservesMarkup: provider.preservesMarkup,
+    }
   }
 }
 
