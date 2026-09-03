@@ -13,7 +13,7 @@
 |---|---|
 | 扩展框架 | WXT + TypeScript，pnpm |
 | UI | React；注入页面的浮层用 WXT `createShadowRootUi` 做 Shadow DOM 隔离；popup / options 是独立扩展页面，无需隔离 |
-| LLM 调用 | Vercel AI SDK（`ai` + `@ai-sdk/openai-compatible`（OpenRouter / DeepSeek / Ollama）/ `@ai-sdk/anthropic` / `@ai-sdk/google`），结构化输出用 `generateObject` + zod；请求拼装、流式、错误分类交给 SDK，不自己维护接口 |
+| LLM 调用 | Vercel AI SDK（`ai` + `@ai-sdk/openai-compatible`（OpenRouter / DeepSeek / Ollama）/ `@ai-sdk/anthropic` / `@ai-sdk/google`），结构化输出用 `generateText` + `Output.object` + zod（AI SDK 7，`generateObject` 已被取代）；请求拼装、流式、错误分类交给 SDK，不自己维护接口 |
 | 校验 | zod |
 | 队列 / 重试 | `p-queue`、`p-retry` |
 | 缓存 | Dexie（IndexedDB），移植 FluentRead 的缓存实现 |

@@ -1,9 +1,117 @@
-// Phase 1 占位；providers、样式、术语表、缓存管理在 Phase 3 实现
+import { useEffect, useState } from 'react'
+import { browser } from 'wxt/browser'
+import { DEFAULT_CONFIG, type Config } from '@/config/schema'
+import { getConfig, setConfig } from '@/config/storage'
+import { sendMessage } from '@/shared/messages'
+
+const LANGUAGES: [string, string][] = [
+  ['zh-CN', '简体中文'],
+  ['zh-TW', '繁體中文'],
+  ['ja', '日本語'],
+  ['en', 'English'],
+]
+
+const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
+
+// Phase 2：provider 配置 + 连接测试。样式预设、术语表、缓存管理在 Phase 3。
 export function App() {
+  const [config, setLocal] = useState<Config>(DEFAULT_CONFIG)
+  const [hasStoredKey, setHasStoredKey] = useState(false)
+  // 空串表示"不改动已存的 key"；密钥只写不回显
+  const [keyInput, setKeyInput] = useState('')
+  const [notice, setNotice] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState('')
+
+  useEffect(() => {
+    getConfig().then(c => {
+      setLocal(c)
+      setHasStoredKey(c.openaiCompat.apiKey.length > 0)
+    })
+  }, [])
+
+  const patchOpenAI = (patch: Partial<Config['openaiCompat']>) =>
+    setLocal(c => ({ ...c, openaiCompat: { ...c.openaiCompat, ...patch } }))
+
+  async function save() {
+    setNotice('')
+    try {
+      const next: Config = { ...config, openaiCompat: { ...config.openaiCompat, apiKey: keyInput || config.openaiCompat.apiKey } }
+      await ensureHostPermission(next.openaiCompat.baseURL)
+      await setConfig(next)
+      setLocal(next)
+      setHasStoredKey(next.openaiCompat.apiKey.length > 0)
+      setKeyInput('')
+      setNotice('已保存')
+    } catch (e) {
+      setNotice(`保存失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  async function testConnection() {
+    setTesting(true)
+    setTestResult('')
+    const t0 = performance.now()
+    try {
+      const res = await sendMessage({
+        type: 'axt:translate',
+        request: { segments: [{ id: 'sample', text: SAMPLE }], source: 'en', target: config.targetLanguage, context: { sectionTitle: '连接测试' } },
+      })
+      const ms = Math.round(performance.now() - t0)
+      setTestResult(res.ok
+        ? `${res.result.segments[0]?.text ?? ''}（${ms} ms，${res.result.model ?? ''}）`
+        : `失败：${res.error.kind} — ${res.error.message}`)
+    } catch (e) {
+      setTestResult(`失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const field = { display: 'block', width: '100%', boxSizing: 'border-box' as const, padding: '6px 8px', font: 'inherit', marginTop: 4 }
+  const label = { display: 'block', marginBottom: 14 }
+
   return (
-    <main style={{ maxWidth: 640, margin: '40px auto', font: '14px system-ui, sans-serif' }}>
+    <main style={{ maxWidth: 640, margin: '40px auto', font: '14px system-ui, sans-serif', lineHeight: 1.5 }}>
       <h1 style={{ fontSize: 18 }}>arXiv HTML Translator · 设置</h1>
-      <p>设置将在 Phase 3 提供。</p>
+
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>OpenAI 兼容端点</h2>
+      <label style={label}>
+        Base URL
+        <input style={field} value={config.openaiCompat.baseURL} onChange={e => patchOpenAI({ baseURL: e.target.value })} placeholder="https://openrouter.ai/api/v1" />
+        <small style={{ color: '#666' }}>OpenRouter、DeepSeek、Ollama 等；非 openrouter.ai 的域名保存时会申请访问权限</small>
+      </label>
+      <label style={label}>
+        API key{hasStoredKey ? '（已配置，留空则不改）' : ''}
+        <input style={field} type="password" value={keyInput} onChange={e => setKeyInput(e.target.value)} autoComplete="off" placeholder={hasStoredKey ? '••••••••' : 'sk-…'} />
+      </label>
+      <label style={label}>
+        模型
+        <input style={field} value={config.openaiCompat.model} onChange={e => patchOpenAI({ model: e.target.value })} placeholder="deepseek/deepseek-v4-flash" />
+      </label>
+      <label style={label}>
+        目标语言
+        <select style={field} value={config.targetLanguage} onChange={e => setLocal(c => ({ ...c, targetLanguage: e.target.value }))}>
+          {LANGUAGES.map(([code, name]) => <option key={code} value={code}>{name}（{code}）</option>)}
+        </select>
+      </label>
+
+      <p>
+        <button onClick={save}>保存</button>
+        {' '}
+        <button onClick={testConnection} disabled={testing}>{testing ? '测试中…' : '测试连接（用已保存的配置）'}</button>
+        {' '}
+        <span>{notice}</span>
+      </p>
+      {testResult && <p style={{ padding: 8, background: '#f4f4f4', borderRadius: 4 }}>{testResult}</p>}
     </main>
   )
+}
+
+/** 自定义端点需要该 origin 的 host 权限；保存按钮就是用户手势 */
+async function ensureHostPermission(baseURL: string) {
+  const origin = `${new URL(baseURL).origin}/*`
+  if (await browser.permissions.contains({ origins: [origin] })) return
+  const granted = await browser.permissions.request({ origins: [origin] })
+  if (!granted) throw new Error(`未授予对 ${origin} 的访问权限`)
 }
