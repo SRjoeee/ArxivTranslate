@@ -1,0 +1,16 @@
+{
+  "name": "arxiv-html-translator",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "GPL-3.0",
+  "packageManager": "pnpm@10.15.0",
+  "scripts": {
+    "fixtures:stats": "tsx scripts/fixtures-stats.ts"
+  },
+  "devDependencies": {
+    "happy-dom": "^20.13.2",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}

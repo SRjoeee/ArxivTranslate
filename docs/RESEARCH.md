@@ -1,0 +1,238 @@
+# Phase 0 研究记录
+
+日期：2026-09-03 · 对应 DESIGN.md v0.1 · 状态：Phase 0 任务 1–7 全部完成
+
+本文记录 Phase 0 的实测结论。凡与 DESIGN.md 不一致之处，只在此记录并在 §7 提修订建议，不直接改设计。
+脚本：`pnpm fixtures:stats`（`scripts/fixtures-stats.ts`，规则覆盖率审计）、`scripts/phase0/fetch-candidates.sh`（候选抓取）、`scripts/phase0/candidate-stats.sh`（粗粒度特征计数）、`scripts/phase0/td-numeric-calib.ts`（§5.3 数值格正则校准）、`scripts/phase0/translator-probe.js`（Translator API 探测）。
+Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起生效。
+
+---
+
+## 1. Fixture
+
+10 篇保存在 `tests/fixtures/arxiv/<id>.html`，清单与选择理由见该目录的 `README.md`。覆盖：公式密集（3 篇）、算法/代码块（4 篇）、大表格/数值表（4 篇）、脚注/定理（4 篇）、2023 年 4 篇、2024/2025 各 1 篇、2026 年 4 篇、`.ltx_ERROR` 2 篇（其中 1 篇为转换失败页）。
+
+**关键发现**
+
+1. **线上不存在"早期 LaTeXML 版本"的页面。** 56 篇候选（2023-12 至 2026-09）的生成器注释全部是 `LaTeXML oxide (version 0.7.6)`，2023 年 12 月的论文也不例外；带版本号的 URL（`/html/2312.17127v1`）同样返回 oxide 0.7.6。arXiv 已用新转换器重新生成了历史文章，旧输出不可得。因此"按年份覆盖 LaTeXML 版本差异"这一目标在当前无法通过线上页面达成，规则只需针对 oxide 0.7.6 一个版本；但版本探测与分叉机制仍应保留，以应对将来的再次升级。
+2. 并非所有论文都有 HTML：60 篇候选中 4 篇 404（无 LaTeX 源或转换失败未发布）。扩展只需处理有 HTML 的页面，无需额外判断。
+3. 转换失败但已发布的页面存在（`2608.30667`）：`<title>` 为 "Untitled Document"，正文只有一个 `.ltx_p`，`.ltx_ERROR` 标出未定义宏。扩展在这类页面上必须安静退出或只翻译能翻译的部分，不能报错。
+4. 抓取注意事项：`export.arxiv.org` 的 http 会 301 到 https，curl 需 `-L`；API 的 `[a TO b]` 需 `-g` 关闭 glob；单个请求偶发挂起，必须设 `--max-time`；遵守 3 秒间隔。
+
+## 2. 规则覆盖率审计
+
+方法：`pnpm fixtures:stats` 用 happy-dom 解析 10 篇 fixture，规则从 `src/core/rules/latexml.ts`（`RULES_VERSION 0.1.0-phase0`，DESIGN.md §5.1 / §5.2 逐条录入）导入，对翻译根 `article.ltx_document` 内每个非空白文本节点向上找最近的跳过规则祖先 S 与翻译单元祖先 U，归为四类：`unit`（在单元内、无跳过）、`protected`（S 在 U 内部，即块内受保护节点）、`skipped`（S 在 U 之上或无 U）、`uncovered`（两者都无）。完整报表见 `docs/phase0/rules-audit.md`（生成物）。
+
+### 2.1 总览
+
+| fixture | 解析 ms | 文本节点 | unit | protected | skipped | uncovered |
+|---|---|---|---|---|---|---|
+| 2312.17141 | 238 | 18375 | 19.6% | 51.2% | 29.1% | 14 |
+| 2312.17527 | 53 | 4294 | 21.9% | 47.9% | 30.2% | 0 |
+| 2401.00418 | 189 | 20524 | 14.5% | 82.4% | 3.2% | 0 |
+| 2401.00596 | 53 | 4044 | 49.4% | 47.7% | 3.0% | 1 |
+| 2410.00260 | 41 | 1750 | 52.9% | 25.9% | 21.1% | 2 |
+| 2507.00150 | 51 | 3551 | 49.1% | 49.7% | 0.8% | 13 |
+| 2608.29808 | 121 | 5891 | 59.3% | 10.5% | 30.2% | 0 |
+| 2608.30667 | 3 | 4 | 50.0% | 25.0% | 25.0% | 0 |
+| 2609.00245 | 618 | 37556 | 12.9% | 49.6% | 37.5% | 0 |
+| 2609.00246 | 263 | 16279 | 26.9% | 30.6% | 42.4% | 3 |
+
+合计 112,268 个文本节点，漏网 33 个（0.03%）。happy-dom 解析 1.8 MB 页面 618 ms，可直接用于 Vitest。`protected` 占比高是因为 MathML 内部的 `mo` / `mi` / `mn` / `annotation` 都算文本节点。
+
+### 2.2 (a) 规则中不存在于任何 fixture 的选择器
+
+所有规则都有匹配元素，但 `.ltx_author` 与 `.ltx_date` 在 10 篇里**从未出现**（authors 规则靠同一选择器里的 `.ltx_authors` / `.ltx_contact` 命中）。真实的作者区类名是 `.ltx_authors > .ltx_creator > .ltx_personname` / `.ltx_author_notes` / `.ltx_role_affiliation` / `.ltx_contact`，日期是 `.ltx_dates`（3 篇）。
+
+### 2.3 (b) 漏网文本
+
+33 个节点全部在 frontmatter / backmatter，正文段落零漏网：
+
+| 结构 | 节点 | 处理建议 |
+|---|---|---|
+| `div.ltx_acknowledgements`（含内部 `.ltx_text`、`a.ltx_ref.ltx_url`） | 12 | 新增翻译单元 |
+| `.ltx_pubnotes.ltx_pubnotes_meta > .ltx_pubnote.ltx_role_{ccs,doi,journal,number,publicationmonth}`（ACM 模板的出版元数据，带 `.ltx_note_name` 标签） | 12 | 新增跳过规则 `.ltx_pubnotes` |
+| `div.ltx_dates` | 3 | 跳过（替换规则中不存在的 `.ltx_date`） |
+| `sup.ltx_note_mark` 直接位于 `.ltx_note.ltx_role_footnotetext` 下 | 2 | `.ltx_note_mark` 进受保护列表（见 2.5） |
+| `div.ltx_keywords`（含 `.ltx_text` 子节点） | 2 | 新增翻译单元 |
+| `div.ltx_subtitle` | 1 | 并入标题规则 |
+| `svg foreignObject > .ltx_foreignobject_content`（TikZ 图内文字） | 1 | 跳过整个 `svg` |
+
+### 2.4 规则冗余与优先级
+
+同一单元元素同时命中多条规则的组合：`p+theorem` 30,607、`p+item+theorem` 9,626、`p+item` 1,830、`p+abstract` 150。§5.1 的 `.ltx_abstract .ltx_p`、`.ltx_item .ltx_p`、`.ltx_theorem .ltx_p, .ltx_proof .ltx_p` 三条**完全被 `.ltx_p` 覆盖**，作为独立规则违反"恰好一条"。建议删除，或改为上下文标记（给 prompt 提供"这是定理/摘要"的信息），不参与块判定。
+
+### 2.5 §6.1 受保护节点必须进规则表
+
+审计只用了 §5.2 的跳过规则，结果暴露出 §6.1 列出的 void 节点目前会被当作段落正文：
+
+| 元素 | 有直接文本的元素数 | 说明 |
+|---|---|---|
+| `a.ltx_ref`（含 `span.ltx_ref_tag.ltx_text`） | 1045 + 1639 | 交叉引用 "Section 2"、"Theorem 1" 及其编号 |
+| `cite.ltx_cite.ltx_citemacro_*` | 713 | 引用标记 |
+| `sup.ltx_note_mark` | 112 | 脚注标记，在 `.ltx_note` 外层与 `.ltx_note_content` 内层各出现一次 |
+
+它们要作为 void 占位符写进 `latexml.ts`（`PROTECT_RULES`），与 `.ltx_tag`、`math`、`code`、`.ltx_font_typewriter` 同级。另一个结构性发现：**脚注是嵌套块**——`.ltx_note`（含 mark + `.ltx_note_outer > .ltx_note_content`）整体位于 `.ltx_p` 内部，而 `.ltx_note_content` 本身是翻译单元。提取时外层段落应把整个 `.ltx_note` 视为 void 占位符，脚注正文单独成块；`.ltx_note_content` 内的第二个 `.ltx_note_mark` 与 `.ltx_note_type`（"footnotemark:"，仅 1 篇）作 void。
+
+### 2.6 表格单元格与 §5.3 数值格正则
+
+`scripts/phase0/td-numeric-calib.ts` 对 5,487 个 `.ltx_td` 统计（排除 MathML 子树后的可见文本）：空格 271、纯公式 294、命中初稿正则 3,236（59%）、散文 1,686。初稿正则有两个问题：
+
+- **误判**：字符类里的 `e` / `E`（为指数准备）让以 E 开头的词整体匹配——`ERROR` 90 次、`Esp`、`ESBMC`。修法：要求至少一个数字（前置断言 `(?=.*\d)`）。
+- **漏判**：`✓` 167 次、`N/A` 17 次、单字母 `G` / `N` / `Y` / `S`、带括号单位 `(kpc)`、`Au+Au`。修法：增加"纯符号"分支（`✓ ✗ ✔ ✘ – — −`）和 `N/A`。
+
+另有 427 个大写枚举值 `TRUE` / `FALSE` / `UNKNOWN`（单篇）——这是值不是散文，但正则无法与缩写词区分，交给 provider 处理即可（LLM 会保留）。建议的正则：`^(?=.*\d)[\s\d.,+\-±×^%()/*eE−–—:;~<>=≤≥∼]+(\s*[a-zA-Zμ°%]{1,4})?$` 或 `^[✓✗✔✘–—−\-·×*]+$` 或 `^N/A$`。带单位的 `7.7 GeV` 之类命中正确。
+
+### 2.7 代码与算法框
+
+- listing 容器类是 `.ltx_listing`（有时叠加 `.ltx_lstlisting`、`.ltx_lst_language_*`），行是 `.ltx_listingline`，行号是 `.ltx_tag.ltx_tag_listingline`。`.ltx_listing_data`（隐藏的原始代码数据）需要跳过。
+- 算法框 `figure.ltx_float.ltx_algorithm`（2 篇）/ `.ltx_float_algorithm`（1 篇）内部是 `.ltx_listingline`，已被 code 规则覆盖；框内 `.ltx_caption` 正常翻译。
+- `.ltx_verbatim` 2 篇，`pre` / `code` 标签未在正文中单独出现（等宽文本都是 `.ltx_text.ltx_font_typewriter`，2,488 个元素）。
+
+### 2.8 (c) 类名分布
+
+翻译根内共 255 个 `ltx_*` 类名，仅 2 个（`ltx_Math`、`ltx_p` 级别的基础类）在全部 10 篇出现；长尾主要是模板相关（ACM 的 `ltx_affiliation_*`、`ltx_role_*`）、bibliography 细分（`ltx_bib_*` 20 余个，只在 2609.00246）、定理种类（`ltx_theorem_*`）、listing 语言（`ltx_lst_language_*`）。这些都在已有单元内部，不需要单独规则。因所有 fixture 同为 oxide 0.7.6，此表反映的是内容分布而非版本差异。
+
+### 2.9 SVG 图占比（§15.1）
+
+翻译根内 `svg` 共 164 个，全部是 `svg.ltx_picture`（TikZ），其中 2608.29808 占 114、2312.17141 占 43（大多带 `ltx_markedasmath`，是画出来的公式）；**没有一个含 `<text>`**，文字只以 `foreignObject > .ltx_foreignobject_content` 形式出现且全部 fixture 仅 1 个文本节点。位图 `img.ltx_graphics` 共 13 个（5 篇）。结论：SVG 图在实践中没有可翻译的 DOM 文字，v1 整体跳过 `svg`；§15 的 OCR 路线只对 `img` 有意义。
+
+### 2.10 其他
+
+- `.ltx_p` 不一定是 `<p>`：`span.ltx_p` 57 个（2 篇，出现在表格与 inline-block 内）。§7.1 "标签名与原块相同"已覆盖；§7.2 的 grid 技巧只能用于 `.ltx_para > p.ltx_p`，其余降级为 stack。
+- 翻译根之外的文本只有 `.ltx_page_navbar` 内的目录（`ltx_ref_title`、`ltx_tag_ref`、目录标题里的 math / italic）与 arXiv 页头页脚，验证了"根外一律不提取"。
+- 转换失败页 `2608.30667`：4 个文本节点，2 个 unit，脚本无异常；扩展应能在这类页面上安静工作。
+
+## 3. 容器与导航
+
+### 3.1 页面骨架（oxide 0.7.6 + arXiv 主题 2026-08）
+
+```
+body                                  ← ≥1280px 时 display:grid（见 3.2）
+├─ header.arxiv-html-header           ← arXiv 注入：logo、nav.html-header-nav
+├─ nav.ltx_page_navbar                ← LaTeXML 导航栏，内含 nav.ltx_TOC
+├─ div.ltx_page_main
+│  └─ div.ltx_page_content
+│     └─ article.ltx_document         ← 论文正文，max-width: var(--main-width)
+├─ footer.arxiv-html-footer           ← arXiv 注入
+├─ footer.ds-site-footer              ← arXiv 注入（站点页脚）
+└─ 其他 arXiv 注入：#infobox、#watermark-tr、.keyboard-glossary、#fixed-buttons-container、
+   报告问题 modal（.modal-header / .modal-body / .modal-footer，表单 #modal-form）、.ds-announcement
+```
+
+主容器判定：以 `article.ltx_document` 为翻译根，`.ltx_page_navbar` 与所有非 `ltx_` 前缀的注入元素一律不进入提取。
+
+### 3.2 宽度控制（决定 side 模式做法）
+
+- 唯一的宽度来源是 CSS 变量 `--main-width`，在 ar5iv 样式的 `:root` 中定义为 `52rem`。
+- `.ltx_document { max-width: var(--main-width) }`；`.ltx_page_main { width: 100% }`（不限宽）。
+- arXiv 主题在 `@media (min-width: 1280px)` 下把 `body` 设为 `display: grid; grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr`，`--nav-width: minmax(14rem, 25rem)`；`div.ltx_page_main` 落在 `article` 区域，`nav.ltx_page_navbar` 落在 `nav` 区域。
+- 因此 **side 模式只需在 `html[data-axt-mode="side"]` 上覆盖 `--main-width`**（如 `min(1600px, 96vw)`），文章列与 `.ltx_document` 同时变宽，无需碰 `.ltx_page_main`。
+- 副作用：`--main-width` 还被图片（`.ltx_graphics`、`.ltx_img_*`）、代码块 `.ltx_listing`、单元格 `.ltx_td` 的 `max-width` 以及 ≥96rem 时脚注的绝对定位（`--main-width-margin`）引用，变量放大后这些也会跟着放大。图片变宽通常是可接受的；若不希望，可在 side 模式下把这些规则的 `max-width` 钉回 `52rem`。
+- 断点：arXiv 主题 1280px（导航栏/页头折叠，JS 里 `narrowViewport` 同值）；ar5iv 样式另有 46/52/96/109rem 断点，其中 96rem 决定脚注是弹出还是边注。DESIGN.md §7.2 的 1100px 自动降级阈值与这两套断点都不对齐，建议改为 1280px 与 arXiv 一致。
+
+### 3.3 arXiv 自带 JS 的行为（`/static/browse/0.3.4/js/arxiv-html-papers-*.js`，268 行）
+
+- 只触碰三处 DOM：`html` 的 `data-theme` / `data-toc-display` / `data-reading-mode` 属性（偏好存 localStorage：`ar5iv_theme`、`arxiv_html_paper_toc_display`、`arxiv_html_paper_reading_mode`）；`.ltx_page_navbar > nav.ltx_TOC` 的显示切换；`.ltx_page_content` 上的 `mouseup` 监听，把选区 `innerHTML` 存起来供"报告问题"表单使用。
+- **没有** MutationObserver，**没有** MathJax（页面 0 次出现，公式是原生 MathML），**没有** 脚注 JS。
+- 脚注弹出纯 CSS：<96rem 时 `.ltx_note:focus-within > .ltx_note_outer` 弹出；≥96rem 时 `.ltx_note.ltx_role_footnotetext .ltx_note_outer` 绝对定位成边注。译文克隆脚注标记后，克隆体同样能触发弹出（结构相同即可），无需额外处理。
+- 冲突面：几乎没有。唯一交集是用户选中译文后点"报告问题"，选区 HTML 会带上 `.axt-t` 节点，无害。
+- 页头脚本 `arxiv-header.js` 只管站点横幅与公告，与正文无关。
+- 页面内联 `<script>` 只做上述偏好属性的早期恢复；内联 `<style>` 仅 535 字节。
+
+### 3.4 阅读模式与我们的模式的关系
+
+arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `.ltx_page_navbar`。我们的 side 模式如需隐藏导航栏，直接设 `html[data-axt-mode="side"] .ltx_page_navbar { display:none }` 即可，不要写 arXiv 的属性（那会被它持久化到 localStorage）。
+
+## 4. 参考文件地图（DESIGN.md §4 各模块）
+
+仓库在 `reference/`（gitignore，只读）：kiss-translator@c95bd46、read-frog@9b44f82、FluentRead@536a819。核心模块只借鉴设计思路。
+
+| 模块 | 参考 |
+|---|---|
+| `rules` / `extractor` | Read Frog `src/utils/host/dom/filter.ts`（块/行内节点判定的一整套谓词）、`dom/traversal.ts`（`walkAndLabelElement`）、`translate/core/translation-walker.ts`。KISS `src/libs/rules.js` 是站点规则订阅体系，v1 不需要 |
+| `protector`（占位符） | KISS `src/apis/trans.js`（`genSystemPrompt` / `genUserPrompt`，placetag 思路）与 `src/libs/translator.js`；Read Frog `translate/html-attribute-markers.ts`（标记完整性校验，`assertHtmlAttributeMarkerIntegrity`）、`translate/translation-output-normalization.ts` |
+| `renderer` | Read Frog `translate/core/translation-modes.ts`（双语 / 仅译文两条路径）、`translate/dom/translation-text-swap.ts`（仅译文模式的原文快照与校验回滚）、`translate/dom/translation-insertion.ts`、`translate/dom/translation-cleanup.ts`；FluentRead `src/features/full-page-translation/content/renderer.ts`、`layout.ts` |
+| 译文样式预设 | KISS `src/config/styles.js`（18 种预设常量）、`src/libs/style.js`（`builtinStylesMap`）、`src/hooks/CustomStyles.js` |
+| `scheduler` | FluentRead `src/features/full-page-translation/content/runtime.ts`（IntersectionObserver 渐进翻译，含无布局盒目标的处理）、`content/viewportStability.ts`、`src/services/translation/requestScheduler.ts`、`queue.ts`；Read Frog `src/utils/request/request-queue.ts`、`batch-queue.ts`、`retry-policy.ts`（429 退避策略）、`src/entrypoints/background/translation-queues.ts` |
+| `providers`（LLM） | Read Frog `src/utils/providers/model.ts`（AI SDK 模型工厂）、`src/entrypoints/background/llm-generate-text.ts`、`translate/api/ai.ts`；KISS `src/apis/trans.js`（`genOpenAI` / `genClaude` / `genGemini` 的请求拼装） |
+| `google-gtx` / `translateHtml` | Read Frog `translate/api/google-legacy.ts`（gtx）、`translate/api/google.ts`（translateHtml）；KISS `src/apis/trans.js`（`genGoogle` / `genGoogle2`）、`src/config/api.js`（端点表） |
+| `chrome-builtin` | KISS `src/libs/builtinAI.js`（`Translator.availability` / `create` 的封装与降级） |
+| `cache` | FluentRead `src/services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层 + Dexie）、`src/app/background/handlers/translationCache.ts`；Read Frog `translate/in-memory-translation-cache.ts`；KISS `src/libs/cache.js`、`cacheDigest.js` |
+| `config` | Read Frog `src/utils/config/storage.ts`、`migration.ts`、`migration-scripts/`（带版本号的迁移函数） |
+| UI / Shadow DOM | Read Frog `src/entrypoints/side.content/index.tsx`、`selection.content/index.tsx`（WXT `createShadowRootUi`）；FluentRead `entrypoints/shadowBridge.content.ts` |
+| WXT 工程配置 | Read Frog `wxt.config.ts`、`vitest.config.ts` |
+
+## 5. 免费接口存活性（2026-09-03）
+
+| 接口 | 状态 | 返回格式 | 标签保留 |
+|---|---|---|---|
+| Google gtx `GET translate.googleapis.com/translate_a/single?client=gtx&dt=t&dj=1&sl=en&tl=zh-CN&q=…` | 200 | `{sentences:[{trans,orig,backend}], src, spell}`；多句时需拼接 `sentences[].trans` | **保留**。样本：5 个 void `<x id="n"/>`、paired `<t id="1">…<x id="2"/>…</t>` 嵌套，全部 id 无增无减、嵌套合法、位置合理 |
+| Google translateHtml `POST translate-pa.googleapis.com/v1/translateHtml` | 200 | 请求 `[[[texts…], from, to], "wt_lib"]`，header `Content-Type: application/json+protobuf` + `X-Goog-API-Key`（KISS 配置内置的公开 key，见 `reference/kiss-translator/src/config/api.js`）；返回 `[[trans…]]`，天然支持批量 | 保留，但语义位置差（首个样本把 `<x id="1"/>` 挪到句尾、`</em>` 吞掉句号），译文质量明显低于 gtx |
+| 微软 `edge.microsoft.com/translate/auth` → `translatetext` | auth 404，翻译 401 | — | 未测。Read Frog 仍在用该端点，可能需要特定 header；v1 不接，仅记录 |
+
+**对 DESIGN.md 的含义**：gtx 在样本中可靠保留了占位符，`google-gtx` 有条件声明 `preservesMarkup: true` 走 markup 路径，由 validator 兜底（失败再降级 runs）；translateHtml 不值得作为独立 provider。见 §7。
+
+## 6. Chrome 内置 Translator API（2026-09-03，Chrome 152，macOS）
+
+探测脚本 `scripts/phase0/translator-probe.js`（本次通过 Claude in Chrome 在 `arxiv.org/html/2410.00260` 页面主世界执行，逻辑相同）。
+
+### 6.1 可用性与用户手势
+
+| 步骤 | 结果 |
+|---|---|
+| `'Translator' in self` / `'LanguageDetector' in self` | 均为 `true`；`isSecureContext` true |
+| `Translator.availability({en→zh})` 初始 | `downloadable`（en→ja / de / fr / zh-Hant / ko 同样 `downloadable`，语言包按语言对独立下载） |
+| 无手势 `create()`（模型未下载） | 抛 `NotAllowedError: Requires a user gesture when availability is "downloading" or "downloadable"` |
+| 带手势 `create()`（模拟点击，`navigator.userActivation.isActive === true`） | 成功，耗时 **66.9 s**（即语言包下载）；**下载期间 `availability()` 一直返回 `downloadable` 而非 `downloading`** |
+| 下载完成后再次 `create()` | 8.6 s，`monitor` 收到 15 个 `downloadprogress` 事件（`loaded` 0→1，`total` 为 1，即归一化进度），说明二次 create 仍有一段本地加载 |
+| 模型就绪后无手势 `create()` | 成功，1 ms；`availability()` 为 `available` |
+| `LanguageDetector.availability()` | `available` |
+
+**结论**：用户手势只在需要下载语言包时才必需。扩展的 `isAvailable()` 应以 `availability()` 为准：`available` → 直接可用；`downloadable` → 需要在 popup 的点击处理函数里调用 `create()` 触发下载，并向用户展示进度（`monitor` 只在下载已完成后的 create 里给出进度事件，首次下载期间进度事件为空，需用"正在下载"的不确定态提示）。
+
+### 6.2 翻译行为（模型就绪后）
+
+| 输入 | 耗时 | 输出 |
+|---|---|---|
+| 纯文本一句 | 9 ms | 「当图表连接时，定理 1 的证明是微不足道的。」 |
+| 含 `<a href="#x">`、`<em>`、`<x id="1"/>` | 15 ms | 三种标签全部保留，`href` 与 `id` 原样；标签内文字被翻译且小写化（"theorem 1"） |
+| 5 个 void 占位符 | 19 ms | 全部保留、顺序正确 |
+| paired 嵌套 void | 15 ms | 嵌套合法，id 无增无减 |
+| 四句整段（约 90 词） | 18 ms | 逐句翻译，质量可读；句间产生「。 」（句号后多一个空格），需归一化 |
+| `inputQuota` / `measureInputUsage()` | — | `null` / `0`，无配额限制信号 |
+
+**对 DESIGN.md 的含义**：`chrome-builtin` 在所有样本中保留了占位符与 HTML 标签，与 gtx 一样有条件声明 `preservesMarkup: true`，runs 路径只作 validator 失败后的兜底；单句延迟 10–20 ms，远快于任何网络引擎，适合作为视口内首屏的即时引擎。
+
+### 6.3 未覆盖
+
+- 本次在页面主世界执行；content script 的隔离世界是否同样暴露 `Translator`，待 Phase 1 有 WXT 骨架后用真实 content script 验证（预期可用，Web API 不受 world 隔离影响）。
+- 语言包大小未测（Chrome 不暴露字节数，`total` 恒为 1）；67 s 的下载时长对应本机网络，仅作量级参考。
+
+## 7. DESIGN.md 修订清单
+
+按章节排列。每条只提建议，是否采纳由设计文档决定。
+
+| # | 条目 | 建议 | 依据 |
+|---|---|---|---|
+| 1 | §5 整节 [待验证] | 选择器经 10 篇 fixture 校订，正文覆盖率 99.97%，可去掉 [待验证] 标记，按下列各条修订 | §2 |
+| 2 | §5.1 `.ltx_abstract .ltx_p`、`.ltx_item .ltx_p`、`.ltx_theorem .ltx_p, .ltx_proof .ltx_p` | 完全被 `.ltx_p` 覆盖，删除；如需给 prompt 提供"摘要/定理"上下文，改为上下文标记而非块规则 | §2.4 |
+| 3 | §5.1 新增翻译单元 | `.ltx_acknowledgements`、`.ltx_keywords`；`.ltx_subtitle` 并入标题规则 | §2.3 |
+| 4 | §5.1 `.ltx_p` 的标签名 | 注明 `.ltx_p` 可能是 `<span>`（表格、inline-block 内），提取与渲染按类名不按标签名 | §2.10 |
+| 5 | §5.1 / §6.1 脚注 | 脚注是嵌套块：`.ltx_note` 整体在段落内作 void 占位符，`.ltx_note_content` 单独成块；其内部的 `.ltx_note_mark`、`.ltx_note_type` 作 void | §2.5 |
+| 6 | §5.2 `.ltx_author`、`.ltx_date` | 真实页面不存在。替换为 `.ltx_creator, .ltx_personname, .ltx_author_notes, .ltx_role_affiliation, .ltx_dates`；保留 `.ltx_authors`、`.ltx_contact` | §2.2 |
+| 7 | §5.2 新增跳过规则 | `.ltx_pubnotes`（出版元数据）、`svg, .ltx_picture`（TikZ 图）、`.ltx_listing_data`（隐藏代码数据） | §2.3 / §2.7 / §2.9 |
+| 8 | §5.2 "arXiv 注入的页头/页脚" | 不列选择器，改为"`article.ltx_document` 之外一律不提取"；导航栏 `.ltx_page_navbar` 也在根外 | §3.1 / §2.10 |
+| 9 | §5.3 数值格正则 | 加 `(?=.*\d)` 修复 `ERROR` 类误判；加纯符号分支与 `N/A`。校准数据：59% 命中、31% 散文 | §2.6 |
+| 10 | §5.5 / §14 LaTeXML 版本分叉 | 线上只有 oxide 0.7.6（历史文章已重转），无法用真实页面覆盖多版本。保留探测函数与分叉机制；"fixture 覆盖多年份"改为"fixture 记录生成器版本，版本变化时重抓" | §1 |
+| 11 | §6.1 void 节点列表 | 确认 `.ltx_ref`（含 `.ltx_ref_tag`）、`.ltx_cite`、`.ltx_note_mark` 必须以规则形式写进 `latexml.ts`，否则会被当作段落正文（合计 3,500+ 个元素） | §2.5 |
+| 12 | §7.2 宽度：覆盖 `.ltx_page_main` 的 max-width | 改为在 `html[data-axt-mode="side"]` 上覆盖 CSS 变量 `--main-width`；注意变量放大对图片、代码块、单元格与 ≥96rem 边注定位的连带影响 | §3.2 |
+| 13 | §7.2 自动降级阈值 1100px | 改为 1280px，与 arXiv 主题断点对齐 | §3.2 |
+| 14 | §7.2 grid 技巧适用范围 | 只对 `.ltx_para > p.ltx_p` 生效；`span.ltx_p`、表格内、inline-block 内降级为 stack | §2.10 |
+| 15 | §8.1 `google-gtx` preservesMarkup: false [待验证] | 实测两组样本占位符全部保留、嵌套合法，建议改为 `true`，runs 路径退为 validator 失败后的兜底 | §5 |
+| 16 | §8.3 translateHtml 新增 provider 的设想 | 可用但译文质量与占位符位置差于 gtx，不建议新增 | §5 |
+| 17 | §8.1 `chrome-builtin` preservesMarkup: false | 实测保留 HTML 标签与 void / paired 占位符，建议同 gtx 改为 `true`；`isAvailable()` 以 `availability()` 为准，`downloadable` 时必须在用户手势（popup 点击）内调用 `create()` 触发下载，首次下载无进度事件、`availability()` 不变为 `downloading`，UI 用不确定态提示；译文需归一化「。 」 | §6 |
+| 21 | §8.3 fallback 链默认顺序 | `chrome-builtin` 单句 10–20 ms 且离线，建议在模型已就绪时把它排在用户选定的 LLM 之前作为视口首屏的即时引擎，LLM 结果到达后替换（缓存键含 provider，两者不冲突）；是否采纳取决于对译文质量的取舍 | §6.2 |
+| 18 | §11 fixture 覆盖多年份 | 改为"覆盖多领域与多结构"，年份不再是版本代理 | §1 |
+| 19 | §14 arXiv 自身 JS 冲突 | 实测无冲突面（无 MutationObserver / MathJax / 脚注 JS，脚注弹出纯 CSS），风险可降为低 | §3.3 |
+| 20 | §15.1 SVG 图文字按普通块翻译 | 实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics` | §2.9 |
