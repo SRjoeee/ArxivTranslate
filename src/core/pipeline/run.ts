@@ -31,6 +31,10 @@ export interface RunOptions {
   signal?: AbortSignal
   /** content 侧同时在飞的批次数；background 的 p-queue 再按 provider 限流 */
   concurrency?: number
+  /** 视口优先（§10）：取下一批时优先取含此谓词为真的块的批次 */
+  isPriority?: (block: Block) => boolean
+  /** 插入译文时的滚动锚定，每批调用一次（锚定要强制布局，MathML 重的页面按块锚定会卡住主线程）；默认直接执行 */
+  anchor?: <T>(callback: () => T) => T
 }
 
 const FATAL_KINDS = new Set(['no-key', 'auth'])
@@ -41,6 +45,7 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
   const { doc, blocks, transport } = options
   const progress: Progress = { state: 'running', total: blocks.length, done: 0, failed: 0, cached: 0 }
   const report = () => options.onProgress?.({ ...progress })
+  const anchor = options.anchor ?? (<T>(callback: () => T) => callback())
   const aborted = () => options.signal?.aborted === true
   const stopped = () => aborted() || progress.fatal !== undefined
 
@@ -126,17 +131,19 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
     const out: Outcome = new Map()
     await translateSegments(batch.segments, batch.sectionTitle, out)
     if (aborted()) return
-    if (batch.kind === 'table' && batch.block) {
-      const cells = new Map<Element, DocumentFragment>()
-      for (const [segment, fragment] of out) if (fragment && segment.cell) cells.set(segment.cell.el, fragment)
-      if (cells.size > 0) {
-        renderTable(batch.block, cells)
-        progress.done++
-      } else {
-        setState(batch.block, 'failed')
-        progress.failed++
+    anchor(() => {
+      if (batch.kind === 'table' && batch.block) {
+        const cells = new Map<Element, DocumentFragment>()
+        for (const [segment, fragment] of out) if (fragment && segment.cell) cells.set(segment.cell.el, fragment)
+        if (cells.size > 0) {
+          renderTable(batch.block!, cells)
+          progress.done++
+        } else {
+          setState(batch.block, 'failed')
+          progress.failed++
+        }
+        return
       }
-    } else {
       for (const segment of batch.segments) {
         const fragment = out.get(segment)
         if (fragment) {
@@ -147,14 +154,23 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
           progress.failed++
         }
       }
-    }
+    })
     report()
   }
 
   const queue = planBatches(blocks, { maxBatchChars: options.capabilities.maxBatchChars, maxBatchItems: options.capabilities.maxBatchItems })
+  // 视口优先：每次取批都重新评估，滚动后自然生效；没有优先批次就按文档序
+  const pickNext = (): Batch | undefined => {
+    const isPriority = options.isPriority
+    if (isPriority) {
+      const index = queue.findIndex(batch => batch.segments.some(segment => isPriority(segment.block)))
+      if (index > 0) return queue.splice(index, 1)[0]
+    }
+    return queue.shift()
+  }
   const workers = Array.from({ length: Math.max(1, options.concurrency ?? 8) }, async () => {
     for (;;) {
-      const batch = queue.shift()
+      const batch = pickNext()
       if (!batch || stopped()) return
       await processBatch(batch)
     }

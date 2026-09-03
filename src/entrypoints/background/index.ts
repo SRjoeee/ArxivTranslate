@@ -21,9 +21,14 @@ export default defineBackground(() => {
       case 'axt:translate':
         translate({ request: message.request, providerId: message.providerId, cache: message.cache }).then(sendResponse)
         return true
-      case 'axt:provider-status':
-        status().then(sendResponse)
+      case 'axt:provider-status': {
+        const t0 = performance.now()
+        status().then(result => {
+          console.debug(`[axt] provider-status answered in ${Math.round(performance.now() - t0)} ms`)
+          sendResponse(result)
+        })
         return true
+      }
       case 'axt:cache-clear':
         translationCache.clear(message.paper).then(removed => sendResponse({ removed }))
         return true

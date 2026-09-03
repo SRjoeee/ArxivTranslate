@@ -344,7 +344,8 @@ export interface TranslateResult {
 
 ## 10. 调度
 
-- `IntersectionObserver` 给视口内及其前后各一屏的块最高优先级
+- `IntersectionObserver` 给视口内及其前后各一屏的块最高优先级（参数照 FluentRead：`rootMargin: '600px 0px'`、`threshold: 0.01`，Read Frog 同为 600px）；批次队列每次取批时优先取含临近视口块的批次。IO 首次回调是异步的，而运行循环一开始就同步取走并发数个批次，所以追踪器创建时先按 `getBoundingClientRect` 同步播种一次临近集合，之后以 IO 为准
+- 插入译文时用移植自 FluentRead 的滚动锚定保持视口不跳；锚定按**批**做一次而不是按块（锚定的 `elementFromPoint` / `getBoundingClientRect` 都强制布局，MathML 重的页面按块锚定会把主线程卡住几十秒，实测 2609.00062）
 - 其余块按文档顺序在后台排队，一篇论文最终全部翻完
 - 每个 provider 一个 `p-queue` 实例，并发上限来自 provider 声明
 - popup 显示进度（已翻 / 总数 / 失败数），失败块可单击重试
