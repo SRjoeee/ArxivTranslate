@@ -4,6 +4,8 @@ import { defineConfig } from 'wxt'
 export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
+  // 扩展页面里 <link rel="modulepreload" crossorigin> 会触发 Chrome 的 "cross-world extension resource mismatch" 告警（无害但刷屏），关掉预加载
+  vite: () => ({ build: { modulePreload: false } }),
   manifest: {
     name: 'arXiv HTML Translator',
     description: '面向 arxiv.org/html 的保结构、可逆双语翻译',
