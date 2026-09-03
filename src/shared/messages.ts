@@ -1,6 +1,7 @@
 // 扩展内部消息协议。popup / content / background 之间只允许使用这里定义的类型。
 import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
+import type { ProviderStatus, TranslateMessageRequest, TranslateMessageResponse } from '@/entrypoints/background/translate-handler'
 
 /** 消息表：type → { request, response } */
 export interface AxtMessages {
@@ -8,10 +9,15 @@ export interface AxtMessages {
   'axt:ping': { request: Record<never, never>; response: { ok: true; version: string } }
   /** popup → content script：内存中 Block[] 的统计 */
   'axt:stats': { request: Record<never, never>; response: BlockStats }
+  /** content / options → background：翻译一批 segment */
+  'axt:translate': { request: TranslateMessageRequest; response: TranslateMessageResponse }
+  /** popup / options → background：当前 provider 是否可用 */
+  'axt:provider-status': { request: Record<never, never>; response: ProviderStatus }
 }
 
 export type AxtMessageType = keyof AxtMessages
-export type AxtMessage<T extends AxtMessageType = AxtMessageType> = { type: T } & AxtMessages[T]['request']
+/** 分配式条件类型：让 switch (message.type) 能按 type 收窄到对应的 request 形状 */
+export type AxtMessage<T extends AxtMessageType = AxtMessageType> = T extends unknown ? { type: T } & AxtMessages[T]['request'] : never
 export type AxtResponse<T extends AxtMessageType> = AxtMessages[T]['response']
 
 export function isAxtMessage(value: unknown): value is AxtMessage {
