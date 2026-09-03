@@ -1,6 +1,6 @@
 # arXiv HTML Translator — 设计文档
 
-版本：v0.4 · 2026-09-03 · 状态：Phase 2 设计细化（§9 缓存改 Dexie 与配置 schema、§12 Phase 2 五分支；v0.3 改参考代码边界，v0.2 为 Phase 0 实测后修订，v0.1 为 Phase 0 前的基线）
+版本：v0.5 · 2026-09-03 · 状态：Phase 2 完成（核心闭环五分支合入，真实页面验证通过；v0.4 为 Phase 2 设计细化，v0.3 改参考代码边界，v0.2 为 Phase 0 实测后修订，v0.1 为 Phase 0 前的基线）
 
 本文是项目的唯一事实来源（source of truth）。设计变更先改这里，再改代码。
 标记说明：**[决定]** 已定，不再讨论；**[待验证]** Phase 0 需要用实测确认；**[延后]** v1 不做。
@@ -379,7 +379,7 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 - `feat/rules`：`latexml.ts` 扩成 §5.6 的完整规则模块，谓词单测 + 数值格边界用例；`pnpm fixtures:stats` 改用 PROTECT_RULES
 - `feat/extractor`：§4.1 的块模型与遍历，10 篇 fixture 快照 + 不变量测试（id 唯一、不在 skip 内、有可翻译文本、`extract` 不改 DOM）；content script 加载只 extract，`#axt-debug` 时 mark + 虚线描边，popup 显示块统计
 
-**Phase 2 — 核心闭环（五个分支依次合入，边界见 §13）**
+**Phase 2 — 核心闭环（已完成 2026-09-03；五个分支依次合入，边界见 §13；完成标准四项在真实页面实测通过；速度按 KISS / Read Frog 的做法修正——思考模式按端点关闭、1000 字 / 4 段 / 并发 8）**
 - `feat/protector`：占位符引擎——`serialize` / `validate` / `rehydrate` / runs 切段；嵌套单元对外层作 void；移植 Read Frog `html-attribute-markers.ts` 的完整性校验改成 `<x id>` / `<t id>` 协议
 - `feat/providers`：`TranslationProvider` 接口；`openai-compat`（`@ai-sdk/openai-compatible` + `generateObject`，默认 OpenRouter 端点与便宜快速档模型）；prompt 与 `PROMPT_VERSION`；配置 schema + 迁移；options 页字段。移植 Read Frog `providers/model.ts`（精简到三家）、`retry-policy.ts`、`config/storage.ts` + `migration.ts`；并发 `p-queue`，重试 `p-retry` 配移植的策略
 - `feat/cache`：移植 FluentRead `cache.ts`（Dexie），键见 §9
