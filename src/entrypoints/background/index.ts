@@ -7,6 +7,8 @@ import { createStatusHandler, createTranslateHandler } from './translate-handler
 
 // background：消息路由 + 翻译队列 + 缓存。WXT ≥0.20 不带 polyfill，异步响应必须用 sendResponse + return true。
 export default defineBackground(() => {
+  // 排查 content 侧 provider-status 往返 50–90 s：对照 content 的 sent at 看是 SW 启动慢还是消息投递慢
+  console.debug(`[axt] background started at ${new Date().toISOString()}`)
   const providerFromConfig = async () => getProvider(await getConfig())
   const modelFromConfig = async () => (await getConfig()).openaiCompat.model
   const translate = createTranslateHandler({ getProvider: providerFromConfig, getModel: modelFromConfig, cache: translationCache })
@@ -23,8 +25,9 @@ export default defineBackground(() => {
         return true
       case 'axt:provider-status': {
         const t0 = performance.now()
+        const receivedAt = new Date().toISOString()
         status().then(result => {
-          console.debug(`[axt] provider-status answered in ${Math.round(performance.now() - t0)} ms`)
+          console.debug(`[axt] provider-status received at ${receivedAt}, answered in ${Math.round(performance.now() - t0)} ms`)
           sendResponse(result)
         })
         return true
