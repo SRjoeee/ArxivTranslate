@@ -96,3 +96,19 @@ describe('openai-compat provider', () => {
     expect(await kindOf(createOpenAICompatProvider(cfg, { model }).translate({ ...req, signal: AbortSignal.abort() }))).toBe('aborted')
   })
 })
+
+describe('openai-compat provider：思考开关与批次能力', () => {
+  it('把端点对应的思考关闭字段放进 providerOptions', async () => {
+    let captured: unknown
+    const model = modelReturning({ segments: [{ id: 's1', text: 'a' }, { id: 's2', text: 'b' }] }, o => { captured = o })
+    await createOpenAICompatProvider(cfg, { model }).translate(req)
+    expect((captured as { providerOptions?: unknown }).providerOptions).toEqual({ 'openai-compat': { reasoning: { effort: 'none' } } })
+  })
+
+  it('批次能力照参考项目的默认值：1000 字 / 4 段，并发 8', () => {
+    const p = createOpenAICompatProvider(cfg)
+    expect(p.maxBatchChars).toBe(1000)
+    expect(p.maxBatchItems).toBe(4)
+    expect(p.concurrency).toBe(8)
+  })
+})

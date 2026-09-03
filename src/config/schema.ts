@@ -11,6 +11,8 @@ export const configSchema = z.object({
     /** 只存本地，永不进日志、缓存键或 fixture */
     apiKey: z.string(),
     model: z.string().min(1),
+    // 用 default 让旧版本存储（没有这个字段）仍能通过校验
+    thinking: z.enum(['enabled', 'disabled']).default('disabled'),
   }),
   targetLanguage: z.string().min(2),
   mode: z.enum(['stack', 'side', 'only']),
@@ -26,6 +28,7 @@ export const DEFAULT_CONFIG: Config = {
     apiKey: '',
     // 便宜快速档；设置页可改
     model: 'deepseek/deepseek-v4-flash',
+    thinking: 'disabled',
   },
   targetLanguage: 'zh-CN',
   mode: 'stack',

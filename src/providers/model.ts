@@ -2,11 +2,14 @@
 // Read Frog 的 providers/model.ts 覆盖 20 家，拆改比自写 20 行费事，未移植。
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { LanguageModel } from 'ai'
+import type { ThinkingMode } from './thinking'
 
 export interface OpenAICompatConfig {
   baseURL: string
   apiKey: string
   model: string
+  /** 默认 disabled，见 thinking.ts */
+  thinking?: ThinkingMode
 }
 
 export function createModel(config: OpenAICompatConfig): LanguageModel {

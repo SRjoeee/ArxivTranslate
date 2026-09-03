@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { createModel, type OpenAICompatConfig } from './model'
 import { systemPrompt, userPrompt } from './prompt'
 import { attachRequestErrorMeta } from './retry-policy'
+import { thinkingBodyFields } from './thinking'
 import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 
 const outputSchema = z.object({
@@ -18,14 +19,17 @@ export function createOpenAICompatProvider(config: OpenAICompatConfig, deps: { m
     displayName: 'OpenAI 兼容端点',
     kind: 'llm',
     preservesMarkup: true,
-    maxBatchChars: 6000,
-    concurrency: 3,
+    // 批次与并发照 Read Frog 的默认值（1000 字 / 4 段 / 速率 8）：小批高并发，首屏快、吞吐高
+    maxBatchChars: 1000,
+    maxBatchItems: 4,
+    concurrency: 8,
     async isAvailable() {
       return hasKey()
     },
     async translate(request: TranslateRequest): Promise<TranslateResult> {
       if (!hasKey()) throw new ProviderError('no-key', '未配置 API key')
       const model = deps.model ?? createModel(config)
+      const extraBody = thinkingBodyFields(config.baseURL, config.thinking ?? 'disabled')
       let output: z.infer<typeof outputSchema>
       try {
         const result = await generateText({
@@ -36,6 +40,8 @@ export function createOpenAICompatProvider(config: OpenAICompatConfig, deps: { m
           temperature: 0.2,
           maxRetries: 0,
           abortSignal: request.signal,
+          // 思考开关等端点特有字段；openai-compatible 会把它们并进请求体
+          providerOptions: Object.keys(extraBody).length ? { 'openai-compat': extraBody as never } : undefined,
         })
         output = result.output
       } catch (e) {

@@ -20,6 +20,7 @@ export interface ProviderStatus {
   model?: string
   /** content 侧规划批次与选择渲染路径要用（§2 第 3 条） */
   maxBatchChars: number
+  maxBatchItems: number
   preservesMarkup: boolean
 }
 
@@ -94,6 +95,7 @@ export function createStatusHandler(deps: { getProvider: () => Promise<Translati
       available: await provider.isAvailable(),
       model: await deps.getModel(),
       maxBatchChars: provider.maxBatchChars,
+      maxBatchItems: provider.maxBatchItems,
       preservesMarkup: provider.preservesMarkup,
     }
   }

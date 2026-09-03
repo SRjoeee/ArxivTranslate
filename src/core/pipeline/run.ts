@@ -25,7 +25,7 @@ export interface RunOptions {
   target: string
   mode: Mode
   paper: string
-  capabilities: { maxBatchChars: number; preservesMarkup: boolean }
+  capabilities: { maxBatchChars: number; maxBatchItems: number; preservesMarkup: boolean }
   transport: Transport
   onProgress?: (progress: Progress) => void
   signal?: AbortSignal
@@ -151,8 +151,8 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
     report()
   }
 
-  const queue = planBatches(blocks, { maxBatchChars: options.capabilities.maxBatchChars })
-  const workers = Array.from({ length: Math.max(1, options.concurrency ?? 4) }, async () => {
+  const queue = planBatches(blocks, { maxBatchChars: options.capabilities.maxBatchChars, maxBatchItems: options.capabilities.maxBatchItems })
+  const workers = Array.from({ length: Math.max(1, options.concurrency ?? 8) }, async () => {
     for (;;) {
       const batch = queue.shift()
       if (!batch || stopped()) return

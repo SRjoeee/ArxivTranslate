@@ -38,6 +38,8 @@ export interface TranslationProvider {
   preservesMarkup: boolean
   /** 单次请求字符上限 */
   maxBatchChars: number
+  /** 单次请求段落数上限 */
+  maxBatchItems: number
   /** 并发上限，交给 p-queue */
   concurrency: number
   /** 健康检查：key 是否配置、端点是否可达、内置模型是否可用 */
