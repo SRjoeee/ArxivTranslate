@@ -1,0 +1,273 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`fixture > 2312.17141.html 1`] = `
+{
+  "byUnit": {
+    "ack": 1,
+    "bibitem": 52,
+    "caption": 11,
+    "footnote": 2,
+    "p": 550,
+    "title": 160,
+  },
+  "cells": 0,
+  "firstIds": [
+    "axt-b1",
+    "axt-b2",
+    "abstract1.1",
+  ],
+  "lastIds": [
+    "S8.SS2.SSS0.Px7.p2.1",
+    "S8.SS2.SSS0.Px7.p3.1",
+    "S8.SS2.SSS0.Px7.p3.2",
+  ],
+  "numericCells": 0,
+  "table": 0,
+  "text": 776,
+  "total": 776,
+}
+`;
+
+exports[`fixture > 2312.17527.html 1`] = `
+{
+  "byUnit": {
+    "bibitem": 42,
+    "caption": 3,
+    "footnote": 4,
+    "p": 78,
+    "table": 2,
+    "title": 16,
+  },
+  "cells": 84,
+  "firstIds": [
+    "axt-b1",
+    "axt-b2",
+    "abstract1.1",
+  ],
+  "lastIds": [
+    "bib.bib40",
+    "bib.bib41",
+    "bib.bib42",
+  ],
+  "numericCells": 55,
+  "table": 2,
+  "text": 143,
+  "total": 145,
+}
+`;
+
+exports[`fixture > 2401.00418.html 1`] = `
+{
+  "byUnit": {
+    "bibitem": 35,
+    "caption": 3,
+    "footnote": 2,
+    "p": 140,
+    "table": 17,
+    "title": 34,
+  },
+  "cells": 750,
+  "firstIds": [
+    "axt-b1",
+    "axt-b2",
+    "abstract1.1",
+  ],
+  "lastIds": [
+    "bib.bibx33",
+    "bib.bibx34",
+    "bib.bibx35",
+  ],
+  "numericCells": 750,
+  "table": 17,
+  "text": 214,
+  "total": 231,
+}
+`;
+
+exports[`fixture > 2401.00596.html 1`] = `
+{
+  "byUnit": {
+    "bibitem": 88,
+    "caption": 13,
+    "footnote": 15,
+    "p": 54,
+    "table": 1,
+    "title": 16,
+  },
+  "cells": 49,
+  "firstIds": [
+    "axt-b1",
+    "axt-b2",
+    "abstract1.1",
+  ],
+  "lastIds": [
+    "bib.bib87",
+    "bib.bib88",
+    "bib.bib89",
+  ],
+  "numericCells": 8,
+  "table": 1,
+  "text": 186,
+  "total": 187,
+}
+`;
+
+exports[`fixture > 2410.00260.html 1`] = `
+{
+  "byUnit": {
+    "bibitem": 70,
+    "caption": 17,
+    "footnote": 2,
+    "p": 63,
+    "table": 10,
+    "title": 23,
+  },
+  "cells": 144,
+  "firstIds": [
+    "axt-b1",
+    "axt-b2",
+    "abstract1.1",
+  ],
+  "lastIds": [
+    "A3.T8.2",
+    "axt-b184",
+    "A3.T9.2",
+  ],
+  "numericCells": 76,
+  "table": 10,
+  "text": 175,
+  "total": 185,
+}
+`;
+
+exports[`fixture > 2507.00150.html 1`] = `
+{
+  "byUnit": {
+    "ack": 1,
+    "bibitem": 97,
+    "caption": 9,
+    "footnote": 7,
+    "keywords": 1,
+    "p": 53,
+    "table": 3,
+    "title": 14,
+  },
+  "cells": 700,
+  "firstIds": [
+    "axt-b1",
+    "axt-b2",
+    "abstract1.1",
+  ],
+  "lastIds": [
+    "axt-b183",
+    "A1.p1.1",
+    "A1.p2.1",
+  ],
+  "numericCells": 552,
+  "table": 3,
+  "text": 182,
+  "total": 185,
+}
+`;
+
+exports[`fixture > 2608.29808.html 1`] = `
+{
+  "byUnit": {
+    "bibitem": 69,
+    "caption": 25,
+    "p": 134,
+    "table": 13,
+    "title": 46,
+  },
+  "cells": 1897,
+  "firstIds": [
+    "p1.3",
+    "axt-b2",
+    "axt-b3",
+  ],
+  "lastIds": [
+    "axt-b285",
+    "axt-b286",
+    "A3.SS1.SSS0.Px2.p1.1",
+  ],
+  "numericCells": 1536,
+  "table": 13,
+  "text": 274,
+  "total": 287,
+}
+`;
+
+exports[`fixture > 2608.30667.html 1`] = `
+{
+  "byUnit": {
+    "p": 1,
+  },
+  "cells": 0,
+  "firstIds": [
+    "p1.2",
+  ],
+  "lastIds": [
+    "p1.2",
+  ],
+  "numericCells": 0,
+  "table": 0,
+  "text": 1,
+  "total": 1,
+}
+`;
+
+exports[`fixture > 2609.00245.html 1`] = `
+{
+  "byUnit": {
+    "bibitem": 39,
+    "footnote": 11,
+    "p": 491,
+    "table": 1,
+    "title": 60,
+  },
+  "cells": 15,
+  "firstIds": [
+    "axt-b1",
+    "axt-b2",
+    "abstract1.1",
+  ],
+  "lastIds": [
+    "p2.1",
+    "p3.1",
+    "p4.1",
+  ],
+  "numericCells": 0,
+  "table": 1,
+  "text": 601,
+  "total": 602,
+}
+`;
+
+exports[`fixture > 2609.00246.html 1`] = `
+{
+  "byUnit": {
+    "bibitem": 37,
+    "caption": 18,
+    "footnote": 9,
+    "keywords": 1,
+    "p": 256,
+    "table": 8,
+    "title": 42,
+  },
+  "cells": 1603,
+  "firstIds": [
+    "axt-b1",
+    "axt-b2",
+    "axt-b3",
+  ],
+  "lastIds": [
+    "Pt0.A7.T6.13",
+    "axt-b370",
+    "Pt0.A7.SS6.SSSx2.p1.1",
+  ],
+  "numericCells": 1010,
+  "table": 8,
+  "text": 363,
+  "total": 371,
+}
+`;
