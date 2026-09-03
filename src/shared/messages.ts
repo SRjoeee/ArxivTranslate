@@ -13,6 +13,9 @@ export interface AxtMessages {
   'axt:translate': { request: TranslateMessageRequest; response: TranslateMessageResponse }
   /** popup / options → background：当前 provider 是否可用 */
   'axt:provider-status': { request: Record<never, never>; response: ProviderStatus }
+  /** 清空缓存，或只清某篇论文 */
+  'axt:cache-clear': { request: { paper?: string }; response: { removed: number } }
+  'axt:cache-stats': { request: Record<never, never>; response: { entries: number; bytes: number } }
 }
 
 export type AxtMessageType = keyof AxtMessages
