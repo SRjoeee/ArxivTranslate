@@ -1,6 +1,6 @@
 # arXiv HTML Translator — 设计文档
 
-版本：v0.3 · 2026-09-03 · 状态：Phase 1 完成；§13 参考代码边界改为"默认移植，例外原创"（v0.2 为 Phase 0 实测后修订，v0.1 为 Phase 0 前的基线）
+版本：v0.4 · 2026-09-03 · 状态：Phase 2 设计细化（§9 缓存改 Dexie 与配置 schema、§12 Phase 2 五分支；v0.3 改参考代码边界，v0.2 为 Phase 0 实测后修订，v0.1 为 Phase 0 前的基线）
 
 本文是项目的唯一事实来源（source of truth）。设计变更先改这里，再改代码。
 标记说明：**[决定]** 已定，不再讨论；**[待验证]** Phase 0 需要用实测确认；**[延后]** v1 不做。
@@ -299,7 +299,7 @@ export interface TranslateResult {
 
 | id | 实现 | preservesMarkup |
 |---|---|---|
-| `openai-compat` | Vercel AI SDK `createOpenAI({ baseURL })`，覆盖 DeepSeek、Ollama、OpenRouter 等 | true |
+| `openai-compat` | Vercel AI SDK `@ai-sdk/openai-compatible` 的 `createOpenAICompatible({ baseURL })`，覆盖 OpenRouter（默认端点）、DeepSeek、Ollama 等；默认模型取便宜快速档，设置页可改 | true |
 | `anthropic` | AI SDK `@ai-sdk/anthropic` | true |
 | `gemini` | AI SDK `@ai-sdk/google` | true |
 | `chrome-builtin` | `Translator` API（Chrome 138+ 桌面），类型来自 `@types/dom-chromium-ai`，约定见 §8.4 | true（实测保留标签与 void / paired 占位符）|
@@ -334,10 +334,10 @@ export interface TranslateResult {
 
 ## 9. 缓存与配置
 
-- 译文缓存：IndexedDB，`idb-keyval`（v1 足够；需要查询/导出时再升 Dexie）
-- 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`
+- 译文缓存：IndexedDB，**Dexie**，移植 FluentRead `services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层），crypto-js 换成 Web Crypto SHA-256（v0.4 修订，原定 idb-keyval）
+- 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
 - 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出
-- 配置：WXT storage，带 schema 版本与迁移函数；API key 只存本地，永不出现在缓存键或日志里
+- 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
 ---
 
@@ -378,8 +378,13 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 - `feat/rules`：`latexml.ts` 扩成 §5.6 的完整规则模块，谓词单测 + 数值格边界用例；`pnpm fixtures:stats` 改用 PROTECT_RULES
 - `feat/extractor`：§4.1 的块模型与遍历，10 篇 fixture 快照 + 不变量测试（id 唯一、不在 skip 内、有可翻译文本、`extract` 不改 DOM）；content script 加载只 extract，`#axt-debug` 时 mark + 虚线描边，popup 显示块统计
 
-**Phase 2 — 核心闭环**
-- `protector` + `validator` + `rehydrator`；`openai-compat` provider；stack 模式渲染；恢复；缓存
+**Phase 2 — 核心闭环（五个分支依次合入，边界见 §13）**
+- `feat/protector`：占位符引擎——`serialize` / `validate` / `rehydrate` / runs 切段；嵌套单元对外层作 void；移植 Read Frog `html-attribute-markers.ts` 的完整性校验改成 `<x id>` / `<t id>` 协议
+- `feat/providers`：`TranslationProvider` 接口；`openai-compat`（`@ai-sdk/openai-compatible` + `generateObject`，默认 OpenRouter 端点与便宜快速档模型）；prompt 与 `PROMPT_VERSION`；配置 schema + 迁移；options 页字段。移植 Read Frog `providers/model.ts`（精简到三家）、`retry-policy.ts`、`config/storage.ts` + `migration.ts`；并发 `p-queue`，重试 `p-retry` 配移植的策略
+- `feat/cache`：移植 FluentRead `cache.ts`（Dexie），键见 §9
+- `feat/renderer`：stack 模式、恢复原文、表格整表克隆置于下方；原创，DOM 逐节点相等测试守护
+- `feat/pipeline`：content 提取 → 查缓存 → protector → background 队列 → provider → validate → rehydrate → render → 写缓存；降级链（重试一次 → runs → 标记失败）；popup 翻译 / 恢复 / 进度。Phase 2 按文档序整篇翻，视口优先留 Phase 3
+- 完成标准：真实 arXiv 页面 popup 点"翻译"后段落下方出现译文；刷新再点秒出（缓存）；"恢复原文"后 DOM 与翻译前逐节点相等；失败块在 popup 可见
 
 **Phase 3 — 完整 v1**
 - side / only 模式与宽度逻辑；`chrome-builtin` + `google-gtx` 与 runs 路径；fallback 链；调度与进度；样式预设；术语表；options 页
