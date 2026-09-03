@@ -23,3 +23,6 @@ reference/
 *.log
 .idea/
 .vscode/
+
+# WXT 生成的类型与 tsconfig
+.wxt/

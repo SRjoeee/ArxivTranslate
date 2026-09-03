@@ -58,6 +58,7 @@ function* textNodes(root: Element): Generator<Text> {
     const children = Array.from(el.childNodes)
     for (let i = children.length - 1; i >= 0; i--) {
       const n = children[i]
+      if (!n) continue
       if (n.nodeType === ELEMENT_NODE) stack.push(n as Element)
       else if (n.nodeType === TEXT_NODE) yield n as Text
     }
@@ -113,11 +114,11 @@ function auditFixture(file: string): FixtureStats {
     let kind: Kind
     if (unitHit && (!skipHit || (skipHit.el !== unitHit.el && unitHit.el.contains(skipHit.el)))) {
       kind = skipHit ? 'protected' : 'unit'
-      inc(s.byRule, (skipHit ?? unitHit).rules[0].id)
+      inc(s.byRule, (skipHit ?? unitHit).rules[0]!.id)
       if (unitHit.rules.length > 1) inc(s.multi, unitHit.rules.map(r => r.id).join('+'))
     } else if (skipHit) {
       kind = 'skipped'
-      inc(s.byRule, skipHit.rules[0].id)
+      inc(s.byRule, skipHit.rules[0]!.id)
     } else {
       kind = 'uncovered'
       const chain: string[] = []
@@ -180,7 +181,7 @@ function report(all: FixtureStats[]): string {
      ...SKIP_RULES.map(r => ['skip', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0])],
   ), '')
 
-  const dead = [...UNIT_RULES, ...SKIP_RULES].filter(r => !(ruleElements[r.id] > 0))
+  const dead = [...UNIT_RULES, ...SKIP_RULES].filter(r => (ruleElements[r.id] ?? 0) === 0)
   out.push('### (a) 在所有 fixture 中都没有匹配元素的规则', '', dead.length ? dead.map(r => `- \`${r.selector}\` (${r.id})`).join('\n') : '（无）', '')
 
   const unc: Record<string, { count: number; sample: string; fixtures: Set<string> }> = {}
