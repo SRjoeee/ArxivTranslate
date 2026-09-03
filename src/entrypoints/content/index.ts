@@ -28,8 +28,12 @@ export default defineContentScript({
       if (progress.state === 'running') return { started: false, reason: '翻译进行中' }
       if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
       if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
+      const tStart = performance.now()
       const config = await getConfig()
+      const tConfig = performance.now()
       const status = await sendMessage({ type: 'axt:provider-status' })
+      // 实测过页面加载后 20–60 s 才开始标记块，先记下这两步各花多久（DESIGN §10 待查项）
+      console.debug(`[axt] start: config ${Math.round(tConfig - tStart)} ms, provider-status ${Math.round(performance.now() - tConfig)} ms, since page start ${Math.round(tStart)} ms`)
       if (!status.available) return { started: false, reason: '未配置 API key，请先到设置页填写' }
 
       mode = requested ?? config.mode
