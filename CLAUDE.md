@@ -22,7 +22,7 @@
 | Chrome 内置翻译类型 | `@types/dom-chromium-ai` |
 | 测试 | Vitest + happy-dom |
 
-不允许自己实现：请求队列、重试退避、hash、存储封装、JSON 解析容错。这些一律用上表的库。
+不从零实现：请求队列、重试退避、hash、存储封装、JSON 解析容错。一律用上表的库，或移植参考仓库里已经成熟的实现（如 Read Frog 的 `utils/request/*`、FluentRead 的 `services/translation/cache.ts`，后者带 Dexie，允许）。
 
 ---
 
@@ -73,11 +73,12 @@ reference/              # 参考仓库，gitignore，只读
 
 ## 参考代码使用边界
 
-`reference/` 下是 KISS Translator、Read Frog、FluentRead 的源码（GPL-3.0），**只读**。
+`reference/` 下是 KISS Translator、Read Frog、FluentRead 的源码（GPL-3.0，与本项目同许可证），**只读**。
 
-- 核心模块 `rules`、`protector`、`renderer`、`scheduler` 必须原创，只允许借鉴设计思路，读完后关掉文件自己写。
-- 外壳（WXT 配置、provider 请求拼装、UI 组件）可以参考实现；逐字复制不超过零散几行，且在代码注释中注明来源文件。
-- 本项目本身是 GPL-3.0，边界的目的是保持核心代码天然干净，不是规避许可证。
+- **默认优先移植**：它们已经迭代多年，能整段拿来用的就拿来用（provider 请求拼装、队列 / 重试 / 批处理、缓存、配置迁移、占位符校验、视口调度、样式预设、UI 组件），移植后按本项目的命名与目录改造，不引入它们的配置体系。参考文件地图见 `docs/RESEARCH.md` §4。
+- **原创的例外**只有三种：(1) arXiv 适配——`rules/latexml.ts` 与 `extractor` 的 LaTeXML 路径（Phase 1 已完成）；(2) `renderer`——三个项目都改动、包裹或替换原节点，与 DESIGN.md §7.1 的 DOM 不变量冲突；(3) 移植会与 DESIGN.md 的不变量冲突或让代码变乱时改写，并在 PR 里说明理由。
+- **来源标注（GPL §5）**：每个移植文件的文件头写 `// 移植自 reference/<repo>/<path>@<commit>（GPL-3.0），有修改`，并在 `docs/THIRD_PARTY.md` 登记；改写幅度大的也要登记。
+- 面向未来：extractor 以"站点适配器"接口组织，LaTeXML 是第一个适配器；通用启发式 walker（Read Frog `dom/filter.ts`、`dom/traversal.ts`）移植后作为 v2 的第二个适配器接入其他论文站点，v1 仍只做 arXiv。
 
 ---
 
