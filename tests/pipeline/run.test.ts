@@ -32,7 +32,7 @@ function makeTransport(mutate?: (req: TranslateMessageRequest, seg: { id: string
 const run = (doc: Document, transport: Transport, extra: Partial<Parameters<typeof runTranslation>[0]> = {}) =>
   runTranslation({
     doc, blocks: extract(doc), target: 'zh-CN', mode: 'stack', paper: 'test', transport,
-    capabilities: { maxBatchChars: 100_000, preservesMarkup: true }, concurrency: 1, ...extra,
+    capabilities: { maxBatchChars: 100_000, maxBatchItems: 100, preservesMarkup: true }, concurrency: 1, ...extra,
   })
 
 describe('runTranslation', () => {

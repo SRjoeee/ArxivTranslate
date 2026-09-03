@@ -16,7 +16,7 @@ describe('pipeline × fixture', () => {
       return { ok: true, result: { segments: req.request.segments.map(s => ({ id: s.id, text: s.text })), provider: 'mock' }, cached: 0 }
     }
     const t0 = performance.now()
-    const progress = await runTranslation({ doc, blocks, target: 'zh-CN', mode: 'stack', paper: '2410.00260', transport, capabilities: { maxBatchChars: 6000, preservesMarkup: true } })
+    const progress = await runTranslation({ doc, blocks, target: 'zh-CN', mode: 'stack', paper: '2410.00260', transport, capabilities: { maxBatchChars: 1000, maxBatchItems: 4, preservesMarkup: true } })
     console.info(`[pipeline] 2410.00260: ${blocks.length} 块，${calls} 批，${Math.round(performance.now() - t0)} ms`)
     expect(progress.state).toBe('done')
     expect(progress.done).toBe(blocks.length)

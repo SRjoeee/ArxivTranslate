@@ -312,7 +312,7 @@ export interface TranslateResult {
 - 用 AI SDK 7 的 `generateText` + `Output.object({ schema })`（`generateObject` 已被取代）+ zod schema `{ segments: { id, text }[] }`，让结构校验由 SDK 完成；SDK 自身 `maxRetries: 0`，重试交给移植的 retry policy
 - system prompt 固定要素：学术论文翻译；占位符标签必须原样保留、不可增删改；人名/期刊名/会议名保留原文；术语表优先；只返回译文
 - prompt 带版本号 `PROMPT_VERSION`，写入缓存键
-- 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
+- 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`（默认照 Read Frog：1000 字 / 4 段，provider 并发 8——小批高并发，首屏快）；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
 - 批次失败：对半拆分重试 → 单块 → 标记失败
 
 ### 8.3 免费引擎约定
@@ -320,6 +320,7 @@ export interface TranslateResult {
 - 视为**随时会断**的东西：独立文件、独立错误类型、失败自动切到 fallback 链的下一个
 - fallback 链默认：用户选定 provider → `chrome-builtin` → `google-gtx`
 - `google-gtx` 单块一请求，并发 4，指数退避处理 429
+- **思考模式默认关闭**（照 KISS 的 THINKING_API_REGISTRY）：按端点域名选字段——OpenRouter `reasoning: { effort: "none" }`、DeepSeek 官方 `thinking: { type: "disabled" }`、百炼 / 硅基流动 `enable_thinking: false`，未登记端点不发；经 AI SDK `providerOptions` 进请求体（`src/providers/thinking.ts`）
 - **即时引擎**：`chrome-builtin` 模型就绪时（`availability() === 'available'`）单句 10–20 ms 且离线，用它先渲染视口内的块，用户选定的 LLM 译文到达后原位替换；缓存键含 provider，两者互不覆盖。用户可在设置里关闭
 
 ### 8.4 `chrome-builtin` 约定（Phase 0 实测，Chrome 152，RESEARCH.md §6）

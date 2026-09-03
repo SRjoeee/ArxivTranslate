@@ -22,7 +22,7 @@ export interface Batch {
 
 const TITLE_MAX = 80
 
-export function planBatches(blocks: Block[], options: { maxBatchChars: number }): Batch[] {
+export function planBatches(blocks: Block[], options: { maxBatchChars: number; maxBatchItems: number }): Batch[] {
   const batches: Batch[] = []
   let current: Segment[] = []
   let currentChars = 0
@@ -64,7 +64,7 @@ export function planBatches(blocks: Block[], options: { maxBatchChars: number })
       continue
     }
 
-    if (current.length > 0 && currentChars + segment.text.length > options.maxBatchChars) flush()
+    if (current.length > 0 && (currentChars + segment.text.length > options.maxBatchChars || current.length >= options.maxBatchItems)) flush()
     if (current.length === 0) currentTitle = sectionTitle
     current.push(segment)
     currentChars += segment.text.length

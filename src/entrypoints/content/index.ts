@@ -40,7 +40,7 @@ export default defineContentScript({
         target: config.targetLanguage,
         mode,
         paper,
-        capabilities: { maxBatchChars: status.maxBatchChars, preservesMarkup: status.preservesMarkup },
+        capabilities: { maxBatchChars: status.maxBatchChars, maxBatchItems: status.maxBatchItems, preservesMarkup: status.preservesMarkup },
         transport: request => sendMessage({ type: 'axt:translate', ...request }),
         onProgress: p => { progress = p },
         signal: controller.signal,
