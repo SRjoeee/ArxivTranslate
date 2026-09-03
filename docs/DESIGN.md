@@ -1,6 +1,6 @@
 # arXiv HTML Translator — 设计文档
 
-版本：v0.2 · 2026-09-03 · 状态：Phase 0 实测后修订（依据 `docs/RESEARCH.md` §7 的 21 条建议；v0.1 为 Phase 0 前的基线）
+版本：v0.3 · 2026-09-03 · 状态：Phase 1 完成；§13 参考代码边界改为"默认移植，例外原创"（v0.2 为 Phase 0 实测后修订，v0.1 为 Phase 0 前的基线）
 
 本文是项目的唯一事实来源（source of truth）。设计变更先改这里，再改代码。
 标记说明：**[决定]** 已定，不再讨论；**[待验证]** Phase 0 需要用实测确认；**[延后]** v1 不做。
@@ -387,6 +387,9 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 **Phase 4 — 打磨**
 - 更多 fixture 与规则修正；性能；导出/导入缓存；发布
 
+**v2 — 其他论文站点**
+- extractor 站点适配器接口；移植 Read Frog 的通用启发式 walker 作为第二个适配器；按站点补 fixture 与规则
+
 ---
 
 ## 13. 参考项目与借鉴边界
@@ -397,9 +400,11 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 | Read Frog | WXT 工程配置；AI SDK provider 抽象；Shadow DOM UI 隔离；批处理与重试流程；仅译文模式的标记处理 | 语言学习、字幕、TTS、生词本 |
 | FluentRead | 渐进式翻译与缓存策略；悬浮球交互 | Vue 技术栈 |
 
-**边界 [决定]**：核心模块（`rules`、`protector`、`renderer`、`scheduler`）必须原创，只借鉴设计思路。外壳（工程配置、provider 拼装、UI 组件）可以参考实现，但逐字复制不超过零散几行，且注明来源。
+**边界 [决定，v0.3 修订]**：默认优先移植三个参考项目的成熟实现——它们已迭代多年，能整段拿来用的就拿来用，移植后按本项目命名与目录改造。原创的例外只有三种：(1) arXiv 适配（`rules/latexml.ts`、`extractor` 的 LaTeXML 路径，Phase 1 已完成）；(2) `renderer`——三个项目的译文渲染都改动、包裹或替换原节点（Read Frog 把译文追加进原元素、仅译文模式直接改文本节点；FluentRead 用 host 包裹原节点；KISS `replaceWith` 替换），与 §7.1 的 DOM 不变量冲突；(3) 移植会与不变量冲突或让代码变乱时改写并说明理由。各模块的移植来源见 RESEARCH.md §4。
 
-**许可证 [决定]**：项目以 GPL-3.0 开源，非商业。上述边界的目的不是规避 GPL，而是让核心代码天然干净，将来若需调整许可证只需替换外壳。
+**许可证 [决定]**：项目以 GPL-3.0 开源，非商业，与三个参考项目同许可证，可直接移植。GPL §5 要求保留声明并标明修改：移植文件的文件头写 `// 移植自 reference/<repo>/<path>@<commit>（GPL-3.0），有修改`，并在 `docs/THIRD_PARTY.md` 登记。
+
+**面向其他论文站点 [v2]**：extractor 以"站点适配器"接口组织，LaTeXML 适配器是第一个；通用启发式 walker（移植 Read Frog `dom/filter.ts`、`dom/traversal.ts`）作为第二个适配器在 v2 接入其他站点。v1 范围（§1）不变。
 
 ---
 
