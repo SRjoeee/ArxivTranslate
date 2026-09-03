@@ -107,6 +107,21 @@ describe('runTranslation', () => {
     expect(progress.state).toBe('cancelled')
   })
 
+  it('视口优先：isPriority 标记的块所在批次先发，其余按文档序', async () => {
+    const doc = docOf()
+    const { transport, requests } = makeTransport()
+    await run(doc, transport, { capabilities: { maxBatchChars: 100_000, maxBatchItems: 1, preservesMarkup: true }, isPriority: b => b.id === 'p3' })
+    expect(requests.map(r => r.request.segments[0]?.id)).toEqual(['p3', 'p1', 'p2', 'T1#c0'])
+  })
+
+  it('anchor 钩子包住每次渲染', async () => {
+    const doc = docOf()
+    const { transport } = makeTransport()
+    let wrapped = 0
+    await run(doc, transport, { anchor: cb => { wrapped++; return cb() } })
+    expect(wrapped).toBe(4)
+  })
+
   it('onProgress 每批回调', async () => {
     const doc = docOf()
     const seen: number[] = []

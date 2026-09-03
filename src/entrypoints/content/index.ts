@@ -3,6 +3,7 @@ import { extract, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
 import { restore, type Mode } from '@/core/renderer'
+import { createViewportTracker, withViewportAnchor, type ViewportTracker } from '@/core/scheduler'
 import { isAxtMessage, sendMessage } from '@/shared/messages'
 import { enableDebug } from './debug'
 
@@ -19,6 +20,7 @@ export default defineContentScript({
     const paper = paperIdFromUrl(location.href)
     let mode: Mode = 'stack'
     let controller: AbortController | null = null
+    let tracker: ViewportTracker | null = null
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, done: 0, failed: 0, cached: 0 })
     let progress: Progress = idle()
 
@@ -33,6 +35,9 @@ export default defineContentScript({
       mode = requested ?? config.mode
       controller = new AbortController()
       progress = { ...idle(), state: 'running' }
+      tracker?.disconnect()
+      tracker = createViewportTracker(blocks)
+      const activeTracker = tracker
       const t1 = performance.now()
       void runTranslation({
         doc: document,
@@ -44,7 +49,11 @@ export default defineContentScript({
         transport: request => sendMessage({ type: 'axt:translate', ...request }),
         onProgress: p => { progress = p },
         signal: controller.signal,
+        // 视口优先 + 插入译文时的滚动锚定（DESIGN §10）
+        isPriority: block => activeTracker.isNear(block),
+        anchor: withViewportAnchor,
       })
+        .finally(() => activeTracker.disconnect())
         .then(p => {
           progress = p
           console.debug(`[axt] translation ${p.state}: ${p.done}/${p.total} done, ${p.failed} failed, ${p.cached} cached, ${Math.round(performance.now() - t1)} ms${p.fatal ? `, fatal: ${p.fatal}` : ''}`)
@@ -58,6 +67,8 @@ export default defineContentScript({
 
     function restorePage(): { removedNodes: number } {
       controller?.abort()
+      tracker?.disconnect()
+      tracker = null
       const result = restore(document)
       progress = idle()
       return { removedNodes: result.removedNodes }

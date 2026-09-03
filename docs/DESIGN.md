@@ -344,7 +344,7 @@ export interface TranslateResult {
 
 ## 10. 调度
 
-- `IntersectionObserver` 给视口内及其前后各一屏的块最高优先级
+- `IntersectionObserver` 给视口内及其前后各一屏的块最高优先级（参数照 FluentRead：`rootMargin: '600px 0px'`、`threshold: 0.01`，Read Frog 同为 600px）；批次队列每次取批时优先取含临近视口块的批次；插入译文时用移植自 FluentRead 的滚动锚定保持视口不跳
 - 其余块按文档顺序在后台排队，一篇论文最终全部翻完
 - 每个 provider 一个 `p-queue` 实例，并发上限来自 provider 声明
 - popup 显示进度（已翻 / 总数 / 失败数），失败块可单击重试
