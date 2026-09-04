@@ -244,11 +244,22 @@ interface ProtectedBlock {
 
 ### 7.2 side（左右对照）
 
-- 核心技巧：`:is(.ltx_para, .ltx_abstract) { display: grid; grid-template-columns: 1fr 1fr; column-gap: 1.5em }`。原文 `.ltx_p` 与译文 `p.axt-t` 是相邻兄弟，自动成对落在同一行；不需要 wrapper，`.ltx_para` 上的锚点 id 不受影响。**只对这两个容器的直接子 `.ltx_p` 生效**（摘要的段落不在 `.ltx_para` 里，2026-09-04 实测补上）；同行短标题（§7.3）例外地各占一栏，正好左右对照；`span.ltx_p`、表格与 inline-block 内的 `.ltx_p` 降级为 stack（ar5iv 样式已把 `.ltx_para` 设为 `display:block`，无冲突）
+- 核心技巧 [2026-09-04 重做]：配对只依赖一个结构事实——**原件后面紧跟一个 `.axt-t` 兄弟**。凡是可能装下这种配对的容器都设为两列网格（`.ltx_document`、`.ltx_para`、`.ltx_abstract`、各级 `section`、`.ltx_figure` / `.ltx_table` / `.ltx_float`、`.ltx_bibitem` 等），容器内默认通栏，有配对的原件占左栏、`.axt-t` 占右栏：
+
+  ```css
+  容器 > *              { grid-column: 1 / -1 }
+  容器 > :has(+ .axt-t) { grid-column: 1 }
+  容器 > .axt-t         { grid-column: 2 }
+  ```
+
+  这样标题、图表说明、参考文献片段不必各写一条规则就都能左右对照。不需要 wrapper，锚点 id 不受影响
+- **镜像节点** [决定]：公式与插图没有译文，右栏会空着、内容横跨两栏打断阅读。因此给它们插一份副本作为 `.axt-t.axt-mirror` 兄弟（`MIRROR_SELECTORS`）。只镜像**图形本身**而不是整个 `figure`——figure 里的 `.ltx_caption` 是可翻译块，整体镜像会让右栏那份带着英文说明；figure 作为网格容器时，图形与镜像占一行、说明与译文占下一行。镜像**只在第一次进入 side 模式时生成**（实测要复制约三分之一的正文节点），之后留在 DOM 里由 `html:not([data-axt-mode="side"]) .axt-mirror { display: none }` 控制显隐，所以模式切换仍然只改 `<html>` 上的一个属性。这是 §7.1 第 2 条的一处放宽：首次进入 side 有一次性 DOM 写入，恢复原文时随 `.axt-t` 一并删除
+- 译文在 side 模式下**不压缩上边距**：它与原文同处一行，边距不一致会让两边错位（实测 `h2` 差 19px、`figure` 差 64px）。stack / only 才应用 `margin: 0.25em 0 0`
+- 文档主标题与它的译文通栏居中，不参与左右配对（像论文页眉）；`.ltx_title` 有 `max-inline-size: 52rem`，文章列变宽后必须 `margin-inline: auto` 才居中；`span.ltx_p`、表格与 inline-block 内的 `.ltx_p` 降级为 stack（ar5iv 样式已把 `.ltx_para` 设为 `display:block`，无冲突）
 - `.ltx_para` 内非成对的子元素（行间公式、图表等）设 `grid-column: 1 / -1` 通栏
 - 标题、图表说明：降级为上下堆叠（它们的父级是整个 section，做不了 grid）
 - 表格：整表克隆置于下方（见 5.3）
-- **宽度** [决定，2026-09-04 修订]：进入 side 时覆盖两个变量——`--main-width: min(104rem, calc(100vw - 3rem))` 与 `--nav-width: 0px`。只覆盖 `--main-width` 不够：body 的网格是 `1fr nav main nav 1fr`，把导航栏 `display:none` 并不会收掉它的两条轨道（各 14rem 下限），页面因此比视口宽而出现横向滚动（实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）。两列合计不超过原单列宽度的两倍，也永远不超出视口。arXiv 页面的文章列宽（≥1280px 时 body 是 `grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr` 的网格）与 `.ltx_document` 的 `max-width` 都只由这个变量决定，`.ltx_page_main` 本身是 `width:100%`（RESEARCH.md §3.2）。同时隐藏 `.ltx_page_navbar`（用我们自己的属性选择器，不要写 arXiv 的 `data-reading-mode`，那会被它持久化）。注意 `--main-width` 还控制图片、代码块、单元格的 max-width 与 ≥96rem 时脚注边注的定位，需要时把这些钉回 `52rem`
+- **宽度** [决定，2026-09-04 重做]：body 是五列命名网格 `1fr nav article nav 1fr`，第 4 列在实测页面上始终是空的预留列。side 模式**保留左侧 TOC**（`--nav-width: minmax(8rem, 12rem)` 收窄），文章列 `--main-width: min(96rem, calc(100vw - 26rem))` 随视口伸缩且永远不超出视口，两侧 `1fr` 保持整体居中。只覆盖 `--main-width` 不够：把导航栏 `display:none` 并不会收掉它的轨道（各 14rem 下限），页面因此比视口宽而横向滚动（实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）；把轨道整个归零则会让 TOC 消失，两者都不可取。实测 1440px 视口：溢出 0、TOC 保留 176px、每栏 484px。arXiv 页面的文章列宽（≥1280px 时 body 是 `grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr` 的网格）与 `.ltx_document` 的 `max-width` 都只由这个变量决定，`.ltx_page_main` 本身是 `width:100%`（RESEARCH.md §3.2）。同时隐藏 `.ltx_page_navbar`（用我们自己的属性选择器，不要写 arXiv 的 `data-reading-mode`，那会被它持久化）。注意 `--main-width` 还控制图片、代码块、单元格的 max-width 与 ≥96rem 时脚注边注的定位，需要时把这些钉回 `52rem`
 - 用 `matchMedia('(max-width: 1279px)')` 监听（与 arXiv 主题折叠导航栏的 1280px 断点对齐）：变窄自动切到 stack，变宽切回 side；用户手动选的模式记为偏好，自动降级不覆盖偏好。实现见 `src/core/renderer/responsive.ts` 的 `createModeController`，popup 显示偏好、状态里同时带实际生效的模式
 
 ### 7.3 stack（上下对照）

@@ -4,7 +4,7 @@ import { createTranslateService } from '@/providers/translate-service'
 import { extract, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
-import { createModeController, restore, type Mode, type ModeController } from '@/core/renderer'
+import { createMirrors, createModeController, restore, type Mode, type ModeController } from '@/core/renderer'
 import { createViewportTracker, withViewportAnchor, type ViewportTracker } from '@/core/scheduler'
 import { isAxtMessage } from '@/shared/messages'
 import { createMessageCachePort } from './cache-port'
@@ -44,12 +44,13 @@ export default defineContentScript({
       console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
       modes?.stop()
-      modes = createModeController(document, requested ?? config.mode, {})
+      modes = createModeController(document, requested ?? config.mode, { onChange: ensureMirrors })
       controller = new AbortController()
       progress = { ...idle(), state: 'running' }
       tracker?.disconnect()
       tracker = createViewportTracker(blocks)
       const activeTracker = tracker
+      ensureMirrors(modes.effective())
       const translate = createTranslateService({
         getProvider: async () => provider,
         // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
@@ -83,10 +84,21 @@ export default defineContentScript({
       return { started: true }
     }
 
+    let mirrored = false
+    /** side 模式要在右栏放一份公式与图表（§7.2）；只做一次，之后靠 CSS 显隐 */
+    function ensureMirrors(effective: Mode): void {
+      if (effective !== 'side' || mirrored) return
+      const t0 = performance.now()
+      const made = createMirrors(document)
+      mirrored = true
+      console.debug(`[axt] mirrored ${made} blocks in ${Math.round(performance.now() - t0)} ms`)
+    }
+
     async function setPageMode(mode: Mode): Promise<{ mode: Mode; effective: Mode }> {
       // 没在翻译时也允许切换：控制器会把属性写到 <html> 上，样式立刻生效
-      if (!modes) modes = createModeController(document, mode, {})
+      if (!modes) modes = createModeController(document, mode, { onChange: ensureMirrors })
       const effective = modes.choose(mode)
+      ensureMirrors(effective)
       savedMode = mode
       const config = await getConfig()
       if (config.mode !== mode) await setConfig({ ...config, mode })
@@ -99,6 +111,7 @@ export default defineContentScript({
       tracker = null
       modes?.stop()
       modes = null
+      mirrored = false
       const result = restore(document)
       progress = idle()
       return { removedNodes: result.removedNodes }

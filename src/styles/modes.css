@@ -7,11 +7,10 @@
   color: var(--axt-color, inherit);
 }
 
-p.axt-t,
-div.axt-t,
-h1.axt-t, h2.axt-t, h3.axt-t, h4.axt-t, h5.axt-t, h6.axt-t,
-figcaption.axt-t,
-li.axt-t {
+/* stack / only：译文紧跟原文，压掉站点为该标签留的大边距。
+   side 模式不能这么做——译文与原文同处一行，边距不一致会让两边错位
+   （实测 h2 差 19px、figure 差 64px），那里让译文沿用 class 自带的边距 */
+html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption, li).axt-t {
   margin: 0.25em 0 0;
 }
 
@@ -30,57 +29,69 @@ li.axt-t {
 }
 
 /* ── side：左右对照（§7.2）────────────────────────────────────────────────
-   原文 .ltx_p 与译文 p.axt-t 是相邻兄弟，把它们的父级 .ltx_para 设成两列网格就自动成对落行，
-   不需要 wrapper，.ltx_para 上的锚点 id 也不受影响。 */
-html[data-axt-mode="side"] :is(.ltx_para, .ltx_abstract) {
+   配对靠"原件 + 紧随其后的 .axt-t 兄弟"这一个结构事实，不为每种内容写规则：
+   容器里默认通栏，有译文（或镜像）的原件占左栏，译文占右栏。 */
+html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
+  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
+  .ltx_figure, .ltx_table, .ltx_float) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: 1.5em;
   align-items: start;
 }
 
-/* 容器里非成对的子元素（行间公式、图表、列表等）通栏；
-   同行短标题（§7.3）例外：它和它的译文正好占左右两栏 */
-html[data-axt-mode="side"] :is(.ltx_para, .ltx_abstract) > :not(.ltx_p):not(p.axt-t):not([data-axt-inline]) {
+html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
+  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
+  .ltx_figure, .ltx_table, .ltx_float) > * {
   grid-column: 1 / -1;
 }
 
-/* 译文与原文同行，所以不要 stack 模式那点上边距 */
-html[data-axt-mode="side"] :is(.ltx_para, .ltx_abstract) > p.axt-t {
-  margin-top: 0;
+html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
+  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
+  .ltx_figure, .ltx_table, .ltx_float) > :has(+ .axt-t) {
+  grid-column: 1;
 }
 
-/* 网格里的同行标题各占一栏，左边距会让它偏离栏首 */
-html[data-axt-mode="side"] :is(.ltx_para, .ltx_abstract) > .axt-t[data-axt-inline] {
+html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
+  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
+  .ltx_figure, .ltx_table, .ltx_float) > .axt-t {
+  grid-column: 2;
   margin-inline-start: 0;
 }
 
-/* 段内嵌套的 .ltx_p（表格单元格、inline-block 里的）不参与网格，降级为上下堆叠 */
-html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block) .ltx_para {
+/* 段内嵌套的容器（表格单元格、inline-block 里的）不参与网格，降级为上下堆叠 */
+html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block) :is(.ltx_para, .ltx_abstract) {
   display: block;
 }
 
-/* 宽度（§7.2 [决定]）：arXiv 的文章列宽与 .ltx_document 的 max-width 都只由 --main-width 决定，
-   覆盖这一个变量即可，不必碰 .ltx_page_main（RESEARCH.md §3.2）。
-   关键是 --nav-width 也要归零：body 的网格是 `1fr nav main nav 1fr`，只把导航栏 display:none
-   不会收掉它的两条轨道（各 14rem 下限），页面因此比视口宽、出现横向滚动
-   （实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）。
-   两列合起来不超过原来单列宽度的两倍，且永远不超出视口。 */
+/* 镜像节点只在 side 模式出现（§7.2）：其他模式下它会让公式、图表重复一份 */
+html:not([data-axt-mode="side"]) .axt-mirror {
+  display: none;
+}
+
+/* 宽度（§7.2 [决定]，2026-09-04 重做）：
+   body 是五列命名网格 `1fr nav article nav 1fr`，第 4 列在所有实测页面上都是空的预留列。
+   保留左侧 TOC（收窄），把预留列压到最小，文章列按视口动态取值且永远不超出视口。
+   只覆盖 --main-width 而不动轨道会横向溢出：隐藏导航栏不会收掉它的轨道
+   （实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）。 */
 html[data-axt-mode="side"] body {
-  --nav-width: 0px;
+  --nav-width: minmax(8rem, 12rem);
 }
 html[data-axt-mode="side"] {
-  --main-width: min(104rem, calc(100vw - 3rem));
+  --main-width: min(96rem, calc(100vw - 26rem));
 }
-html[data-axt-mode="side"] .ltx_page_navbar {
-  display: none;
+
+/* 文档主标题与它的译文通栏居中，像论文页眉那样；不参与左右配对。
+   ar5iv 给 .ltx_title 设了 max-inline-size: 52rem，文章列变宽后它会靠左，所以要 margin-inline: auto（实测 Bug） */
+html[data-axt-mode="side"] .ltx_document > .ltx_title_document,
+html[data-axt-mode="side"] .ltx_document > .ltx_title_document + .axt-t {
+  grid-column: 1 / -1;
+  margin-inline: auto;
 }
 
 /* --main-width 还被图片、代码块、单元格的 max-width 引用，变量放大后它们会跟着变宽；
    这些内容本身没有双列需求，钉回原值（RESEARCH.md §3.2 的副作用一条） */
-html[data-axt-mode="side"] .ltx_graphics,
-html[data-axt-mode="side"] .ltx_listing,
-html[data-axt-mode="side"] .ltx_td {
+html[data-axt-mode="side"] :is(.ltx_graphics, .ltx_listing, .ltx_td) {
   max-width: 52rem;
 }
 
