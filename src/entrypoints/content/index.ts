@@ -4,7 +4,10 @@ import { createTranslateService } from '@/providers/translate-service'
 import { extract, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
-import { createMirrors, createModeController, fitTables, restore, type Mode, type ModeController } from '@/core/renderer'
+import {
+  alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, restore,
+  type Mode, type ModeController,
+} from '@/core/renderer'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { createViewportTracker, withViewportAnchor, type ViewportTracker } from '@/core/scheduler'
 import { isAxtMessage } from '@/shared/messages'
@@ -100,8 +103,12 @@ export default defineContentScript({
         if (modes?.effective() !== 'side') return
         const made = createMirrors(document)
         const fit = fitTables(document)
-        if (made || fit.fitted || fit.scrolled) {
-          console.debug(`[axt] side prep: +${made} mirrors, ${fit.fitted} tables scaled, ${fit.scrolled} scrollable`)
+        // 边距对齐要在镜像之后：镜像也是译文节点，同样会被站点的相邻兄弟规则影响
+        const aligned = alignPairMargins(document)
+        if (made || fit.fitted || fit.scrolled || aligned) {
+          console.debug(
+            `[axt] side prep: +${made} mirrors, ${fit.fitted} tables scaled, ${fit.scrolled} scrollable, ${aligned} margins aligned`,
+          )
         }
       }, 150)
     }
@@ -112,6 +119,8 @@ export default defineContentScript({
         fitObserver?.disconnect()
         fitObserver = null
         clearTimeout(fitTimer)
+        // 对齐用的内联边距只服务于左右分栏，其他模式下要还给站点样式
+        clearPairMargins(document)
         return
       }
       scheduleSidePrep()
