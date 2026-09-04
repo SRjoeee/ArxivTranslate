@@ -249,7 +249,7 @@ interface ProtectedBlock {
 - 标题、图表说明：降级为上下堆叠（它们的父级是整个 section，做不了 grid）
 - 表格：整表克隆置于下方（见 5.3）
 - **宽度** [决定]：进入 side 时在 `html[data-axt-mode="side"]` 上覆盖 CSS 变量 `--main-width: min(1600px, 96vw)`。arXiv 页面的文章列宽（≥1280px 时 body 是 `grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr` 的网格）与 `.ltx_document` 的 `max-width` 都只由这个变量决定，`.ltx_page_main` 本身是 `width:100%`（RESEARCH.md §3.2）。同时隐藏 `.ltx_page_navbar`（用我们自己的属性选择器，不要写 arXiv 的 `data-reading-mode`，那会被它持久化）。注意 `--main-width` 还控制图片、代码块、单元格的 max-width 与 ≥96rem 时脚注边注的定位，需要时把这些钉回 `52rem`
-- 用 `matchMedia('(max-width: 1279px)')` 监听（与 arXiv 主题折叠导航栏的 1280px 断点对齐）：变窄自动切到 stack，变宽切回 side；用户手动选的模式记为偏好，自动降级不覆盖偏好
+- 用 `matchMedia('(max-width: 1279px)')` 监听（与 arXiv 主题折叠导航栏的 1280px 断点对齐）：变窄自动切到 stack，变宽切回 side；用户手动选的模式记为偏好，自动降级不覆盖偏好。实现见 `src/core/renderer/responsive.ts` 的 `createModeController`，popup 显示偏好、状态里同时带实际生效的模式
 
 ### 7.3 stack（上下对照）
 
@@ -259,9 +259,9 @@ interface ProtectedBlock {
 
 ### 7.4 only（仅译文）
 
-- 原块 `display: none`（不是删除、不是替换文本节点）
+- 原块 `display: none`（不是删除、不是替换文本节点）；选择器是 `[data-axt-state="translated"]`，所以只隐藏真的有译文的块
 - 参考文献条目豁免（保持双语）
-- 未翻译成功的块保持原文可见
+- 未翻译成功的块保持原文可见（`pending` / `failed` 显式 `display: revert`）
 
 ### 7.5 译文样式
 

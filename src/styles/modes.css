@@ -1,4 +1,6 @@
-/* stack 模式与通用译文样式（DESIGN §7.3 / §7.5）。side / only 的规则在 Phase 3 补；预设颜色由 presets.css 的 --axt-* 变量提供 */
+/* 三种模式的样式（DESIGN §7.2 / §7.3 / §7.4 / §7.5）。模式由 <html data-axt-mode> 决定，切换只改这一个属性。
+   预设颜色由 presets.css 的 --axt-* 变量提供 */
+
 /* 译文节点复制了原块的 class（§7.1），字体、字号、行高由站点样式决定；这里不能再写 font: inherit，
    我们的 <style> 排在站点样式之后，同等特异度会把 .ltx_title_abstract 的 1.4rem、.ltx_bibitem 的字体覆盖掉（实测 2609.00064） */
 .axt-t {
@@ -25,4 +27,69 @@ li.axt-t {
 /* 翻译失败的块：左侧一条细提示线，原文照常可读（§7.4） */
 [data-axt-state="failed"] {
   box-shadow: inset 3px 0 0 var(--axt-failed-color, rgba(220, 38, 38, 0.6));
+}
+
+/* ── side：左右对照（§7.2）────────────────────────────────────────────────
+   原文 .ltx_p 与译文 p.axt-t 是相邻兄弟，把它们的父级 .ltx_para 设成两列网格就自动成对落行，
+   不需要 wrapper，.ltx_para 上的锚点 id 也不受影响。 */
+html[data-axt-mode="side"] .ltx_para {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 1.5em;
+  align-items: start;
+}
+
+/* .ltx_para 里非成对的子元素（行间公式、图表、列表等）通栏 */
+html[data-axt-mode="side"] .ltx_para > :not(.ltx_p):not(p.axt-t) {
+  grid-column: 1 / -1;
+}
+
+/* 译文与原文同行，所以不要 stack 模式那点上边距 */
+html[data-axt-mode="side"] .ltx_para > p.axt-t {
+  margin-top: 0;
+}
+
+/* 段内嵌套的 .ltx_p（表格单元格、inline-block 里的）不参与网格，降级为上下堆叠 */
+html[data-axt-mode="side"] .ltx_td .ltx_para,
+html[data-axt-mode="side"] .ltx_inline-block .ltx_para {
+  display: block;
+}
+
+/* 宽度（§7.2 [决定]）：arXiv 的文章列宽与 .ltx_document 的 max-width 都只由 --main-width 决定，
+   覆盖这一个变量即可，不必碰 .ltx_page_main（RESEARCH.md §3.2）。同时让出导航栏的位置。 */
+html[data-axt-mode="side"] {
+  --main-width: min(1600px, 96vw);
+}
+html[data-axt-mode="side"] .ltx_page_navbar {
+  display: none;
+}
+
+/* --main-width 还被图片、代码块、单元格的 max-width 引用，变量放大后它们会跟着变宽；
+   这些内容本身没有双列需求，钉回原值（RESEARCH.md §3.2 的副作用一条） */
+html[data-axt-mode="side"] .ltx_graphics,
+html[data-axt-mode="side"] .ltx_listing,
+html[data-axt-mode="side"] .ltx_td {
+  max-width: 52rem;
+}
+
+/* ── only：仅译文（§7.4）──────────────────────────────────────────────────
+   原块隐藏而不是删除，切回来只改 data-axt-mode。 */
+html[data-axt-mode="only"] [data-axt-state="translated"] {
+  display: none;
+}
+
+/* 未翻译成功的块保持原文可见 */
+html[data-axt-mode="only"] [data-axt-state="pending"],
+html[data-axt-mode="only"] [data-axt-state="failed"] {
+  display: revert;
+}
+
+/* 参考文献豁免隐藏，始终双语（§5.4）：原文被隐藏后对照就没意义了 */
+html[data-axt-mode="only"] .ltx_biblist [data-axt-state="translated"] {
+  display: revert;
+}
+
+/* 同行显示的短标题在 only 模式下译文要顶回行首 */
+html[data-axt-mode="only"] .axt-t[data-axt-inline] {
+  margin-inline-start: 0;
 }

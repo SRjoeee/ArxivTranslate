@@ -1,10 +1,10 @@
-import { getConfig } from '@/config/storage'
+import { getConfig, setConfig } from '@/config/storage'
 import { getProvider } from '@/providers'
 import { createTranslateService } from '@/providers/translate-service'
 import { extract, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
-import { restore, type Mode } from '@/core/renderer'
+import { createModeController, restore, type Mode, type ModeController } from '@/core/renderer'
 import { createViewportTracker, withViewportAnchor, type ViewportTracker } from '@/core/scheduler'
 import { isAxtMessage } from '@/shared/messages'
 import { createMessageCachePort } from './cache-port'
@@ -21,7 +21,11 @@ export default defineContentScript({
     console.debug(`[axt] extracted ${blocks.length} blocks in ${Math.round(performance.now() - t0)} ms`)
 
     const paper = paperIdFromUrl(location.href)
-    let mode: Mode = 'stack'
+    // 模式：偏好存配置，实际生效的由 ModeController 按视口决定（§7.2）。
+    // 翻译开始前不建控制器，免得往没翻译过的页面写 data-axt-mode；popup 这时看到的是配置里的偏好。
+    let modes: ModeController | null = null
+    let savedMode: Mode = 'stack'
+    void getConfig().then(config => { savedMode = config.mode })
     let controller: AbortController | null = null
     let tracker: ViewportTracker | null = null
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, done: 0, failed: 0, cached: 0 })
@@ -39,7 +43,8 @@ export default defineContentScript({
       if (!(await provider.isAvailable())) return { started: false, reason: '未配置 API key，请先到设置页填写' }
       console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
-      mode = requested ?? config.mode
+      modes?.stop()
+      modes = createModeController(document, requested ?? config.mode, {})
       controller = new AbortController()
       progress = { ...idle(), state: 'running' }
       tracker?.disconnect()
@@ -56,7 +61,7 @@ export default defineContentScript({
         doc: document,
         blocks,
         target: config.targetLanguage,
-        mode,
+        mode: modes.effective(),
         paper,
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
         transport: request => translate(request),
@@ -78,10 +83,22 @@ export default defineContentScript({
       return { started: true }
     }
 
+    async function setPageMode(mode: Mode): Promise<{ mode: Mode; effective: Mode }> {
+      // 没在翻译时也允许切换：控制器会把属性写到 <html> 上，样式立刻生效
+      if (!modes) modes = createModeController(document, mode, {})
+      const effective = modes.choose(mode)
+      savedMode = mode
+      const config = await getConfig()
+      if (config.mode !== mode) await setConfig({ ...config, mode })
+      return { mode, effective }
+    }
+
     function restorePage(): { removedNodes: number } {
       controller?.abort()
       tracker?.disconnect()
       tracker = null
+      modes?.stop()
+      modes = null
       const result = restore(document)
       progress = idle()
       return { removedNodes: result.removedNodes }
@@ -99,8 +116,11 @@ export default defineContentScript({
         case 'axt:restore-page':
           sendResponse(restorePage())
           return true
+        case 'axt:set-mode':
+          setPageMode(message.mode).then(r => sendResponse({ mode: r.effective, preference: r.mode }))
+          return true
         case 'axt:page-status':
-          sendResponse({ paper, mode, progress })
+          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress })
           return true
       }
     })
