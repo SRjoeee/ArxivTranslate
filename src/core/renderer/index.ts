@@ -52,8 +52,13 @@ function removeExisting(block: Block): void {
   }
 }
 
-/** 克隆进译文的内容剥掉 id 与全部 data-axt-*（原表、占位符回填的 .ltx_note 都可能带着块标记） */
+/**
+ * 克隆进译文的内容剥掉 id 与全部 data-axt-*（原表、占位符回填的 .ltx_note 都可能带着块标记）。
+ * 还要删掉克隆里已有的译文节点：表格单元格里的 .ltx_p 本身也是块，它的译文作为兄弟插在原表内，
+ * 整表克隆会把它一起复制进来，于是译文表里出现重复且无 data-axt-for 的节点（2026-09-04 实测）。
+ */
 function stripCloned(root: Element, includeRoot: boolean): void {
+  for (const stale of Array.from(root.querySelectorAll(`.${T_CLASS}`))) stale.remove()
   const targets = Array.from(root.querySelectorAll('*'))
   if (includeRoot) targets.unshift(root)
   for (const el of targets) {
