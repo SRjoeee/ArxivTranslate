@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { T_CLASS } from '@/core/renderer'
+import { SIDE_DENY, T_CLASS } from '@/core/renderer'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 const CSS = readFileSync(join(import.meta.dirname, '../../src/styles/modes.css'), 'utf8')
@@ -39,11 +39,16 @@ describe('side 模式的容器覆盖', () => {
   const { container, deny } = selectorsFromCss()
   const files = readdirSync(FIXTURE_DIR).filter(f => f.endsWith('.html')).sort()
 
-  it('排除清单里的每一项都有理由（数量受控，避免悄悄膨胀）', () => {
-    const entries = deny.split(',').map(s => s.trim()).filter(Boolean)
-    expect(entries.length).toBeLessThanOrEqual(20)
-    expect(entries).toContain('.axt-t')
-    expect(entries).toContain('.ltx_enumerate')
+  it('样式表里的排除清单与 side-layout.ts 保持一致（TS 是事实来源）', () => {
+    const normalize = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean).sort().join(',')
+    expect(normalize(deny)).toBe(normalize(SIDE_DENY))
+  })
+
+  it('排除项只允许是本身不成网格的元素：ar5iv 自己的网格必须接管而不是排除', () => {
+    // 排除一个网格祖先挡不住后代 subgrid 它的轨道（实测 2609.00097 的有序列表）
+    for (const grid of ['.ltx_enumerate', '.ltx_biblist', '.ltx_bibitem', '.ltx_item']) {
+      expect(SIDE_DENY).not.toContain(grid)
+    }
   })
 
   for (const file of files) {
