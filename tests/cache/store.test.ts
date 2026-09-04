@@ -1,5 +1,5 @@
 import { IDBKeyRange, indexedDB } from 'fake-indexeddb'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { TranslationCache, createCacheDb, type CacheLimits } from '@/cache/store'
 
 let n = 0
@@ -64,5 +64,37 @@ describe('TranslationCache', () => {
     expect(await c.set('k', 'x'.repeat(100), 'p')).toBe(false)
     expect(await c.set('k', '', 'p')).toBe(false)
     expect(await c.get('k')).toBeNull()
+  })
+})
+
+describe('TranslationCache：写入不扫全库', () => {
+  it('未超限时 set 不再排序整库；总量只在首次统计一次', async () => {
+    const c = make({ maxEntries: 1000 })
+    await c.set('warm', 'v', 'p')
+    const spy = vi.spyOn(c.db.entries, 'orderBy')
+    for (let i = 0; i < 5; i++) await c.set(`k${i}`, `v${i}`, 'p')
+    expect(spy).not.toHaveBeenCalled()
+    expect((await c.stats()).entries).toBe(6)
+    spy.mockRestore()
+  })
+
+  it('覆盖同一个键不会让字节数只增不减', async () => {
+    const c = make({ maxEntries: 10 })
+    await c.set('k', 'x'.repeat(500), 'p')
+    const big = (await c.stats()).bytes
+    await c.set('k', 'y', 'p')
+    const small = (await c.stats()).bytes
+    expect(small).toBeLessThan(big)
+    expect((await c.stats()).entries).toBe(1)
+  })
+
+  it('按字节上限淘汰最旧的条目', async () => {
+    const c = make({ maxBytes: 400 })
+    await c.set('a', 'x'.repeat(150), 'p', 1)
+    await c.set('b', 'x'.repeat(150), 'p', 2)
+    await c.set('c', 'x'.repeat(150), 'p', 3)
+    expect(await c.get('a', 4)).toBeNull()
+    expect(await c.get('c', 5)).not.toBeNull()
+    expect((await c.stats()).bytes).toBeLessThanOrEqual(400)
   })
 })

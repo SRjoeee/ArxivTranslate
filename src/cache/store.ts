@@ -1,6 +1,9 @@
 // 移植自 reference/FluentRead/src/services/translation/cache.ts@536a819（GPL-3.0），有修改：
 // 键的计算移到 src/cache/key.ts（Web Crypto）；记录加 paper 字段与索引，支持按论文清理；TTL / 容量常量按论文场景放大；
-// 库名、类型与导出按本项目调整，构造函数可注入独立库与小容量用于测试；保留原有的内存热层、事务内 LRU 淘汰与"缓存故障降级为未命中"的策略。
+// 库名、类型与导出按本项目调整，构造函数可注入独立库与小容量用于测试；保留原有的内存热层、LRU 淘汰与"缓存故障降级为未命中"的策略。
+// 与原实现的最大分歧：原版每次 set 都 orderBy('lastAccessedAt').toArray() 把整库记录读出来算条数与字节数（O(n)/次）。
+// 一篇论文几百次 set，库到几千条后每次写入都要反序列化整库，MV3 的 service worker 是单线程，
+// 其他消息（provider-status）会排在后面等几十秒。这里改为：字节数与条数增量维护，只有真的超限才按最旧批量淘汰。
 import Dexie, { type DexieOptions, type Table } from 'dexie'
 
 export interface CacheRecord {
@@ -39,6 +42,8 @@ export class CacheDatabase extends Dexie {
   constructor(name = CACHE_DB_NAME, options?: DexieOptions) {
     super(name, options)
     this.version(1).stores({ entries: '&key, paper, createdAt, expiresAt, lastAccessedAt' })
+    // v2 只多一个 byteSize 索引：靠它用"只读索引键"的方式求和，初始化总量时不必把记录读出来
+    this.version(2).stores({ entries: '&key, paper, createdAt, expiresAt, lastAccessedAt, byteSize' })
   }
 }
 
@@ -56,6 +61,8 @@ export class TranslationCache {
   readonly db: CacheDatabase
   readonly limits: CacheLimits
   private readonly memory = new Map<string, CacheRecord>()
+  /** 持久层的条数与字节数；null 表示尚未统计。每次 set 增量更新，clear / cleanup 后作废重算 */
+  private totals: { count: number; bytes: number } | null = null
 
   constructor(options: { db?: CacheDatabase; limits?: Partial<CacheLimits> } = {}) {
     this.db = options.db ?? createCacheDb()
@@ -79,6 +86,40 @@ export class TranslationCache {
 
   private forget(key: string): void {
     this.memory.delete(key)
+  }
+
+  /** 每个 background 生命周期只做一次：orderBy(index).keys() 只读索引键，不反序列化记录 */
+  private async ensureTotals(): Promise<{ count: number; bytes: number }> {
+    if (this.totals) return this.totals
+    const sizes = (await this.db.entries.orderBy('byteSize').keys()) as number[]
+    this.totals = { count: sizes.length, bytes: sizes.reduce((sum, size) => sum + (size || 0), 0) }
+    return this.totals
+  }
+
+  private overLimit(totals: { count: number; bytes: number }): boolean {
+    return totals.count > this.limits.maxEntries || totals.bytes > this.limits.maxBytes
+  }
+
+  /** 超限才淘汰：每轮只取最旧的一批记录，取到够为止，不扫全库 */
+  private async evictIfNeeded(totals: { count: number; bytes: number }): Promise<void> {
+    const batchSize = 128
+    while (this.overLimit(totals)) {
+      const oldest = await this.db.entries.orderBy('lastAccessedAt').limit(batchSize).toArray()
+      if (oldest.length === 0) {
+        this.totals = null
+        return
+      }
+      const evict: string[] = []
+      for (const record of oldest) {
+        if (!this.overLimit(totals)) break
+        evict.push(record.key)
+        totals.count = Math.max(0, totals.count - 1)
+        totals.bytes = Math.max(0, totals.bytes - record.byteSize)
+      }
+      if (evict.length === 0) return
+      await this.db.entries.bulkDelete(evict)
+      evict.forEach(key => this.forget(key))
+    }
   }
 
   async get(key: string, now = Date.now()): Promise<string | null> {
@@ -118,21 +159,15 @@ export class TranslationCache {
     if (!translation || byteSize > this.limits.maxEntryBytes) return false
     const record: CacheRecord = { key, paper, translation, createdAt: now, lastAccessedAt: now, expiresAt: now + this.limits.ttlMs, byteSize }
     try {
+      const totals = await this.ensureTotals()
       await this.db.transaction('rw', this.db.entries, async () => {
+        // 覆盖同一个键时旧记录的字节数要先减掉，否则总量只增不减
+        const previous = await this.db.entries.get(key)
         await this.db.entries.put(record)
-        const entries = await this.db.entries.orderBy('lastAccessedAt').toArray()
-        let totalBytes = entries.reduce((sum, item) => sum + item.byteSize, 0)
-        const evict: string[] = []
-        while (entries.length - evict.length > this.limits.maxEntries || totalBytes > this.limits.maxBytes) {
-          const candidate = entries[evict.length]
-          if (!candidate) break
-          evict.push(candidate.key)
-          totalBytes -= candidate.byteSize
-        }
-        if (evict.length > 0) {
-          await this.db.entries.bulkDelete(evict)
-          evict.forEach(k => this.forget(k))
-        }
+        if (previous) totals.bytes = Math.max(0, totals.bytes - previous.byteSize)
+        else totals.count++
+        totals.bytes += byteSize
+        await this.evictIfNeeded(totals)
       })
       // 持久化成功后再进热层，防止两层状态分叉
       if (!this.memory.has(key) || this.memory.get(key) !== record) this.remember(record)
@@ -147,6 +182,7 @@ export class TranslationCache {
     try {
       await this.db.entries.where('expiresAt').belowOrEqual(now).delete()
       await this.db.entries.where('createdAt').belowOrEqual(now - this.limits.ttlMs).delete()
+      this.totals = null
       for (const [key, record] of this.memory) if (this.isExpired(record, now)) this.memory.delete(key)
     } catch (error) {
       console.warn('[axt] 缓存清理失败', error)
@@ -155,6 +191,7 @@ export class TranslationCache {
 
   /** 清空全部，或只清某篇论文；返回删除条数 */
   async clear(paper?: string): Promise<number> {
+    this.totals = null
     if (paper === undefined) {
       const total = await this.db.entries.count()
       this.memory.clear()
@@ -167,9 +204,9 @@ export class TranslationCache {
     return keys.length
   }
 
+  /** 与 ensureTotals 同样只读索引键，popup 打开时不必把整库读出来 */
   async stats(): Promise<{ entries: number; bytes: number }> {
-    let bytes = 0
-    await this.db.entries.each(record => { bytes += record.byteSize })
-    return { entries: await this.db.entries.count(), bytes }
+    const sizes = (await this.db.entries.orderBy('byteSize').keys()) as number[]
+    return { entries: sizes.length, bytes: sizes.reduce((sum, size) => sum + (size || 0), 0) }
   }
 }
