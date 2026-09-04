@@ -3,7 +3,7 @@
 // 本文件只放数据表与纯函数，不含遍历；遍历在 src/core/extractor。
 
 /** 任何表或函数的行为变化都要递增；进缓存键 */
-export const RULES_VERSION = '0.3.0'
+export const RULES_VERSION = '0.4.0'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -25,7 +25,10 @@ export interface ProtectRule extends Rule {
 /** §5.1 翻译单元：命中且含可翻译文本即成块，并继续下钻发现嵌套单元 */
 export const UNIT_RULES: readonly Rule[] = [
   { id: 'p', selector: '.ltx_p', note: '正文段落，可能是 <span>；摘要、列表项、定理内的段落都由本条覆盖' },
-  { id: 'title', selector: '.ltx_title, .ltx_subtitle', note: '各级标题、副标题、定理 run-in 标题；内含 .ltx_tag 作 void' },
+  // 致谢、关键词的 run-in 标题不单独成块：它们所在的容器本身就是一个单元（正文是容器里的裸文本），
+  // 标题若也成块，外层块会把它当 void 占位符克隆一份英文，页面上就出现两个英文标题
+  // 加一段中文正文的错乱布局（实测 2609.00095）。不成块时它是成对占位符，随外层一起翻、原位还原
+  { id: 'title', selector: '.ltx_title:not(.ltx_title_acknowledgements):not(.ltx_title_keywords), .ltx_subtitle', note: '各级标题、副标题、定理 run-in 标题；内含 .ltx_tag 作 void' },
   { id: 'caption', selector: '.ltx_caption', note: '图表说明；内含 .ltx_tag 作 void' },
   { id: 'footnote', selector: '.ltx_note_content', note: '脚注正文，独立成块；位于 .ltx_note 容器内部' },
   // 参考文献：条目内按 .ltx_bibblock 分段翻，作者段由 skip 规则排除，译文只跟在标题段下面（§5.4）；

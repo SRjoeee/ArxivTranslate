@@ -45,9 +45,13 @@ html[data-axt-mode="side"] .ltx_document {
 }
 
 /* 参与配对的容器：继承文档的列线，自身通栏。
+   选择器列表必须用 :where() 而不是 :is()——:is() 取列表里最具体那一项的权重，
+   `.ltx_itemize > .ltx_item` 是两个类，会把整条规则抬到 (0,4,1)，压过下面 (0,3,1) 的配对规则，
+   于是直接挂在 .ltx_document 下的块（致谢、摘要）被钉成通栏、译文掉到左列下方（实测 2609.00095）。
+   :where() 权重为 0，配对规则才能覆盖它。
    column-gap 要一并写死——.ltx_biblist 自带 3em 的间距，不覆盖会让右栏偏移 12px。
    .ltx_enumerate / .ltx_description 不在列表里：ar5iv 用自己的两列网格排序号，改成 subgrid 会毁掉编号 */
-html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
+html[data-axt-mode="side"] .ltx_document :where(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
   .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
   .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
   .ltx_itemize, .ltx_itemize > .ltx_item) {
@@ -61,7 +65,7 @@ html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_sect
 /* 配对只依赖一个结构事实：原件后面紧跟一个 .axt-t 兄弟。
    容器内默认通栏，有配对的原件占左栏、译文占右栏，标题 / 图表说明 / 参考文献片段都不必各写一条规则 */
 html[data-axt-mode="side"] .ltx_document > *,
-html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
+html[data-axt-mode="side"] .ltx_document :where(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
   .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
   .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
   .ltx_itemize, .ltx_itemize > .ltx_item) > * {
@@ -69,7 +73,7 @@ html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_sect
 }
 
 html[data-axt-mode="side"] .ltx_document > :has(+ .axt-t),
-html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
+html[data-axt-mode="side"] .ltx_document :where(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
   .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
   .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
   .ltx_itemize, .ltx_itemize > .ltx_item) > :has(+ .axt-t) {
@@ -77,12 +81,30 @@ html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_sect
 }
 
 html[data-axt-mode="side"] .ltx_document > .axt-t,
-html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
+html[data-axt-mode="side"] .ltx_document :where(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
   .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
   .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
   .ltx_itemize, .ltx_itemize > .ltx_item) > .axt-t {
   grid-column: 2;
   margin-inline-start: 0;
+}
+
+/* 表格装进自己那一栏（§7.2）：论文里的数值表最小内容宽度普遍超过半栏——实测同一页三张表是
+   509 / 551 / 613px，栏宽只有 484px——塞进一栏会溢出到隔壁与译文表重叠（实测 2609.00095）。
+   表格压不到 min-content 以下，所以按比例缩小：renderer 量出需要的比例、落到下面这几档，
+   实测那三张只需 0.85 / 0.95 / 0.75，六列齐全、字仍清楚，左右对照得以保留。
+   缩到 0.7 还装不下的极端表格退化为栏内横向滚动，至少不会压到隔壁。 */
+html[data-axt-mode="side"] [data-axt-fit="95"] { zoom: 0.95; }
+html[data-axt-mode="side"] [data-axt-fit="90"] { zoom: 0.9; }
+html[data-axt-mode="side"] [data-axt-fit="85"] { zoom: 0.85; }
+html[data-axt-mode="side"] [data-axt-fit="80"] { zoom: 0.8; }
+html[data-axt-mode="side"] [data-axt-fit="75"] { zoom: 0.75; }
+html[data-axt-mode="side"] [data-axt-fit="70"] { zoom: 0.7; }
+
+html[data-axt-mode="side"] [data-axt-fit="scroll"] {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 /* 段内嵌套的容器（表格单元格、inline-block 里的）不参与网格，降级为上下堆叠 */

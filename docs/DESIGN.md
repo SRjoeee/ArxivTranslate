@@ -112,12 +112,12 @@ interface Block {
 | 选择器 | 说明 |
 |---|---|
 | `.ltx_p` | 正文段落。`.ltx_para` 是带锚点 id 的容器，`.ltx_p` 才是文本块。摘要、列表项、定理与证明内的段落都由本条覆盖，不单列规则（Phase 0 实测那些规则被完全包含，单列会违反"每个文本节点恰好一条规则"）；"摘要 / 定理"之类的上下文只作为提示信息传给 provider。注意 `.ltx_p` 可能是 `<span>`（表格、inline-block 内），提取与渲染按类名不按标签名 |
-| `.ltx_title`, `.ltx_subtitle` | 各级标题与副标题。内含 `.ltx_tag`（章节号）需作 void 占位符；定理的 run-in 标题（"Theorem 1."）也在此列 |
+| `.ltx_title`（不含 `.ltx_title_acknowledgements` / `.ltx_title_keywords`）, `.ltx_subtitle` | 各级标题与副标题。内含 `.ltx_tag`（章节号）需作 void 占位符；定理的 run-in 标题（"Theorem 1."）也在此列 |
 | `.ltx_caption` | 图表说明。内含 `.ltx_tag`（"Table 1: "，其中嵌套 `.ltx_text`）需作 void 占位符 |
 | `.ltx_note_content` | 脚注正文，作为独立块。脚注是**嵌套块**：整个 `.ltx_note`（标记 + `.ltx_note_outer > .ltx_note_content`）位于段落内部，外层段落把 `.ltx_note` 视为 void 占位符；`.ltx_note_content` 内部的第二个 `.ltx_note_mark` 与 `.ltx_note_type` 作 void |
 | （表格） | 不走本表：整张最外层 `.ltx_tabular` 由 §5.3 的 TABLE 规则作为一个单元处理，单元格 `.ltx_td` 是表格块内的段，不是独立块 |
 | `.ltx_bibblock` | 参考文献条目内的片段（作者 / 标题 / 出处）；没有分段的条目用 `.ltx_bibitem` 兜底，见 5.4 |
-| `.ltx_acknowledgements` | 致谢 |
+| `.ltx_acknowledgements` | 致谢。正文是容器里的裸文本，容器本身就是单元；它的 run-in 标题**不单独成块**（2026-09-04 修订），否则外层单元会把标题当 void 占位符克隆一份英文，页面上出现两个英文标题加一段中文正文（实测 2609.00095）。不成块时标题是成对占位符，随外层一起翻、原位还原。`.ltx_keywords` 同理 |
 | `.ltx_keywords` | 关键词 |
 | `.ltx_contact`, `.ltx_role_affiliation`, `.ltx_role_address`, `.ltx_dates`, `.ltx_date` | 作者的机构、联系方式、日期。**2026-09-04 修订**：作者区从"整块跳过"改为"默认翻译"，只排除姓名与邮箱。原策略会漏掉致谢性质的作者注（如《Attention Is All You Need》的 “†Equal contribution. Listing order is random…”，它在 `.ltx_creator > .ltx_note` 里）|
 | `.ltx_role_dedicatory`, `.ltx_item`, `.ltx_marginpar`, `.ltx_indexentry`, `.ltx_cv_item_label`, `.ltx_cv_item_content`, `.ltx_cv_entry_date` | 献词、列表项裸文本、边注、索引词条、CV 字段。这些没在抓过的真实论文里出现，由 `tests/fixtures/arxiv/synthetic-structures.html` 守护（RESEARCH.md §2.12）|
@@ -254,6 +254,7 @@ interface ProtectedBlock {
 
   这样标题、图表说明、参考文献片段不必各写一条规则就都能左右对照。不需要 wrapper，锚点 id 不受影响
 - **两栏必须写 `minmax(0, 1fr)`** [决定]：`1fr` 等价于 `minmax(auto, 1fr)`，那个 `auto` 下限是轨道内容的 min-content 宽度。英文列的下限是最长单词（宽表格、长公式同理），中文可以逐字换行、下限接近 0，空间不够时英文列守住下限、中文列被单方面压窄（实测文章列 600px 时两栏 317 / 227）。归零下限后两栏恒等宽（272 / 272），代价是超宽内容溢出自己那栏而不是抢隔壁的宽度——与 §7.2 已记录的宽表格取舍一致
+- **容器列表必须用 `:where()` 而不是 `:is()`** [决定]：`:is()` 取列表里最具体那一项的权重，列表里有 `.ltx_itemize > .ltx_item`（两个类），会把容器规则抬到 (0,4,1)，压过 (0,3,1) 的配对规则；于是**直接挂在 `.ltx_document` 下的块**（致谢、摘要）被钉成通栏，译文掉到左列下方（实测 2609.00095）。嵌在容器里的块因为走另一条更具体的选择器反而正常，所以这个错误只在文档直接子元素上显形。`:where()` 权重为 0，配对规则才能覆盖
 - **列线必须继承，不能各容器自算** [决定]：早期版本给每个容器都写 `1fr 1fr`，于是每个容器按**自己的宽度**切一半——列表里缩进的段落、`.ltx_biblist` 自带 3em 间距的参考文献条目，分界线都和正文错开（实测同一页出现 720 / 715 / 736 三个位置，视觉上分割带是歪的）。改成 subgrid 后实测 105 个右栏元素全部落在同一条 x 上，为后续画中缝分隔线留出了前提。subgrid 容器要显式写 `column-gap`，否则会用容器自己的间距（`.ltx_biblist` 会偏 12px）
 - `.ltx_enumerate` / `.ltx_description` **不加入** subgrid 链：ar5iv 用它们自己的两列网格排序号与术语，改成 subgrid 会毁掉编号；它们内部的配对退化为上下堆叠
 - 不支持 subgrid 的环境里 `grid-template-columns: subgrid` 整条声明失效，容器退化为单列网格、配对上下堆叠，不会错乱
@@ -263,7 +264,7 @@ interface ProtectedBlock {
 - `.ltx_para` 内非成对的子元素（行间公式、图表等）设 `grid-column: 1 / -1` 通栏
 - 标题、图表说明：降级为上下堆叠（它们的父级是整个 section，做不了 grid）
 - 表格：整表克隆置于下方（见 5.3）
-- **宽度** [决定，2026-09-04 重做]：body 是五列命名网格 `1fr nav article nav 1fr`，第 4 列在实测页面上始终是空的预留列。side 模式**保留左侧 TOC**（`--nav-width: minmax(8rem, 12rem)` 收窄），文章列 `--main-width: min(96rem, calc(100vw - 26rem))` 随视口伸缩且永远不超出视口，两侧 `1fr` 保持整体居中。只覆盖 `--main-width` 不够：把导航栏 `display:none` 并不会收掉它的轨道（各 14rem 下限），页面因此比视口宽而横向滚动（实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）；把轨道整个归零则会让 TOC 消失，两者都不可取。实测 1440px 视口：溢出 0、TOC 保留 176px、每栏 484px。arXiv 页面的文章列宽（≥1280px 时 body 是 `grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr` 的网格）与 `.ltx_document` 的 `max-width` 都只由这个变量决定，`.ltx_page_main` 本身是 `width:100%`（RESEARCH.md §3.2）。同时隐藏 `.ltx_page_navbar`（用我们自己的属性选择器，不要写 arXiv 的 `data-reading-mode`，那会被它持久化）。注意 `--main-width` 还控制图片、代码块、单元格的 max-width；side 模式下它们要装进的是**一栏**，所以约束成 `max-width: 100%`（2026-09-04 实测：钉成 52rem 会让 832px 的插图塞进 484px 的栏里撑出栏外）。**已知小瑕疵**：内容撑得比一栏还宽的表格（min-content 超过栏宽）仍会溢出一点点，实测一例 511px vs 484px；强行 `table-layout: fixed` 或把表格改成可滚动块都会破坏 LaTeXML 的表格排版，暂不处理
+- **宽度** [决定，2026-09-04 重做]：body 是五列命名网格 `1fr nav article nav 1fr`，第 4 列在实测页面上始终是空的预留列。side 模式**保留左侧 TOC**（`--nav-width: minmax(8rem, 12rem)` 收窄），文章列 `--main-width: min(96rem, calc(100vw - 26rem))` 随视口伸缩且永远不超出视口，两侧 `1fr` 保持整体居中。只覆盖 `--main-width` 不够：把导航栏 `display:none` 并不会收掉它的轨道（各 14rem 下限），页面因此比视口宽而横向滚动（实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）；把轨道整个归零则会让 TOC 消失，两者都不可取。实测 1440px 视口：溢出 0、TOC 保留 176px、每栏 484px。arXiv 页面的文章列宽（≥1280px 时 body 是 `grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr` 的网格）与 `.ltx_document` 的 `max-width` 都只由这个变量决定，`.ltx_page_main` 本身是 `width:100%`（RESEARCH.md §3.2）。同时隐藏 `.ltx_page_navbar`（用我们自己的属性选择器，不要写 arXiv 的 `data-reading-mode`，那会被它持久化）。注意 `--main-width` 还控制图片、代码块、单元格的 max-width；side 模式下它们要装进的是**一栏**，所以约束成 `max-width: 100%`（2026-09-04 实测：钉成 52rem 会让 832px 的插图塞进 484px 的栏里撑出栏外）。**表格按比例缩进栏内**（2026-09-04 修订）：论文里的数值表 min-content 普遍超过半栏（实测同一页三张表 509 / 551 / 613px，栏宽 484px），塞进一栏会溢出到隔壁与译文表重叠；表格又压不到 min-content 以下。因此 `fitTables`（`src/core/renderer/table-fit.ts`）在进入 side 与容器尺寸变化时量出所需比例，落到 95/90/85/80/75/70 六档之一，写成 `data-axt-fit` 属性（原节点只允许追加 `data-axt-*`，§7.1），CSS 用 `zoom` 应用。实测那三张只需 0.85 / 0.95 / 0.75，六列齐全、字仍清楚，**左右对照得以保留**。缩到 0.7 还装不下的极端表格退化为栏内横向滚动（`data-axt-fit="scroll"`）。**量尺寸的克隆必须先剥掉 `data-axt-*` 并写死 `zoom: 1`**：带着上一轮的 `data-axt-fit` 会命中缩放规则，量到的是已经缩过的宽度，于是判定装得下、去掉缩放，下一轮又量到原始宽度再缩，窗口停在某些尺寸时表格会不停闪（实测 551→85→468→none→551 的循环）。ResizeObserver 也要比较宽度、只在真的变化时重算，否则我们自己的缩放会再次触发它。放弃过的两个方案：通栏上下堆叠（失去对照）、一律栏内滚动（裁列、两边各滚一次）
 - 用 `matchMedia('(max-width: 1279px)')` 监听（与 arXiv 主题折叠导航栏的 1280px 断点对齐）：变窄自动切到 stack，变宽切回 side；用户手动选的模式记为偏好，自动降级不覆盖偏好。实现见 `src/core/renderer/responsive.ts` 的 `createModeController`，popup 显示偏好、状态里同时带实际生效的模式
 
 ### 7.3 stack（上下对照）
