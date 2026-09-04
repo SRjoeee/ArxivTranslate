@@ -21,7 +21,7 @@ export interface AxtMessages {
   /** popup → content：进度 */
   'axt:page-status': { request: Record<never, never>; response: PageStatus }
   /** popup → background：连通性 */
-  'axt:ping': { request: Record<never, never>; response: { ok: true; version: string } }
+  'axt:ping': { request: Record<never, never>; response: { ok: true; version: string; at: number; bootedAt: number } }
   /** popup → content script：内存中 Block[] 的统计 */
   'axt:stats': { request: Record<never, never>; response: BlockStats }
   /** content / options → background：翻译一批 segment */
