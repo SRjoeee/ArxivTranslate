@@ -62,7 +62,7 @@ reference/              # 参考仓库，gitignore，只读
 ## 硬规则
 
 1. **DOM 不变量**（DESIGN.md §7.1）：译文节点只作为原块的下一个兄弟插入；原节点只允许追加 `data-axt-*` 属性，不改子树；全局状态只在 `<html>` 上；恢复后 DOM 必须与翻译前逐节点相等。有测试守护，不许绕。
-2. **选择器只在一处**：任何 `ltx_*` 选择器只能写在 `src/core/rules/latexml.ts`。其他文件通过规则模块的函数访问。
+2. **选择器只在一处**：任何 `ltx_*` 选择器只能写在 `src/core/rules/latexml.ts`，其他 TS 文件通过规则模块的函数访问。唯一例外是 `src/styles/*.css`：布局要声明式地写在样式表里，不能靠运行时给节点打标记，那会把排版和 JS 生命周期耦在一起。样式表里的 `ltx_*` 只用于布局，规则模块仍是「哪些内容要翻译」的唯一事实来源。
 3. **两条渲染路径**：provider 的 `preservesMarkup` 决定走 markup 还是 runs，不要在渲染层写 provider 特判。
 4. **免费接口视为不稳定**：`chrome-builtin`、`google-gtx` 各自独立文件、独立错误类型；失败必须可恢复并触发 fallback 链，不能让扩展整体挂掉。
 5. **前缀**：所有注入的 class / data 属性 / CSS 变量以 `axt-` / `data-axt-` / `--axt-` 开头。
