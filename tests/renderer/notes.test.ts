@@ -17,33 +17,32 @@ const withNote = (translated = true) => docOf(`
 const copy = (doc: Document) => doc.querySelector(`.${T_CLASS} .ltx_note_content`)!
 
 describe('localizeNotes', () => {
-  it('译文里的脚注副本换成该脚注的译文', () => {
+  it('译文搬进副本：一份边注里原文在上、译文在下', () => {
     const doc = withNote()
     expect(localizeNotes(doc)).toBe(1)
-    expect(copy(doc).textContent).toContain('中文脚注')
-    expect(copy(doc).textContent).not.toContain('English note')
+    const box = copy(doc).closest('.ltx_note_outer')!
+    expect(box.textContent).toContain('English note')
+    expect(box.textContent).toContain('中文脚注')
+    expect(box.textContent!.indexOf('English')).toBeLessThan(box.textContent!.indexOf('中文'))
   })
 
-  it('标号不重复：整体替换内容，不是往里追加', () => {
+  it('原件那份标上 data-axt-note，由样式隐藏——页面右缘只留一份', () => {
     const doc = withNote()
     localizeNotes(doc)
-    expect(copy(doc).querySelectorAll('.ltx_note_mark')).toHaveLength(1)
+    const original = doc.querySelector(`.ltx_p:not(.${T_CLASS}) .ltx_note`)!
+    expect(original.getAttribute('data-axt-note')).toBe('moved')
+    // 副本那份不带标记，照常显示
+    expect(doc.querySelector(`.${T_CLASS} .ltx_note`)!.hasAttribute('data-axt-note')).toBe(false)
   })
 
-  it('副本接手译文的块标记，恢复原文时照样被清掉', () => {
-    const doc = withNote()
-    localizeNotes(doc)
-    expect(copy(doc).getAttribute('data-axt-for')).toBe('n1')
-  })
-
-  it('是移动不是复制：原件搬完只剩原文，页面上不会出现两份译文', () => {
+  it('是移动不是复制：搬完页面上只有一份译文', () => {
     // 第一版用"复制 + 样式隐藏原件里的译文"，只要这一趟没跑成中文就凭空消失，
     // 切到 stack 又变成三份（用户实测反馈）。移动没有这个耦合
     const doc = withNote()
     localizeNotes(doc)
     const source = doc.querySelector(`.ltx_p:not(.${T_CLASS}) .ltx_note_content:not(.${T_CLASS})`)!
     expect(source.textContent).toContain('English note')
-    expect(doc.querySelectorAll(`.ltx_note_content.${T_CLASS}`)).toHaveLength(0)
+    expect(source.nextElementSibling).toBeNull() // 原件里已经没有译文节点了
     expect(doc.body.textContent!.match(/中文脚注/g)).toHaveLength(1)
   })
 
@@ -58,6 +57,7 @@ describe('localizeNotes', () => {
     const doc = withNote(false)
     expect(localizeNotes(doc)).toBe(0)
     expect(copy(doc).textContent).toContain('English note')
+    expect(doc.querySelector('.ltx_note')!.hasAttribute('data-axt-note')).toBe(false)
   })
 
   it('自幂等：搬完原件就没有译文节点，第二遍什么都不做', () => {

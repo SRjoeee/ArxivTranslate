@@ -180,18 +180,15 @@ html:not([data-axt-mode="side"]) .axt-mirror {
   display: none;
 }
 
-/* 脚注（§7.2）：arXiv 在视口 ≥ 96rem 时把脚注渲染成常驻边注，用 float 加一个负的
-   margin-inline-end（实测 -496px）挂到"文章列外面"。side 模式把文章切成两栏后，
-   左栏的"外面"就是右栏——边注正好压在右栏译文上（实测 2312.17141：边注 1112→1592，
-   右栏 1116→1856，用户两次反馈"注解跑进主内容区"）。把负边距收掉，边注就留在自己栏内。
-   脚注的译文由 localizeNotes 搬进译文块里那份副本，原件因此只剩原文，两栏各自完整 */
-html[data-axt-mode="side"] .ltx_note_outer {
-  width: min(20rem, 100%);
-  margin-inline-end: 0;
-  /* 列表项里的脚注 ar5iv 写死了 height: 0 + overflow: visible —— 它本来被负边距推到文章外，
-     不需要占位。收回栏内后高度还是 0，内容就直接盖在下一条列表项上（实测框高 32、内容高 90，
-     压住 2 个元素；用户反馈"跑到内容区里面完全乱掉"）。撑开高度后压住数为 0 */
-  height: auto;
+/* 脚注（§7.2）：arXiv 把脚注渲染成挂在**页面右缘**的边注（视口 ≥ 96rem 时常驻，
+   `.ltx_note_outer` 用 float 加负的 margin-inline-end 推到文章外；更窄则折叠、hover 弹出）。
+   那个位置是对的，不要动它——试过把边注收进本栏，正文被挤、列表项还被盖住（用户反馈"影响阅读"）。
+   要解决的是**同一条脚注出现两次**：段落译文由占位符协议回填，脚注是受保护节点，
+   于是译文段落里会重建一份原文脚注。localizeNotes 把译文搬进那份副本（副本因此是原文 + 译文，
+   上下排），原件那份就多余了——它标上 data-axt-note 后由这条规则隐藏。
+   只隐藏**确实搬走过**的那份：没搬成时原样显示，不会把脚注弄丢 */
+html[data-axt-on] .ltx_note[data-axt-note="moved"] > .ltx_note_outer {
+  display: none;
 }
 
 /* 整块拆开的插图（§7.2）：左份是原件、只显示原文，右份是副本、只有译文。
