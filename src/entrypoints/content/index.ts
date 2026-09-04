@@ -4,7 +4,7 @@ import { createTranslateService } from '@/providers/translate-service'
 import { extract, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
-import { createMirrors, createModeController, restore, type Mode, type ModeController } from '@/core/renderer'
+import { createMirrors, createModeController, fitTables, restore, type Mode, type ModeController } from '@/core/renderer'
 import { createViewportTracker, withViewportAnchor, type ViewportTracker } from '@/core/scheduler'
 import { isAxtMessage } from '@/shared/messages'
 import { createMessageCachePort } from './cache-port'
@@ -85,13 +85,30 @@ export default defineContentScript({
     }
 
     let mirrored = false
-    /** side 模式要在右栏放一份公式与图表（§7.2）；只做一次，之后靠 CSS 显隐 */
+    let fitObserver: ResizeObserver | null = null
+
+    /** side 模式的一次性准备：右栏补一份公式与图表（§7.2），并把表格缩到能装进一栏 */
     function ensureMirrors(effective: Mode): void {
-      if (effective !== 'side' || mirrored) return
+      if (effective !== 'side') {
+        fitObserver?.disconnect()
+        fitObserver = null
+        return
+      }
       const t0 = performance.now()
-      const made = createMirrors(document)
+      const made = mirrored ? 0 : createMirrors(document)
       mirrored = true
-      console.debug(`[axt] mirrored ${made} blocks in ${Math.round(performance.now() - t0)} ms`)
+      const fit = fitTables(document)
+      console.debug(`[axt] side ready: ${made} mirrors, ${fit.fitted} tables scaled, ${fit.scrolled} scrollable, ${Math.round(performance.now() - t0)} ms`)
+      // 栏宽随窗口变化，缩放比例要跟着重算
+      if (!fitObserver && typeof ResizeObserver === 'function') {
+        let pending = 0
+        fitObserver = new ResizeObserver(() => {
+          clearTimeout(pending)
+          pending = window.setTimeout(() => { if (modes?.effective() === 'side') fitTables(document) }, 150)
+        })
+        const target = document.querySelector('article')
+        if (target) fitObserver.observe(target)
+      }
     }
 
     async function setPageMode(mode: Mode): Promise<{ mode: Mode; effective: Mode }> {
@@ -111,6 +128,8 @@ export default defineContentScript({
       tracker = null
       modes?.stop()
       modes = null
+      fitObserver?.disconnect()
+      fitObserver = null
       mirrored = false
       const result = restore(document)
       progress = idle()

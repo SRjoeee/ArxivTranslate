@@ -139,4 +139,5 @@ export function restore(doc: Document): { removedNodes: number; strippedAttrs: n
 }
 
 export * from './mirror'
+export * from './table-fit'
 export * from './responsive'
