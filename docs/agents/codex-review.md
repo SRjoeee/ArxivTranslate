@@ -6,19 +6,22 @@
 三条查询规矩（Codex 在 #29 上指出的三个漏洞）：
 
 - **只认这一个账号**：`.user.login == "chatgpt-codex-connector[bot]"`，不要用 `test("codex")` 之类的子串匹配——公开仓库里任何 login 含 "codex" 的账号点个 👍 就能让 PR 看起来审完了。
-- **只认针对当前 HEAD 的信号**：行内评论与 review 都带 `commit_id`，只取等于 `git rev-parse HEAD` 的；反应没有 commit 字段，用 `created_at` 晚于本次 push 的时间来判断。上一轮的旧评论会一直留在接口里，不过滤的话新提交一 push 就"审完了"。
+- **只认针对当前 HEAD 的信号**：行内评论与 review 都带 `commit_id`，只取等于 `git rev-parse HEAD` 的；反应和限额提示没有 commit 字段，用 `created_at` 晚于**本次 push 的时刻**来判断——这个时刻要在 push 前用 `date -u` 记下（UTC，和 GitHub 的 `created_at` 同一时区才能按字符串比较；不能用提交时间 `%cI`，本地提交可能比 push 早很久、时区也不同）。上一轮的旧评论会一直留在接口里，不过滤的话新提交一 push 就"审完了"。
 - **翻页**：两个列表接口都加 `--paginate`，否则超过一页的反应 / 评论只看得到第一页。
 
 ```sh
-HEAD=$(git rev-parse HEAD); PUSHED=$(git log -1 --format=%cI); BOT='chatgpt-codex-connector[bot]'
+BOT='chatgpt-codex-connector[bot]'
+PUSHED=$(date -u +%Y-%m-%dT%H:%M:%SZ); git push      # push 前记 UTC 时刻
+HEAD=$(git rev-parse HEAD)
 # 反应：eyes = 审查中；+1 = 审完无建议（只认本次 push 之后的）
 gh api --paginate "repos/{owner}/{repo}/issues/<N>/reactions" \
   --jq ".[] | select(.user.login == \"$BOT\") | select(.created_at > \"$PUSHED\") | .content"
 # review + 行内评论（只认针对当前 HEAD 的）
 gh api --paginate "repos/{owner}/{repo}/pulls/<N>/reviews"  --jq ".[] | select(.user.login == \"$BOT\") | select(.commit_id == \"$HEAD\") | .state"
 gh api --paginate "repos/{owner}/{repo}/pulls/<N>/comments" --jq ".[] | select(.user.login == \"$BOT\") | select(.commit_id == \"$HEAD\") | \"\(.path):\(.line // .original_line) \(.body)\""
-# 限额提示
-gh pr view <N> --json comments --jq ".comments[] | select(.author.login == \"$BOT\") | select(.body | test(\"usage limits\")) | .body"
+# 限额提示（同样只认本次 push 之后的）
+gh api --paginate "repos/{owner}/{repo}/issues/<N>/comments" \
+  --jq ".[] | select(.user.login == \"$BOT\") | select(.created_at > \"$PUSHED\") | select(.body | test(\"usage limits\")) | .body"
 ```
 
 | 信号 | 含义 |
@@ -26,7 +29,7 @@ gh pr view <N> --json comments --jq ".comments[] | select(.author.login == \"$BO
 | 本次 push 之后的 👀 反应 | 正在审，继续等 |
 | 本次 push 之后的 👍 反应 | 审完了，没有建议 |
 | 针对当前 HEAD 的 review（`COMMENTED`）+ 行内评论 | 有建议 |
-| "You have reached your Codex usage limits" | 这次没审 |
+| 本次 push 之后的 "You have reached your Codex usage limits" | 这次没审 |
 
 只有 👀 或什么都没有 = 还在审（或还没轮到），继续等；通常几分钟内出终态。push 新提交会重新开始一轮。
 
