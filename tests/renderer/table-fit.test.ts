@@ -72,3 +72,20 @@ describe('fitTables', () => {
     expect(originals(doc).map(fit)).toEqual(['85', FIT_SCROLL])
   })
 })
+
+describe('createFitProbe', () => {
+  it('剥掉 data-axt-*，并显式 zoom: 1——否则量到的是上一轮缩放后的宽度，窗口停在某些尺寸会不停闪', async () => {
+    const { createFitProbe } = await import('@/core/renderer/table-fit')
+    const doc = docOf('<table class="ltx_tabular" data-axt-fit="85" data-axt-id="T1" id="T1">'
+      + '<tbody><tr><td class="ltx_td" data-axt-state="translated">a</td></tr></tbody></table>')
+    const table = doc.querySelector('.ltx_tabular')!
+    const probe = createFitProbe(table)
+    expect(probe.hasAttribute('data-axt-fit')).toBe(false)
+    expect(probe.hasAttribute('data-axt-id')).toBe(false)
+    expect(probe.querySelector('[data-axt-state]')).toBeNull()
+    expect(probe.getAttribute('style')).toContain('zoom:1')
+    expect(probe.getAttribute('style')).toContain('width:min-content')
+    // 原节点不受影响
+    expect(table.getAttribute('data-axt-fit')).toBe('85')
+  })
+})

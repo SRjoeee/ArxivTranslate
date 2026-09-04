@@ -21,12 +21,25 @@ export interface FitDeps {
   columnWidth?: (table: Element) => number
 }
 
+/**
+ * 量尺寸用的离屏克隆。**必须剥掉 data-axt-***：克隆件带着上一轮的 data-axt-fit 就会命中
+ * modes.css 里的 zoom 规则，量到的是已经缩过的宽度，于是判定"装得下"→ 去掉缩放 →
+ * 下一轮又量到原始宽度 → 再缩，窗口停在某些尺寸时表格会不停闪（实测）。
+ * 同时显式写 zoom: 1，挡住任何来自祖先或其他规则的缩放。
+ */
+export function createFitProbe(table: Element): HTMLElement {
+  const probe = table.cloneNode(true) as HTMLElement
+  for (const el of [probe, ...Array.from(probe.querySelectorAll('*'))]) {
+    for (const name of el.getAttributeNames()) if (name.startsWith('data-axt-')) el.removeAttribute(name)
+  }
+  probe.setAttribute('style', 'width:min-content;max-width:none;zoom:1;position:absolute;visibility:hidden;left:-9999px;top:0')
+  return probe
+}
+
 /** 离屏克隆量 min-content：不碰原节点的 style（§7.1） */
 function measureMinContent(table: Element): number {
-  const doc = table.ownerDocument
-  const probe = table.cloneNode(true) as HTMLElement
-  probe.setAttribute('style', 'width:min-content;max-width:none;position:absolute;visibility:hidden;left:-9999px;top:0')
-  doc.body.append(probe)
+  const probe = createFitProbe(table)
+  table.ownerDocument.body.append(probe)
   const width = probe.getBoundingClientRect().width
   probe.remove()
   return width

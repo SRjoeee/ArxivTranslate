@@ -99,10 +99,15 @@ export default defineContentScript({
       mirrored = true
       const fit = fitTables(document)
       console.debug(`[axt] side ready: ${made} mirrors, ${fit.fitted} tables scaled, ${fit.scrolled} scrollable, ${Math.round(performance.now() - t0)} ms`)
-      // 栏宽随窗口变化，缩放比例要跟着重算
+      // 栏宽随窗口变化，缩放比例要跟着重算。只在宽度真的变了才重算——
+      // 缩放表格本身也会让观察目标报告一次尺寸变化，不设这道闸就会自激振荡
       if (!fitObserver && typeof ResizeObserver === 'function') {
         let pending = 0
-        fitObserver = new ResizeObserver(() => {
+        let lastWidth = 0
+        fitObserver = new ResizeObserver(entries => {
+          const width = Math.round(entries[0]?.contentRect.width ?? 0)
+          if (width === lastWidth) return
+          lastWidth = width
           clearTimeout(pending)
           pending = window.setTimeout(() => { if (modes?.effective() === 'side') fitTables(document) }, 150)
         })
