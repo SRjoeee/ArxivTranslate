@@ -1,5 +1,8 @@
 // 缓存键（DESIGN §9）：sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)。
 // 借鉴 FluentRead：identity 做结构化的确定性序列化（JSON 数组），不用分隔符拼用户文本，避免撞键。
+// 这里不引用 ./store：content 侧要算键但不能把 Dexie 打进包（DESIGN §8.0）。
+import { RULES_VERSION } from '@/core/rules/latexml'
+import { PROMPT_VERSION } from '@/providers/prompt'
 export type RenderPath = 'markup' | 'runs'
 
 export interface CacheIdentity {
@@ -34,4 +37,9 @@ export async function buildCacheKey(identity: CacheIdentity): Promise<string> {
   ])
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload))
   return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** 把 PROMPT_VERSION / RULES_VERSION 填进 identity 后算键 */
+export function cacheKeyFor(identity: Omit<CacheIdentity, 'promptVersion' | 'rulesVersion'>): Promise<string> {
+  return buildCacheKey({ ...identity, promptVersion: PROMPT_VERSION, rulesVersion: RULES_VERSION })
 }

@@ -7,13 +7,14 @@
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "dev": "wxt",
-    "build": "wxt build",
+    "build": "wxt build && node scripts/check-output.mjs",
     "zip": "wxt zip",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "postinstall": "wxt prepare",
-    "fixtures:stats": "tsx scripts/fixtures-stats.ts"
+    "fixtures:stats": "tsx scripts/fixtures-stats.ts",
+    "check:output": "node scripts/check-output.mjs"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",
