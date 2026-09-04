@@ -52,11 +52,14 @@ html[data-axt-mode="side"] .ltx_document {
    `.ltx_itemize > .ltx_item` 是两个类，会把整条规则抬到配对规则之上，
    于是直接挂在 .ltx_document 下的块（致谢、摘要）被钉成通栏、译文掉到左列下方（实测 2609.00095）。
    column-gap 要显式写——.ltx_biblist 自带 3em 的间距，subgrid 会用容器自己的值，右栏偏 12px。
-   .ltx_enumerate / .ltx_description 不在列表里：ar5iv 用自己的两列网格排序号，改成 subgrid 会毁掉编号 */
+   .ltx_enumerate / .ltx_description 不在列表里：ar5iv 用自己的两列网格排序号，改成 subgrid 会毁掉编号。
+   .ltx_theorem 是定理环境的容器（LaTeXML 总会带这个基类，变体名由作者宏决定）；
+   .ltx_transformed_inner 是 \resizebox 的包裹层，宽表格常被包在里面——
+   两者不入列表时，里面的配对根本进不了网格，只能上下堆（实测 2609.00097） */
 html[data-axt-mode="side"] .ltx_document :where(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
   .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
   .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
-  .ltx_itemize, .ltx_itemize > .ltx_item) {
+  .ltx_itemize, .ltx_itemize > .ltx_item, .ltx_theorem, .ltx_transformed_inner) {
   display: grid;
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
@@ -70,7 +73,7 @@ html[data-axt-mode="side"] .ltx_document :where(.ltx_para, .ltx_abstract, .ltx_s
 html[data-axt-mode="side"] :where(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
   .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
   .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
-  .ltx_itemize, .ltx_itemize > .ltx_item) {
+  .ltx_itemize, .ltx_itemize > .ltx_item, .ltx_theorem, .ltx_transformed_inner) {
   & > * {
     grid-column: 1 / -1;
   }
@@ -81,7 +84,17 @@ html[data-axt-mode="side"] :where(.ltx_document, .ltx_para, .ltx_abstract, .ltx_
 
   & > .axt-t {
     grid-column: 2;
+  }
+
+  /* 只有同行短标题需要清掉那 0.5em；对其余译文清零会压掉 .ltx_centering 的 auto 边距，
+     镜像图片就会贴着栏首而不是像原图那样居中（实测 2609.00097） */
+  & > .axt-t[data-axt-inline] {
     margin-inline-start: 0;
+  }
+
+  /* 参考文献条目里没有配对的内容（序号、作者段）留在左栏，不要横跨分割线（实测 2609.00097） */
+  &.ltx_bibitem > * {
+    grid-column: 1;
   }
 }
 
