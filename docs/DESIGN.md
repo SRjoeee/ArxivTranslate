@@ -112,12 +112,12 @@ interface Block {
 | 选择器 | 说明 |
 |---|---|
 | `.ltx_p` | 正文段落。`.ltx_para` 是带锚点 id 的容器，`.ltx_p` 才是文本块。摘要、列表项、定理与证明内的段落都由本条覆盖，不单列规则（Phase 0 实测那些规则被完全包含，单列会违反"每个文本节点恰好一条规则"）；"摘要 / 定理"之类的上下文只作为提示信息传给 provider。注意 `.ltx_p` 可能是 `<span>`（表格、inline-block 内），提取与渲染按类名不按标签名 |
-| `.ltx_title`, `.ltx_subtitle` | 各级标题与副标题。内含 `.ltx_tag`（章节号）需作 void 占位符；定理的 run-in 标题（"Theorem 1."）也在此列 |
+| `.ltx_title`（不含 `.ltx_title_acknowledgements` / `.ltx_title_keywords`）, `.ltx_subtitle` | 各级标题与副标题。内含 `.ltx_tag`（章节号）需作 void 占位符；定理的 run-in 标题（"Theorem 1."）也在此列 |
 | `.ltx_caption` | 图表说明。内含 `.ltx_tag`（"Table 1: "，其中嵌套 `.ltx_text`）需作 void 占位符 |
 | `.ltx_note_content` | 脚注正文，作为独立块。脚注是**嵌套块**：整个 `.ltx_note`（标记 + `.ltx_note_outer > .ltx_note_content`）位于段落内部，外层段落把 `.ltx_note` 视为 void 占位符；`.ltx_note_content` 内部的第二个 `.ltx_note_mark` 与 `.ltx_note_type` 作 void |
 | （表格） | 不走本表：整张最外层 `.ltx_tabular` 由 §5.3 的 TABLE 规则作为一个单元处理，单元格 `.ltx_td` 是表格块内的段，不是独立块 |
 | `.ltx_bibblock` | 参考文献条目内的片段（作者 / 标题 / 出处）；没有分段的条目用 `.ltx_bibitem` 兜底，见 5.4 |
-| `.ltx_acknowledgements` | 致谢 |
+| `.ltx_acknowledgements` | 致谢。正文是容器里的裸文本，容器本身就是单元；它的 run-in 标题**不单独成块**（2026-09-04 修订），否则外层单元会把标题当 void 占位符克隆一份英文，页面上出现两个英文标题加一段中文正文（实测 2609.00095）。不成块时标题是成对占位符，随外层一起翻、原位还原。`.ltx_keywords` 同理 |
 | `.ltx_keywords` | 关键词 |
 | `.ltx_contact`, `.ltx_role_affiliation`, `.ltx_role_address`, `.ltx_dates`, `.ltx_date` | 作者的机构、联系方式、日期。**2026-09-04 修订**：作者区从"整块跳过"改为"默认翻译"，只排除姓名与邮箱。原策略会漏掉致谢性质的作者注（如《Attention Is All You Need》的 “†Equal contribution. Listing order is random…”，它在 `.ltx_creator > .ltx_note` 里）|
 | `.ltx_role_dedicatory`, `.ltx_item`, `.ltx_marginpar`, `.ltx_indexentry`, `.ltx_cv_item_label`, `.ltx_cv_item_content`, `.ltx_cv_entry_date` | 献词、列表项裸文本、边注、索引词条、CV 字段。这些没在抓过的真实论文里出现，由 `tests/fixtures/arxiv/synthetic-structures.html` 守护（RESEARCH.md §2.12）|

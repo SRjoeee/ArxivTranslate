@@ -9,7 +9,7 @@ exports[`fixture > 2312.17141.html 1`] = `
     "caption": 11,
     "footnote": 2,
     "p": 550,
-    "title": 160,
+    "title": 159,
   },
   "cells": 0,
   "firstIds": [
@@ -24,8 +24,8 @@ exports[`fixture > 2312.17141.html 1`] = `
   ],
   "numericCells": 0,
   "table": 0,
-  "text": 827,
-  "total": 827,
+  "text": 826,
+  "total": 826,
 }
 `;
 
@@ -155,7 +155,7 @@ exports[`fixture > 2507.00150.html 1`] = `
     "keywords": 1,
     "p": 53,
     "table": 3,
-    "title": 14,
+    "title": 12,
   },
   "cells": 700,
   "firstIds": [
@@ -164,14 +164,14 @@ exports[`fixture > 2507.00150.html 1`] = `
     "axt-b3",
   ],
   "lastIds": [
-    "axt-b195",
+    "axt-b193",
     "A1.p1.1",
     "A1.p2.1",
   ],
   "numericCells": 552,
   "table": 3,
-  "text": 194,
-  "total": 197,
+  "text": 192,
+  "total": 195,
 }
 `;
 
@@ -260,7 +260,7 @@ exports[`fixture > 2609.00246.html 1`] = `
     "keywords": 1,
     "p": 256,
     "table": 8,
-    "title": 42,
+    "title": 41,
   },
   "cells": 1603,
   "firstIds": [
@@ -270,13 +270,13 @@ exports[`fixture > 2609.00246.html 1`] = `
   ],
   "lastIds": [
     "Pt0.A7.T6.13",
-    "axt-b513",
+    "axt-b512",
     "Pt0.A7.SS6.SSSx2.p1.1",
   ],
   "numericCells": 1010,
   "table": 8,
-  "text": 506,
-  "total": 514,
+  "text": 505,
+  "total": 513,
 }
 `;
 

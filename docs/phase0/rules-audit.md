@@ -2,36 +2,36 @@
 > arxiv-html-translator@0.0.0 fixtures:stats /Users/cheongzhiyan/Developer/ArxivTranslate
 > tsx scripts/fixtures-stats.ts
 
-## 规则覆盖率审计（RULES_VERSION 0.3.0，11 篇，112320 个文本节点）
+## 规则覆盖率审计（RULES_VERSION 0.4.0，11 篇，112320 个文本节点）
 
 ### 每篇概览
 
 | fixture | 解析 ms | 文本节点 | unit | protected | skipped | uncovered |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2312.17141 | 219 | 18375 | 15.5% | 48.2% | 36.3% | 0 (0.0%) |
-| 2312.17527 | 54 | 4294 | 17.1% | 52.9% | 29.9% | 0 (0.0%) |
-| 2401.00418 | 178 | 20524 | 13.4% | 80.9% | 5.7% | 0 (0.0%) |
+| 2312.17141 | 234 | 18375 | 15.5% | 48.2% | 36.3% | 0 (0.0%) |
+| 2312.17527 | 58 | 4294 | 17.1% | 52.9% | 29.9% | 0 (0.0%) |
+| 2401.00418 | 170 | 20524 | 13.4% | 80.9% | 5.7% | 0 (0.0%) |
 | 2401.00596 | 52 | 4044 | 26.6% | 68.2% | 5.1% | 0 (0.0%) |
-| 2410.00260 | 39 | 1750 | 30.8% | 41.9% | 27.3% | 0 (0.0%) |
-| 2507.00150 | 47 | 3551 | 39.8% | 57.2% | 2.9% | 0 (0.0%) |
-| 2608.29808 | 182 | 5891 | 48.4% | 19.0% | 32.5% | 0 (0.0%) |
-| 2608.30667 | 4 | 4 | 50.0% | 25.0% | 25.0% | 0 (0.0%) |
-| 2609.00245 | 410 | 37556 | 9.2% | 56.2% | 34.6% | 0 (0.0%) |
-| 2609.00246 | 252 | 16279 | 23.4% | 37.1% | 39.5% | 0 (0.0%) |
-| synthetic-structures | 6 | 52 | 71.2% | 21.2% | 7.7% | 0 (0.0%) |
+| 2410.00260 | 41 | 1750 | 30.8% | 41.9% | 27.3% | 0 (0.0%) |
+| 2507.00150 | 74 | 3551 | 39.8% | 57.2% | 2.9% | 0 (0.0%) |
+| 2608.29808 | 134 | 5891 | 48.4% | 19.0% | 32.5% | 0 (0.0%) |
+| 2608.30667 | 3 | 4 | 50.0% | 25.0% | 25.0% | 0 (0.0%) |
+| 2609.00245 | 439 | 37556 | 9.2% | 56.2% | 34.6% | 0 (0.0%) |
+| 2609.00246 | 269 | 16279 | 23.4% | 37.1% | 39.5% | 0 (0.0%) |
+| synthetic-structures | 2 | 52 | 71.2% | 21.2% | 7.7% | 0 (0.0%) |
 
 ### 规则命中（文本节点数 / 匹配元素数）
 
 | 类型 | id | selector | 文本节点 | 元素数 |
 | --- | --- | --- | --- | --- |
 | unit | p | `.ltx_p` | 11770 | 2308 |
-| unit | title | `.ltx_title, .ltx_subtitle` | 577 | 575 |
+| unit | title | `.ltx_title:not(.ltx_title_acknowledgements):not(.ltx_title_keywords), .ltx_subtitle` | 573 | 571 |
 | unit | caption | `.ltx_caption` | 239 | 105 |
 | unit | footnote | `.ltx_note_content` | 166 | 56 |
 | unit | bibblock | `.ltx_bibblock` | 2003 | 1121 |
 | unit | bibitem | `.ltx_bibitem:not(:has(.ltx_bibblock))` | 0 | 0 |
-| unit | ack | `.ltx_acknowledgements` | 10 | 2 |
-| unit | keywords | `.ltx_keywords` | 2 | 2 |
+| unit | ack | `.ltx_acknowledgements` | 12 | 2 |
+| unit | keywords | `.ltx_keywords` | 4 | 2 |
 | unit | authorinfo | `.ltx_contact, .ltx_role_affiliation, .ltx_role_address, .ltx_dates, .ltx_date` | 89 | 45 |
 | unit | dedicatory | `.ltx_role_dedicatory` | 1 | 1 |
 | unit | item | `.ltx_item` | 1 | 327 |

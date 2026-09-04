@@ -32,7 +32,7 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.3.0')
+    expect(RULES_VERSION).toBe('0.4.0')
   })
 })
 
@@ -52,6 +52,9 @@ describe('classify：逐规则命中', () => {
     ['只有一段的条目不当作者段', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span><span class="ltx_bibblock">B. P. Abbott et al. Title. 2024.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
     ['未分段的参考文献条目', '<li class="ltx_bibitem"><span class="ltx_tag ltx_tag_bibitem">[1]</span>A. Title, 2024.</li>', 'li', { kind: 'unit', rule: 'bibitem', descend: true }],
     ['致谢', '<div class="ltx_acknowledgements">Thanks.</div>', undefined, { kind: 'unit', rule: 'ack', descend: true }],
+    // 致谢 / 关键词的 run-in 标题随所在块一起翻，不单独成块（否则外层块会克隆一份英文标题）
+    ['致谢的 run-in 标题', '<div class="ltx_acknowledgements"><h6 class="ltx_title ltx_title_acknowledgements">Acknowledgements.</h6>Text.</div>', 'h6', null],
+    ['关键词的 run-in 标题', '<div class="ltx_keywords"><h6 class="ltx_title ltx_title_keywords">Keywords.</h6>a, b</div>', 'h6', null],
     ['关键词', '<div class="ltx_keywords">data races</div>', undefined, { kind: 'unit', rule: 'keywords', descend: true }],
     ['表格根', '<table class="ltx_tabular"><tbody><tr><th class="ltx_td ltx_th">h</th><td class="ltx_td">1</td></tr></tbody></table>', undefined, { kind: 'table', rule: 'table', descend: false }],
     ['行间公式', '<table class="ltx_equation"><tbody><tr><td class="ltx_td ltx_eqn_cell"><math class="ltx_Math"><mi>x</mi></math></td></tr></tbody></table>', undefined, { kind: 'skip', rule: 'equation', descend: false }],
