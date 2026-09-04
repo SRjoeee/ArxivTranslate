@@ -47,7 +47,7 @@ export interface TranslationProvider {
   translate(request: TranslateRequest): Promise<TranslateResult>
 }
 
-export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'invalid-response' | 'aborted' | 'unknown'
+export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'invalid-response' | 'timeout' | 'aborted' | 'unknown'
 
 export class ProviderError extends Error {
   constructor(readonly kind: ProviderErrorKind, message: string, options?: { cause?: unknown }) {

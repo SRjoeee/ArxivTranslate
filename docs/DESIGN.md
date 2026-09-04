@@ -373,6 +373,8 @@ export interface TranslateResult {
 - 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`（默认照 Read Frog：1000 字 / 4 段，provider 并发 8——小批高并发，首屏快）；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
 - 批次失败：对半拆分重试 → 单块 → 标记失败
 
+- **每次请求有上限（默认 60s），超时按可重试错误处理** [决定，2026-09-05]：没有上限时一个挂住的连接会让整篇翻译永远停在"进行中"——实测 2312.17527 走真实 API：153 块翻了 152 块，最后一块（1600 字、32 个占位符）等了 220s 还没回，`translation done` 永远不打、popup 一直转。`translate-service` 用 `Promise.race` 加上限（provider 不配合 signal 也能切断），超时归入 retry-policy 的 `timeout` 类别走重试，用尽后只这一块标失败
+
 ### 8.3 免费引擎约定
 
 - 视为**随时会断**的东西：独立文件、独立错误类型、失败自动切到 fallback 链的下一个
