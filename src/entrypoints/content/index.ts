@@ -23,6 +23,8 @@ export default defineContentScript({
   main() {
     const t0 = performance.now()
     const blocks: Block[] = extract(document)
+    // 标题 + 摘要在这里抽一次：此时 DOM 里还没有译文，翻译过再抽会把上一轮的译文也算进摘要
+    const context = paperContext(document)
     console.debug(`[axt] extracted ${blocks.length} blocks in ${Math.round(performance.now() - t0)} ms`)
 
     const paper = paperIdFromUrl(location.href)
@@ -70,7 +72,7 @@ export default defineContentScript({
         mode: modes.effective(),
         paper,
         // 标题 + 摘要每批都带（DESIGN §8.2）
-        context: paperContext(document),
+        context,
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
         transport: request => translate(request),
           onProgress: p => { progress = p; prep.schedule() },

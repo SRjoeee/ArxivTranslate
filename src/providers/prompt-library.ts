@@ -91,16 +91,18 @@ export function resolvePromptReplacementValue(value: string | null | undefined, 
   return typeof value === 'string' && value.trim() !== '' ? value : fallback
 }
 
-/** 内置优先，其次自定义，都找不到回退 default（与 Read Frog 一致） */
+/** 内置优先，其次自定义，都找不到回退 default（与 Read Frog 一致）。只认自有属性：id 是 "constructor" 之类时不能摸到原型 */
 export function selectPrompt(config: PromptsConfig = DEFAULT_PROMPTS_CONFIG): PromptTemplate {
   const id = config.promptId || DEFAULT_PROMPT_ID
-  return BUILT_IN_PROMPTS[id] ?? config.patterns.find(p => p.id === id) ?? BUILT_IN_PROMPTS[DEFAULT_PROMPT_ID]!
+  const builtIn = Object.hasOwn(BUILT_IN_PROMPTS, id) ? BUILT_IN_PROMPTS[id] : undefined
+  return builtIn ?? config.patterns.find(p => p.id === id) ?? BUILT_IN_PROMPTS[DEFAULT_PROMPT_ID]!
 }
 
+const TOKEN_PATTERN = new RegExp(`\\{\\{(${PROMPT_TOKENS.join('|')})\\}\\}`, 'g')
+
+/** 单趟替换：填进去的值不会再被后面的变量扫一遍（原文里恰好写着 "{{abstract}}" 也要原样送给模型） */
 export function renderTemplate(text: string, values: Record<PromptToken, string>): string {
-  let out = text
-  for (const token of PROMPT_TOKENS) out = out.replaceAll(getTokenCellText(token), values[token])
-  return out
+  return text.replace(TOKEN_PATTERN, (_, token: PromptToken) => values[token])
 }
 
 function djb2(text: string): string {
@@ -115,6 +117,7 @@ function djb2(text: string): string {
  */
 export function promptKey(config: PromptsConfig = DEFAULT_PROMPTS_CONFIG): string {
   const template = selectPrompt(config)
-  if (BUILT_IN_PROMPTS[template.id]) return template.id
-  return `custom:${djb2(`${template.systemPrompt} ${template.prompt}`)}`
+  if (Object.hasOwn(BUILT_IN_PROMPTS, template.id)) return template.id
+  // 两段分别编码：拼一个空格会让 "A"+"B C" 与 "A B"+"C" 同键
+  return `custom:${djb2(JSON.stringify([template.systemPrompt, template.prompt]))}`
 }

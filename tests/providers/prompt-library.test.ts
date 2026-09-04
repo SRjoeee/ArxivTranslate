@@ -45,4 +45,19 @@ describe('prompt library', () => {
     expect(a.startsWith('custom:')).toBe(true)
     expect(a).not.toBe(b)
   })
+
+  it('id 撞上原型属性（constructor）时不摸原型，回退 default（Codex 在 #28 指出）', () => {
+    expect(selectPrompt({ promptId: 'constructor', patterns: [] }).id).toBe(DEFAULT_PROMPT_ID)
+    expect(promptKey({ promptId: 'toString', patterns: [] })).toBe(DEFAULT_PROMPT_ID)
+  })
+
+  it('单趟替换：原文里写着 "{{abstract}}" 也原样送出，不会被后面的变量二次替换', () => {
+    const out = renderTemplate('{{input}} | {{abstract}}', { ...values, input: 'see {{abstract}} literally', abstract: 'A' })
+    expect(out).toBe('see {{abstract}} literally | A')
+  })
+
+  it('指纹对两段分别编码："A"+"B C" 与 "A B"+"C" 不同键', () => {
+    const k = (systemPrompt: string, prompt: string) => promptKey({ promptId: 'm', patterns: [{ id: 'm', name: '', systemPrompt, prompt }] })
+    expect(k('A', 'B C')).not.toBe(k('A B', 'C'))
+  })
 })

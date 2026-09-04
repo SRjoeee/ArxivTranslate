@@ -27,4 +27,10 @@ describe('paperContext', () => {
     expect(abstract!.length).toBeLessThanOrEqual(ABSTRACT_MAX_CHARS + 3)
     expect(abstract!.endsWith('...')).toBe(true)
   })
+
+  it('摘要里的公式只取呈现层文字，不把 <annotation> 里的 TeX 源码读一遍（Codex 在 #28 指出）', () => {
+    const doc = new DOMParser().parseFromString(`<article class="ltx_document"><div class="ltx_abstract"><h6 class="ltx_title">Abstract</h6>
+      <p class="ltx_p">Let <math><semantics><mi>x</mi><annotation encoding="application/x-tex">\\mathbf{x}</annotation></semantics></math> be.</p></div></article>`, 'text/html')
+    expect(paperContext(doc).abstract).toBe('Let x be.')
+  })
 })

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildCacheKey, normalizeText, type CacheIdentity } from '@/cache/key'
+import { buildCacheKey, contextKey, normalizeText, type CacheIdentity } from '@/cache/key'
 
 const base: CacheIdentity = {
-  providerId: 'openai-compat', model: 'm', promptVersion: '1', promptKey: 'default', rulesVersion: '0.2.0', target: 'zh-CN', renderPath: 'markup',
+  providerId: 'openai-compat', model: 'm', promptVersion: '1', promptKey: 'default', contextKey: 'c1', rulesVersion: '0.2.0', target: 'zh-CN', renderPath: 'markup',
   text: 'Hello <x id="1"/> world',
 }
 
@@ -43,5 +43,13 @@ describe('buildCacheKey', () => {
     const a = await buildCacheKey({ ...base, promptKey: 'default' })
     const b = await buildCacheKey({ ...base, promptKey: 'custom:abc' })
     expect(a).not.toBe(b)
+  })
+
+  it('上下文指纹不同则键不同：同一段文字在另一篇论文 / 另一章里不能拿来命中（Codex 在 #28 指出）', async () => {
+    const a = await buildCacheKey({ ...base, contextKey: contextKey({ paperTitle: 'P1', abstract: 'A' }) })
+    const b = await buildCacheKey({ ...base, contextKey: contextKey({ paperTitle: 'P2', abstract: 'A' }) })
+    expect(a).not.toBe(b)
+    expect(contextKey(undefined)).toBe('')
+    expect(contextKey({ paperTitle: 'P', sectionTitle: 'S' })).toBe(contextKey({ paperTitle: 'P', sectionTitle: 'S' }))
   })
 })
