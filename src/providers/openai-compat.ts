@@ -3,7 +3,8 @@
 import { APICallError, Output, generateText, type LanguageModel } from 'ai'
 import { z } from 'zod'
 import { createModel, type OpenAICompatConfig } from './model'
-import { systemPrompt, userPrompt } from './prompt'
+import { buildPrompts } from './prompt'
+import { promptKey, type PromptsConfig } from './prompt-library'
 import { attachRequestErrorMeta } from './retry-policy'
 import { thinkingBodyFields } from './thinking'
 import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
@@ -12,7 +13,10 @@ const outputSchema = z.object({
   segments: z.array(z.object({ id: z.string(), text: z.string() })),
 })
 
-export function createOpenAICompatProvider(config: OpenAICompatConfig, deps: { model?: LanguageModel } = {}): TranslationProvider {
+export function createOpenAICompatProvider(
+  config: OpenAICompatConfig,
+  deps: { model?: LanguageModel; prompts?: PromptsConfig } = {},
+): TranslationProvider {
   const hasKey = () => config.apiKey.trim().length > 0
   return {
     id: 'openai-compat',
@@ -23,6 +27,7 @@ export function createOpenAICompatProvider(config: OpenAICompatConfig, deps: { m
     maxBatchChars: 1000,
     maxBatchItems: 4,
     concurrency: 8,
+    promptKey: promptKey(deps.prompts),
     async isAvailable() {
       return hasKey()
     },
@@ -31,12 +36,13 @@ export function createOpenAICompatProvider(config: OpenAICompatConfig, deps: { m
       const model = deps.model ?? createModel(config)
       const extraBody = thinkingBodyFields(config.baseURL, config.thinking ?? 'disabled')
       let output: z.infer<typeof outputSchema>
+      const { system, prompt } = buildPrompts(request, deps.prompts)
       try {
         const result = await generateText({
           model,
           output: Output.object({ schema: outputSchema }),
-          system: systemPrompt(request.target),
-          prompt: userPrompt(request),
+          system,
+          prompt,
           temperature: 0.2,
           maxRetries: 0,
           abortSignal: request.signal,

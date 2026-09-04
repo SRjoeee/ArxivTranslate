@@ -86,7 +86,7 @@ export function createTranslateService(deps: TranslateServiceDeps) {
       const translated = new Map<string, string>()
       if (store && cache) {
         const computed = await Promise.all(request.segments.map(segment =>
-          cacheKeyFor({ providerId: provider.id, model, target: request.target, renderPath: cache.renderPath, text: segment.text }),
+          cacheKeyFor({ providerId: provider.id, model, promptKey: provider.promptKey ?? '', target: request.target, renderPath: cache.renderPath, text: segment.text }),
         ))
         request.segments.forEach((segment, i) => keys.set(segment.id, computed[i]!))
         const hits = await store.getMany(computed)

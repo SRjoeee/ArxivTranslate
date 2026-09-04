@@ -7,6 +7,8 @@ export interface TranslateSegment {
 
 export interface TranslateContext {
   paperTitle?: string
+  /** 论文摘要（截断），每批都带：论文自带摘要，不必像 Read Frog 那样再调一次 LLM 生成 */
+  abstract?: string
   sectionTitle?: string
   glossary?: { term: string; translation: string }[]
 }
@@ -45,6 +47,8 @@ export interface TranslationProvider {
   /** 健康检查：key 是否配置、端点是否可达、内置模型是否可用 */
   isAvailable(): Promise<boolean>
   translate(request: TranslateRequest): Promise<TranslateResult>
+  /** 提示词指纹，进缓存键（只有 LLM provider 有）：换了提示词不能再命中旧译文 */
+  promptKey?: string
 }
 
 export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'invalid-response' | 'timeout' | 'aborted' | 'unknown'

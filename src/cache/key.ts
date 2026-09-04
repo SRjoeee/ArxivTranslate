@@ -1,4 +1,4 @@
-// 缓存键（DESIGN §9）：sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)。
+// 缓存键（DESIGN §9）：sha256(providerId | model | PROMPT_VERSION | promptKey | RULES_VERSION | target | renderPath | normalizedText)。
 // 借鉴 FluentRead：identity 做结构化的确定性序列化（JSON 数组），不用分隔符拼用户文本，避免撞键。
 // 这里不引用 ./store：content 侧要算键但不能把 Dexie 打进包（DESIGN §8.0）。
 import { RULES_VERSION } from '@/core/rules/latexml'
@@ -9,6 +9,8 @@ export interface CacheIdentity {
   providerId: string
   model: string
   promptVersion: string
+  /** 提示词指纹（prompt-library.promptKey）；免费引擎没有提示词，传空串 */
+  promptKey: string
   rulesVersion: string
   target: string
   renderPath: RenderPath
@@ -17,7 +19,7 @@ export interface CacheIdentity {
 }
 
 /** 改变键的算法或归一化规则时递增，旧数据自然失效 */
-export const CACHE_KEY_VERSION = 1
+export const CACHE_KEY_VERSION = 2
 
 /** NFC + 连续空白折成一个空格 + 首尾 trim。只用于算键，不改动送翻译的文本 */
 export function normalizeText(text: string): string {
@@ -30,6 +32,7 @@ export async function buildCacheKey(identity: CacheIdentity): Promise<string> {
     identity.providerId,
     identity.model,
     identity.promptVersion,
+    identity.promptKey,
     identity.rulesVersion,
     identity.target,
     identity.renderPath,

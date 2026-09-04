@@ -1,7 +1,7 @@
 import { getConfig, setConfig } from '@/config/storage'
 import { getProvider } from '@/providers'
 import { createTranslateService } from '@/providers/translate-service'
-import { extract, type Block } from '@/core/extractor'
+import { extract, paperContext, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
 import {
@@ -69,6 +69,8 @@ export default defineContentScript({
         target: config.targetLanguage,
         mode: modes.effective(),
         paper,
+        // 标题 + 摘要每批都带（DESIGN §8.2）
+        context: paperContext(document),
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
         transport: request => translate(request),
           onProgress: p => { progress = p; prep.schedule() },

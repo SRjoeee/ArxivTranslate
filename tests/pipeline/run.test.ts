@@ -125,4 +125,15 @@ describe('runTranslation', () => {
     expect(requests).toHaveLength(2)
     expect(seen.filter(p => p.state === 'running')).toHaveLength(2)
   })
+
+  it('论文级上下文（标题、摘要）带到每一批，并与批次的章节标题合并', async () => {
+    const doc = docOf()
+    const { transport, requests } = makeTransport()
+    await run(doc, transport, { context: { paperTitle: 'P', abstract: 'A' } })
+    expect(requests.length).toBeGreaterThan(0)
+    for (const r of requests) {
+      expect(r.request.context?.paperTitle).toBe('P')
+      expect(r.request.context?.abstract).toBe('A')
+    }
+  })
 })

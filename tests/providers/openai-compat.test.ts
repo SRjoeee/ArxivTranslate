@@ -111,4 +111,21 @@ describe('openai-compat provider：思考开关与批次能力', () => {
     expect(p.maxBatchItems).toBe(4)
     expect(p.concurrency).toBe(8)
   })
+
+  it('暴露提示词指纹给缓存键：默认是 default，自定义随文本变', () => {
+    expect(createOpenAICompatProvider(cfg).promptKey).toBe('default')
+    const custom = { promptId: 'm', patterns: [{ id: 'm', name: 'm', systemPrompt: 'S', prompt: '{{input}}' }] }
+    expect(createOpenAICompatProvider(cfg, { prompts: custom }).promptKey).toMatch(/^custom:/)
+  })
+
+  it('发给模型的 system prompt 带论文标题与摘要（提示词库 + 协议块）', async () => {
+    let sent = ''
+    const model = modelReturning({ segments: [{ id: 's1', text: '你好 <x id="1"/>' }, { id: 's2', text: '世界' }] }, options => { sent = JSON.stringify(options) })
+    const p = createOpenAICompatProvider(cfg, { model })
+    await p.translate({ ...req, context: { paperTitle: 'Graphs', abstract: 'We study graphs.', sectionTitle: 'Intro' } })
+    expect(sent).toContain('Paper title: Graphs')
+    expect(sent).toContain('Abstract: We study graphs.')
+    expect(sent).toContain('Current section: Intro')
+    expect(sent).toContain('Input and Output Protocol')
+  })
 })

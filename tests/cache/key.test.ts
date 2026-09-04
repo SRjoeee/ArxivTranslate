@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildCacheKey, normalizeText, type CacheIdentity } from '@/cache/key'
 
 const base: CacheIdentity = {
-  providerId: 'openai-compat', model: 'm', promptVersion: '1', rulesVersion: '0.2.0', target: 'zh-CN', renderPath: 'markup',
+  providerId: 'openai-compat', model: 'm', promptVersion: '1', promptKey: 'default', rulesVersion: '0.2.0', target: 'zh-CN', renderPath: 'markup',
   text: 'Hello <x id="1"/> world',
 }
 
@@ -36,6 +36,12 @@ describe('buildCacheKey', () => {
   it('文本里的分隔符不会撞键', async () => {
     const a = await buildCacheKey({ ...base, model: 'm|x', text: 'y' })
     const b = await buildCacheKey({ ...base, model: 'm', text: 'x|y' })
+    expect(a).not.toBe(b)
+  })
+
+  it('提示词指纹不同则键不同：换了提示词不能命中旧译文', async () => {
+    const a = await buildCacheKey({ ...base, promptKey: 'default' })
+    const b = await buildCacheKey({ ...base, promptKey: 'custom:abc' })
     expect(a).not.toBe(b)
   })
 })
