@@ -126,6 +126,7 @@ describe('openai-compat provider：思考开关与批次能力', () => {
     expect(sent).toContain('Paper title: Graphs')
     expect(sent).toContain('Abstract: We study graphs.')
     expect(sent).toContain('Current section: Intro')
+    expect(sent).toContain('<document_metadata>')
     expect(sent).toContain('Input and Output Protocol')
   })
 })

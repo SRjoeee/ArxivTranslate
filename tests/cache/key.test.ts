@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildCacheKey, contextKey, normalizeText, type CacheIdentity } from '@/cache/key'
+import { buildCacheKey, normalizeText, type CacheIdentity } from '@/cache/key'
 
 const base: CacheIdentity = {
-  providerId: 'openai-compat', model: 'm', promptVersion: '1', promptKey: 'default', contextKey: 'c1', rulesVersion: '0.2.0', target: 'zh-CN', renderPath: 'markup',
+  providerId: 'openai-compat', model: 'm', promptVersion: '1', promptKey: 'default', context: { paperTitle: 'P', abstract: 'A' }, rulesVersion: '0.2.0', target: 'zh-CN', renderPath: 'markup',
   text: 'Hello <x id="1"/> world',
 }
 
@@ -45,11 +45,16 @@ describe('buildCacheKey', () => {
     expect(a).not.toBe(b)
   })
 
-  it('上下文指纹不同则键不同：同一段文字在另一篇论文 / 另一章里不能拿来命中（Codex 在 #28 指出）', async () => {
-    const a = await buildCacheKey({ ...base, contextKey: contextKey({ paperTitle: 'P1', abstract: 'A' }) })
-    const b = await buildCacheKey({ ...base, contextKey: contextKey({ paperTitle: 'P2', abstract: 'A' }) })
+  it('上下文不同则键不同：同一段文字在另一篇论文 / 另一章里不能拿来命中（Codex 在 #28 指出）', async () => {
+    const a = await buildCacheKey({ ...base, context: { paperTitle: 'P1', abstract: 'A' } })
+    const b = await buildCacheKey({ ...base, context: { paperTitle: 'P2', abstract: 'A' } })
     expect(a).not.toBe(b)
-    expect(contextKey(undefined)).toBe('')
-    expect(contextKey({ paperTitle: 'P', sectionTitle: 'S' })).toBe(contextKey({ paperTitle: 'P', sectionTitle: 'S' }))
+    expect(await buildCacheKey({ ...base, context: undefined })).toBe(await buildCacheKey({ ...base, context: undefined }))
+  })
+
+  it('上下文以原文进 SHA-256 载荷，不先压成 32 位 hash：DJB2 相撞的两个标题也不同键（Codex 给的实例）', async () => {
+    const a = await buildCacheKey({ ...base, context: { paperTitle: '19k04n01vcr73f' } })
+    const b = await buildCacheKey({ ...base, context: { paperTitle: '1efm0uaep90s9' } })
+    expect(a).not.toBe(b)
   })
 })

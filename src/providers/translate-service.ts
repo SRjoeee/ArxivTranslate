@@ -1,7 +1,7 @@
 // 翻译服务：查缓存 → 只把未命中的段落交给 provider → 回写缓存。
 // 与运行上下文无关：缓存通过 CachePort 注入，background 用本地 Dexie，content 用消息代理（DESIGN §8.0）。
 import PQueue from 'p-queue'
-import { cacheKeyFor, contextKey, type RenderPath } from '@/cache/key'
+import { cacheKeyFor, type RenderPath } from '@/cache/key'
 import { withRetry, type RetryOptions } from './retry'
 import { attachRequestErrorMeta } from './retry-policy'
 import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
@@ -86,7 +86,7 @@ export function createTranslateService(deps: TranslateServiceDeps) {
       const translated = new Map<string, string>()
       if (store && cache) {
         const computed = await Promise.all(request.segments.map(segment =>
-          cacheKeyFor({ providerId: provider.id, model, promptKey: provider.promptKey ?? '', contextKey: provider.promptKey ? contextKey(request.context) : '', target: request.target, renderPath: cache.renderPath, text: segment.text }),
+          cacheKeyFor({ providerId: provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text }),
         ))
         request.segments.forEach((segment, i) => keys.set(segment.id, computed[i]!))
         const hits = await store.getMany(computed)

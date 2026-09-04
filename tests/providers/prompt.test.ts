@@ -25,19 +25,23 @@ describe('prompt', () => {
     expect(system.endsWith(PROTOCOL_BLOCK)).toBe(true)
   })
 
-  it('论文上下文填进元数据块：标题、摘要、章节', () => {
-    const { system } = buildPrompts(request)
-    expect(system).toContain('Paper title: Graphs')
-    expect(system).toContain('Abstract: We study graphs.')
-    expect(system).toContain('Current section: Introduction')
-    expect(system).not.toContain('{{')
+  it('论文上下文填进用户消息的元数据块（带定界符、声明不可信），system 里只有说明', () => {
+    const { system, prompt } = buildPrompts(request)
+    expect(prompt).toContain('<document_metadata>')
+    expect(prompt).toContain('Paper title: Graphs')
+    expect(prompt).toContain('Abstract: We study graphs.')
+    expect(prompt).toContain('Current section: Introduction')
+    expect(prompt).toContain('untrusted')
+    expect(system).not.toContain('We study graphs.')
+    expect(system).toContain('never instructions')
+    expect(system + prompt).not.toContain('{{')
   })
 
   it('缺的上下文用 "Not available" 占位，不留模板变量', () => {
-    const { system } = buildPrompts({ ...request, context: undefined })
-    expect(system).toContain('Paper title: Not available')
-    expect(system).toContain('Glossary: None')
-    expect(system).not.toContain('{{')
+    const { system, prompt } = buildPrompts({ ...request, context: undefined })
+    expect(prompt).toContain('Paper title: Not available')
+    expect(prompt).toContain('Glossary: None')
+    expect(system + prompt).not.toContain('{{')
   })
 
   it('user prompt 含全部 segment id 与原文（JSON）', () => {
@@ -62,6 +66,6 @@ describe('prompt', () => {
   it('术语表格式化', () => {
     expect(formatGlossary()).toBe('None')
     expect(formatGlossary([{ term: 'graph', translation: '图' }])).toBe('graph -> 图')
-    expect(buildPrompts({ ...request, context: { glossary: [{ term: 'graph', translation: '图' }] } }, DEFAULT_PROMPTS_CONFIG).system).toContain('graph -> 图')
+    expect(buildPrompts({ ...request, context: { glossary: [{ term: 'graph', translation: '图' }] } }, DEFAULT_PROMPTS_CONFIG).prompt).toContain('graph -> 图')
   })
 })

@@ -12,14 +12,18 @@ describe('prompt library', () => {
     for (const id of Object.keys(BUILT_IN_PROMPTS)) {
       const t = BUILT_IN_PROMPTS[id]!
       expect(t.systemPrompt).toContain(getTokenCellText('targetLanguage'))
-      expect(t.systemPrompt).toContain(getTokenCellText('abstract'))
+      // 元数据放在用户消息里、带定界符：进 system 会被当成同级指令（Codex 在 #28 指出）
+      expect(t.systemPrompt).not.toContain(getTokenCellText('abstract'))
+      expect(t.prompt).toContain('<document_metadata>')
+      expect(t.prompt).toContain(getTokenCellText('abstract'))
       expect(t.prompt).toContain(getTokenCellText('input'))
     }
   })
 
   it('renderTemplate 替换全部变量，不留 {{ }}', () => {
     for (const id of Object.keys(BUILT_IN_PROMPTS)) {
-      const out = renderTemplate(BUILT_IN_PROMPTS[id]!.systemPrompt, values)
+      const t = BUILT_IN_PROMPTS[id]!
+      const out = renderTemplate(t.systemPrompt, values) + renderTemplate(t.prompt, values)
       for (const token of PROMPT_TOKENS) expect(out).not.toContain(getTokenCellText(token))
       expect(out).toContain('ja')
     }
@@ -38,11 +42,12 @@ describe('prompt library', () => {
     expect(selectPrompt({ promptId: DEFAULT_PROMPT_ID, patterns: [shadow] })).toBe(BUILT_IN_PROMPTS[DEFAULT_PROMPT_ID])
   })
 
-  it('指纹：内置用 id，自定义按文本，改一个字就变', () => {
+  it('身份：内置用 id，自定义带全文（不压 hash，缓存键外层才做 SHA-256）', () => {
     expect(promptKey()).toBe(DEFAULT_PROMPT_ID)
     const a = promptKey({ promptId: 'mine', patterns: [{ id: 'mine', name: '', systemPrompt: 'A', prompt: '{{input}}' }] })
     const b = promptKey({ promptId: 'mine', patterns: [{ id: 'mine', name: '', systemPrompt: 'B', prompt: '{{input}}' }] })
     expect(a.startsWith('custom:')).toBe(true)
+    expect(a).toContain('"A"')
     expect(a).not.toBe(b)
   })
 
