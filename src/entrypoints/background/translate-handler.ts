@@ -22,6 +22,9 @@ export interface ProviderStatus {
   maxBatchChars: number
   maxBatchItems: number
   preservesMarkup: boolean
+  /** 排查往返耗时用的墙钟：handler 收到与答复的时刻（毫秒） */
+  receivedAt: number
+  answeredAt: number
 }
 
 export interface TranslateHandlerDeps {
@@ -89,14 +92,19 @@ export function createTranslateHandler(deps: TranslateHandlerDeps) {
 
 export function createStatusHandler(deps: { getProvider: () => Promise<TranslationProvider>; getModel: () => Promise<string | undefined> }) {
   return async (): Promise<ProviderStatus> => {
+    const receivedAt = Date.now()
     const provider = await deps.getProvider()
+    const available = await provider.isAvailable()
+    const model = await deps.getModel()
     return {
       providerId: provider.id,
-      available: await provider.isAvailable(),
-      model: await deps.getModel(),
+      available,
+      model,
       maxBatchChars: provider.maxBatchChars,
       maxBatchItems: provider.maxBatchItems,
       preservesMarkup: provider.preservesMarkup,
+      receivedAt,
+      answeredAt: Date.now(),
     }
   }
 }
