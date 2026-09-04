@@ -1,6 +1,6 @@
 # arXiv HTML Translator — 设计文档
 
-版本：v0.5 · 2026-09-03 · 状态：Phase 2 完成（核心闭环五分支合入，真实页面验证通过；v0.4 为 Phase 2 设计细化，v0.3 改参考代码边界，v0.2 为 Phase 0 实测后修订，v0.1 为 Phase 0 前的基线）
+版本：v0.6 · 2026-09-04 · 状态：Phase 3 进行中（v0.6 把 provider 请求移到 content 并换用 translateHtml，见 §8.0 / §8.1；v0.5 为 Phase 2 完成，v0.4 为 Phase 2 设计细化，v0.3 改参考代码边界，v0.2 为 Phase 0 实测后修订，v0.1 为 Phase 0 前的基线）
 
 本文是项目的唯一事实来源（source of truth）。设计变更先改这里，再改代码。
 标记说明：**[决定]** 已定，不再讨论；**[待验证]** Phase 0 需要用实测确认；**[延后]** v1 不做。
@@ -28,7 +28,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 
 1. **不需要通用翻译器那套启发式 DOM walker 和站点规则订阅系统**。用一套针对 LaTeXML 的确定性规则做块切分和跳过判定，规则集中在一个文件里，可版本化。
 2. **三种模式共享同一份 DOM，模式切换只改一个 CSS 属性**。译文节点永远作为原块的相邻兄弟插入，从不修改原节点子树。这是可逆性的根基。
-3. **两条渲染路径由 provider 的能力位决定，不由引擎类型决定**。markup 路径整块带占位符翻译；runs 路径按行内不可翻译节点切段。Phase 0 实测 LLM、Google gtx、Chrome 内置 Translator 都能保留占位符，因此 v1 的所有 provider 默认走 markup，runs 是占位符校验失败后的兜底（RESEARCH.md §5 / §6）。provider 用 `preservesMarkup` 能力位声明自己走哪条。
+3. **两条渲染路径由 provider 的能力位决定，不由引擎类型决定**。markup 路径整块带占位符翻译；runs 路径按行内不可翻译节点切段。Phase 0 / Phase 3 实测 LLM、Google translateHtml、Chrome 内置 Translator 都能保留占位符，因此 v1 的所有 provider 默认走 markup，runs 是占位符校验失败后的兜底（RESEARCH.md §5 / §6）。provider 用 `preservesMarkup` 能力位声明自己走哪条。
 
 ---
 
@@ -77,7 +77,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 2. `scheduler` 视口优先排队；不可见的块在后台顺序翻完整篇
 3. 先查缓存；命中直接渲染
 4. 未命中：`protector` 把块序列化为 `{text, slots}`；按 provider 的 `preservesMarkup` 决定走 markup 路径（整块带占位符）还是 runs 路径（切段）
-5. background 的 `queue` 按 provider 并发上限发请求；失败退避、重试、必要时切换 fallback provider
+5. content 侧的 `queue` 按 provider 并发上限发请求（§8.0：请求不经过 background）；失败退避、重试、必要时切换 fallback provider
 6. `validator` 校验占位符完整性；失败 → 单块重试一次 → 降级 runs 路径
 7. `rehydrator` 把占位符换回受保护节点的克隆（剥掉 `id` 属性）
 8. `renderer` 把译文节点插为原块的下一个兄弟，写入缓存
@@ -267,9 +267,19 @@ interface ProtectedBlock {
 
 位置：`src/providers/`。每个引擎一个文件，禁止跨文件共享未公开接口的细节。
 
+### 8.0 请求跑在 content script [决定，2026-09-04 修订]
+
+provider 的 `fetch` 在 **content script** 里发，background 只保留缓存、配置与跨页面协调。
+
+理由是实测：MV3 的 service worker 会在等待期间被挂起，一条没有任何 I/O 的 `axt:provider-status` 在冷 worker 上要 6.7–77 s（同一 worker 上紧邻的 ping 只要 50 ms），翻译中途还会出现 `A listener indicated an asynchronous response by returning true, but the message channel closed`（RESEARCH.md §6.5）。把请求留在 background 就是在跟 MV3 的生命周期较劲；Read Frog 的 provider 适配层本来就跑在 content（`utils/host/translate/api/*`），FluentRead 用 `platform/http/runtime.ts` 抽象 transport，两家都不把等待放在 worker 里。
+
+- 跨源请求可行性已实测：`translate-pa.googleapis.com` 在页面上下文返回 CORS 响应（RESEARCH.md §6.6）。自定义 LLM 端点由 `optional_host_permissions` + 运行时授权覆盖，与现在设置页的做法一致
+- 代价：LLM 的 API key 会进入 content script 的隔离世界内存。页面脚本读不到，但比只留在 background 弱一层，因此 key 仍然**只存 WXT storage、只在发请求时读取、不写日志不写缓存键**（§0 硬规则不变）
+- background 仍持有缓存（IndexedDB 按扩展 origin 隔离，跨论文共享）与配置；content 侧只发两类消息：查缓存 / 写缓存。这两类消息即使被 worker 挂起拖慢，也只影响缓存命中，不阻塞翻译
+
 ```ts
 export interface TranslationProvider {
-  id: string                        // 'openai-compat' | 'anthropic' | 'gemini' | 'chrome-builtin' | 'google-gtx'
+  id: string                        // 'openai-compat' | 'anthropic' | 'gemini' | 'chrome-builtin' | 'google-web'
   displayName: string
   kind: 'llm' | 'mt' | 'builtin'
   preservesMarkup: boolean          // true → markup 路径；false → runs 路径
@@ -305,9 +315,11 @@ export interface TranslateResult {
 | `anthropic` | AI SDK `@ai-sdk/anthropic` | true |
 | `gemini` | AI SDK `@ai-sdk/google` | true |
 | `chrome-builtin` | `Translator` API（Chrome 138+ 桌面），类型来自 `@types/dom-chromium-ai`，约定见 §8.4 | true（实测保留标签与 void / paired 占位符）|
-| `google-gtx` | `translate.googleapis.com/translate_a/single?client=gtx`，必须从 background 发请求；返回 `{sentences:[{trans,orig}]}`，多句需拼接 | true（实测保留占位符）|
+| `google-web` | `translate-pa.googleapis.com/v1/translateHtml`，移植 Read Frog `utils/host/translate/api/google.ts`；一次请求多条，body `[[[items...], from, to], "wt_lib"]` | true（实测原样保留 void / paired 占位符）|
 
-`preservesMarkup: true` 的免费引擎仍走 §6.3 的校验，失败后降级 runs；runs 路径退为纯兜底。Google `translateHtml`（`translate-pa.googleapis.com/v1/translateHtml`）可用但译文质量与占位符位置差于 gtx，不作为 provider；微软 edge 通道 auth 端点已 404，不接（RESEARCH.md §5）。
+`preservesMarkup: true` 的免费引擎仍走 §6.3 的校验，失败后降级 runs；runs 路径退为纯兜底。
+
+`google-web` 取代原定的 `google-gtx`（`translate_a/single`）：2026-09-04 实测 `translateHtml` 一次请求可带 150 条、556 ms 返回且占位符完好，而 gtx 是单条接口（RESEARCH.md §6.6）。gtx 与微软 edge 通道不接（后者 auth 端点已 404，RESEARCH.md §5）。免费引擎的定位是**大批量回归测试**与视口首屏的即时译文，最终译文仍以 LLM 为准：机器翻译会把 "weights" 译成"重量"，术语准确度不够。
 
 ### 8.2 LLM 调用约定
 
@@ -320,8 +332,8 @@ export interface TranslateResult {
 ### 8.3 免费引擎约定
 
 - 视为**随时会断**的东西：独立文件、独立错误类型、失败自动切到 fallback 链的下一个
-- fallback 链默认：用户选定 provider → `chrome-builtin` → `google-gtx`
-- `google-gtx` 单块一请求，并发 4，指数退避处理 429
+- fallback 链默认：用户选定 provider → `chrome-builtin` → `google-web`
+- `google-web` 一次请求多条（默认 100 条 / 8000 字一批，并发 2），指数退避处理 429；超时预算照 FluentRead 的做法给单次尝试与总时长各设上限
 - **思考模式默认关闭**（照 KISS 的 THINKING_API_REGISTRY）：按端点域名选字段——OpenRouter `reasoning: { effort: "none" }`、DeepSeek 官方 `thinking: { type: "disabled" }`、百炼 / 硅基流动 `enable_thinking: false`，未登记端点不发；经 AI SDK `providerOptions` 进请求体（`src/providers/thinking.ts`）
 - **即时引擎**：`chrome-builtin` 模型就绪时（`availability() === 'available'`）单句 10–20 ms 且离线，用它先渲染视口内的块，用户选定的 LLM 译文到达后原位替换；缓存键含 provider，两者互不覆盖。用户可在设置里关闭
 
@@ -339,7 +351,7 @@ export interface TranslateResult {
 
 - 译文缓存：IndexedDB，**Dexie**，移植 FluentRead `services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层），crypto-js 换成 Web Crypto SHA-256（v0.4 修订，原定 idb-keyval）
 - 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
-- 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有（IndexedDB 按 origin 隔离），查询并进 `axt:translate`：background 先查缓存，只把未命中的段落发给 provider
+- 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有（IndexedDB 按扩展 origin 隔离，跨论文共享），content 侧通过 `axt:cache-get` / `axt:cache-put` 读写；provider 请求本身不经过 background（§8.0）
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
 - 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
@@ -374,7 +386,7 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 **Phase 0 — 研究（已完成，产出见 `docs/RESEARCH.md`）**
 - [x] 抓 8–10 篇不同年份/领域的 arXiv HTML 存为 fixture，跑 `ltx_*` 类名直方图，校订第 5 节的选择器，结果写入 `docs/RESEARCH.md`
 - [x] clone 三个参考仓库到 `reference/`（gitignore），为每个模块写一行"参考哪个文件"，写入 `docs/RESEARCH.md`
-- [x] curl 验证 `google-gtx`、微软 `translatetext`、Google `translateHtml` 今天是否可用、是否保留标签
+- [x] curl 验证 `google-gtx`、微软 `translatetext`、Google `translateHtml` 今天是否可用、是否保留标签（结论：采用 `translateHtml`，见 §8.1）
 - [x] 验证 content script 内能否直接调 `Translator` API，模型下载是否需要用户手势
 - [x] 确认 arXiv 主容器与导航栏的选择器，以及 arXiv 自身 JS 是否会与我们冲突
 
@@ -392,7 +404,7 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 - 完成标准：真实 arXiv 页面 popup 点"翻译"后段落下方出现译文；刷新再点秒出（缓存）；"恢复原文"后 DOM 与翻译前逐节点相等；失败块在 popup 可见
 
 **Phase 3 — 完整 v1**
-- side / only 模式与宽度逻辑；`chrome-builtin` + `google-gtx` 与 runs 路径；fallback 链；调度与进度；样式预设；术语表；options 页
+- provider 请求移到 content（§8.0）；side / only 模式与宽度逻辑；`chrome-builtin` + `google-web` 与 runs 路径；fallback 链；调度与进度；样式预设；术语表；options 页
 
 **Phase 4 — 打磨**
 - 更多 fixture 与规则修正；性能；导出/导入缓存；发布
