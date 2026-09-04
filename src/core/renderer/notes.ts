@@ -20,6 +20,10 @@ import { T_CLASS } from './index'
 const NOTE_CONTENT = '.ltx_note_content'
 /** 原件上的标记：译文已经搬走，这份边注由样式隐藏 */
 const MOVED_ATTR = 'data-axt-note'
+/** 搬进副本后给译文换上的 class：脱掉 ar5iv 的脚注框外壳（见下） */
+export const NOTE_T_CLASS = 'axt-note-t'
+/** 脚注自带的标号；副本外层已经有一个，搬进去的那份不能再带 */
+const NOTE_MARKS = '.ltx_note_mark, .ltx_tag'
 
 /**
  * 把脚注的译文搬进译文块里重建出来的副本，并标记原件。
@@ -41,7 +45,13 @@ export function localizeNotes(root: Document | Element): number {
       const source = sources[i]
       const translated = source?.nextElementSibling
       if (!translated?.classList.contains(T_CLASS)) return // 这条脚注还没翻到，下一轮再说
-      // 副本保留自己的原文，译文接在后面：一份边注里英文在上、中文在下
+      // 副本保留自己的原文，译文接在后面：一份边注里英文在上、中文在下。
+      // 搬进去之前要脱掉 ar5iv 的脚注框外壳：译文节点自己也是 .ltx_note_content，
+      // 套进副本就成了"框里套框"——多一条 double 顶边线、多 9.6px 缩进，
+      // 它自带的标号又是绝对定位的，会飞到正文里（实测，用户反馈"位置是乱的"）
+      translated.classList.remove('ltx_note_content')
+      translated.classList.add(NOTE_T_CLASS)
+      for (const mark of Array.from(translated.querySelectorAll(NOTE_MARKS))) mark.remove()
       copy.append(translated)
       source?.closest('.ltx_note')?.setAttribute(MOVED_ATTR, 'moved')
       localized += 1

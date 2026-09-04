@@ -191,6 +191,13 @@ html[data-axt-on] .ltx_note[data-axt-note="moved"] > .ltx_note_outer {
   display: none;
 }
 
+/* 搬进副本的译文：另起一行接在原文下面。它已经被摘掉 .ltx_note_content，
+   不再套一层 ar5iv 的脚注框（那会多一条 double 顶边线与 9.6px 缩进） */
+html[data-axt-on] .axt-note-t {
+  display: block;
+  margin-top: 0.35em;
+}
+
 /* 整块拆开的插图（§7.2）：左份是原件、只显示原文，右份是副本、只有译文。
    插图里的图与公式没有译文，按块配对右栏就空着；整张图跨两栏又等于放弃对照，
    所以整块复制一份。两份结构相同，行天然对齐。

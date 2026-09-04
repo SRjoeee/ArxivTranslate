@@ -26,6 +26,16 @@ describe('localizeNotes', () => {
     expect(box.textContent!.indexOf('English')).toBeLessThan(box.textContent!.indexOf('中文'))
   })
 
+  it('搬进去的译文要脱掉脚注框外壳，否则框里套框', () => {
+    // .ltx_note_content 带 double 顶边线与缩进，自带的标号还是绝对定位的（实测会飞进正文）
+    const doc = withNote()
+    localizeNotes(doc)
+    const moved = doc.querySelector('.axt-note-t')!
+    expect(moved.classList.contains('ltx_note_content')).toBe(false)
+    expect(moved.querySelectorAll('.ltx_note_mark, .ltx_tag')).toHaveLength(0)
+    expect(moved.textContent).toContain('中文脚注')
+  })
+
   it('原件那份标上 data-axt-note，由样式隐藏——页面右缘只留一份', () => {
     const doc = withNote()
     localizeNotes(doc)

@@ -113,6 +113,8 @@ describe('side 模式的容器覆盖', () => {
     expect(RULES).toMatch(/\.ltx_note\[data-axt-note="moved"\] > \.ltx_note_outer \{\s*display: none/)
     // 别再把边注收进本栏：正文被挤、列表项还会被 ar5iv 写死的 height:0 盖住
     expect(RULES).not.toMatch(/\.ltx_note_outer \{[^}]*margin-inline-end: 0/)
+    // 搬进副本的译文另起一行，且不再套一层脚注框
+    expect(RULES).toMatch(/\.axt-note-t \{[^}]*display: block/)
   })
 
   for (const file of files) {
