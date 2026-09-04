@@ -3,7 +3,7 @@
 // 塞进一栏会溢出到隔壁与译文表重叠。表格无法被压到 min-content 以下，所以按比例缩小：
 // 量出需要的比例，落到一档离散的 zoom 上（写成 data-axt-fit，样式在 modes.css）。
 // 缩到 MIN_FIT 还装不下的极端表格退化为栏内横向滚动。
-import { TABLE_RULES } from '@/core/rules/latexml'
+import { DOCUMENT_ROOT, TABLE_RULES } from '@/core/rules/latexml'
 import { FOR_ATTR, T_CLASS } from './index'
 
 /** 原节点只允许追加 data-axt-*（§7.1），所以比例用属性而不是内联样式表达 */
@@ -45,12 +45,21 @@ function measureMinContent(table: Element): number {
   return width
 }
 
-/** 容器是两列网格，一栏是（容器宽 - 间距）/ 2 */
+/**
+ * 栏宽以翻译根的第一条网格轨道为准：所有容器都是它的 subgrid，栏宽处处相同（§7.2）。
+ * 直接读轨道比"父容器宽度减间距再除二"更可靠——表格的父级不一定是我们设的网格容器。
+ */
 function measureColumn(table: Element): number {
+  const view = table.ownerDocument.defaultView
+  const root = table.closest(DOCUMENT_ROOT)
+  if (view && root) {
+    const first = Number.parseFloat(view.getComputedStyle(root).gridTemplateColumns.split(' ')[0] ?? '')
+    if (Number.isFinite(first) && first > 0) return first
+  }
+  // 退路：还没进 side 或读不到轨道时，按父容器折半估算
   const holder = table.parentElement
-  if (!holder) return 0
-  const style = holder.ownerDocument.defaultView?.getComputedStyle(holder)
-  const gap = style ? Number.parseFloat(style.columnGap) || 0 : 0
+  if (!holder || !view) return 0
+  const gap = Number.parseFloat(view.getComputedStyle(holder).columnGap) || 0
   return (holder.getBoundingClientRect().width - gap) / 2
 }
 

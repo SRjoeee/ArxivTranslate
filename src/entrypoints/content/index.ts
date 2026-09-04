@@ -5,6 +5,7 @@ import { extract, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
 import { createMirrors, createModeController, fitTables, restore, type Mode, type ModeController } from '@/core/renderer'
+import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { createViewportTracker, withViewportAnchor, type ViewportTracker } from '@/core/scheduler'
 import { isAxtMessage } from '@/shared/messages'
 import { createMessageCachePort } from './cache-port'
@@ -44,13 +45,13 @@ export default defineContentScript({
       console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
       modes?.stop()
-      modes = createModeController(document, requested ?? config.mode, { onChange: ensureMirrors })
+      modes = createModeController(document, requested ?? config.mode, { onChange: enterSide })
       controller = new AbortController()
       progress = { ...idle(), state: 'running' }
       tracker?.disconnect()
       tracker = createViewportTracker(blocks)
       const activeTracker = tracker
-      ensureMirrors(modes.effective())
+      enterSide(modes.effective())
       const translate = createTranslateService({
         getProvider: async () => provider,
         // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
@@ -66,7 +67,7 @@ export default defineContentScript({
         paper,
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
         transport: request => translate(request),
-        onProgress: p => { progress = p },
+        onProgress: p => { progress = p; scheduleFit() },
         signal: controller.signal,
         // 视口优先 + 插入译文时的滚动锚定（DESIGN §10）
         isPriority: block => activeTracker.isNear(block),
@@ -86,12 +87,25 @@ export default defineContentScript({
 
     let mirrored = false
     let fitObserver: ResizeObserver | null = null
+    let fitTimer = 0
 
-    /** side 模式的一次性准备：右栏补一份公式与图表（§7.2），并把表格缩到能装进一栏 */
-    function ensureMirrors(effective: Mode): void {
+    /** 表格缩放要在译文到达、窗口变化后重算；合并成一次，避免每块都量一遍布局 */
+    function scheduleFit(): void {
+      if (modes?.effective() !== 'side') return
+      clearTimeout(fitTimer)
+      fitTimer = window.setTimeout(() => {
+        if (modes?.effective() !== 'side') return
+        const fit = fitTables(document)
+        if (fit.fitted || fit.scrolled) console.debug(`[axt] tables refit: ${fit.fitted} scaled, ${fit.scrolled} scrollable`)
+      }, 150)
+    }
+
+    /** 进入 side 时的准备：右栏补一份公式与图表（§7.2），并把表格缩到能装进一栏 */
+    function enterSide(effective: Mode): void {
       if (effective !== 'side') {
         fitObserver?.disconnect()
         fitObserver = null
+        clearTimeout(fitTimer)
         return
       }
       const t0 = performance.now()
@@ -102,25 +116,23 @@ export default defineContentScript({
       // 栏宽随窗口变化，缩放比例要跟着重算。只在宽度真的变了才重算——
       // 缩放表格本身也会让观察目标报告一次尺寸变化，不设这道闸就会自激振荡
       if (!fitObserver && typeof ResizeObserver === 'function') {
-        let pending = 0
         let lastWidth = 0
         fitObserver = new ResizeObserver(entries => {
           const width = Math.round(entries[0]?.contentRect.width ?? 0)
           if (width === lastWidth) return
           lastWidth = width
-          clearTimeout(pending)
-          pending = window.setTimeout(() => { if (modes?.effective() === 'side') fitTables(document) }, 150)
+          scheduleFit()
         })
-        const target = document.querySelector('article')
+        const target = document.querySelector(DOCUMENT_ROOT)
         if (target) fitObserver.observe(target)
       }
     }
 
     async function setPageMode(mode: Mode): Promise<{ mode: Mode; effective: Mode }> {
       // 没在翻译时也允许切换：控制器会把属性写到 <html> 上，样式立刻生效
-      if (!modes) modes = createModeController(document, mode, { onChange: ensureMirrors })
+      if (!modes) modes = createModeController(document, mode, { onChange: enterSide })
       const effective = modes.choose(mode)
-      ensureMirrors(effective)
+      enterSide(effective)
       savedMode = mode
       const config = await getConfig()
       if (config.mode !== mode) await setConfig({ ...config, mode })
@@ -135,6 +147,7 @@ export default defineContentScript({
       modes = null
       fitObserver?.disconnect()
       fitObserver = null
+      clearTimeout(fitTimer)
       mirrored = false
       const result = restore(document)
       progress = idle()
