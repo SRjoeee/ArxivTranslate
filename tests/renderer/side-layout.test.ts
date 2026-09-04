@@ -84,7 +84,9 @@ describe('side 模式的容器覆盖', () => {
     // 加在列表容器 / 列表项上会让左栏窄一截、右栏顶格（实测 2312.17141：左 444 / 右 484）
     expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) \{\s*padding-inline-start: 0/)
     expect(RULES).toMatch(/&\.ltx_item:has\(> \.ltx_tag\) \{[^}]*padding-inline-start: 0/)
-    expect(RULES).toMatch(/&\.ltx_item :where\(:has\(\+ \.axt-t\), \.axt-t\):not\(\.ltx_tag\) \{\s*padding-inline-start: 2\.5rem/)
+    // 只缩进容器的直接子元素：写成后代选择器会连脚注里的译文一起缩进（实测）
+    expect(RULES).toMatch(/&:is\(\.ltx_item, \.ltx_item \*\) > :where\(:has\(\+ \.axt-t\), \.axt-t\):not\(\.ltx_tag\) \{\s*padding-inline-start: 2\.5rem/)
+    expect(RULES).not.toMatch(/&\.ltx_item :where\(:has\(\+ \.axt-t\), \.axt-t\)/)
   })
 
   it('堆叠区清单：样式表与 side-layout.ts 保持一致（TS 是事实来源）', () => {

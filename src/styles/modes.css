@@ -143,7 +143,10 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, tab
     padding-inline-start: 0;
   }
 
-  &.ltx_item :where(:has(+ .axt-t), .axt-t):not(.ltx_tag) {
+  /* 只缩进**容器的直接子元素**，不能写成后代选择器：列表项里任意深度的译文都会被缩进，
+     包括深埋在脚注里的那份——实测 2312.17141 的脚注译文被塞了 40px 的标记槽，
+     在边注里比原文缩进一截（用户反馈"位置是乱的"）。配对放置本来也只作用于直接子元素，这里保持一致 */
+  &:is(.ltx_item, .ltx_item *) > :where(:has(+ .axt-t), .axt-t):not(.ltx_tag) {
     padding-inline-start: 2.5rem;
   }
 }
