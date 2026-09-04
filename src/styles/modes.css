@@ -35,7 +35,11 @@ html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption,
    其余是本来就居中的图表说明）。 */
 html[data-axt-mode="side"] .ltx_document {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* 必须是 minmax(0, 1fr) 而不是 1fr：1fr 等价于 minmax(auto, 1fr)，
+     那个 auto 下限是轨道内容的 min-content 宽度。英文列的下限是最长单词（还有宽表格、长公式），
+     中文可以逐字换行、下限接近 0，于是空间不够时英文列守住下限、中文列被单方面压窄
+     （实测文章列 600px 时两栏变成 317 / 227）。归零下限后两栏恒等宽，实测 272 / 272 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   column-gap: 1.5em;
   align-items: start;
 }
