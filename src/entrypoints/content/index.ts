@@ -28,12 +28,20 @@ export default defineContentScript({
       if (progress.state === 'running') return { started: false, reason: '翻译进行中' }
       if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
       if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
+      // 实测过页面加载后 20–90 s 才开始翻译，分段计时：读配置 / ping 往返 / provider-status 往返。
+      // ping 回传 background 的墙钟：投递延迟 = 收到时刻 - 发出时刻，SW 年龄 = 收到时刻 - SW 启动时刻。
       const tStart = performance.now()
       const config = await getConfig()
       const tConfig = performance.now()
+      const pingSentAt = Date.now()
+      const pong = await sendMessage({ type: 'axt:ping' })
+      const tPing = performance.now()
       const status = await sendMessage({ type: 'axt:provider-status' })
-      // 实测过页面加载后 20–60 s 才开始标记块，先记下这两步各花多久（DESIGN §10 待查项）
-      console.debug(`[axt] start: config ${Math.round(tConfig - tStart)} ms, provider-status ${Math.round(performance.now() - tConfig)} ms, since page start ${Math.round(tStart)} ms`)
+      console.debug(
+        `[axt] start: config ${Math.round(tConfig - tStart)} ms, ping ${Math.round(tPing - tConfig)} ms`
+        + ` (投递 ${pong.at - pingSentAt} ms, SW 年龄 ${Math.round((pong.at - pong.bootedAt) / 1000)} s)`
+        + `, provider-status ${Math.round(performance.now() - tPing)} ms, since page start ${Math.round(tStart)} ms`,
+      )
       if (!status.available) return { started: false, reason: '未配置 API key，请先到设置页填写' }
 
       mode = requested ?? config.mode

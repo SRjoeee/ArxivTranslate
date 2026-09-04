@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { extract, type TableBlock } from '@/core/extractor'
-import { FOR_ATTR, STATE_ATTR, T_CLASS, renderTable } from '@/core/renderer'
+import { extract, markBlocks, type TableBlock } from '@/core/extractor'
+import { FOR_ATTR, STATE_ATTR, T_CLASS, renderTable, setState } from '@/core/renderer'
 import { TABLE_RULES } from '@/core/rules/latexml'
 import { docOf, frag } from './helpers'
 
@@ -28,6 +28,19 @@ describe('renderTable', () => {
     const tds = Array.from(node.querySelectorAll(TABLE_RULES.cell))
     expect(tds.map(td => td.innerHTML)).toEqual(['模型', '91.2', '基线', '<math class="ltx_Math"><mi>x</mi></math>'])
     expect(t.el.outerHTML).toBe(before.replace('<table class="ltx_tabular" id="T1">', `<table class="ltx_tabular" id="T1" ${STATE_ATTR}="translated">`))
+  })
+
+  it('克隆不带原表的 data-axt-id / data-axt-state', () => {
+    const doc = docOf(table)
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    const t = blocks.find(b => b.kind === 'table') as TableBlock
+    setState(t, 'pending')
+    const node = renderTable(t, new Map([[t.cells[0]!.el, frag(doc, '模型')]]))
+    expect(node.hasAttribute('data-axt-id')).toBe(false)
+    expect(node.hasAttribute(STATE_ATTR)).toBe(false)
+    expect(node.querySelector('[data-axt-id], [data-axt-state]')).toBeNull()
+    expect(t.el.getAttribute(STATE_ATTR)).toBe('translated')
   })
 
   it('重复渲染只保留最新一份', () => {

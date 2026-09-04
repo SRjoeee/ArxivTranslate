@@ -22,6 +22,8 @@ describe('脚手架', () => {
     expect(isAxtMessage({ type: 'axt:stats' })).toBe(true)
     expect(isAxtMessage({ type: 'other' })).toBe(false)
     expect(isAxtMessage(null)).toBe(false)
-    expect(handlePing('1.2.3')).toEqual({ ok: true, version: '1.2.3' })
+    expect(handlePing('1.2.3', 1000, 400)).toEqual({ ok: true, version: '1.2.3', at: 1000, bootedAt: 400 })
+    // 不传 bootedAt 时视为刚启动，SW 年龄为 0
+    expect(handlePing('1.2.3', 1000)).toEqual({ ok: true, version: '1.2.3', at: 1000, bootedAt: 1000 })
   })
 })

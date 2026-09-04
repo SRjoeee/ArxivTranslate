@@ -87,6 +87,14 @@ export function classify(el: Element): Classification | null {
   return null
 }
 
+/** 文档主标题：靠 text-align:center 居中，不能与译文同行（§7.3） */
+const DOCUMENT_TITLE = '.ltx_title_document'
+
+/** 短标题同行的候选：title 单元里除文档主标题外的标题（长度另由渲染层判断） */
+export function isInlineTitleCandidate(el: Element): boolean {
+  return classify(el)?.rule === 'title' && !el.matches(DOCUMENT_TITLE)
+}
+
 export function documentRoot(doc: Document | Element): Element | null {
   return doc.querySelector(DOCUMENT_ROOT)
 }
