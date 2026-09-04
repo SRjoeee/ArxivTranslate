@@ -89,6 +89,18 @@ html[data-axt-mode="side"] .ltx_document :where(.ltx_para, .ltx_abstract, .ltx_s
   margin-inline-start: 0;
 }
 
+/* 表格通栏堆叠（§7.2）：论文里的数值表最小内容宽度普遍超过半栏——实测同一页三张表是
+   509 / 551 / 613px，而栏宽只有 484px——塞进一栏会溢出到隔壁，和译文表挤在一起（实测 2609.00095）。
+   通栏后原表与译文表各自完整、上下排列，与 stack 模式一致。
+   另一种做法是在栏内横向滚动（display: block + overflow-x: auto），实测能防重叠，
+   但会裁掉右侧的列、两边还要各滚一次，读数值表更难，所以不采用。
+   这条必须排在配对规则之后：两者特异度相同，靠顺序取胜 */
+html[data-axt-mode="side"] .ltx_document .ltx_tabular {
+  grid-column: 1 / -1;
+  margin-inline: auto;
+  max-width: 100%;
+}
+
 /* 段内嵌套的容器（表格单元格、inline-block 里的）不参与网格，降级为上下堆叠 */
 html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block) :is(.ltx_para, .ltx_abstract) {
   display: block;
