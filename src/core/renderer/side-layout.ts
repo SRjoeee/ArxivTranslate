@@ -18,3 +18,11 @@ export const SIDE_DENY = [
 
 /** 会被 CSS 设成两栏网格的元素 */
 export const SIDE_CONTAINER = `:has(.axt-t):not(:is(${SIDE_DENY}))`
+
+// 堆叠区：这些格子里不做左右分栏，配对降级为上下堆叠（modes.css 里有同一份清单，测试守着）。
+// 既然没有右栏，里面就**不能生成镜像**——镜像本来是为了"右栏别空着"，
+// 在堆叠区只会变成同一列里上下两份（实测 2312.17141 的三面板图：每个面板的公式重复了一遍）。
+export const SIDE_STACK = [
+  '.ltx_td', '.ltx_inline-block', // 段内嵌套的容器
+  '.ltx_flex_cell',               // 多面板插图的分格，宽度只有半栏
+].join(', ')

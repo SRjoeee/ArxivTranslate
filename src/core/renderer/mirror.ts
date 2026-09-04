@@ -10,7 +10,7 @@
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
 import { FOR_ATTR, T_CLASS } from './index'
-import { SIDE_CONTAINER } from './side-layout'
+import { SIDE_CONTAINER, SIDE_STACK } from './side-layout'
 
 export const MIRROR_CLASS = 'axt-mirror'
 /** 镜像用的 data-axt-for 前缀，避免与真实块 id 撞车 */
@@ -53,6 +53,8 @@ export function createMirrors(root: Document | Element): number {
   let made = 0
   for (const container of containers) {
     if (container.classList.contains(MIRROR_CLASS)) continue
+    // 堆叠区里没有右栏，镜像只会在同一列里多出一份重复（实测 2312.17141 的多面板插图）
+    if (container.closest(SIDE_STACK)) continue
     for (const child of Array.from(container.children)) {
       if (!needsMirror(child)) continue
       const clone = child.cloneNode(true) as Element

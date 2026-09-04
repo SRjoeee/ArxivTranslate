@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { SIDE_DENY, T_CLASS } from '@/core/renderer'
+import { SIDE_DENY, SIDE_STACK, T_CLASS } from '@/core/renderer'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 const CSS = readFileSync(join(import.meta.dirname, '../../src/styles/modes.css'), 'utf8')
@@ -68,16 +68,28 @@ describe('side 模式的容器覆盖', () => {
     expect(checked).toBeGreaterThan(0) // fixture 里确实有多面板插图，这条测试不是空跑
   })
 
-  it('被排除的布局容器要有降级规则，格内的配对才不会各自长出隐式两列', () => {
-    // 父级是 flex 时后代够不到文档轨道，subgrid 失效后会退化成隐式两列
-    const stack = /:is\(([^)]*)\)[^{]*\{\s*display: block/.exec(RULES)
-    expect(stack?.[1]).toContain('.ltx_flex_cell')
-  })
-
-  it('列表标记要脱离网格流：否则会被网格项块级化，单独占一行落在正文上方', () => {
+  it('列表标记要脱离网格流，并且两栏各挂一份', () => {
     // happy-dom 没有布局引擎，这里守的是规则本身；效果的实测记录在 DESIGN §7.2
     expect(RULES).toMatch(/&\.ltx_item > \.ltx_tag \{[^}]*position: absolute/)
-    expect(RULES).toMatch(/&\.ltx_item:has\(> \.ltx_tag\) \{[^}]*padding-inline-start/)
+    // 镜像标记要落到右栏的槽里，否则它和原标记叠在左栏，右栏没有编号
+    expect(RULES).toMatch(/&\.ltx_item > \.ltx_tag\.axt-t \{[^}]*inset-inline-start: calc\(50% \+ var\(--axt-gap\) \/ 2\)/)
+  })
+
+  it('列表缩进只能加在格子内容上：subgrid 容器自己的 inline padding 会吃掉第一条轨道', () => {
+    // 加在列表容器 / 列表项上会让左栏窄一截、右栏顶格（实测 2312.17141：左 444 / 右 484）
+    expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) \{\s*padding-inline-start: 0/)
+    expect(RULES).toMatch(/&\.ltx_item:has\(> \.ltx_tag\) \{[^}]*padding-inline-start: 0/)
+    expect(RULES).toMatch(/&\.ltx_item :where\(:has\(\+ \.axt-t\), \.axt-t\):not\(\.ltx_tag\) \{\s*padding-inline-start: 2\.5rem/)
+  })
+
+  it('堆叠区清单：样式表与 side-layout.ts 保持一致（TS 是事实来源）', () => {
+    const stack = /:is\(([^)]*)\)[^{]*\{\s*display: block/.exec(RULES)
+    const normalize = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean).sort().join(',')
+    expect(normalize(stack?.[1] ?? '')).toBe(normalize(SIDE_STACK))
+  })
+
+  it('行内收缩包裹里的图形要豁免 max-width：否则宽度会解成病态的窄值', () => {
+    expect(RULES).toMatch(/\.ltx_inline-block :is\(img, svg\) \{\s*max-width: none/)
   })
 
   for (const file of files) {

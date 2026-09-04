@@ -99,4 +99,19 @@ describe('createMirrors', () => {
     restore(document)
     expect(document.documentElement.outerHTML).toBe(before)
   })
+
+  it('堆叠区里不生成镜像：那里没有右栏，镜像只会变成同一列里的重复', () => {
+    // 多面板插图的分格（实测 2312.17141：每个面板的公式被复制了一份，页面上内容重复两遍）
+    const doc = docOf(`
+      <div class="ltx_para"><p class="ltx_p">x</p><p class="ltx_p ${T_CLASS}" data-axt-for="1">译</p></div>
+      <figure class="ltx_figure"><div class="ltx_flex_figure"><div class="ltx_flex_cell">
+        <figure class="ltx_figure ltx_figure_panel">
+          <table class="ltx_equation"><tbody><tr><td>E</td></tr></tbody></table>
+          <figcaption class="ltx_caption">(a) panel</figcaption>
+          <figcaption class="ltx_caption ${T_CLASS}" data-axt-for="2">(a) 面板</figcaption>
+        </figure>
+      </div></div></figure>`)
+    createMirrors(doc)
+    expect(doc.querySelectorAll('.ltx_flex_cell .axt-mirror')).toHaveLength(0)
+  })
 })
