@@ -55,15 +55,22 @@ html[data-axt-mode="side"] .ltx_document {
    新出现的包裹层自动生效，不需要维护清单。
    排除项各有理由（清单的事实来源在 src/core/renderer/side-layout.ts，测试守着两边一致）：
    译文自身不是容器；表格内部结构改成网格会毁掉表格；
-   .ltx_inline-block / .ltx_note / .ltx_listing 是行内与预格式化上下文；
+   .ltx_inline-block / .ltx_listing 是行内与预格式化上下文；
+   脚注要连**整棵子树**一起排除——ar5iv 把折叠状态写在 .ltx_note_outer 的 display:none 上，
+   译文一插进脚注内部，容器规则就会命中 :has(.axt-t) 把它改成 grid，折叠的脚注被掀开、
+   165px 高 781px 宽横在正文中间，与中栏译文互相干扰（实测 2312.17141，用户反馈）；
    .ltx_p / .ltx_title / .ltx_caption / .ltx_bibblock 本身就是配对的成员，
    内部若有译文（脚注那种嵌套）不该再开一套两栏。
+   多面板插图（.ltx_flex_figure / .ltx_flex_cell）用 flex 让面板并排，接管成网格后每个面板各占一行、
+   撑满整个文章列（实测 2410.00260：原本 left 321 / 721 各 398 宽，接管后都在 321、798 宽）；
+   flex 可以放心排除——后代要 subgrid 得先是网格项，父级是 flex 就够不着外面的轨道，
+   代价是格内的配对要显式降级为堆叠（见下面的堆叠区规则），否则它们会各自长出隐式两列。
    排除项只能是**本身不是网格**的元素：排除一个网格祖先并不能阻止它的后代去 subgrid 那个外来网格。
    ar5iv 的 .ltx_enumerate 曾经在排除清单里，结果列表项内的段落 subgrid 了它的编号网格，
    英文横跨分割线、中文挤成 39px 的窄条（实测 2609.00097）；这类网格必须接管而不是排除。
    整体包在 :where() 里让权重为 0，否则会压过下面的配对规则（实测过这个坑）。
    column-gap 要显式写——.ltx_biblist 自带 3em 的间距，subgrid 会用容器自己的值，右栏偏 12px */
-html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock))) {
+html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell))) {
   display: grid;
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
@@ -76,7 +83,7 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, tab
    都不必各写一条规则。构建会把嵌套编译成扁平选择器 */
 html[data-axt-mode="side"] .ltx_document,
 html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th,
-  .ltx_inline-block, .ltx_note, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock))) {
+  .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell))) {
   & > * {
     grid-column: 1 / -1;
   }
@@ -100,6 +107,45 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, tab
   & > .axt-t[data-axt-inline] {
     margin-inline-start: 0;
   }
+
+  /* 列表标记（§7.2）：ar5iv 有三套排法——itemize 用 margin-inline-start: -2.5rem 悬挂、
+     enumerate 用自己的两列网格加 grid-area: 1/1、description 用 float。把列表项接管成网格后，
+     这三种都会被**网格项块级化**：标记变成整行的块，单独占一行落在正文上方
+     （实测 2312.17141：89 个列表项全部如此，标记被拉到 388px 宽）。
+     两栏各自是一份完整的列表，所以标记也要有两份：原件挂左栏的槽，镜像挂右栏的槽。
+     绝对定位的子元素不是网格项、不会被块级化；50% 落在两栏正中，加半个间距正好是右栏起点
+     （项目跨满两栏，宽度 = 2×栏宽 + 间距，故 50% + 间距/2 ≡ 栏宽 + 间距，实测精确命中 732px） */
+  &.ltx_item:has(> .ltx_tag) {
+    position: relative;
+    padding-inline-start: 0;
+  }
+
+  &.ltx_item > .ltx_tag {
+    position: absolute;
+    inset-inline-start: 0;
+    grid-column: auto;
+    box-sizing: border-box;
+    width: 2.5rem;
+    margin: 0;
+    padding-inline-end: 0.5rem;
+    text-align: end;
+  }
+
+  &.ltx_item > .ltx_tag.axt-t {
+    inset-inline-start: calc(50% + var(--axt-gap) / 2);
+  }
+
+  /* 缩进也要两栏各一份。不能加在列表容器或列表项上：**subgrid 容器自己的 inline padding
+     会吃掉第一条轨道**，于是左栏窄一截、右栏顶格（实测 2312.17141：左 444 / 右 484，
+     左侧文字缩进 40px 而中文顶格——就是用户看到的"译文没有缩进"）。
+     加在格子内容上则只影响它自己，两栏因此对称（实测 83/83 项：文字 264 / 772，栏宽 484 / 484） */
+  &:is(.ltx_itemize, .ltx_enumerate, .ltx_description) {
+    padding-inline-start: 0;
+  }
+
+  &.ltx_item :where(:has(+ .axt-t), .axt-t):not(.ltx_tag) {
+    padding-inline-start: 2.5rem;
+  }
 }
 
 /* 表格装进自己那一栏（§7.2）：论文里的数值表最小内容宽度普遍超过半栏——实测同一页三张表是
@@ -120,8 +166,12 @@ html[data-axt-mode="side"] [data-axt-fit="scroll"] {
   max-width: 100%;
 }
 
-/* 段内嵌套的容器（表格单元格、inline-block 里的）不参与网格，降级为上下堆叠 */
-html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block) :is(.ltx_para, .ltx_abstract) {
+/* 堆叠区：这些格子里不做左右分栏，配对降级为上下堆叠。
+   表格单元格与 inline-block 是段内嵌套的容器；多面板插图的分格只有半栏宽、本身又是 flex 项，
+   硬分两列会溢出，而且它们够不到文档的轨道（父级是 flex），不降级就会各自长出隐式两列。
+   内层用 :is(...) 而不是 :where(...)：要压过上面 (0,2,1) 的容器规则。
+   脚注子树要排除：改它的 display 会把 ar5iv 折叠起来的脚注掀开 */
+html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block, .ltx_flex_cell) :is(.ltx_para, .ltx_abstract, :has(.axt-t)):not(:is(.ltx_note, .ltx_note *)) {
   display: block;
 }
 
@@ -156,6 +206,13 @@ html[data-axt-mode="side"] .ltx_document > .ltx_title_document + .axt-t {
    宽高比由浏览器按内在尺寸保持，不需要额外写 height。 */
 html[data-axt-mode="side"] :is(.ltx_graphics, .ltx_listing, .ltx_td, img, svg) {
   max-width: 100%;
+}
+
+/* 行内收缩包裹里的图形要豁免。`.ltx_inline-block` 的宽度由内容决定，而内容（这里是图）的
+   max-width: 100% 又回过头去参照它 —— 循环依赖被解成一个病态的窄值：实测 2312.17141 的弦图
+   viewBox 68.3×97.88 被压成 10.5×97.9，页面上就是一个看不清的小点。豁免后与原版式逐张一致 */
+html[data-axt-mode="side"] .ltx_inline-block :is(img, svg) {
+  max-width: none;
 }
 
 /* ── only：仅译文（§7.4）──────────────────────────────────────────────────
