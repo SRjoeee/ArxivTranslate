@@ -3,6 +3,7 @@
 // 这里不引用 ./store：content 侧要算键但不能把 Dexie 打进包（DESIGN §8.0）。
 import { RULES_VERSION } from '@/core/rules/latexml'
 import { PROMPT_VERSION } from '@/providers/prompt'
+import { hashText } from '@/shared/hash'
 export type RenderPath = 'markup' | 'runs'
 
 export interface CacheIdentity {
@@ -53,8 +54,5 @@ export function cacheKeyFor(identity: Omit<CacheIdentity, 'promptVersion' | 'rul
 /** 上下文指纹：进 prompt 的几个字段一起 hash。免费引擎不看上下文，调用方传空串 */
 export function contextKey(context: { paperTitle?: string; abstract?: string; sectionTitle?: string; glossary?: { term: string; translation: string }[] } | undefined): string {
   if (!context) return ''
-  const payload = JSON.stringify([context.paperTitle ?? '', context.abstract ?? '', context.sectionTitle ?? '', context.glossary ?? []])
-  let hash = 5381
-  for (const ch of payload) hash = ((hash * 33) ^ ch.charCodeAt(0)) >>> 0
-  return hash.toString(36)
+  return hashText(JSON.stringify([context.paperTitle ?? '', context.abstract ?? '', context.sectionTitle ?? '', context.glossary ?? []]))
 }

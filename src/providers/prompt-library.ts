@@ -3,6 +3,7 @@
 // 去掉字幕与文本分隔符式的批处理。批处理协议不在这里——见 prompt.ts 的协议块，它追加在任何提示词之后。
 //
 // 结构照搬：模板变量 {{token}} + 内置提示词表 + 用户自定义（patterns）+ 按 promptId 选择、找不到回退 default。
+import { hashText } from '@/shared/hash'
 
 export const PROMPT_TOKENS = ['targetLanguage', 'input', 'paperTitle', 'abstract', 'sectionTitle', 'glossary'] as const
 export type PromptToken = (typeof PROMPT_TOKENS)[number]
@@ -105,12 +106,6 @@ export function renderTemplate(text: string, values: Record<PromptToken, string>
   return text.replace(TOKEN_PATTERN, (_, token: PromptToken) => values[token])
 }
 
-function djb2(text: string): string {
-  let hash = 5381
-  for (const ch of text) hash = ((hash * 33) ^ ch.charCodeAt(0)) >>> 0
-  return hash.toString(36)
-}
-
 /**
  * 提示词指纹，进缓存键：换了提示词就不能再命中旧译文。
  * 内置的用 id（措辞变化由 PROMPT_VERSION 兜底），自定义的按文本算。
@@ -119,5 +114,5 @@ export function promptKey(config: PromptsConfig = DEFAULT_PROMPTS_CONFIG): strin
   const template = selectPrompt(config)
   if (Object.hasOwn(BUILT_IN_PROMPTS, template.id)) return template.id
   // 两段分别编码：拼一个空格会让 "A"+"B C" 与 "A B"+"C" 同键
-  return `custom:${djb2(JSON.stringify([template.systemPrompt, template.prompt]))}`
+  return `custom:${hashText(JSON.stringify([template.systemPrompt, template.prompt]))}`
 }

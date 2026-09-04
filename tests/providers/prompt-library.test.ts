@@ -60,4 +60,9 @@ describe('prompt library', () => {
     const k = (systemPrompt: string, prompt: string) => promptKey({ promptId: 'm', patterns: [{ id: 'm', name: '', systemPrompt, prompt }] })
     expect(k('A', 'B C')).not.toBe(k('A B', 'C'))
   })
+
+  it('指纹按码点算：只差一个增补平面字符（😀 / 😁）的提示词不同键（Codex 在 #28 指出）', () => {
+    const k = (systemPrompt: string) => promptKey({ promptId: 'm', patterns: [{ id: 'm', name: '', systemPrompt, prompt: '{{input}}' }] })
+    expect(k('😀')).not.toBe(k('😁'))
+  })
 })
