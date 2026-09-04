@@ -61,9 +61,16 @@ html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block) .ltx_para {
 }
 
 /* 宽度（§7.2 [决定]）：arXiv 的文章列宽与 .ltx_document 的 max-width 都只由 --main-width 决定，
-   覆盖这一个变量即可，不必碰 .ltx_page_main（RESEARCH.md §3.2）。同时让出导航栏的位置。 */
+   覆盖这一个变量即可，不必碰 .ltx_page_main（RESEARCH.md §3.2）。
+   关键是 --nav-width 也要归零：body 的网格是 `1fr nav main nav 1fr`，只把导航栏 display:none
+   不会收掉它的两条轨道（各 14rem 下限），页面因此比视口宽、出现横向滚动
+   （实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）。
+   两列合起来不超过原来单列宽度的两倍，且永远不超出视口。 */
+html[data-axt-mode="side"] body {
+  --nav-width: 0px;
+}
 html[data-axt-mode="side"] {
-  --main-width: min(1600px, 96vw);
+  --main-width: min(104rem, calc(100vw - 3rem));
 }
 html[data-axt-mode="side"] .ltx_page_navbar {
   display: none;
@@ -89,10 +96,9 @@ html[data-axt-mode="only"] [data-axt-state="failed"] {
   display: revert;
 }
 
-/* 参考文献豁免隐藏，始终双语（§5.4）：原文被隐藏后对照就没意义了 */
-html[data-axt-mode="only"] .ltx_biblist [data-axt-state="translated"] {
-  display: revert;
-}
+/* 参考文献不再豁免（2026-09-04 修订）：条目改为按 .ltx_bibblock 分段翻译后，
+   作者段本来就不翻、没有 data-axt-state，只译文模式下它自然保留，条目仍然完整可读，
+   不需要整条双语。旧的豁免规则是"整条翻译"时代的遗留。 */
 
 /* 同行显示的短标题在 only 模式下译文要顶回行首 */
 html[data-axt-mode="only"] .axt-t[data-axt-inline] {

@@ -157,7 +157,7 @@ interface Block {
 - 默认翻译，可在设置里关闭
 - **按条目内的片段翻**（2026-09-04 修订）：LaTeXML 把一条参考文献拆成若干 `.ltx_bibblock`（作者 / 标题 / 出处各一段，页面上各占一行），翻译单元是 `.ltx_bibblock` 而不是整条 `.ltx_bibitem`，译文因此只跟在对应的那一行下面，不再整条重复
 - **多段条目的第一段是作者列表，跳过**：只有部分模板会标 `.ltx_bib_author`（20 篇实测 13 篇有），所以按位置判断（`isBibAuthorBlock`）。只有一段的条目（natbib 等样式）整段就是引文，不跳过
-- **only 模式下豁免隐藏**，参考文献始终双语（原文被隐藏后对照的前提就没了）
+- only 模式不再整条豁免（见 §7.4）：作者段不翻、自然保留，标题与出处段只显示译文
 - DOI / URL 本身是 `<a>`，走占位符自动保留
 - LLM prompt 固定加一条：人名、期刊名、会议名保留原文
 
@@ -248,7 +248,7 @@ interface ProtectedBlock {
 - `.ltx_para` 内非成对的子元素（行间公式、图表等）设 `grid-column: 1 / -1` 通栏
 - 标题、图表说明：降级为上下堆叠（它们的父级是整个 section，做不了 grid）
 - 表格：整表克隆置于下方（见 5.3）
-- **宽度** [决定]：进入 side 时在 `html[data-axt-mode="side"]` 上覆盖 CSS 变量 `--main-width: min(1600px, 96vw)`。arXiv 页面的文章列宽（≥1280px 时 body 是 `grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr` 的网格）与 `.ltx_document` 的 `max-width` 都只由这个变量决定，`.ltx_page_main` 本身是 `width:100%`（RESEARCH.md §3.2）。同时隐藏 `.ltx_page_navbar`（用我们自己的属性选择器，不要写 arXiv 的 `data-reading-mode`，那会被它持久化）。注意 `--main-width` 还控制图片、代码块、单元格的 max-width 与 ≥96rem 时脚注边注的定位，需要时把这些钉回 `52rem`
+- **宽度** [决定，2026-09-04 修订]：进入 side 时覆盖两个变量——`--main-width: min(104rem, calc(100vw - 3rem))` 与 `--nav-width: 0px`。只覆盖 `--main-width` 不够：body 的网格是 `1fr nav main nav 1fr`，把导航栏 `display:none` 并不会收掉它的两条轨道（各 14rem 下限），页面因此比视口宽而出现横向滚动（实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）。两列合计不超过原单列宽度的两倍，也永远不超出视口。arXiv 页面的文章列宽（≥1280px 时 body 是 `grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr` 的网格）与 `.ltx_document` 的 `max-width` 都只由这个变量决定，`.ltx_page_main` 本身是 `width:100%`（RESEARCH.md §3.2）。同时隐藏 `.ltx_page_navbar`（用我们自己的属性选择器，不要写 arXiv 的 `data-reading-mode`，那会被它持久化）。注意 `--main-width` 还控制图片、代码块、单元格的 max-width 与 ≥96rem 时脚注边注的定位，需要时把这些钉回 `52rem`
 - 用 `matchMedia('(max-width: 1279px)')` 监听（与 arXiv 主题折叠导航栏的 1280px 断点对齐）：变窄自动切到 stack，变宽切回 side；用户手动选的模式记为偏好，自动降级不覆盖偏好。实现见 `src/core/renderer/responsive.ts` 的 `createModeController`，popup 显示偏好、状态里同时带实际生效的模式
 
 ### 7.3 stack（上下对照）
@@ -260,7 +260,7 @@ interface ProtectedBlock {
 ### 7.4 only（仅译文）
 
 - 原块 `display: none`（不是删除、不是替换文本节点）；选择器是 `[data-axt-state="translated"]`，所以只隐藏真的有译文的块
-- 参考文献条目豁免（保持双语）
+- 参考文献条目**不再豁免**（2026-09-04 修订）：条目改为按 `.ltx_bibblock` 分段翻译后（§5.4），作者段本来就不翻、没有 `data-axt-state`，只译文模式下自然保留，条目仍完整可读。旧豁免是整条翻译时代的遗留
 - 未翻译成功的块保持原文可见（`pending` / `failed` 显式 `display: revert`）
 
 ### 7.5 译文样式
