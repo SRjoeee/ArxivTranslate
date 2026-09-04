@@ -244,7 +244,7 @@ interface ProtectedBlock {
 
 ### 7.2 side（左右对照）
 
-- 核心技巧：`.ltx_para { display: grid; grid-template-columns: 1fr 1fr; column-gap: 1.5em }`。原文 `.ltx_p` 与译文 `p.axt-t` 是相邻兄弟，自动成对落在同一行；不需要 wrapper，`.ltx_para` 上的锚点 id 不受影响。**只对 `.ltx_para > p.ltx_p` 生效**；`span.ltx_p`、表格与 inline-block 内的 `.ltx_p` 降级为 stack（ar5iv 样式已把 `.ltx_para` 设为 `display:block`，无冲突）
+- 核心技巧：`:is(.ltx_para, .ltx_abstract) { display: grid; grid-template-columns: 1fr 1fr; column-gap: 1.5em }`。原文 `.ltx_p` 与译文 `p.axt-t` 是相邻兄弟，自动成对落在同一行；不需要 wrapper，`.ltx_para` 上的锚点 id 不受影响。**只对这两个容器的直接子 `.ltx_p` 生效**（摘要的段落不在 `.ltx_para` 里，2026-09-04 实测补上）；同行短标题（§7.3）例外地各占一栏，正好左右对照；`span.ltx_p`、表格与 inline-block 内的 `.ltx_p` 降级为 stack（ar5iv 样式已把 `.ltx_para` 设为 `display:block`，无冲突）
 - `.ltx_para` 内非成对的子元素（行间公式、图表等）设 `grid-column: 1 / -1` 通栏
 - 标题、图表说明：降级为上下堆叠（它们的父级是整个 section，做不了 grid）
 - 表格：整表克隆置于下方（见 5.3）

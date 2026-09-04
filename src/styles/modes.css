@@ -32,26 +32,31 @@ li.axt-t {
 /* ── side：左右对照（§7.2）────────────────────────────────────────────────
    原文 .ltx_p 与译文 p.axt-t 是相邻兄弟，把它们的父级 .ltx_para 设成两列网格就自动成对落行，
    不需要 wrapper，.ltx_para 上的锚点 id 也不受影响。 */
-html[data-axt-mode="side"] .ltx_para {
+html[data-axt-mode="side"] :is(.ltx_para, .ltx_abstract) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: 1.5em;
   align-items: start;
 }
 
-/* .ltx_para 里非成对的子元素（行间公式、图表、列表等）通栏 */
-html[data-axt-mode="side"] .ltx_para > :not(.ltx_p):not(p.axt-t) {
+/* 容器里非成对的子元素（行间公式、图表、列表等）通栏；
+   同行短标题（§7.3）例外：它和它的译文正好占左右两栏 */
+html[data-axt-mode="side"] :is(.ltx_para, .ltx_abstract) > :not(.ltx_p):not(p.axt-t):not([data-axt-inline]) {
   grid-column: 1 / -1;
 }
 
 /* 译文与原文同行，所以不要 stack 模式那点上边距 */
-html[data-axt-mode="side"] .ltx_para > p.axt-t {
+html[data-axt-mode="side"] :is(.ltx_para, .ltx_abstract) > p.axt-t {
   margin-top: 0;
 }
 
+/* 网格里的同行标题各占一栏，左边距会让它偏离栏首 */
+html[data-axt-mode="side"] :is(.ltx_para, .ltx_abstract) > .axt-t[data-axt-inline] {
+  margin-inline-start: 0;
+}
+
 /* 段内嵌套的 .ltx_p（表格单元格、inline-block 里的）不参与网格，降级为上下堆叠 */
-html[data-axt-mode="side"] .ltx_td .ltx_para,
-html[data-axt-mode="side"] .ltx_inline-block .ltx_para {
+html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block) .ltx_para {
   display: block;
 }
 
