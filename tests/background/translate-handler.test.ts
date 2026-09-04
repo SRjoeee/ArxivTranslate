@@ -64,10 +64,7 @@ describe('translate handler', () => {
 
   it('provider 状态', async () => {
     const status = createStatusHandler({ getProvider: async () => mockProvider(async r => ({ segments: r.segments, provider: 'mock' })), getModel: async () => 'm/1' })
-    const result = await status()
-    expect(result).toMatchObject({ providerId: 'mock', available: true, model: 'm/1', maxBatchChars: 1000, maxBatchItems: 4, preservesMarkup: true })
-    expect(result.answeredAt).toBeGreaterThanOrEqual(result.receivedAt)
-    expect(result.steps.config).toBeGreaterThanOrEqual(0)
+    expect(await status()).toEqual({ providerId: 'mock', available: true, model: 'm/1', maxBatchChars: 1000, maxBatchItems: 4, preservesMarkup: true })
   })
 })
 
