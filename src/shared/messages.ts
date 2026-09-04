@@ -21,7 +21,7 @@ export interface AxtMessages {
   /** popup → content：进度 */
   'axt:page-status': { request: Record<never, never>; response: PageStatus }
   /** popup → background：连通性 */
-  'axt:ping': { request: Record<never, never>; response: { ok: true; version: string; at: number; bootedAt: number } }
+  'axt:ping': { request: Record<never, never>; response: { ok: true; version: string } }
   /** popup → content script：内存中 Block[] 的统计 */
   'axt:stats': { request: Record<never, never>; response: BlockStats }
   /** content / options → background：翻译一批 segment */
@@ -29,6 +29,10 @@ export interface AxtMessages {
   /** popup / options → background：当前 provider 是否可用 */
   'axt:provider-status': { request: Record<never, never>; response: ProviderStatus }
   /** 清空缓存，或只清某篇论文 */
+  /** content → background：批量查缓存（§8.0，provider 请求不经过 background，只有缓存走消息） */
+  'axt:cache-get': { request: { keys: string[] }; response: { hits: (string | null)[] } }
+  /** content → background：批量写缓存；调用方不等结果 */
+  'axt:cache-put': { request: { entries: { key: string; translation: string; paper: string }[] }; response: { written: number } }
   'axt:cache-clear': { request: { paper?: string }; response: { removed: number } }
   'axt:cache-stats': { request: Record<never, never>; response: { entries: number; bytes: number } }
 }

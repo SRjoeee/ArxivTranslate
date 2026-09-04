@@ -1,10 +1,13 @@
 import { getConfig } from '@/config/storage'
+import { getProvider } from '@/providers'
+import { createTranslateService } from '@/providers/translate-service'
 import { extract, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
 import { restore, type Mode } from '@/core/renderer'
 import { createViewportTracker, withViewportAnchor, type ViewportTracker } from '@/core/scheduler'
-import { isAxtMessage, sendMessage } from '@/shared/messages'
+import { isAxtMessage } from '@/shared/messages'
+import { createMessageCachePort } from './cache-port'
 import { enableDebug } from './debug'
 
 // 注入 arxiv.org/html/*。页面加载只 extract（不写 DOM），Block[] 留在内存里；
@@ -28,27 +31,13 @@ export default defineContentScript({
       if (progress.state === 'running') return { started: false, reason: '翻译进行中' }
       if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
       if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
-      // 实测过页面加载后 20–90 s 才开始翻译，分段计时：读配置 / ping 往返 / provider-status 往返。
-      // ping 回传 background 的墙钟：投递延迟 = 收到时刻 - 发出时刻，SW 年龄 = 收到时刻 - SW 启动时刻。
+      // provider 直接在 content 侧构造与调用（DESIGN §8.0）：MV3 的 service worker 会在等待中被挂起，
+      // 冷启动时一条无 I/O 的消息也要等几十秒。现在只有缓存读写走消息，翻译本身不经过 background。
       const tStart = performance.now()
       const config = await getConfig()
-      const tConfig = performance.now()
-      const pingSentAt = Date.now()
-      const pong = await sendMessage({ type: 'axt:ping' })
-      const tPing = performance.now()
-      const statusSentAt = Date.now()
-      const status = await sendMessage({ type: 'axt:provider-status' })
-      const statusGotAt = Date.now()
-      console.debug(
-        `[axt] start: config ${Math.round(tConfig - tStart)} ms, ping ${Math.round(tPing - tConfig)} ms`
-        + ` (投递 ${pong.at - pingSentAt} ms, SW 年龄 ${Math.round((pong.at - pong.bootedAt) / 1000)} s)`
-        + `, provider-status ${Math.round(performance.now() - tPing)} ms`
-        + ` (投递 ${status.receivedAt - statusSentAt} ms, 处理 ${status.answeredAt - status.receivedAt} ms`
-        + ` [读配置 ${status.steps.config} / 可用性 ${status.steps.available} / 取模型 ${status.steps.model}]`
-        + `, 回程 ${statusGotAt - status.answeredAt} ms)`
-        + `, since page start ${Math.round(tStart)} ms`,
-      )
-      if (!status.available) return { started: false, reason: '未配置 API key，请先到设置页填写' }
+      const provider = getProvider(config)
+      if (!(await provider.isAvailable())) return { started: false, reason: '未配置 API key，请先到设置页填写' }
+      console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
       mode = requested ?? config.mode
       controller = new AbortController()
@@ -56,6 +45,11 @@ export default defineContentScript({
       tracker?.disconnect()
       tracker = createViewportTracker(blocks)
       const activeTracker = tracker
+      const translate = createTranslateService({
+        getProvider: async () => provider,
+        getModel: async () => config.openaiCompat.model,
+        cache: createMessageCachePort(),
+      })
       const t1 = performance.now()
       void runTranslation({
         doc: document,
@@ -63,8 +57,8 @@ export default defineContentScript({
         target: config.targetLanguage,
         mode,
         paper,
-        capabilities: { maxBatchChars: status.maxBatchChars, maxBatchItems: status.maxBatchItems, preservesMarkup: status.preservesMarkup },
-        transport: request => sendMessage({ type: 'axt:translate', ...request }),
+        capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
+        transport: request => translate(request),
         onProgress: p => { progress = p },
         signal: controller.signal,
         // 视口优先 + 插入译文时的滚动锚定（DESIGN §10）

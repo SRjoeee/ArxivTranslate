@@ -13,3 +13,13 @@ export function cacheKeyFor(identity: Omit<CacheIdentity, 'promptVersion' | 'rul
 
 export * from './key'
 export * from './store'
+
+/** 把本地 Dexie 缓存包成 CachePort（DESIGN §8.0：background 侧用它，content 侧走消息代理） */
+export function cachePortOf(cache: TranslationCache) {
+  return {
+    getMany: (keys: string[]) => Promise.all(keys.map(key => cache.get(key))),
+    async putMany(entries: { key: string; translation: string; paper: string }[]) {
+      for (const entry of entries) await cache.set(entry.key, entry.translation, entry.paper)
+    },
+  }
+}
