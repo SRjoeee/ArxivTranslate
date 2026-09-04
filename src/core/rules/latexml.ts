@@ -77,6 +77,16 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
   { id: 'br', selector: 'br', note: '换行' },
 ]
 
+/**
+ * §7.2 side 模式的镜像目标：没有译文、但会独占一行的块级内容。
+ * 左右对照时右栏也要有一份，否则公式和插图会横跨两栏、打断阅读节奏。
+ * 只镜像**图形本身**而不是整个 figure：figure 里的 .ltx_caption 是可翻译块，
+ * 整体镜像会让右栏那份带着英文说明（实测）。figure 作为网格容器时，
+ * 图形与镜像占一行、说明与译文占下一行，左右各自完整。
+ * 表格不在此列——整表克隆已经是它的译文（§5.3）。
+ */
+export const MIRROR_SELECTORS = '.ltx_equation, .ltx_equationgroup, .ltx_graphics, svg.ltx_picture, .ltx_listing'
+
 /** §15.1 图片统计用选择器（审计脚本） */
 export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics' } as const
 

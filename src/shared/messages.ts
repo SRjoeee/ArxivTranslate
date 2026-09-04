@@ -8,7 +8,10 @@ import type { ProviderStatus, TranslateMessageRequest, TranslateMessageResponse 
 export interface PageStatus {
   /** 当前页面的 arXiv id；不是 arXiv HTML 页面时为 null */
   paper: string | null
+  /** 实际生效的模式；窄视口下 side 会自动降级为 stack（§7.2） */
   mode: Mode
+  /** 用户选定的模式，自动降级不改它 */
+  preference: Mode
   progress: Progress
 }
 
@@ -18,6 +21,8 @@ export interface AxtMessages {
   'axt:translate-page': { request: { mode?: Mode }; response: { started: boolean; reason?: string } }
   /** popup → content：中止并恢复原文 */
   'axt:restore-page': { request: Record<never, never>; response: { removedNodes: number } }
+  /** popup → content：切换模式（只改 <html> 上的属性，不重新翻译；§4 第 9 步） */
+  'axt:set-mode': { request: { mode: Mode }; response: { mode: Mode; preference: Mode } }
   /** popup → content：进度 */
   'axt:page-status': { request: Record<never, never>; response: PageStatus }
   /** popup → background：连通性 */

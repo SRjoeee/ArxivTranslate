@@ -1,15 +1,16 @@
-/* stack 模式与通用译文样式（DESIGN §7.3 / §7.5）。side / only 的规则在 Phase 3 补；预设颜色由 presets.css 的 --axt-* 变量提供 */
+/* 三种模式的样式（DESIGN §7.2 / §7.3 / §7.4 / §7.5）。模式由 <html data-axt-mode> 决定，切换只改这一个属性。
+   预设颜色由 presets.css 的 --axt-* 变量提供 */
+
 /* 译文节点复制了原块的 class（§7.1），字体、字号、行高由站点样式决定；这里不能再写 font: inherit，
    我们的 <style> 排在站点样式之后，同等特异度会把 .ltx_title_abstract 的 1.4rem、.ltx_bibitem 的字体覆盖掉（实测 2609.00064） */
 .axt-t {
   color: var(--axt-color, inherit);
 }
 
-p.axt-t,
-div.axt-t,
-h1.axt-t, h2.axt-t, h3.axt-t, h4.axt-t, h5.axt-t, h6.axt-t,
-figcaption.axt-t,
-li.axt-t {
+/* stack / only：译文紧跟原文，压掉站点为该标签留的大边距。
+   side 模式不能这么做——译文与原文同处一行，边距不一致会让两边错位
+   （实测 h2 差 19px、figure 差 64px），那里让译文沿用 class 自带的边距 */
+html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption, li).axt-t {
   margin: 0.25em 0 0;
 }
 
@@ -25,4 +26,92 @@ li.axt-t {
 /* 翻译失败的块：左侧一条细提示线，原文照常可读（§7.4） */
 [data-axt-state="failed"] {
   box-shadow: inset 3px 0 0 var(--axt-failed-color, rgba(220, 38, 38, 0.6));
+}
+
+/* ── side：左右对照（§7.2）────────────────────────────────────────────────
+   配对靠"原件 + 紧随其后的 .axt-t 兄弟"这一个结构事实，不为每种内容写规则：
+   容器里默认通栏，有译文（或镜像）的原件占左栏，译文占右栏。 */
+html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
+  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
+  .ltx_figure, .ltx_table, .ltx_float) {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 1.5em;
+  align-items: start;
+}
+
+html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
+  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
+  .ltx_figure, .ltx_table, .ltx_float) > * {
+  grid-column: 1 / -1;
+}
+
+html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
+  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
+  .ltx_figure, .ltx_table, .ltx_float) > :has(+ .axt-t) {
+  grid-column: 1;
+}
+
+html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
+  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
+  .ltx_figure, .ltx_table, .ltx_float) > .axt-t {
+  grid-column: 2;
+  margin-inline-start: 0;
+}
+
+/* 段内嵌套的容器（表格单元格、inline-block 里的）不参与网格，降级为上下堆叠 */
+html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block) :is(.ltx_para, .ltx_abstract) {
+  display: block;
+}
+
+/* 镜像节点只在 side 模式出现（§7.2）：其他模式下它会让公式、图表重复一份 */
+html:not([data-axt-mode="side"]) .axt-mirror {
+  display: none;
+}
+
+/* 宽度（§7.2 [决定]，2026-09-04 重做）：
+   body 是五列命名网格 `1fr nav article nav 1fr`，第 4 列在所有实测页面上都是空的预留列。
+   保留左侧 TOC（收窄），把预留列压到最小，文章列按视口动态取值且永远不超出视口。
+   只覆盖 --main-width 而不动轨道会横向溢出：隐藏导航栏不会收掉它的轨道
+   （实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）。 */
+html[data-axt-mode="side"] body {
+  --nav-width: minmax(8rem, 12rem);
+}
+html[data-axt-mode="side"] {
+  --main-width: min(96rem, calc(100vw - 26rem));
+}
+
+/* 文档主标题与它的译文通栏居中，像论文页眉那样；不参与左右配对。
+   ar5iv 给 .ltx_title 设了 max-inline-size: 52rem，文章列变宽后它会靠左，所以要 margin-inline: auto（实测 Bug） */
+html[data-axt-mode="side"] .ltx_document > .ltx_title_document,
+html[data-axt-mode="side"] .ltx_document > .ltx_title_document + .axt-t {
+  grid-column: 1 / -1;
+  margin-inline: auto;
+}
+
+/* --main-width 还被图片、代码块、单元格的 max-width 引用，变量放大后它们会跟着变宽；
+   这些内容本身没有双列需求，钉回原值（RESEARCH.md §3.2 的副作用一条） */
+html[data-axt-mode="side"] :is(.ltx_graphics, .ltx_listing, .ltx_td) {
+  max-width: 52rem;
+}
+
+/* ── only：仅译文（§7.4）──────────────────────────────────────────────────
+   原块隐藏而不是删除，切回来只改 data-axt-mode。 */
+html[data-axt-mode="only"] [data-axt-state="translated"] {
+  display: none;
+}
+
+/* 未翻译成功的块保持原文可见 */
+html[data-axt-mode="only"] [data-axt-state="pending"],
+html[data-axt-mode="only"] [data-axt-state="failed"] {
+  display: revert;
+}
+
+/* 参考文献不再豁免（2026-09-04 修订）：条目改为按 .ltx_bibblock 分段翻译后，
+   作者段本来就不翻、没有 data-axt-state，只译文模式下它自然保留，条目仍然完整可读，
+   不需要整条双语。旧的豁免规则是"整条翻译"时代的遗留。 */
+
+/* 同行显示的短标题在 only 模式下译文要顶回行首 */
+html[data-axt-mode="only"] .axt-t[data-axt-inline] {
+  margin-inline-start: 0;
 }

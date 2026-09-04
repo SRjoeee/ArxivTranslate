@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
 import type { ProviderStatus } from '@/entrypoints/background/translate-handler'
+import type { Mode } from '@/core/renderer'
 import { sendMessage, sendToActiveTab, type PageStatus } from '@/shared/messages'
 
 const scriptStart = performance.now()
 
-// Phase 2：翻译 / 恢复 / 进度 + provider 状态；块统计保留在下方。模式切换、引擎选择在 Phase 3。
+// 翻译 / 恢复 / 进度 + provider 状态 + 模式切换（§7.2）；引擎在设置页选。
 export function App() {
   const [ping, setPing] = useState('连接后台…')
   const [provider, setProvider] = useState<ProviderStatus | null>(null)
@@ -51,6 +52,23 @@ export function App() {
     refresh()
   }
 
+  const MODES: [Mode, string, string][] = [
+    ['stack', '上下', '译文紧跟原文，任何宽度都能用'],
+    ['side', '左右', '需要较宽的窗口；窄了自动退回上下'],
+    ['only', '仅译文', '隐藏原文，参考文献仍保持双语'],
+  ]
+
+  async function chooseMode(mode: Mode) {
+    setNote('')
+    try {
+      const r = await sendToActiveTab({ type: 'axt:set-mode', mode })
+      if (r.mode !== r.preference) setNote(`窗口偏窄，已按上下对照显示（选的是${MODES.find(([m]) => m === r.preference)?.[1] ?? r.preference}）`)
+      refresh()
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   async function restorePage() {
     setNote('')
     try {
@@ -84,6 +102,20 @@ export function App() {
               <button onClick={translate} disabled={!canTranslate}>{running ? '翻译中…' : '翻译'}</button>
               {' '}
               <button onClick={restorePage} disabled={!canRestore}>恢复原文</button>
+            </p>
+            <p style={{ margin: '0 0 8px', display: 'flex', gap: 4, alignItems: 'center' }}>
+              <span style={{ color: '#666' }}>对照</span>
+              {MODES.map(([m, label, title]) => (
+                <button
+                  key={m}
+                  title={title}
+                  onClick={() => chooseMode(m)}
+                  aria-pressed={page.preference === m}
+                  style={{ font: 'inherit', fontWeight: page.preference === m ? 700 : 400 }}
+                >
+                  {label}
+                </button>
+              ))}
             </p>
             <ProgressLine page={page} />
           </section>

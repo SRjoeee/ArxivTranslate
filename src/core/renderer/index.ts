@@ -137,3 +137,6 @@ export function restore(doc: Document): { removedNodes: number; strippedAttrs: n
   for (const style of Array.from(doc.querySelectorAll(`style[${STYLE_ATTR}]`))) style.remove()
   return { removedNodes, strippedAttrs }
 }
+
+export * from './mirror'
+export * from './responsive'
