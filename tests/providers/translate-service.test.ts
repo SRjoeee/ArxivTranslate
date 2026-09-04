@@ -87,4 +87,23 @@ describe('createTranslateService', () => {
     expect(res.ok && res.cached).toBe(0)
     expect(port.putMany).toHaveBeenCalled()
   })
+
+  it('provider 挂住不返回时按超时重试，重试用尽转成错误响应，而不是永远等待', async () => {
+    // 实测 2312.17527：最后一块等了 220s 还没回，整篇停在"进行中"
+    let calls = 0
+    const provider = {
+      id: 'stuck', preservesMarkup: true, maxBatchChars: 1000, maxBatchItems: 10, concurrency: 1,
+      isAvailable: async () => true,
+      translate: () => { calls++; return new Promise<never>(() => {}) }, // 不配合 signal 也不返回
+    }
+    const translate = createTranslateService({
+      getProvider: async () => provider as never,
+      requestTimeoutMs: 20,
+      retry: { maxRetries: 1, baseRetryDelayMs: 0, sleep: async () => {} },
+    })
+    const res = await translate({ request: { segments: [{ id: 'a', text: 'x' }], source: 'en', target: 'zh' } })
+    expect(res.ok).toBe(false)
+    expect(calls).toBe(2) // 首次 + 重试一次
+    if (!res.ok) expect(res.error.kind).toBe('timeout')
+  })
 })

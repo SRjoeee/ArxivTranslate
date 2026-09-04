@@ -3,6 +3,7 @@
 import PQueue from 'p-queue'
 import { cacheKeyFor, type RenderPath } from '@/cache/key'
 import { withRetry, type RetryOptions } from './retry'
+import { attachRequestErrorMeta } from './retry-policy'
 import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 
 export interface CacheEntry {
@@ -33,6 +34,34 @@ export interface TranslateServiceDeps {
   getModel?: () => Promise<string | undefined>
   cache?: CachePort
   retry?: RetryOptions
+  /** 单次请求的上限；默认 60s。LLM 翻一批含几十个占位符的段落可能要十几秒，但不会到一分钟 */
+  requestTimeoutMs?: number
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
+
+/**
+ * 给一次请求加上限。没有上限时一个挂住的连接会让整篇翻译永远停在"进行中"
+ *（实测 2312.17527：153 块翻了 152 块，最后一块等了 220s 还没回，`translation done` 永远不打）。
+ * 用 race 而不是只传 signal：provider 不配合 signal 时也能被切断；超时按可重试的 timeout 处理，
+ * 重试用尽才把这一块标成失败，其余块不受影响。
+ */
+async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
+  const timeout = AbortSignal.timeout(ms)
+  const cutoff = new Promise<never>((_, reject) => {
+    timeout.addEventListener('abort', () => {
+      reject(attachRequestErrorMeta(new ProviderError('timeout', `请求超过 ${ms}ms 没有返回`), { kind: 'timeout', isRetryable: true }))
+    }, { once: true })
+  })
+  try {
+    return await Promise.race([run(timeout), cutoff])
+  } catch (error) {
+    // provider 配合 signal 时抛的是 aborted；只要是我们的超时触发的，就按 timeout 算
+    if (timeout.aborted && error instanceof ProviderError && error.kind === 'aborted') {
+      throw attachRequestErrorMeta(new ProviderError('timeout', `请求超过 ${ms}ms 没有返回`, { cause: error }), { kind: 'timeout', isRetryable: true })
+    }
+    throw error
+  }
 }
 
 export function createTranslateService(deps: TranslateServiceDeps) {
@@ -73,8 +102,9 @@ export function createTranslateService(deps: TranslateServiceDeps) {
       let resultProvider = provider.id
       let resultModel: string | undefined = model || undefined
       if (misses.length > 0) {
+        const timeoutMs = deps.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
         const result = (await queueFor(provider).add(() =>
-          withRetry(() => provider.translate({ ...request, segments: misses }), deps.retry),
+          withRetry(() => withTimeout(signal => provider.translate({ ...request, segments: misses, signal }), timeoutMs), deps.retry),
         )) as TranslateResult
         resultProvider = result.provider
         resultModel = result.model
