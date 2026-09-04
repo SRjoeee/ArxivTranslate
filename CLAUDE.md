@@ -87,7 +87,7 @@ reference/              # 参考仓库，gitignore，只读
 - 任何超过 100 行的模块，先用 plan mode 给出方案再写代码；方案要引用 DESIGN.md 的对应章节。
 - 一个模块一个分支 / PR。`rules`、`protector`、`renderer` 的改动必须附带测试。
 - 结束前必须通过：`pnpm test && pnpm build`。
-- **PR 开出或 push 后，等 Codex 审完再合并**：它会留 👍 反应（无建议）、一条 review + 行内评论（有建议）或限额提示，三种信号之一出现前不要合。评论逐条核实（fixture / 实测 / 读代码）再采纳，没采纳的写明理由。See `docs/agents/codex-review.md`。
+- **PR 开出或 push 后，等 Codex 审完再合并**：它先打 👀 反应表示审查中，结束时留 👍 反应（无建议）、一条 review + 行内评论（有建议）或限额提示，三种终态信号之一出现前不要合。评论逐条核实（fixture / 实测 / 读代码）再采纳，没采纳的写明理由。See `docs/agents/codex-review.md`。
 - 遇到 DESIGN.md 里标 **[待验证]** 的内容，先用 fixture 或 curl 实测，把结论写进 `docs/RESEARCH.md`，再实现。
 - 发现 DESIGN.md 与实测不符：停下，在 RESEARCH.md 记录差异并提出修改建议，不要默默改设计。
 - 代码标识符英文，注释和文档中文。commit message 英文，格式 `type(scope): summary`。
@@ -136,7 +136,7 @@ Issues 与 spec 记录在本仓库的 GitHub Issues，通过 `gh` CLI 读写。S
 
 ### Codex review
 
-合并前必须等 Codex 的审查信号（👍 / 行内评论 / 限额提示），评论逐条核实。See `docs/agents/codex-review.md`.
+合并前必须等 Codex 的终态信号（👍 / 行内评论 / 限额提示；👀 表示还在审），评论逐条核实。See `docs/agents/codex-review.md`.
 
 ### Triage labels
 
