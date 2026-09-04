@@ -6,7 +6,7 @@
 三条查询规矩（Codex 在 #29 上指出的三个漏洞）：
 
 - **只认这一个账号**：`.user.login == "chatgpt-codex-connector[bot]"`，不要用 `test("codex")` 之类的子串匹配——公开仓库里任何 login 含 "codex" 的账号点个 👍 就能让 PR 看起来审完了。
-- **只认针对当前 HEAD 的信号**：行内评论与 review 都带 `commit_id`，只取等于 `git rev-parse HEAD` 的。反应和限额提示没有 commit 字段，要靠**本轮标记**：Codex 开始新一轮时会打一个 👀（并清掉上一轮的反应）。在 push（或 `gh pr create`）**之前**用 `date -u` 记下 UTC 时间 `PRE`（和 GitHub 的 `created_at` 同时区；不能用提交时间 `%cI`），`created_at >= PRE` 的 👀 就是本轮标记；**只有该 👀 之后出现的 👍 / 限额提示**才算这一轮的。用 push 前的时刻而不是"客户端看到新 HEAD 的时刻"：Codex 可能在我们轮询到新 HEAD 之前就已打上 👀，用后者会把唯一的标记丢掉。上一轮在 push 期间刚好收尾留下的 👍 早于新的 👀，被排除。上一轮的旧评论会一直留在接口里，不过滤的话新提交一 push 就"审完了"。
+- **只认针对当前 HEAD 的信号**：行内评论与 review 都带 `commit_id`，只取等于 `git rev-parse HEAD` 的。反应和限额提示没有 commit 字段，要靠**本轮标记**：Codex 开始新一轮时会打一个 👀（并清掉上一轮的反应）。在 push（或 `gh pr create`）**之前**用 `date -u` 记下 UTC 时间 `PRE`（和 GitHub 的 `created_at` 同时区；不能用提交时间 `%cI`），`created_at >= PRE` 的 👀 就是本轮标记；**只有该 👀 之后（含同一秒）出现的 👍 / 限额提示**才算这一轮的。用 push 前的时刻而不是"客户端看到新 HEAD 的时刻"：Codex 可能在我们轮询到新 HEAD 之前就已打上 👀，用后者会把唯一的标记丢掉。上一轮在 push 期间刚好收尾留下的 👍 早于新的 👀，被排除。上一轮的旧评论会一直留在接口里，不过滤的话新提交一 push 就"审完了"。
 - **翻页**：两个列表接口都加 `--paginate`，否则超过一页的反应 / 评论只看得到第一页。
 
 ```sh
@@ -17,14 +17,15 @@ until [ "$(gh pr view <N> --json headRefOid --jq .headRefOid)" = "$HEAD" ]; do s
 # 本轮标记：PRE 之后的 👀；之后的 +1 才是本轮的"审完无建议"
 ROUND=$(gh api --paginate "repos/{owner}/{repo}/issues/<N>/reactions" \
   --jq "[.[] | select(.user.login == \"$BOT\") | select(.content == \"eyes\") | select(.created_at >= \"$PRE\") | .created_at] | max // empty")
+# 与标记同一秒的也算（created_at 只到秒；标记本身是 eyes，不会被 +1 的谓词误计）
 [ -n "$ROUND" ] && gh api --paginate "repos/{owner}/{repo}/issues/<N>/reactions" \
-  --jq ".[] | select(.user.login == \"$BOT\") | select(.content == \"+1\") | select(.created_at > \"$ROUND\") | .content"
+  --jq ".[] | select(.user.login == \"$BOT\") | select(.content == \"+1\") | select(.created_at >= \"$ROUND\") | .content"
 # review + 行内评论（只认针对当前 HEAD 的）
 gh api --paginate "repos/{owner}/{repo}/pulls/<N>/reviews"  --jq ".[] | select(.user.login == \"$BOT\") | select(.commit_id == \"$HEAD\") | .state"
 gh api --paginate "repos/{owner}/{repo}/pulls/<N>/comments" --jq ".[] | select(.user.login == \"$BOT\") | select(.commit_id == \"$HEAD\") | \"\(.path):\(.line // .original_line) \(.body)\""
 # 限额提示（同样只认本轮 👀 之后的）
 [ -n "$ROUND" ] && gh api --paginate "repos/{owner}/{repo}/issues/<N>/comments" \
-  --jq ".[] | select(.user.login == \"$BOT\") | select(.created_at > \"$ROUND\") | select(.body | test(\"usage limits\")) | .body"
+  --jq ".[] | select(.user.login == \"$BOT\") | select(.created_at >= \"$ROUND\") | select(.body | test(\"usage limits\")) | .body"
 ```
 
 | 信号 | 含义 |
