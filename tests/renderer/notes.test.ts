@@ -30,18 +30,28 @@ describe('localizeNotes', () => {
     expect(copy(doc).querySelectorAll('.ltx_note_mark')).toHaveLength(1)
   })
 
-  it('搬过去的内容不带 data-axt-* 标记', () => {
+  it('副本接手译文的块标记，恢复原文时照样被清掉', () => {
     const doc = withNote()
     localizeNotes(doc)
-    expect(copy(doc).querySelector('[data-axt-for]')).toBeNull()
+    expect(copy(doc).getAttribute('data-axt-for')).toBe('n1')
   })
 
-  it('原件那份不动：它的译文由样式隐藏，恢复原文时照常删除', () => {
+  it('是移动不是复制：原件搬完只剩原文，页面上不会出现两份译文', () => {
+    // 第一版用"复制 + 样式隐藏原件里的译文"，只要这一趟没跑成中文就凭空消失，
+    // 切到 stack 又变成三份（用户实测反馈）。移动没有这个耦合
     const doc = withNote()
     localizeNotes(doc)
     const source = doc.querySelector(`.ltx_p:not(.${T_CLASS}) .ltx_note_content:not(.${T_CLASS})`)!
     expect(source.textContent).toContain('English note')
-    expect(doc.querySelectorAll(`.ltx_note_content.${T_CLASS}`)).toHaveLength(1)
+    expect(doc.querySelectorAll(`.ltx_note_content.${T_CLASS}`)).toHaveLength(0)
+    expect(doc.body.textContent!.match(/中文脚注/g)).toHaveLength(1)
+  })
+
+  it('没跑这一趟也不丢内容：原件里仍是原文 + 译文', () => {
+    const doc = withNote()
+    const source = doc.querySelector(`.ltx_p:not(.${T_CLASS})`)!
+    expect(source.textContent).toContain('English note')
+    expect(source.textContent).toContain('中文脚注')
   })
 
   it('脚注还没翻到就先不动，等下一轮', () => {
@@ -50,7 +60,7 @@ describe('localizeNotes', () => {
     expect(copy(doc).textContent).toContain('English note')
   })
 
-  it('幂等：跑第二遍不再改写', () => {
+  it('自幂等：搬完原件就没有译文节点，第二遍什么都不做', () => {
     const doc = withNote()
     expect(localizeNotes(doc)).toBe(1)
     expect(localizeNotes(doc)).toBe(0)

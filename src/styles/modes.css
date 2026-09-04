@@ -184,14 +184,10 @@ html:not([data-axt-mode="side"]) .axt-mirror {
    margin-inline-end（实测 -496px）挂到"文章列外面"。side 模式把文章切成两栏后，
    左栏的"外面"就是右栏——边注正好压在右栏译文上（实测 2312.17141：边注 1112→1592，
    右栏 1116→1856，用户两次反馈"注解跑进主内容区"）。把负边距收掉，边注就留在自己栏内。
-   左栏那份里的译文隐藏：它已经被 localizeNotes 搬进右栏那份副本里了，两栏各自完整 */
+   脚注的译文由 localizeNotes 搬进译文块里那份副本，原件因此只剩原文，两栏各自完整 */
 html[data-axt-mode="side"] .ltx_note_outer {
   width: min(20rem, 100%);
   margin-inline-end: 0;
-}
-
-html[data-axt-mode="side"] .ltx_note .axt-t {
-  display: none;
 }
 
 /* 整块拆开的插图（§7.2）：左份是原件、只显示原文，右份是副本、只有译文。

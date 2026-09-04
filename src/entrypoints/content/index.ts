@@ -71,7 +71,12 @@ export default defineContentScript({
         paper,
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
         transport: request => translate(request),
-        onProgress: p => { progress = p; scheduleSidePrep() },
+        onProgress: p => {
+        progress = p
+        // 脚注的译文要搬进译文块里那份副本，三种模式都需要，所以不放在 side prep 里
+        localizeNotes(document)
+        scheduleSidePrep()
+      },
         signal: controller.signal,
         // 视口优先 + 插入译文时的滚动锚定（DESIGN §10）
         isPriority: block => activeTracker.isNear(block),
@@ -104,14 +109,13 @@ export default defineContentScript({
         if (modes?.effective() !== 'side') return
         // 先整块拆插图，再补镜像：拆过的插图不再参与镜像（两套方案会重复一份）
         const split = splitFigures(document)
-        const notes = localizeNotes(document)
         const made = createMirrors(document)
         const fit = fitTables(document)
         // 边距对齐要在镜像之后：镜像也是译文节点，同样会被站点的相邻兄弟规则影响
         const aligned = alignPairMargins(document)
-        if (split || notes || made || fit.fitted || fit.scrolled || aligned) {
+        if (split || made || fit.fitted || fit.scrolled || aligned) {
           console.debug(
-            `[axt] side prep: +${split} figures split, ${notes} notes localized, +${made} mirrors, `
+            `[axt] side prep: +${split} figures split, +${made} mirrors, `
             + `${fit.fitted} tables scaled, ${fit.scrolled} scrollable, ${aligned} margins aligned`,
           )
         }
