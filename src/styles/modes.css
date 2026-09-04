@@ -47,19 +47,21 @@ html[data-axt-mode="side"] .ltx_document {
   align-items: start;
 }
 
-/* 参与配对的容器继承文档的列线，自身通栏。
-   列表用 :where() 而不是 :is()——:is() 取列表里最具体那一项的权重，
-   `.ltx_itemize > .ltx_item` 是两个类，会把整条规则抬到配对规则之上，
-   于是直接挂在 .ltx_document 下的块（致谢、摘要）被钉成通栏、译文掉到左列下方（实测 2609.00095）。
-   column-gap 要显式写——.ltx_biblist 自带 3em 的间距，subgrid 会用容器自己的值，右栏偏 12px。
-   .ltx_enumerate / .ltx_description 不在列表里：ar5iv 用自己的两列网格排序号，改成 subgrid 会毁掉编号。
-   .ltx_theorem 是定理环境的容器（LaTeXML 总会带这个基类，变体名由作者宏决定）；
-   .ltx_transformed_inner 是 \resizebox 的包裹层，宽表格常被包在里面——
-   两者不入列表时，里面的配对根本进不了网格，只能上下堆（实测 2609.00097） */
-html[data-axt-mode="side"] .ltx_document :where(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
-  .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
-  .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
-  .ltx_itemize, .ltx_itemize > .ltx_item, .ltx_theorem, .ltx_transformed_inner) {
+/* 参与配对的容器 = **内部含有译文的元素**，减去一小撮明确排除的。
+   早期版本在这里列举容器类名（.ltx_para、.ltx_section……），但那是个开放集合：
+   定理环境 .ltx_theorem、\resizebox 的包裹层 .ltx_transformed_inner、证明块 .ltx_proof、
+   作者注 .ltx_author_notes 都是逐个被用户发现后才补进去的，补一个漏一个。
+   改成按结构判定后（实测 2609.00097：右栏元素 250→254、未配对 5→1；2609.00095：108→111），
+   新出现的包裹层自动生效，不需要维护清单。
+   排除项各有理由：译文自身不是容器；表格内部结构改成网格会毁掉表格；
+   .ltx_enumerate / .ltx_description 是 ar5iv 自己的两列网格（编号、术语）；
+   .ltx_inline-block / .ltx_note / .ltx_listing 是行内与预格式化上下文；
+   .ltx_p / .ltx_title / .ltx_caption / .ltx_bibblock 本身就是配对的成员，
+   内部若有译文（脚注那种嵌套）不该再开一套两栏。
+   整体包在 :where() 里让权重为 0，否则会压过下面的配对规则（实测过这个坑）。
+   column-gap 要显式写——.ltx_biblist 自带 3em 的间距，subgrid 会用容器自己的值，右栏偏 12px */
+html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_enumerate, .ltx_description,
+  .ltx_inline-block, .ltx_note, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock))) {
   display: grid;
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
@@ -70,12 +72,18 @@ html[data-axt-mode="side"] .ltx_document :where(.ltx_para, .ltx_abstract, .ltx_s
 /* 配对只依赖一个结构事实：原件后面紧跟一个 .axt-t 兄弟。
    容器内默认通栏，有配对的原件占左栏、译文占右栏——标题、图表说明、参考文献片段
    都不必各写一条规则。构建会把嵌套编译成扁平选择器 */
-html[data-axt-mode="side"] :where(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
-  .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
-  .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
-  .ltx_itemize, .ltx_itemize > .ltx_item, .ltx_theorem, .ltx_transformed_inner) {
+html[data-axt-mode="side"] .ltx_document,
+html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th,
+  .ltx_enumerate, .ltx_description, .ltx_inline-block, .ltx_note, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption,
+  .ltx_bibblock))) {
   & > * {
     grid-column: 1 / -1;
+  }
+
+  /* 参考文献条目里没有配对的内容（序号、作者段）留在左栏，不要横跨分割线（实测 2609.00097）。
+     必须排在配对规则之前：两者特异度相同，写在后面会把译文也钉进左栏 */
+  &.ltx_bibitem > * {
+    grid-column: 1;
   }
 
   & > :has(+ .axt-t) {
@@ -90,11 +98,6 @@ html[data-axt-mode="side"] :where(.ltx_document, .ltx_para, .ltx_abstract, .ltx_
      镜像图片就会贴着栏首而不是像原图那样居中（实测 2609.00097） */
   & > .axt-t[data-axt-inline] {
     margin-inline-start: 0;
-  }
-
-  /* 参考文献条目里没有配对的内容（序号、作者段）留在左栏，不要横跨分割线（实测 2609.00097） */
-  &.ltx_bibitem > * {
-    grid-column: 1;
   }
 }
 
