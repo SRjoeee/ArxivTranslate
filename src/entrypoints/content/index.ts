@@ -47,7 +47,8 @@ export default defineContentScript({
       const activeTracker = tracker
       const translate = createTranslateService({
         getProvider: async () => provider,
-        getModel: async () => config.openaiCompat.model,
+        // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
+        getModel: async () => (config.provider === 'openai-compat' ? config.openaiCompat.model : undefined),
         cache: createMessageCachePort(),
       })
       const t1 = performance.now()

@@ -13,6 +13,11 @@ const LANGUAGES: [string, string][] = [
 
 const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
 
+const PROVIDERS: [Config['provider'], string, string][] = [
+  ['openai-compat', 'LLM（OpenAI 兼容端点）', '译文质量最好，需要 API key'],
+  ['google-web', 'Google 网页翻译（免费）', '不需要 key，整篇几秒翻完，术语准确度不如 LLM'],
+]
+
 // Phase 2：provider 配置 + 连接测试。样式预设、术语表、缓存管理在 Phase 3。
 export function App() {
   const [config, setLocal] = useState<Config>(DEFAULT_CONFIG)
@@ -37,7 +42,8 @@ export function App() {
     setNotice('')
     try {
       const next: Config = { ...config, openaiCompat: { ...config.openaiCompat, apiKey: keyInput || config.openaiCompat.apiKey } }
-      await ensureHostPermission(next.openaiCompat.baseURL)
+      // 免费端点自带 CORS，不需要 host 权限；只有走 LLM 时才申请
+      if (next.provider === 'openai-compat') await ensureHostPermission(next.openaiCompat.baseURL)
       await setConfig(next)
       setLocal(next)
       setHasStoredKey(next.openaiCompat.apiKey.length > 0)
@@ -75,19 +81,28 @@ export function App() {
     <main style={{ maxWidth: 640, margin: '40px auto', font: '14px system-ui, sans-serif', lineHeight: 1.5 }}>
       <h1 style={{ fontSize: 18 }}>arXiv HTML Translator · 设置</h1>
 
-      <h2 style={{ fontSize: 15, marginTop: 24 }}>OpenAI 兼容端点</h2>
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译引擎</h2>
+      <label style={label}>
+        引擎
+        <select style={field} value={config.provider} onChange={e => setLocal(c => ({ ...c, provider: e.target.value as Config['provider'] }))}>
+          {PROVIDERS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        <small style={{ color: '#666' }}>{PROVIDERS.find(([id]) => id === config.provider)?.[2]}</small>
+      </label>
+
+      <h2 style={{ fontSize: 15, marginTop: 24, opacity: config.provider === 'openai-compat' ? 1 : 0.5 }}>OpenAI 兼容端点</h2>
       <label style={label}>
         Base URL
-        <input style={field} value={config.openaiCompat.baseURL} onChange={e => patchOpenAI({ baseURL: e.target.value })} placeholder="https://openrouter.ai/api/v1" />
+        <input style={field} value={config.openaiCompat.baseURL} onChange={e => patchOpenAI({ baseURL: e.target.value })} placeholder="https://openrouter.ai/api/v1" disabled={config.provider !== 'openai-compat'} />
         <small style={{ color: '#666' }}>OpenRouter、DeepSeek、Ollama 等；非 openrouter.ai 的域名保存时会申请访问权限</small>
       </label>
       <label style={label}>
         API key{hasStoredKey ? '（已配置，留空则不改）' : ''}
-        <input style={field} type="password" value={keyInput} onChange={e => setKeyInput(e.target.value)} autoComplete="off" placeholder={hasStoredKey ? '••••••••' : 'sk-…'} />
+        <input style={field} type="password" value={keyInput} onChange={e => setKeyInput(e.target.value)} autoComplete="off" placeholder={hasStoredKey ? '••••••••' : 'sk-…'} disabled={config.provider !== 'openai-compat'} />
       </label>
       <label style={label}>
         模型
-        <input style={field} value={config.openaiCompat.model} onChange={e => patchOpenAI({ model: e.target.value })} placeholder="deepseek/deepseek-v4-flash" />
+        <input style={field} value={config.openaiCompat.model} onChange={e => patchOpenAI({ model: e.target.value })} placeholder="deepseek/deepseek-v4-flash" disabled={config.provider !== 'openai-compat'} />
       </label>
       <label style={label}>
         目标语言
