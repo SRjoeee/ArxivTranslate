@@ -244,7 +244,7 @@ interface ProtectedBlock {
 
 ### 7.2 side（左右对照）
 
-- 核心技巧 [2026-09-04 重做]：配对只依赖一个结构事实——**原件后面紧跟一个 `.axt-t` 兄弟**。凡是可能装下这种配对的容器都设为两列网格（`.ltx_document`、`.ltx_para`、`.ltx_abstract`、各级 `section`、`.ltx_figure` / `.ltx_table` / `.ltx_float`、`.ltx_bibitem` 等），容器内默认通栏，有配对的原件占左栏、`.axt-t` 占右栏：
+- 核心技巧 [2026-09-04 重做]：配对只依赖一个结构事实——**原件后面紧跟一个 `.axt-t` 兄弟**。两条列线**只在 `.ltx_document` 上定义一次**，其余容器用 `grid-template-columns: subgrid` 继承同一组列线并自身通栏；容器内默认通栏，有配对的原件占左栏、`.axt-t` 占右栏：
 
   ```css
   容器 > *              { grid-column: 1 / -1 }
@@ -253,6 +253,9 @@ interface ProtectedBlock {
   ```
 
   这样标题、图表说明、参考文献片段不必各写一条规则就都能左右对照。不需要 wrapper，锚点 id 不受影响
+- **列线必须继承，不能各容器自算** [决定]：早期版本给每个容器都写 `1fr 1fr`，于是每个容器按**自己的宽度**切一半——列表里缩进的段落、`.ltx_biblist` 自带 3em 间距的参考文献条目，分界线都和正文错开（实测同一页出现 720 / 715 / 736 三个位置，视觉上分割带是歪的）。改成 subgrid 后实测 105 个右栏元素全部落在同一条 x 上，为后续画中缝分隔线留出了前提。subgrid 容器要显式写 `column-gap`，否则会用容器自己的间距（`.ltx_biblist` 会偏 12px）
+- `.ltx_enumerate` / `.ltx_description` **不加入** subgrid 链：ar5iv 用它们自己的两列网格排序号与术语，改成 subgrid 会毁掉编号；它们内部的配对退化为上下堆叠
+- 不支持 subgrid 的环境里 `grid-template-columns: subgrid` 整条声明失效，容器退化为单列网格、配对上下堆叠，不会错乱
 - **镜像节点** [决定]：公式与插图没有译文，右栏会空着、内容横跨两栏打断阅读。因此给它们插一份副本作为 `.axt-t.axt-mirror` 兄弟（`MIRROR_SELECTORS`）。只镜像**图形本身**而不是整个 `figure`——figure 里的 `.ltx_caption` 是可翻译块，整体镜像会让右栏那份带着英文说明；figure 作为网格容器时，图形与镜像占一行、说明与译文占下一行。镜像**只在第一次进入 side 模式时生成**（实测要复制约三分之一的正文节点），之后留在 DOM 里由 `html:not([data-axt-mode="side"]) .axt-mirror { display: none }` 控制显隐，所以模式切换仍然只改 `<html>` 上的一个属性。这是 §7.1 第 2 条的一处放宽：首次进入 side 有一次性 DOM 写入，恢复原文时随 `.axt-t` 一并删除
 - 译文在 side 模式下**不压缩上边距**：它与原文同处一行，边距不一致会让两边错位（实测 `h2` 差 19px、`figure` 差 64px）。stack / only 才应用 `margin: 0.25em 0 0`
 - 文档主标题与它的译文通栏居中，不参与左右配对（像论文页眉）；`.ltx_title` 有 `max-inline-size: 52rem`，文章列变宽后必须 `margin-inline: auto` 才居中；`span.ltx_p`、表格与 inline-block 内的 `.ltx_p` 降级为 stack（ar5iv 样式已把 `.ltx_para` 设为 `display:block`，无冲突）
