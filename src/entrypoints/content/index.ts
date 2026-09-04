@@ -5,11 +5,12 @@ import { extract, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
 import {
-  alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, restore,
+  alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, localizeNotes, restore,
+  splitFigures,
   type Mode, type ModeController,
 } from '@/core/renderer'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { createViewportTracker, withViewportAnchor, type ViewportTracker } from '@/core/scheduler'
+import { createCoalescer, createViewportTracker, type ViewportTracker } from '@/core/scheduler'
 import { isAxtMessage } from '@/shared/messages'
 import { createMessageCachePort } from './cache-port'
 import { enableDebug } from './debug'
@@ -70,11 +71,10 @@ export default defineContentScript({
         paper,
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
         transport: request => translate(request),
-        onProgress: p => { progress = p; scheduleSidePrep() },
+          onProgress: p => { progress = p; prep.schedule() },
         signal: controller.signal,
-        // 视口优先 + 插入译文时的滚动锚定（DESIGN §10）
+        // 视口优先（DESIGN §10）；视口不跳交给浏览器原生 scroll anchoring，这里不再做布局读取
         isPriority: block => activeTracker.isNear(block),
-        anchor: withViewportAnchor,
       })
         .finally(() => activeTracker.disconnect())
         .then(p => {
@@ -89,41 +89,40 @@ export default defineContentScript({
     }
 
     let fitObserver: ResizeObserver | null = null
-    let fitTimer = 0
 
     /**
-     * side 模式的两件准备都依赖"译文已经在 DOM 里"：镜像要看哪些内容没有配对，
-     * 表格缩放要看哪些表格有了译文。译文是逐块到达的，所以随进度去抖重算，
-     * 而不是进入模式时跑一次（跑早了会把整篇内容当成没有配对的内容复制一遍）。
+     * 译文到达后的整理：脚注译文搬进副本（三种模式都要），side 模式再补镜像、拆图、缩表、对齐边距。
+     * 译文是逐块到达的，随进度合并执行；纯去抖会被连续的进度回调饿死，直到整篇翻完才跑
+     * （实测 413 个镜像在最后一刻同时出现），所以用带最长等待的合并器。
      */
-    function scheduleSidePrep(): void {
+    const prep = createCoalescer(() => {
+      localizeNotes(document)
       if (modes?.effective() !== 'side') return
-      clearTimeout(fitTimer)
-      fitTimer = window.setTimeout(() => {
-        if (modes?.effective() !== 'side') return
-        const made = createMirrors(document)
-        const fit = fitTables(document)
-        // 边距对齐要在镜像之后：镜像也是译文节点，同样会被站点的相邻兄弟规则影响
-        const aligned = alignPairMargins(document)
-        if (made || fit.fitted || fit.scrolled || aligned) {
-          console.debug(
-            `[axt] side prep: +${made} mirrors, ${fit.fitted} tables scaled, ${fit.scrolled} scrollable, ${aligned} margins aligned`,
-          )
-        }
-      }, 150)
-    }
+      // 先整块拆插图，再补镜像：拆过的插图不再参与镜像（两套方案会重复一份）
+      const split = splitFigures(document)
+      const made = createMirrors(document)
+      const fit = fitTables(document)
+      // 边距对齐要在镜像之后：镜像也是译文节点，同样会被站点的相邻兄弟规则影响
+      const aligned = alignPairMargins(document)
+      if (split || made || fit.fitted || fit.scrolled || aligned) {
+        console.debug(
+          `[axt] side prep: +${split} figures split, +${made} mirrors, `
+          + `${fit.fitted} tables scaled, ${fit.scrolled} scrollable, ${aligned} margins aligned`,
+        )
+      }
+    }, { delay: 150, maxWait: 1000 })
 
     /** 进入 side 时的准备：右栏补一份公式与图表（§7.2），并把表格缩到能装进一栏 */
     function enterSide(effective: Mode): void {
       if (effective !== 'side') {
         fitObserver?.disconnect()
         fitObserver = null
-        clearTimeout(fitTimer)
+        prep.cancel()
         // 对齐用的内联边距只服务于左右分栏，其他模式下要还给站点样式
         clearPairMargins(document)
         return
       }
-      scheduleSidePrep()
+      prep.schedule()
       // 栏宽随窗口变化，缩放比例要跟着重算。只在宽度真的变了才重算——
       // 缩放表格本身也会让观察目标报告一次尺寸变化，不设这道闸就会自激振荡
       if (!fitObserver && typeof ResizeObserver === 'function') {
@@ -132,7 +131,7 @@ export default defineContentScript({
           const width = Math.round(entries[0]?.contentRect.width ?? 0)
           if (width === lastWidth) return
           lastWidth = width
-          scheduleSidePrep()
+          prep.schedule()
         })
         const target = document.querySelector(DOCUMENT_ROOT)
         if (target) fitObserver.observe(target)
@@ -158,7 +157,7 @@ export default defineContentScript({
       modes = null
       fitObserver?.disconnect()
       fitObserver = null
-      clearTimeout(fitTimer)
+      prep.cancel()
       const result = restore(document)
       progress = idle()
       return { removedNodes: result.removedNodes }

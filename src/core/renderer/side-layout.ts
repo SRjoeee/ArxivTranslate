@@ -25,7 +25,11 @@ export const SIDE_DENY = [
  * `:is(.ltx_note *)` 恒为 false（原生 `.ltx_note *` 正常），并进去会让测试与线上行为不一致。
  * 运行时改用 isSideContainer() 判定。
  */
-export const SIDE_DENY_SUBTREE = '.ltx_note'
+export const SIDE_DENY_SUBTREE = [
+  '.ltx_note', // 脚注（上面那段）
+  // 整块拆开的插图：两份都不参与配对网格，内部一律交给 ar5iv 自己排（DESIGN §7.2）
+  '[data-axt-split]', '.axt-split',
+].join(', ')
 
 /** 会被 CSS 设成两栏网格的元素 */
 export const SIDE_CONTAINER = `:has(.axt-t):not(:is(${SIDE_DENY}))`
@@ -33,6 +37,19 @@ export const SIDE_CONTAINER = `:has(.axt-t):not(:is(${SIDE_DENY}))`
 /** 是不是配对容器（含子树排除）。运行时一律走这里，别直接 matches(SIDE_CONTAINER) */
 export function isSideContainer(el: Element): boolean {
   return el.matches(SIDE_CONTAINER) && el.closest(SIDE_DENY_SUBTREE) === null
+}
+
+/**
+ * 镜像用的容器判定：译文**还没到**、但块已经标记（data-axt-id）的元素也算。
+ * 公式与插图本来就没有译文，等它们所在段落的译文到达才镜像，只是白等——
+ * 实测 2312.17141 全部 413 个镜像在翻译结束那一刻才一起出现，之前公式一直居中横跨两栏。
+ * 块标记在翻译开始的第一刻就写好，所以第一趟 side prep 就能把它们镜像完。
+ * 安全边界不变：带块标记或内部含块的子元素仍然不镜像（mirror.ts 的闸 2），整块复制的事故不会重演。
+ */
+export const MIRROR_CONTAINER = `:has(.axt-t, [data-axt-id]):not(:is(${SIDE_DENY}))`
+
+export function isMirrorContainer(el: Element): boolean {
+  return el.matches(MIRROR_CONTAINER) && el.closest(SIDE_DENY_SUBTREE) === null
 }
 
 // 堆叠区：这些格子里不做左右分栏，配对降级为上下堆叠（modes.css 里有同一份清单，测试守着）。

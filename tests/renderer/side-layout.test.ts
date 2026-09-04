@@ -43,9 +43,12 @@ describe('side 模式的容器覆盖', () => {
   const files = readdirSync(FIXTURE_DIR).filter(f => f.endsWith('.html')).sort()
 
   it('样式表里的排除清单与 side-layout.ts 保持一致（TS 是事实来源）', () => {
-    const normalize = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean).sort().join(',')
-    // 子树排除在样式表里写成 `X *`，TS 侧由 isSideContainer 用 closest 实现（happy-dom 的 :is(X *) 恒假）
-    expect(normalize(deny)).toBe(normalize(`${SIDE_DENY}, ${SIDE_DENY_SUBTREE} *`))
+    const parts = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean)
+    const normalize = (v: string[]) => [...new Set(v)].sort().join(',')
+    // 子树排除在样式表里写成 `X, X *` 两条；TS 侧由 isSideContainer 用 closest 实现
+    //（happy-dom 的 :is(X *) 恒为 false，并进 SIDE_CONTAINER 会让测试与线上行为不一致）
+    const subtrees = parts(SIDE_DENY_SUBTREE).flatMap(x => [x, `${x} *`])
+    expect(normalize(parts(deny))).toBe(normalize([...parts(SIDE_DENY), ...subtrees]))
   })
 
   it('排除项只允许是本身不成网格的元素：ar5iv 自己的网格必须接管而不是排除', () => {
@@ -81,7 +84,9 @@ describe('side 模式的容器覆盖', () => {
     // 加在列表容器 / 列表项上会让左栏窄一截、右栏顶格（实测 2312.17141：左 444 / 右 484）
     expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) \{\s*padding-inline-start: 0/)
     expect(RULES).toMatch(/&\.ltx_item:has\(> \.ltx_tag\) \{[^}]*padding-inline-start: 0/)
-    expect(RULES).toMatch(/&\.ltx_item :where\(:has\(\+ \.axt-t\), \.axt-t\):not\(\.ltx_tag\) \{\s*padding-inline-start: 2\.5rem/)
+    // 只缩进容器的直接子元素：写成后代选择器会连脚注里的译文一起缩进（实测）
+    expect(RULES).toMatch(/&:is\(\.ltx_item, \.ltx_item \*\) > :where\(:has\(\+ \.axt-t\), \.axt-t\):not\(\.ltx_tag\) \{\s*padding-inline-start: 2\.5rem/)
+    expect(RULES).not.toMatch(/&\.ltx_item :where\(:has\(\+ \.axt-t\), \.axt-t\)/)
   })
 
   it('堆叠区清单：样式表与 side-layout.ts 保持一致（TS 是事实来源）', () => {
@@ -103,6 +108,15 @@ describe('side 模式的容器覆盖', () => {
     const content = doc.querySelector('.ltx_note_content')!
     expect(content.matches(container)).toBe(true) // 只看选择器的话它够格当容器
     expect(isSideContainer(content)).toBe(false) // 子树排除把它挡在外面
+  })
+
+  it('脚注只留一份：译文复制进副本后，原件那份由样式隐藏', () => {
+    // 边注挂在页面右缘是 arXiv 自己的排法，不要改；要解决的是同一条脚注出现两次
+    expect(RULES).toMatch(/\.ltx_note\[data-axt-note\] > \.ltx_note_outer \{\s*display: none/)
+    // 别再把边注收进本栏：正文被挤、列表项还会被 ar5iv 写死的 height:0 盖住
+    expect(RULES).not.toMatch(/\.ltx_note_outer \{[^}]*margin-inline-end: 0/)
+    // 搬进副本的译文另起一行，且不再套一层脚注框
+    expect(RULES).toMatch(/\.axt-note-t \{[^}]*display: block/)
   })
 
   for (const file of files) {

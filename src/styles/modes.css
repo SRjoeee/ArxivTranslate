@@ -70,7 +70,7 @@ html[data-axt-mode="side"] .ltx_document {
    英文横跨分割线、中文挤成 39px 的窄条（实测 2609.00097）；这类网格必须接管而不是排除。
    整体包在 :where() 里让权重为 0，否则会压过下面的配对规则（实测过这个坑）。
    column-gap 要显式写——.ltx_biblist 自带 3em 的间距，subgrid 会用容器自己的值，右栏偏 12px */
-html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell))) {
+html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *))) {
   display: grid;
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
@@ -83,7 +83,7 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, tab
    都不必各写一条规则。构建会把嵌套编译成扁平选择器 */
 html[data-axt-mode="side"] .ltx_document,
 html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th,
-  .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell))) {
+  .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *))) {
   & > * {
     grid-column: 1 / -1;
   }
@@ -143,7 +143,10 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, tab
     padding-inline-start: 0;
   }
 
-  &.ltx_item :where(:has(+ .axt-t), .axt-t):not(.ltx_tag) {
+  /* 只缩进**容器的直接子元素**，不能写成后代选择器：列表项里任意深度的译文都会被缩进，
+     包括深埋在脚注里的那份——实测 2312.17141 的脚注译文被塞了 40px 的标记槽，
+     在边注里比原文缩进一截（用户反馈"位置是乱的"）。配对放置本来也只作用于直接子元素，这里保持一致 */
+  &:is(.ltx_item, .ltx_item *) > :where(:has(+ .axt-t), .axt-t):not(.ltx_tag) {
     padding-inline-start: 2.5rem;
   }
 }
@@ -177,6 +180,48 @@ html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block, .ltx_flex_cell) :is(.
 
 /* 镜像节点只在 side 模式出现（§7.2）：其他模式下它会让公式、图表重复一份 */
 html:not([data-axt-mode="side"]) .axt-mirror {
+  display: none;
+}
+
+/* 脚注（§7.2）：arXiv 把脚注渲染成挂在**页面右缘**的边注（视口 ≥ 96rem 时常驻，
+   `.ltx_note_outer` 用 float 加负的 margin-inline-end 推到文章外；更窄则折叠、hover 弹出）。
+   那个位置是对的，不要动它——试过把边注收进本栏，正文被挤、列表项还被盖住（用户反馈"影响阅读"）。
+   要解决的是**同一条脚注出现两次**：段落译文由占位符协议回填，脚注是受保护节点，
+   于是译文段落里会重建一份原文脚注。localizeNotes 把译文复制进那份副本（副本因此是原文 + 译文，
+   上下排），原件那份就多余了——它标上 data-axt-note 后由这条规则整框隐藏。
+   只隐藏**确实复制过**的那份：没复制成时原样显示，不会把脚注弄丢 */
+html[data-axt-on] .ltx_note[data-axt-note] > .ltx_note_outer {
+  display: none;
+}
+
+/* 搬进副本的译文：另起一行接在原文下面。它已经被摘掉 .ltx_note_content，
+   不再套一层 ar5iv 的脚注框（那会多一条 double 顶边线与 9.6px 缩进） */
+html[data-axt-on] .axt-note-t {
+  display: block;
+  margin-top: 0.35em;
+}
+
+/* 整块拆开的插图（§7.2）：左份是原件、只显示原文，右份是副本、只有译文。
+   插图里的图与公式没有译文，按块配对右栏就空着；整张图跨两栏又等于放弃对照，
+   所以整块复制一份。两份结构相同，行天然对齐。
+   **不缩放**：栏窄了让 ar5iv 自己重排（.ltx_flex_figure 本身就是 flex-flow: wrap，
+   实测 2312.17141 满栏 342px 高、半栏 546px 且不溢出）；实在不能重排的（宽公式、宽 SVG，
+   实测 8 张图里 3 张溢出 78 / 102 / 209px）退化为栏内横滑，字号一律不动 */
+html[data-axt-mode="side"] [data-axt-split] .axt-t {
+  display: none;
+}
+
+html[data-axt-mode="side"] :is([data-axt-split], .axt-split) {
+  max-width: 100%;
+  overflow: auto hidden;
+}
+
+/* stack 只看原件（它内部本来就是原文 + 译文上下排），only 只看副本（它只有译文） */
+html[data-axt-mode="stack"] .axt-split {
+  display: none;
+}
+
+html[data-axt-mode="only"] [data-axt-split] {
   display: none;
 }
 
