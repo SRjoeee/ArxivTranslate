@@ -89,10 +89,12 @@ html[data-axt-mode="side"] .ltx_document > .ltx_title_document + .axt-t {
   margin-inline: auto;
 }
 
-/* --main-width 还被图片、代码块、单元格的 max-width 引用，变量放大后它们会跟着变宽；
-   这些内容本身没有双列需求，钉回原值（RESEARCH.md §3.2 的副作用一条） */
-html[data-axt-mode="side"] :is(.ltx_graphics, .ltx_listing, .ltx_td) {
-  max-width: 52rem;
+/* 图片、代码块、单元格的 max-width 在 ar5iv 里跟着 --main-width 走。
+   side 模式下它们要装进的是**一栏**而不是整个文章列，所以约束成所在格子的 100%
+   （2026-09-04 实测：钉成 52rem 会让 832px 的插图塞进 484px 的栏里，撑出栏外）。
+   宽高比由浏览器按内在尺寸保持，不需要额外写 height。 */
+html[data-axt-mode="side"] :is(.ltx_graphics, .ltx_listing, .ltx_td, img, svg) {
+  max-width: 100%;
 }
 
 /* ── only：仅译文（§7.4）──────────────────────────────────────────────────
