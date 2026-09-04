@@ -36,6 +36,7 @@ gh api --paginate "repos/{owner}/{repo}/pulls/<N>/comments" --jq ".[] | select(.
 | 本轮 👀 之后的 "You have reached your Codex usage limits" | 这次没审 |
 
 只有 👀 或什么都没有 = 还在审（或还没轮到），继续等；通常几分钟内出终态。push 新提交会重新开始一轮。
+**等多久**：push 后 30 分钟连 👀 都没有，视为 Codex 这轮没接（实测 #29 审了五轮后第六轮再没来），把这一点告诉用户、由用户决定是否合并，不要无限等。
 
 ## 处理评论的规矩
 
