@@ -12,6 +12,8 @@ import { SIDE_DENY, T_CLASS } from '@/core/renderer'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 const CSS = readFileSync(join(import.meta.dirname, '../../src/styles/modes.css'), 'utf8')
+/** 注释里也写着选择器（讲取舍用的），做文本断言前先去掉 */
+const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
 
 /** 从样式表里取出容器判定，样式表是唯一事实来源，改了这里测试自动跟上 */
 function selectorsFromCss(): { container: string; deny: string } {
@@ -49,6 +51,33 @@ describe('side 模式的容器覆盖', () => {
     for (const grid of ['.ltx_enumerate', '.ltx_biblist', '.ltx_bibitem', '.ltx_item']) {
       expect(SIDE_DENY).not.toContain(grid)
     }
+  })
+
+  it('多面板插图不接管：flex 容器与分格都不算配对容器', () => {
+    // ar5iv 用 flex 让面板并排，接管成网格后每个面板各占一行、撑满文章列（实测 2410.00260）
+    let checked = 0
+    for (const file of files) {
+      const doc = new DOMParser().parseFromString(readFileSync(join(FIXTURE_DIR, file), 'utf8'), 'text/html')
+      const root = doc.querySelector(DOCUMENT_ROOT)
+      if (!root) continue
+      fakeTranslate(doc)
+      const flex = Array.from(root.querySelectorAll('.ltx_flex_figure, .ltx_flex_cell'))
+      checked += flex.length
+      expect(flex.filter(el => el.matches(container)).map(el => el.className)).toEqual([])
+    }
+    expect(checked).toBeGreaterThan(0) // fixture 里确实有多面板插图，这条测试不是空跑
+  })
+
+  it('被排除的布局容器要有降级规则，格内的配对才不会各自长出隐式两列', () => {
+    // 父级是 flex 时后代够不到文档轨道，subgrid 失效后会退化成隐式两列
+    const stack = /:is\(([^)]*)\)[^{]*\{\s*display: block/.exec(RULES)
+    expect(stack?.[1]).toContain('.ltx_flex_cell')
+  })
+
+  it('列表标记要脱离网格流：否则会被网格项块级化，单独占一行落在正文上方', () => {
+    // happy-dom 没有布局引擎，这里守的是规则本身；效果的实测记录在 DESIGN §7.2
+    expect(RULES).toMatch(/&\.ltx_item > \.ltx_tag \{[^}]*position: absolute/)
+    expect(RULES).toMatch(/&\.ltx_item:has\(> \.ltx_tag\) \{[^}]*padding-inline-start/)
   })
 
   for (const file of files) {
