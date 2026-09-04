@@ -267,6 +267,7 @@ interface ProtectedBlock {
 - 不支持 subgrid 的环境里 `grid-template-columns: subgrid` 整条声明失效，容器退化为单列网格、配对上下堆叠，不会错乱
 - **镜像节点** [决定]：公式与插图没有译文，右栏会空着、内容横跨两栏打断阅读。因此给它们插一份副本作为 `.axt-t.axt-mirror` 兄弟（`MIRROR_SELECTORS`）。只镜像**图形本身**而不是整个 `figure`——figure 里的 `.ltx_caption` 是可翻译块，整体镜像会让右栏那份带着英文说明；figure 作为网格容器时，图形与镜像占一行、说明与译文占下一行。镜像**只在第一次进入 side 模式时生成**（实测要复制约三分之一的正文节点），之后留在 DOM 里由 `html:not([data-axt-mode="side"]) .axt-mirror { display: none }` 控制显隐，所以模式切换仍然只改 `<html>` 上的一个属性。这是 §7.1 第 2 条的一处放宽：首次进入 side 有一次性 DOM 写入，恢复原文时随 `.axt-t` 一并删除
 - 译文在 side 模式下**不压缩上边距**：它与原文同处一行，边距不一致会让两边错位（实测 `h2` 差 19px、`figure` 差 64px）。stack / only 才应用 `margin: 0.25em 0 0`
+- **同一行两栏的上边距要抄齐** [决定，2026-09-04]：译文作为下一个兄弟插入，会改写站点 CSS 里**相邻兄弟选择器**的匹配结果。ar5iv 有形如 `.ltx_role_affiliation + .ltx_role_affiliation { margin-top: 8px }` 的规则，而译文复制原块的 class，于是原文的前一个兄弟是上一条**译文**（角色不同 → 0px）、译文的前一个兄弟是自己的**原文**（角色相同 → 8px）；网格里格子的顶端 = 行顶 + 自身 `margin-top`，两栏就差了 8px（实测 2501.00077v1 作者区。对照实验：去掉自身该类、去掉前一个兄弟的该类、或在两者中间插一个节点，8px 都归零）。CSS 没有"取兄弟的计算值"的写法，因此 `alignPairMargins`（`src/core/renderer/pair-margins.ts`）在 side prep 里把原文的计算上边距抄到译文的内联样式上——只写我们自己的节点，不碰原节点（§7.1）。每轮**先擦掉上一轮写的值再量**，否则量到的是自己写进去的，栏宽或站点样式变了就修不回来；离开 side 模式时清空，把边距还给站点样式。实测该页 167 对里只有 2 对需要改写、整轮 1.2ms，稳定后重复调用不再改动
 - 文档主标题与它的译文通栏居中，不参与左右配对（像论文页眉）；`.ltx_title` 有 `max-inline-size: 52rem`，文章列变宽后必须 `margin-inline: auto` 才居中；`span.ltx_p`、表格与 inline-block 内的 `.ltx_p` 降级为 stack（ar5iv 样式已把 `.ltx_para` 设为 `display:block`，无冲突）
 - `.ltx_para` 内非成对的子元素（行间公式、图表等）设 `grid-column: 1 / -1` 通栏
 - 标题、图表说明：降级为上下堆叠（它们的父级是整个 section，做不了 grid）
