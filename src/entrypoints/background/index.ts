@@ -8,7 +8,10 @@ import { createStatusHandler, createTranslateHandler } from './translate-handler
 // background：消息路由 + 翻译队列 + 缓存。WXT ≥0.20 不带 polyfill，异步响应必须用 sendResponse + return true。
 export default defineBackground(() => {
   const providerFromConfig = async () => getProvider(await getConfig())
-  const modelFromConfig = async () => (await getConfig()).openaiCompat.model
+  const modelFromConfig = async () => {
+    const config = await getConfig()
+    return config.provider === 'openai-compat' ? config.openaiCompat.model : undefined
+  }
   const translate = createTranslateHandler({ getProvider: providerFromConfig, getModel: modelFromConfig, cache: translationCache })
   const status = createStatusHandler({ getProvider: providerFromConfig, getModel: modelFromConfig })
 

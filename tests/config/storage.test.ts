@@ -32,3 +32,25 @@ describe('config storage', () => {
     await expect(setConfig({ ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, baseURL: 'not a url' } })).rejects.toThrow()
   })
 })
+
+describe('provider 选择', () => {
+  it('两个 provider 都能存取，getProvider 返回对应实现', async () => {
+    const { getProvider } = await import('@/providers')
+    const llm = getProvider({ ...DEFAULT_CONFIG, provider: 'openai-compat' })
+    expect(llm.id).toBe('openai-compat')
+    expect(llm.kind).toBe('llm')
+
+    const free = getProvider({ ...DEFAULT_CONFIG, provider: 'google-web' })
+    expect(free.id).toBe('google-web')
+    expect(free.kind).toBe('mt')
+    expect(free.preservesMarkup).toBe(true)
+    expect(await free.isAvailable()).toBe(true)
+
+    await setConfig({ ...DEFAULT_CONFIG, provider: 'google-web' })
+    expect((await getConfig()).provider).toBe('google-web')
+  })
+
+  it('未知 provider 被 schema 拒绝', async () => {
+    await expect(setConfig({ ...DEFAULT_CONFIG, provider: 'nope' } as never)).rejects.toThrow()
+  })
+})
