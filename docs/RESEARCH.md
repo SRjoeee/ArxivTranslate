@@ -218,6 +218,41 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 - 本次在页面主世界执行；content script 的隔离世界是否同样暴露 `Translator`，待 Phase 1 有 WXT 骨架后用真实 content script 验证（预期可用，Web API 不受 world 隔离影响）。
 - 语言包大小未测（Chrome 不暴露字节数，`total` 恒为 1）；67 s 的下载时长对应本机网络，仅作量级参考。
 
+## 6.5 MV3 service worker 是当前延迟的根因（2026-09-04）
+
+页面加载后要等几十秒才开始翻译，逐层测下来结论如下（日志见 content 的 `[axt] start:`）：
+
+| 现象 | 数据 |
+|---|---|
+| `axt:ping` 往返（background 只回一个常量） | 投递 0–51 ms，SW 年龄 0 s |
+| 紧接着的 `axt:provider-status`（无网络请求，只读配置 + 判断有没有 key） | 6.7 s / 13.5 s / 77 s（冷 worker），4 ms（热 worker） |
+| 其中 handler 内部 | 6663 ms（投递 0 ms，回程 13 ms） |
+| 翻译中途 | `Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received` |
+
+同一个刚启动的 worker 上，前一条消息 50 ms、后一条 6.7 秒，且 handler 内部没有任何 I/O。加上那条"通道在收到响应前关闭"的报错，指向 **MV3 的 service worker 在等待期间被挂起 / 回收**，与我们的代码无关。缓存写入扫全库（§9）确实是个真缺陷，也已修复，但不是这次延迟的根因，之前的判断作废。
+
+**参考项目怎么绕开**：Read Frog 把 provider 的 `fetch` 放在 **content script**（`utils/host/translate/api/*.ts` 由 host content 调用），service worker 完全不在请求链路上。FluentRead 有 `platform/http/runtime.ts` 抽象，可替换 transport。
+
+## 6.6 Google translateHtml 免费接口实测（2026-09-04，页面上下文）
+
+端点与参数照 Read Frog `utils/host/translate/api/google.ts`：`POST https://translate-pa.googleapis.com/v1/translateHtml`，`Content-Type: application/json+protobuf`，`X-Goog-API-Key`（公开常量），body `[[[items...], from, to], "wt_lib"]`。
+
+| 批量 | 耗时 | 结果 |
+|---|---|---|
+| 2 条 | 307 ms | 全部返回 |
+| 20 条 | 183 ms | 全部返回 |
+| 60 条 | 250 ms | 全部返回 |
+| 150 条 | 556 ms | 全部返回 |
+
+两个关键结论：
+
+1. **可在页面 / content script 上下文直接调用**，响应带 CORS（`response.type === "cors"`），不需要经过 background。
+2. **原样保留我们的占位符**：`Let <x id="1"/> be a <t id="2">connected</t> graph` → `让<x id="1"/>成为<t id="2">连接</t>图表`。void 与 paired 占位符、id 全部完好，所以它走 **markup 路径**，`preservesMarkup: true`，不需要 runs 兜底。DESIGN §8 里把 `google-gtx` 预设为 `preservesMarkup: false` 需要修订。
+
+对比：一篇 159 块的论文用 LLM 走了 190 s，用这个接口按 150 条一批只需约 1 s。译文质量是机器翻译水准（"weights" 译成"重量"），适合大批量回归测试与首屏即时显示，不适合替代 LLM 做最终译文。
+
+---
+
 ## 7. DESIGN.md 修订清单
 
 按章节排列。每条只提建议，是否采纳由设计文档决定。
@@ -244,4 +279,6 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 | 21 | §8.3 fallback 链默认顺序 | `chrome-builtin` 单句 10–20 ms 且离线，建议在模型已就绪时把它排在用户选定的 LLM 之前作为视口首屏的即时引擎，LLM 结果到达后替换（缓存键含 provider，两者不冲突）；是否采纳取决于对译文质量的取舍 | §6.2 |
 | 18 | §11 fixture 覆盖多年份 | 改为"覆盖多领域与多结构"，年份不再是版本代理 | §1 |
 | 19 | §14 arXiv 自身 JS 冲突 | 实测无冲突面（无 MutationObserver / MathJax / 脚注 JS，脚注弹出纯 CSS），风险可降为低 | §3.3 |
+| 22 | §8 / §10 provider 请求跑在 background | 实测 MV3 的 service worker 会在等待中被挂起，一条无 I/O 的 `provider-status` 冷启动要 6.7–77 s，翻译中途出现"消息通道关闭"报错。建议照 Read Frog 把 provider 的 fetch 移到 content script，background 只保留缓存与配置 | §6.5 |
+| 23 | §8 `google-gtx` 用 `translate_a/single`、`preservesMarkup: false` | 改用 Read Frog 的 `translate-pa.googleapis.com/v1/translateHtml`：实测保留占位符，`preservesMarkup: true`，批量 150 条 556 ms | §6.6 |
 | 20 | §15.1 SVG 图文字按普通块翻译 | 实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics` | §2.9 |
