@@ -404,7 +404,9 @@ export interface TranslateResult {
 ## 10. 调度
 
 - `IntersectionObserver` 给视口内及其前后各一屏的块最高优先级（参数照 FluentRead：`rootMargin: '600px 0px'`、`threshold: 0.01`，Read Frog 同为 600px）；批次队列每次取批时优先取含临近视口块的批次。IO 首次回调是异步的，而运行循环一开始就同步取走并发数个批次，所以追踪器创建时先按 `getBoundingClientRect` 同步播种一次临近集合，之后以 IO 为准
-- 插入译文时用移植自 FluentRead 的滚动锚定保持视口不跳；锚定按**批**做一次而不是按块（锚定的 `elementFromPoint` / `getBoundingClientRect` 都强制布局，MathML 重的页面按块锚定会把主线程卡住几十秒，实测 2609.00062）
+- **插入译文时不做滚动锚定，也不做任何布局读取** [决定，2026-09-05]：视口不跳交给 Chrome 原生 scroll anchoring（`overflow-anchor: auto` 是默认值；实测在视口上方插入 600px，浏览器自动补偿 575px 滚动、锚点位移 0）。早期移植 FluentRead 的 JS 锚定（`elementFromPoint` + `getBoundingClientRect`）每批强制两次全页布局，side 模式下每次 130–150ms、stack 90–100ms（15644 个节点、~700 个 subgrid 容器）；8 个 worker 一百多批下来，全命中缓存的 826 块也要 16.5s，主线程长任务 52 条、每条 ~90ms 首尾相接。去掉后翻译只受网络 / 缓存往返约束
+- **进度事件用带最长等待的合并器，不用纯去抖** [决定，2026-09-05]：翻译中每秒几十次进度回调，150ms 去抖计时器一直被重置，side prep 直到整篇翻完才跑（实测 413 个镜像在最后一刻同时出现，之前公式一直居中横跨两栏）。`createCoalescer(fn, { delay: 150, maxWait: 1000 })`：事件再密也至少每秒整理一次
+- **镜像不等译文** [决定，2026-09-05]：公式与插图本来就没有译文，等它们所在段落的译文到达才镜像是白等。块标记（`data-axt-id`）在翻译开始的第一刻就写好，镜像的容器判定改为 `:has(.axt-t, [data-axt-id])`，第一趟 prep 就把它们全部镜像；闸 2（带块标记或内部含块的不镜像）不变，整块复制的事故不会重演
 - 其余块按文档顺序在后台排队，一篇论文最终全部翻完
 - 每个 provider 一个 `p-queue` 实例，并发上限来自 provider 声明
 - popup 显示进度（已翻 / 总数 / 失败数），失败块可单击重试

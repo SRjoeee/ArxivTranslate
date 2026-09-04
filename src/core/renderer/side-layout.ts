@@ -39,6 +39,19 @@ export function isSideContainer(el: Element): boolean {
   return el.matches(SIDE_CONTAINER) && el.closest(SIDE_DENY_SUBTREE) === null
 }
 
+/**
+ * 镜像用的容器判定：译文**还没到**、但块已经标记（data-axt-id）的元素也算。
+ * 公式与插图本来就没有译文，等它们所在段落的译文到达才镜像，只是白等——
+ * 实测 2312.17141 全部 413 个镜像在翻译结束那一刻才一起出现，之前公式一直居中横跨两栏。
+ * 块标记在翻译开始的第一刻就写好，所以第一趟 side prep 就能把它们镜像完。
+ * 安全边界不变：带块标记或内部含块的子元素仍然不镜像（mirror.ts 的闸 2），整块复制的事故不会重演。
+ */
+export const MIRROR_CONTAINER = `:has(.axt-t, [data-axt-id]):not(:is(${SIDE_DENY}))`
+
+export function isMirrorContainer(el: Element): boolean {
+  return el.matches(MIRROR_CONTAINER) && el.closest(SIDE_DENY_SUBTREE) === null
+}
+
 // 堆叠区：这些格子里不做左右分栏，配对降级为上下堆叠（modes.css 里有同一份清单，测试守着）。
 // 既然没有右栏，里面就**不能生成镜像**——镜像本来是为了"右栏别空着"，
 // 在堆叠区只会变成同一列里上下两份（实测 2312.17141 的三面板图：每个面板的公式重复了一遍）。

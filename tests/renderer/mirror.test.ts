@@ -34,6 +34,17 @@ describe('createMirrors', () => {
     expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
   })
 
+  it('块一标记就镜像公式，不等译文到达：公式本来就没有译文，等只是白等', () => {
+    // 实测 2312.17141：413 个镜像全部在翻译结束那一刻才出现，之前公式一直居中横跨两栏
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p>'
+      + '<table class="ltx_equation" id="E1"><tbody><tr><td class="ltx_eqn_cell">x=1</td></tr></tbody></table></div>')
+    markBlocks(extract(doc))
+    expect(createMirrors(doc)).toBe(1)
+    expect(doc.querySelector(`.ltx_equation.${MIRROR_CLASS}`)).not.toBeNull()
+    // 段落本身带块标记，绝不能被复制
+    expect(doc.querySelectorAll('.ltx_p')).toHaveLength(1)
+  })
+
   it('容器里没有译文的内容各补一份副本，标成 axt-t + axt-mirror', () => {
     const doc = withTranslation('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p>'
       + '<table class="ltx_equation" id="E1"><tbody><tr><td class="ltx_eqn_cell">x=1</td></tr></tbody></table></div>')

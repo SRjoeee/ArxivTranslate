@@ -5,12 +5,12 @@
 // 早期版本列举 .ltx_equation / .ltx_graphics 之类，于是参考文献的序号、作者姓名、
 // 列表编号这些同样没有译文的内容都漏在外面（实测 2609.00097）。
 //
-// 只在第一次进入 side 模式时生成，之后留在 DOM 里由 CSS 控制显隐，
+// 块一标记（翻译开始的第一刻）就生成，不等译文；之后留在 DOM 里由 CSS 控制显隐，
 // 所以模式切换仍然只改 <html> 上的一个属性。
 import { DOCUMENT_ROOT, MARGIN_ASIDE } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
 import { FOR_ATTR, T_CLASS } from './index'
-import { SIDE_CONTAINER, SIDE_STACK, isSideContainer } from './side-layout'
+import { MIRROR_CONTAINER, SIDE_STACK, isMirrorContainer } from './side-layout'
 
 export const MIRROR_CLASS = 'axt-mirror'
 /** 镜像用的 data-axt-for 前缀，避免与真实块 id 撞车 */
@@ -48,10 +48,10 @@ function needsMirror(child: Element): boolean {
 export function createMirrors(root: Document | Element): number {
   const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))
   if (!scope) return 0
-  // 翻译根也要满足"内部含有译文"才算容器。少了这一条，翻译开始前调用会把摘要、章节
-  // 这些顶层元素整块复制到右栏——它们那时既没有译文也没有块标记（实测：整页内容重复一遍）
-  if (!isSideContainer(scope)) return 0
-  const containers = [scope, ...Array.from(scope.querySelectorAll(SIDE_CONTAINER))].filter(isSideContainer)
+  // 翻译根也要满足"内部含有译文或已标记的块"才算容器。少了这一条，翻译开始前调用会把摘要、
+  // 章节这些顶层元素整块复制到右栏——它们那时既没有译文也没有块标记（实测：整页内容重复一遍）
+  if (!isMirrorContainer(scope)) return 0
+  const containers = [scope, ...Array.from(scope.querySelectorAll(MIRROR_CONTAINER))].filter(isMirrorContainer)
   let made = 0
   for (const container of containers) {
     if (container.classList.contains(MIRROR_CLASS)) continue

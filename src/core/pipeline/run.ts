@@ -33,8 +33,6 @@ export interface RunOptions {
   concurrency?: number
   /** 视口优先（§10）：取下一批时优先取含此谓词为真的块的批次 */
   isPriority?: (block: Block) => boolean
-  /** 插入译文时的滚动锚定，每批调用一次（锚定要强制布局，MathML 重的页面按块锚定会卡住主线程）；默认直接执行 */
-  anchor?: <T>(callback: () => T) => T
 }
 
 const FATAL_KINDS = new Set(['no-key', 'auth'])
@@ -45,7 +43,6 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
   const { doc, blocks, transport } = options
   const progress: Progress = { state: 'running', total: blocks.length, done: 0, failed: 0, cached: 0 }
   const report = () => options.onProgress?.({ ...progress })
-  const anchor = options.anchor ?? (<T>(callback: () => T) => callback())
   const aborted = () => options.signal?.aborted === true
   const stopped = () => aborted() || progress.fatal !== undefined
 
@@ -127,34 +124,34 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
     }
   }
 
+  // 插入译文时不做任何布局读取：视口不跳由浏览器原生 scroll anchoring 负责（§10）。
+  // 每批强制一次布局在 side 模式下要 130–150ms，8 个 worker 一百多批就是十几秒的主线程时间
   async function processBatch(batch: Batch): Promise<void> {
     const out: Outcome = new Map()
     await translateSegments(batch.segments, batch.sectionTitle, out)
     if (aborted()) return
-    anchor(() => {
-      if (batch.kind === 'table' && batch.block) {
-        const cells = new Map<Element, DocumentFragment>()
-        for (const [segment, fragment] of out) if (fragment && segment.cell) cells.set(segment.cell.el, fragment)
-        if (cells.size > 0) {
-          renderTable(batch.block!, cells)
-          progress.done++
-        } else {
-          setState(batch.block, 'failed')
-          progress.failed++
-        }
-        return
+    if (batch.kind === 'table' && batch.block) {
+      const cells = new Map<Element, DocumentFragment>()
+      for (const [segment, fragment] of out) if (fragment && segment.cell) cells.set(segment.cell.el, fragment)
+      if (cells.size > 0) {
+        renderTable(batch.block!, cells)
+        progress.done++
+      } else {
+        setState(batch.block, 'failed')
+        progress.failed++
       }
-      for (const segment of batch.segments) {
-        const fragment = out.get(segment)
-        if (fragment) {
-          renderText(segment.block as TextBlock, fragment)
-          progress.done++
-        } else {
-          setState(segment.block, 'failed')
-          progress.failed++
-        }
+      return
+    }
+    for (const segment of batch.segments) {
+      const fragment = out.get(segment)
+      if (fragment) {
+        renderText(segment.block as TextBlock, fragment)
+        progress.done++
+      } else {
+        setState(segment.block, 'failed')
+        progress.failed++
       }
-    })
+    }
     report()
   }
 

@@ -15,7 +15,6 @@
 | 本项目文件 | 来源 | 修改说明 |
 |---|---|---|
 | `src/cache/store.ts` | `reference/FluentRead/src/services/translation/cache.ts@536a819` | 移植并改造：键计算移到 `key.ts`（Web Crypto），记录加 `paper` 索引，TTL / 容量按论文场景放大，构造函数可注入库与容量；保留内存热层与故障降级策略。**淘汰逻辑改写**：原版每次 `set` 都 `orderBy('lastAccessedAt').toArray()` 扫全库求和（O(n)/次），改为增量维护总量 + 超限时批量淘汰，见 DESIGN §9 |
-| `src/core/scheduler/viewport-anchor.ts` | `reference/FluentRead/src/features/full-page-translation/content/viewportStability.ts@536a819` | 只保留 `withFullPageViewportAnchor` 及 helper，导出别名 `withViewportAnchor`；去掉滚动控制器 |
 | `src/providers/google-web.ts` | `reference/read-frog/src/utils/host/translate/api/google.ts@9b44f82` | 端点、API key 常量、请求体与响应解析照搬；改为一次请求多条（原版一条一请求）；去掉 preserveLineBreaks 的换行标记与 `entities` 依赖（我们送的是占位符标记文本，protector 已转义）；错误按本项目的 ProviderError 分类 |
 | `src/providers/retry-policy.ts` | `reference/read-frog/src/utils/request/retry-policy.ts@9b44f82` | 整段移植；加文件头来源行，按本项目严格类型检查微调；由 `src/providers/retry.ts` 的 `withRetry` 驱动 |
 
