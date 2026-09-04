@@ -6,16 +6,17 @@
 三条查询规矩（Codex 在 #29 上指出的三个漏洞）：
 
 - **只认这一个账号**：`.user.login == "chatgpt-codex-connector[bot]"`，不要用 `test("codex")` 之类的子串匹配——公开仓库里任何 login 含 "codex" 的账号点个 👍 就能让 PR 看起来审完了。
-- **只认针对当前 HEAD 的信号**：行内评论与 review 都带 `commit_id`，只取等于 `git rev-parse HEAD` 的。反应和限额提示没有 commit 字段，要靠**本轮标记**：push 后等 `gh pr view --json headRefOid` 报出新 HEAD（服务端已收到），记下这一刻的 UTC 时间 `ACKED`（用 `date -u`，和 GitHub 的 `created_at` 同时区；不能用提交时间 `%cI`），Codex 开始新一轮时会打一个 👀，**只有 `created_at` 晚于 `ACKED` 的 👀 之后出现的 👍 / 限额提示**才算这一轮的——上一轮在 push 期间刚好收尾留下的 👍 会早于新的 👀，被排除。上一轮的旧评论会一直留在接口里，不过滤的话新提交一 push 就"审完了"。
+- **只认针对当前 HEAD 的信号**：行内评论与 review 都带 `commit_id`，只取等于 `git rev-parse HEAD` 的。反应和限额提示没有 commit 字段，要靠**本轮标记**：Codex 开始新一轮时会打一个 👀（并清掉上一轮的反应）。在 push（或 `gh pr create`）**之前**用 `date -u` 记下 UTC 时间 `PRE`（和 GitHub 的 `created_at` 同时区；不能用提交时间 `%cI`），`created_at >= PRE` 的 👀 就是本轮标记；**只有该 👀 之后出现的 👍 / 限额提示**才算这一轮的。用 push 前的时刻而不是"客户端看到新 HEAD 的时刻"：Codex 可能在我们轮询到新 HEAD 之前就已打上 👀，用后者会把唯一的标记丢掉。上一轮在 push 期间刚好收尾留下的 👍 早于新的 👀，被排除。上一轮的旧评论会一直留在接口里，不过滤的话新提交一 push 就"审完了"。
 - **翻页**：两个列表接口都加 `--paginate`，否则超过一页的反应 / 评论只看得到第一页。
 
 ```sh
-BOT='chatgpt-codex-connector[bot]'; HEAD=$(git rev-parse HEAD); git push
+set -e                                               # push 失败就停，别带着旧 SHA 轮询到天荒地老
+BOT='chatgpt-codex-connector[bot]'; HEAD=$(git rev-parse HEAD)
+PRE=$(date -u +%Y-%m-%dT%H:%M:%SZ); git push         # push 前记 UTC 时刻（新开 PR 则放在 gh pr create 前）
 until [ "$(gh pr view <N> --json headRefOid --jq .headRefOid)" = "$HEAD" ]; do sleep 5; done
-ACKED=$(date -u +%Y-%m-%dT%H:%M:%SZ)                 # 服务端已收到新 HEAD 的时刻
-# 本轮标记：ACKED 之后的 👀；之后的 +1 才是本轮的"审完无建议"
+# 本轮标记：PRE 之后的 👀；之后的 +1 才是本轮的"审完无建议"
 ROUND=$(gh api --paginate "repos/{owner}/{repo}/issues/<N>/reactions" \
-  --jq "[.[] | select(.user.login == \"$BOT\") | select(.content == \"eyes\") | select(.created_at > \"$ACKED\") | .created_at] | max // empty")
+  --jq "[.[] | select(.user.login == \"$BOT\") | select(.content == \"eyes\") | select(.created_at >= \"$PRE\") | .created_at] | max // empty")
 [ -n "$ROUND" ] && gh api --paginate "repos/{owner}/{repo}/issues/<N>/reactions" \
   --jq ".[] | select(.user.login == \"$BOT\") | select(.content == \"+1\") | select(.created_at > \"$ROUND\") | .content"
 # review + 行内评论（只认针对当前 HEAD 的）
@@ -28,7 +29,7 @@ gh api --paginate "repos/{owner}/{repo}/pulls/<N>/comments" --jq ".[] | select(.
 
 | 信号 | 含义 |
 |---|---|
-| 服务端收到新 HEAD 之后的 👀 反应 | 本轮开始，正在审，继续等 |
+| push 之后的 👀 反应 | 本轮开始，正在审，继续等 |
 | 本轮 👀 之后的 👍 反应 | 审完了，没有建议 |
 | 针对当前 HEAD 的 review（`COMMENTED`）+ 行内评论 | 有建议 |
 | 本轮 👀 之后的 "You have reached your Codex usage limits" | 这次没审 |
