@@ -180,6 +180,20 @@ html:not([data-axt-mode="side"]) .axt-mirror {
   display: none;
 }
 
+/* 脚注（§7.2）：arXiv 在视口 ≥ 96rem 时把脚注渲染成常驻边注，用 float 加一个负的
+   margin-inline-end（实测 -496px）挂到"文章列外面"。side 模式把文章切成两栏后，
+   左栏的"外面"就是右栏——边注正好压在右栏译文上（实测 2312.17141：边注 1112→1592，
+   右栏 1116→1856，用户两次反馈"注解跑进主内容区"）。把负边距收掉，边注就留在自己栏内。
+   左栏那份里的译文隐藏：它已经被 localizeNotes 搬进右栏那份副本里了，两栏各自完整 */
+html[data-axt-mode="side"] .ltx_note_outer {
+  width: min(20rem, 100%);
+  margin-inline-end: 0;
+}
+
+html[data-axt-mode="side"] .ltx_note .axt-t {
+  display: none;
+}
+
 /* 整块拆开的插图（§7.2）：左份是原件、只显示原文，右份是副本、只有译文。
    插图里的图与公式没有译文，按块配对右栏就空着；整张图跨两栏又等于放弃对照，
    所以整块复制一份。两份结构相同，行天然对齐。

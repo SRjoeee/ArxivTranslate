@@ -5,7 +5,8 @@ import { extract, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
 import {
-  alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, restore, splitFigures,
+  alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, localizeNotes, restore,
+  splitFigures,
   type Mode, type ModeController,
 } from '@/core/renderer'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
@@ -103,14 +104,15 @@ export default defineContentScript({
         if (modes?.effective() !== 'side') return
         // 先整块拆插图，再补镜像：拆过的插图不再参与镜像（两套方案会重复一份）
         const split = splitFigures(document)
+        const notes = localizeNotes(document)
         const made = createMirrors(document)
         const fit = fitTables(document)
         // 边距对齐要在镜像之后：镜像也是译文节点，同样会被站点的相邻兄弟规则影响
         const aligned = alignPairMargins(document)
-        if (split || made || fit.fitted || fit.scrolled || aligned) {
+        if (split || notes || made || fit.fitted || fit.scrolled || aligned) {
           console.debug(
-            `[axt] side prep: +${split} figures split, +${made} mirrors, ${fit.fitted} tables scaled, `
-            + `${fit.scrolled} scrollable, ${aligned} margins aligned`,
+            `[axt] side prep: +${split} figures split, ${notes} notes localized, +${made} mirrors, `
+            + `${fit.fitted} tables scaled, ${fit.scrolled} scrollable, ${aligned} margins aligned`,
           )
         }
       }, 150)

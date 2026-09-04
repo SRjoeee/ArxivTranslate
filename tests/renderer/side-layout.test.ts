@@ -108,6 +108,12 @@ describe('side 模式的容器覆盖', () => {
     expect(isSideContainer(content)).toBe(false) // 子树排除把它挡在外面
   })
 
+  it('脚注边注要收回自己栏内：负边距会让它落到隔壁栏', () => {
+    // arXiv 视口 ≥96rem 时脚注是常驻边注，用负 margin 挂到文章外；两栏布局下"外面"就是隔壁栏
+    expect(RULES).toMatch(/\.ltx_note_outer \{[^}]*margin-inline-end: 0/)
+    expect(RULES).toMatch(/\.ltx_note \.axt-t \{\s*display: none/)
+  })
+
   for (const file of files) {
     it(`${file}：配对能否连到翻译根，快照记录被排除项挡住的数量`, () => {
       const doc = new DOMParser().parseFromString(readFileSync(join(FIXTURE_DIR, file), 'utf8'), 'text/html')
