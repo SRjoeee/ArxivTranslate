@@ -188,6 +188,10 @@ html:not([data-axt-mode="side"]) .axt-mirror {
 html[data-axt-mode="side"] .ltx_note_outer {
   width: min(20rem, 100%);
   margin-inline-end: 0;
+  /* 列表项里的脚注 ar5iv 写死了 height: 0 + overflow: visible —— 它本来被负边距推到文章外，
+     不需要占位。收回栏内后高度还是 0，内容就直接盖在下一条列表项上（实测框高 32、内容高 90，
+     压住 2 个元素；用户反馈"跑到内容区里面完全乱掉"）。撑开高度后压住数为 0 */
+  height: auto;
 }
 
 /* 整块拆开的插图（§7.2）：左份是原件、只显示原文，右份是副本、只有译文。
