@@ -116,9 +116,11 @@ interface Block {
 | `.ltx_caption` | 图表说明。内含 `.ltx_tag`（"Table 1: "，其中嵌套 `.ltx_text`）需作 void 占位符 |
 | `.ltx_note_content` | 脚注正文，作为独立块。脚注是**嵌套块**：整个 `.ltx_note`（标记 + `.ltx_note_outer > .ltx_note_content`）位于段落内部，外层段落把 `.ltx_note` 视为 void 占位符；`.ltx_note_content` 内部的第二个 `.ltx_note_mark` 与 `.ltx_note_type` 作 void |
 | （表格） | 不走本表：整张最外层 `.ltx_tabular` 由 §5.3 的 TABLE 规则作为一个单元处理，单元格 `.ltx_td` 是表格块内的段，不是独立块 |
-| `.ltx_bibitem` | 参考文献条目，内含 `.ltx_tag`（可嵌套 `sup` / `span`）作 void，见 5.4 |
+| `.ltx_bibblock` | 参考文献条目内的片段（作者 / 标题 / 出处）；没有分段的条目用 `.ltx_bibitem` 兜底，见 5.4 |
 | `.ltx_acknowledgements` | 致谢 |
 | `.ltx_keywords` | 关键词 |
+| `.ltx_contact`, `.ltx_role_affiliation`, `.ltx_role_address`, `.ltx_dates`, `.ltx_date` | 作者的机构、联系方式、日期。**2026-09-04 修订**：作者区从"整块跳过"改为"默认翻译"，只排除姓名与邮箱。原策略会漏掉致谢性质的作者注（如《Attention Is All You Need》的 “†Equal contribution. Listing order is random…”，它在 `.ltx_creator > .ltx_note` 里）|
+| `.ltx_role_dedicatory`, `.ltx_item`, `.ltx_marginpar`, `.ltx_indexentry`, `.ltx_cv_item_label`, `.ltx_cv_item_content`, `.ltx_cv_entry_date` | 献词、列表项裸文本、边注、索引词条、CV 字段。这些没在抓过的真实论文里出现，由 `tests/fixtures/arxiv/synthetic-structures.html` 守护（RESEARCH.md §2.12）|
 
 ### 5.2 跳过规则（整块不翻）
 
@@ -129,7 +131,10 @@ interface Block {
 | `.ltx_tag` | 公式编号、章节号、图表号、列表符号、代码行号 |
 | `.ltx_listing`, `.ltx_listingline`, `.ltx_listing_data`, `.ltx_verbatim`, `pre`, `code` | 代码、verbatim、隐藏的代码数据。算法框 `figure.ltx_float.ltx_algorithm` / `.ltx_float_algorithm` 内部即 `.ltx_listingline`，由本条覆盖，框内 `.ltx_caption` 正常翻译 |
 | `.ltx_text.ltx_font_typewriter` | 等宽文本（视为代码）|
-| `.ltx_authors`, `.ltx_creator`, `.ltx_personname`, `.ltx_author_notes`, `.ltx_role_affiliation`, `.ltx_contact`, `.ltx_dates` | 作者、机构、联系方式、日期（真实页面没有 `.ltx_author` / `.ltx_date`）|
+| `.ltx_personname` | 作者姓名：音译后引用检索会失效（2026-09-04 修订：作者区不再整块跳过）|
+| `.ltx_author_before`, `.ltx_author_after` | 作者之间的连接词（“ and ”“, ”），单独成块会打断姓名列表 |
+| `.ltx_classification` | MSC / ACM 分类号，如 “Primary: 11L07” |
+| `.ltx_ERROR`, `.ltx_FATAL`, `.ltx_WARNING`, `.ltx_INFO` | LaTeXML 的转换错误与提示，不是论文内容 |
 | `.ltx_pubnotes` | 出版元数据（ACM 模板的 CCS / DOI / 期刊 / 卷期）|
 | `svg`, `.ltx_picture` | TikZ 图，实测没有可翻译文字，见 §15.1 |
 | `.ltx_ERROR` | LaTeXML 转换错误块（也会出现在转换失败页 "Untitled Document" 上，扩展须安静处理）|
@@ -150,6 +155,8 @@ interface Block {
 ### 5.4 参考文献 [决定]
 
 - 默认翻译，可在设置里关闭
+- **按条目内的片段翻**（2026-09-04 修订）：LaTeXML 把一条参考文献拆成若干 `.ltx_bibblock`（作者 / 标题 / 出处各一段，页面上各占一行），翻译单元是 `.ltx_bibblock` 而不是整条 `.ltx_bibitem`，译文因此只跟在对应的那一行下面，不再整条重复
+- **多段条目的第一段是作者列表，跳过**：只有部分模板会标 `.ltx_bib_author`（20 篇实测 13 篇有），所以按位置判断（`isBibAuthorBlock`）。只有一段的条目（natbib 等样式）整段就是引文，不跳过
 - **only 模式下豁免隐藏**，参考文献始终双语（原文被隐藏后对照的前提就没了）
 - DOI / URL 本身是 `<a>`，走占位符自动保留
 - LLM prompt 固定加一条：人名、期刊名、会议名保留原文

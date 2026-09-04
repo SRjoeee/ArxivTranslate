@@ -3,7 +3,7 @@
 // 本文件只放数据表与纯函数，不含遍历；遍历在 src/core/extractor。
 
 /** 任何表或函数的行为变化都要递增；进缓存键 */
-export const RULES_VERSION = '0.2.0'
+export const RULES_VERSION = '0.3.0'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -28,9 +28,21 @@ export const UNIT_RULES: readonly Rule[] = [
   { id: 'title', selector: '.ltx_title, .ltx_subtitle', note: '各级标题、副标题、定理 run-in 标题；内含 .ltx_tag 作 void' },
   { id: 'caption', selector: '.ltx_caption', note: '图表说明；内含 .ltx_tag 作 void' },
   { id: 'footnote', selector: '.ltx_note_content', note: '脚注正文，独立成块；位于 .ltx_note 容器内部' },
-  { id: 'bibitem', selector: '.ltx_bibitem', note: '参考文献条目，见 §5.4' },
+  // 参考文献：条目内按 .ltx_bibblock 分段翻，作者段由 skip 规则排除，译文只跟在标题段下面（§5.4）；
+  // 没有分段的条目（natbib 等样式）整条作一个单元兜底
+  { id: 'bibblock', selector: '.ltx_bibblock', note: '参考文献条目内的片段（作者 / 标题 / 出处），见 §5.4' },
+  { id: 'bibitem', selector: '.ltx_bibitem:not(:has(.ltx_bibblock))', note: '没有分段的参考文献条目，整条一个单元' },
   { id: 'ack', selector: '.ltx_acknowledgements', note: '致谢' },
   { id: 'keywords', selector: '.ltx_keywords', note: '关键词' },
+  // 作者区默认翻译（§5.2 修订）：机构、联系方式、日期都是有信息量的文字；
+  // 姓名与邮箱另由 skip / protect 排除
+  { id: 'authorinfo', selector: '.ltx_contact, .ltx_role_affiliation, .ltx_role_address, .ltx_dates, .ltx_date', note: '作者的机构、联系方式、日期' },
+  // 以下结构没在抓过的真实论文里出现，靠 tests/fixtures/arxiv/synthetic-structures.html 守护（RESEARCH.md §2.12）
+  { id: 'dedicatory', selector: '.ltx_role_dedicatory', note: '献词' },
+  { id: 'item', selector: '.ltx_item', note: '列表项 / description 术语的裸文本；项内有 .ltx_p 时由 p 规则接管' },
+  { id: 'marginal', selector: '.ltx_marginpar', note: '边注' },
+  { id: 'indexentry', selector: '.ltx_indexentry', note: '索引词条；页码由 .ltx_indexrefs 作占位符' },
+  { id: 'cv', selector: '.ltx_cv_item_label, .ltx_cv_item_content, .ltx_cv_entry_date', note: 'CV 模板的条目字段' },
 ]
 
 /** §5.3 表格：最外层 .ltx_tabular 作为一个单元（遍历不下钻即取到最外层），单元格是块内的段，th 也带 ltx_td */
@@ -40,10 +52,13 @@ export const TABLE_RULES = { root: '.ltx_tabular', cell: '.ltx_td' } as const
 export const SKIP_RULES: readonly Rule[] = [
   { id: 'equation', selector: '.ltx_equation, .ltx_equationgroup', note: '行间公式，含其对齐表格与 .ltx_eqn_cell' },
   { id: 'listing', selector: '.ltx_listing, .ltx_listingline, .ltx_listing_data, .ltx_verbatim, pre, code', note: '代码、算法框内的行、verbatim、隐藏的代码数据' },
-  { id: 'authors', selector: '.ltx_authors, .ltx_creator, .ltx_personname, .ltx_author_notes, .ltx_role_affiliation, .ltx_contact, .ltx_dates', note: '作者、机构、联系方式、日期' },
+  // 作者区不再整块跳过（§5.2 修订）：只排除翻了会坏事的部分
+  { id: 'personname', selector: '.ltx_personname', note: '作者姓名：音译后引用检索会失效' },
+  { id: 'author-glue', selector: '.ltx_author_before, .ltx_author_after', note: '作者之间的连接词（“ and ”“, ”），单独成块会打断姓名列表' },
+  { id: 'classification', selector: '.ltx_classification', note: 'MSC / ACM 分类号，如“Primary: 11L07”' },
   { id: 'pubnotes', selector: '.ltx_pubnotes', note: '出版元数据（ACM 模板的 CCS / DOI / 期刊）' },
   { id: 'picture', selector: 'svg, .ltx_picture', note: 'TikZ 图，实测无可翻译文字（§15.1）' },
-  { id: 'error', selector: '.ltx_ERROR', note: 'LaTeXML 转换错误' },
+  { id: 'error', selector: '.ltx_ERROR, .ltx_FATAL, .ltx_WARNING, .ltx_INFO', note: 'LaTeXML 的转换错误与提示，不是论文内容' },
   { id: 'nav', selector: '.ltx_page_navbar, .ltx_TOC', note: '导航栏与目录；位于翻译根之外，供渲染层隐藏用' },
 ]
 
@@ -56,6 +71,8 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
   { id: 'tt', selector: '.ltx_text.ltx_font_typewriter', note: '等宽文本，视为代码' },
   { id: 'note', selector: '.ltx_note', descend: true, note: '脚注容器：对外层段落是 void，内部的 .ltx_note_content 仍要被发现为块' },
   { id: 'note-mark', selector: '.ltx_note_mark, .ltx_note_type', note: '脚注标记与类型标签（容器外层与正文内各一次）' },
+  { id: 'mailto', selector: 'a[href^="mailto:"]', note: '邮箱地址原样保留' },
+  { id: 'indexrefs', selector: '.ltx_indexrefs', note: '索引词条后面的页码列表' },
   { id: 'img', selector: 'img', note: '行内图片' },
   { id: 'br', selector: 'br', note: '换行' },
 ]
@@ -76,7 +93,19 @@ export interface Classification {
 const TABLE_CLASSIFICATION: Classification = { kind: 'table', rule: 'table', descend: false }
 
 /** §5.6：同一元素命中多类时取 skip > table > unit > protect；都不命中返回 null */
+/**
+ * 参考文献条目里的作者段（§5.4）：分成多段的条目，第一段固定是作者列表。
+ * 只有部分模板会标 .ltx_bib_author（20 篇实测 13 篇有），所以按位置判断而不是按类名；
+ * 只有一段的条目（natbib 等样式）整条就是引文，不能跳过。
+ */
+export function isBibAuthorBlock(el: Element): boolean {
+  if (!el.matches('.ltx_bibblock')) return false
+  const siblings = Array.from(el.parentElement?.children ?? []).filter(child => child.matches('.ltx_bibblock'))
+  return siblings.length > 1 && siblings[0] === el
+}
+
 export function classify(el: Element): Classification | null {
+  if (isBibAuthorBlock(el)) return { kind: 'skip', rule: 'bib-authors', descend: false }
   const skip = SKIP_RULES.find(r => el.matches(r.selector))
   if (skip) return { kind: 'skip', rule: skip.id, descend: false }
   if (el.matches(TABLE_RULES.root)) return TABLE_CLASSIFICATION

@@ -32,26 +32,36 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.2.0')
+    expect(RULES_VERSION).toBe('0.3.0')
   })
 })
 
 describe('classify：逐规则命中', () => {
-  type Expected = { kind: string; rule: string; descend: boolean }
+  type Expected = { kind: string; rule: string; descend: boolean } | null
   const cases: [string, string, string | undefined, Expected][] = [
     ['正文段落', '<div class="ltx_para"><p class="ltx_p">Text.</p></div>', 'p', { kind: 'unit', rule: 'p', descend: true }],
     ['标题（含章节号）', '<h2 class="ltx_title ltx_title_section"><span class="ltx_tag ltx_tag_section">1 </span>Intro</h2>', 'h2', { kind: 'unit', rule: 'title', descend: true }],
     ['副标题', '<div class="ltx_subtitle">(Extended)</div>', undefined, { kind: 'unit', rule: 'title', descend: true }],
     ['图注', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table"><span class="ltx_text">Table 1</span>: </span>Results.</figcaption>', undefined, { kind: 'unit', rule: 'caption', descend: true }],
     ['脚注正文', '<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup>Note.</span></span></span>', '.ltx_note_content', { kind: 'unit', rule: 'footnote', descend: true }],
-    ['参考文献条目', '<li class="ltx_bibitem"><span class="ltx_tag ltx_tag_bibitem">[1]</span><span class="ltx_bibblock">A. Title.</span></li>', undefined, { kind: 'unit', rule: 'bibitem', descend: true }],
+    // 分段的条目：容器本身不成块，逐个 .ltx_bibblock 才是单元（§5.4）
+    ['参考文献条目（分段）', '<li class="ltx_bibitem"><span class="ltx_tag ltx_tag_bibitem">[1]</span><span class="ltx_bibblock">A. Title.</span></li>', 'li', null],
+    ['参考文献片段', '<li class="ltx_bibitem"><span class="ltx_bibblock">A. Title.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
+    // 多段条目的第一段是作者列表，按位置判断（部分模板才有 .ltx_bib_author）
+    ['参考文献的作者段', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span><span class="ltx_bibblock">B. P. Abbott et al.</span><span class="ltx_bibblock">Title.</span></li>', '.ltx_bibblock', { kind: 'skip', rule: 'bib-authors', descend: false }],
+    ['只有一段的条目不当作者段', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span><span class="ltx_bibblock">B. P. Abbott et al. Title. 2024.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
+    ['未分段的参考文献条目', '<li class="ltx_bibitem"><span class="ltx_tag ltx_tag_bibitem">[1]</span>A. Title, 2024.</li>', 'li', { kind: 'unit', rule: 'bibitem', descend: true }],
     ['致谢', '<div class="ltx_acknowledgements">Thanks.</div>', undefined, { kind: 'unit', rule: 'ack', descend: true }],
     ['关键词', '<div class="ltx_keywords">data races</div>', undefined, { kind: 'unit', rule: 'keywords', descend: true }],
     ['表格根', '<table class="ltx_tabular"><tbody><tr><th class="ltx_td ltx_th">h</th><td class="ltx_td">1</td></tr></tbody></table>', undefined, { kind: 'table', rule: 'table', descend: false }],
     ['行间公式', '<table class="ltx_equation"><tbody><tr><td class="ltx_td ltx_eqn_cell"><math class="ltx_Math"><mi>x</mi></math></td></tr></tbody></table>', undefined, { kind: 'skip', rule: 'equation', descend: false }],
     ['代码行', '<div class="ltx_listing"><div class="ltx_listingline"><span class="ltx_text ltx_font_typewriter">x = 1</span></div></div>', '.ltx_listingline', { kind: 'skip', rule: 'listing', descend: false }],
-    ['作者区', '<div class="ltx_authors"><span class="ltx_creator"><span class="ltx_personname">A. B.</span></span></div>', '.ltx_personname', { kind: 'skip', rule: 'authors', descend: false }],
-    ['日期', '<div class="ltx_dates">2018</div>', undefined, { kind: 'skip', rule: 'authors', descend: false }],
+    ['作者姓名', '<div class="ltx_authors"><span class="ltx_creator"><span class="ltx_personname">A. B.</span></span></div>', '.ltx_personname', { kind: 'skip', rule: 'personname', descend: false }],
+    ['作者的机构与联系方式', '<span class="ltx_contact ltx_role_affiliation"><span class="ltx_contact_name">Affiliation: </span>Radboud University</span>', '.ltx_contact', { kind: 'unit', rule: 'authorinfo', descend: true }],
+    ['邮箱地址', '<span class="ltx_contact ltx_role_email"><a href="mailto:a@b.c">a@b.c</a></span>', 'a', { kind: 'protect', rule: 'mailto', descend: false }],
+    ['作者之间的连接词', '<span class="ltx_author_before"> and </span>', undefined, { kind: 'skip', rule: 'author-glue', descend: false }],
+    ['日期', '<div class="ltx_dates">2018</div>', undefined, { kind: 'unit', rule: 'authorinfo', descend: true }],
+    ['分类号', '<div class="ltx_classification">Primary: 11L07</div>', undefined, { kind: 'skip', rule: 'classification', descend: false }],
     ['出版元数据', '<span class="ltx_pubnotes ltx_pubnotes_meta"><span class="ltx_pubnote ltx_role_doi">DOI</span></span>', undefined, { kind: 'skip', rule: 'pubnotes', descend: false }],
     ['TikZ 图', '<svg class="ltx_picture"><foreignObject><span class="ltx_foreignobject_content">t</span></foreignObject></svg>', undefined, { kind: 'skip', rule: 'picture', descend: false }],
     ['转换错误', '<p class="ltx_p"><span class="ltx_ERROR undefined">\\foo</span></p>', '.ltx_ERROR', { kind: 'skip', rule: 'error', descend: false }],
@@ -142,8 +152,12 @@ describe('isNumericCell（Phase 0 校准边界用例）', () => {
 describe('fixture 不变量', () => {
   const files = readdirSync(FIXTURE_DIR).filter(f => f.endsWith('.html')).sort()
 
-  it('有 10 篇 fixture', () => {
-    expect(files).toHaveLength(10)
+  /** 合成结构 fixture：覆盖真实论文里没出现过的模板结构（RESEARCH.md §2.12） */
+  const SYNTHETIC = 'synthetic-structures.html'
+
+  it('有 10 篇真实论文 + 1 份合成结构', () => {
+    expect(files.filter(f => f !== SYNTHETIC)).toHaveLength(10)
+    expect(files).toContain(SYNTHETIC)
   })
 
   for (const f of files) {

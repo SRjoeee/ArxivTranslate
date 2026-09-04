@@ -112,6 +112,24 @@ Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起
 - 归属变化：`.ltx_ref`（3,253 个文本节点）、`.ltx_cite`（1,872）、`.ltx_note_mark`（114）从段落正文转为受保护节点；表格单元格 4,632 个文本节点归到 `table`；脚注正文 166 个归到嵌套单元 `footnote`，`.ltx_note` 容器本身归属 0。
 - unit 占比因此下降（如 2401.00596 从 49.4% 到 26.6%），这是把引用与脚注标记从"待翻译文本"里剔除后的真实数字。
 
+### 2.12 用 CSS 类清单反查规则覆盖（2026-09-04）
+
+起点是一个假设：ar5iv 的 CSS 覆盖了所有区块，可以拿它把规则补全。**实测这个假设不成立。**
+
+把 LaTeXML 仓库 `lib/LaTeXML/resources/CSS` 下全部 15 个样式表（含 `ltx-book.css`、`ltx-amsart.css`、`ltx-apj.css` 等模板专用）、ar5iv 仓库与 arXiv 实际服务的两份合起来，共 **322 个 `ltx_*` 类**。再从 8 个学科抓 20 篇新论文比对：
+
+- **88 个类出现在页面里而所有 CSS 都没有**，且不是边角料：`ltx_Math` 20/20 篇、`ltx_ref_tag` 20/20、`ltx_tag_bibitem` 20/20、`ltx_math_unparsed` 18/20、`ltx_citemacro_cite` 17/20、`ltx_theorem_*` 与 `ltx_bib_*` 两个家族
+- 原因是**类名是开放集合**：`ltx_theorem_maintheoremA`、`ltx_theorem_manualconjectureinner`、`ltx_bib_<字段>`、`ltx_citemacro_<宏名>`、`ltx_colspan_8` 都由作者自己的 LaTeX 宏名生成，任何样式表都列不全
+- 反方向 **145 个类只在 CSS 里有**，是书稿 / CV / 索引 / 题记等模板专用结构，30 篇真实论文里一次没出现
+
+覆盖率检查（用 `classify()` 逐文本节点判定归属）：**20 篇新论文 + 10 篇 fixture 共 36348 个带文字的节点，未覆盖 1 个**，就是数学论文的 MSC 分类号（`.ltx_classification`），本来也不该翻。
+
+结论：规则不是靠枚举类名做全的，而是靠"容器不需要规则、文本落在 `.ltx_p` 等少数单元里"这个结构性质。CSS 清单的价值在于第三条——那 145 个没见过的结构，已按 LaTeXML 的输出惯例写成 `tests/fixtures/arxiv/synthetic-structures.html`，一跑就暴露出 8 处真实缺口（`.ltx_date`、`.ltx_role_dedicatory`、description 术语的裸文本、`.ltx_marginpar`、`.ltx_indexentry`、CV 字段），已补进规则。
+
+原先报告的漏翻（作者区的致谢性注释）与规则完整性无关，是 §5.2 里"作者区整块跳过"这条策略造成的，已在同一次修订里改为默认翻译。
+
+---
+
 ## 3. 容器与导航
 
 ### 3.1 页面骨架（oxide 0.7.6 + arXiv 主题 2026-08）
