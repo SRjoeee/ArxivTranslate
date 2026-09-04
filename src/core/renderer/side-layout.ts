@@ -16,8 +16,24 @@ export const SIDE_DENY = [
   '.ltx_flex_figure', '.ltx_flex_cell',                // 多面板插图：ar5iv 用 flex 让面板并排
 ].join(', ')
 
+/**
+ * 连**整棵子树**一起排除的元素。ar5iv 把脚注的折叠状态写在 `.ltx_note_outer` 的 `display: none` 上，
+ * 译文一插进脚注内部，容器规则就会命中 `:has(.axt-t)` 把它改成 `display: grid`——
+ * 折叠的脚注被掀开，165px 高、781px 宽横在正文中间，与中栏的译文互相干扰（实测 2312.17141，用户反馈）。
+ *
+ * 样式表里写成 `.ltx_note *` 加进排除清单；这里不并进 SIDE_CONTAINER，因为 happy-dom 的
+ * `:is(.ltx_note *)` 恒为 false（原生 `.ltx_note *` 正常），并进去会让测试与线上行为不一致。
+ * 运行时改用 isSideContainer() 判定。
+ */
+export const SIDE_DENY_SUBTREE = '.ltx_note'
+
 /** 会被 CSS 设成两栏网格的元素 */
 export const SIDE_CONTAINER = `:has(.axt-t):not(:is(${SIDE_DENY}))`
+
+/** 是不是配对容器（含子树排除）。运行时一律走这里，别直接 matches(SIDE_CONTAINER) */
+export function isSideContainer(el: Element): boolean {
+  return el.matches(SIDE_CONTAINER) && el.closest(SIDE_DENY_SUBTREE) === null
+}
 
 // 堆叠区：这些格子里不做左右分栏，配对降级为上下堆叠（modes.css 里有同一份清单，测试守着）。
 // 既然没有右栏，里面就**不能生成镜像**——镜像本来是为了"右栏别空着"，

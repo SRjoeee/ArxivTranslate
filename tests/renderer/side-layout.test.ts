@@ -8,7 +8,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { SIDE_DENY, SIDE_STACK, T_CLASS } from '@/core/renderer'
+import { SIDE_DENY, SIDE_DENY_SUBTREE, SIDE_STACK, T_CLASS, isSideContainer } from '@/core/renderer'
+import { docOf } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 const CSS = readFileSync(join(import.meta.dirname, '../../src/styles/modes.css'), 'utf8')
@@ -43,7 +44,8 @@ describe('side 模式的容器覆盖', () => {
 
   it('样式表里的排除清单与 side-layout.ts 保持一致（TS 是事实来源）', () => {
     const normalize = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean).sort().join(',')
-    expect(normalize(deny)).toBe(normalize(SIDE_DENY))
+    // 子树排除在样式表里写成 `X *`，TS 侧由 isSideContainer 用 closest 实现（happy-dom 的 :is(X *) 恒假）
+    expect(normalize(deny)).toBe(normalize(`${SIDE_DENY}, ${SIDE_DENY_SUBTREE} *`))
   })
 
   it('排除项只允许是本身不成网格的元素：ar5iv 自己的网格必须接管而不是排除', () => {
@@ -90,6 +92,17 @@ describe('side 模式的容器覆盖', () => {
 
   it('行内收缩包裹里的图形要豁免 max-width：否则宽度会解成病态的窄值', () => {
     expect(RULES).toMatch(/\.ltx_inline-block :is\(img, svg\) \{\s*max-width: none/)
+  })
+
+  it('脚注内部永远不算配对容器：改它的 display 会把 ar5iv 折叠的脚注掀开', () => {
+    // ar5iv 把折叠状态写在 .ltx_note_outer 的 display:none 上；容器规则一命中就把它改成 grid，
+    // 脚注被掀开横在正文中间（实测 2312.17141：165px 高、781px 宽，与中栏译文互相干扰）
+    const doc = docOf(`<div class="ltx_para"><span class="ltx_note"><span class="ltx_note_outer">
+      <span class="ltx_note_content"><span class="ltx_p">note</span
+      ><span class="ltx_p ${T_CLASS}" data-axt-for="1">脚注译文</span></span></span></span></div>`)
+    const content = doc.querySelector('.ltx_note_content')!
+    expect(content.matches(container)).toBe(true) // 只看选择器的话它够格当容器
+    expect(isSideContainer(content)).toBe(false) // 子树排除把它挡在外面
   })
 
   for (const file of files) {

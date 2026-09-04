@@ -10,7 +10,7 @@
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
 import { FOR_ATTR, T_CLASS } from './index'
-import { SIDE_CONTAINER, SIDE_STACK } from './side-layout'
+import { SIDE_CONTAINER, SIDE_STACK, isSideContainer } from './side-layout'
 
 export const MIRROR_CLASS = 'axt-mirror'
 /** 镜像用的 data-axt-for 前缀，避免与真实块 id 撞车 */
@@ -48,8 +48,8 @@ export function createMirrors(root: Document | Element): number {
   if (!scope) return 0
   // 翻译根也要满足"内部含有译文"才算容器。少了这一条，翻译开始前调用会把摘要、章节
   // 这些顶层元素整块复制到右栏——它们那时既没有译文也没有块标记（实测：整页内容重复一遍）
-  if (!scope.matches(SIDE_CONTAINER)) return 0
-  const containers = [scope, ...Array.from(scope.querySelectorAll(SIDE_CONTAINER))]
+  if (!isSideContainer(scope)) return 0
+  const containers = [scope, ...Array.from(scope.querySelectorAll(SIDE_CONTAINER))].filter(isSideContainer)
   let made = 0
   for (const container of containers) {
     if (container.classList.contains(MIRROR_CLASS)) continue

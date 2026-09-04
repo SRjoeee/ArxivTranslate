@@ -55,7 +55,10 @@ html[data-axt-mode="side"] .ltx_document {
    新出现的包裹层自动生效，不需要维护清单。
    排除项各有理由（清单的事实来源在 src/core/renderer/side-layout.ts，测试守着两边一致）：
    译文自身不是容器；表格内部结构改成网格会毁掉表格；
-   .ltx_inline-block / .ltx_note / .ltx_listing 是行内与预格式化上下文；
+   .ltx_inline-block / .ltx_listing 是行内与预格式化上下文；
+   脚注要连**整棵子树**一起排除——ar5iv 把折叠状态写在 .ltx_note_outer 的 display:none 上，
+   译文一插进脚注内部，容器规则就会命中 :has(.axt-t) 把它改成 grid，折叠的脚注被掀开、
+   165px 高 781px 宽横在正文中间，与中栏译文互相干扰（实测 2312.17141，用户反馈）；
    .ltx_p / .ltx_title / .ltx_caption / .ltx_bibblock 本身就是配对的成员，
    内部若有译文（脚注那种嵌套）不该再开一套两栏。
    多面板插图（.ltx_flex_figure / .ltx_flex_cell）用 flex 让面板并排，接管成网格后每个面板各占一行、
@@ -67,7 +70,7 @@ html[data-axt-mode="side"] .ltx_document {
    英文横跨分割线、中文挤成 39px 的窄条（实测 2609.00097）；这类网格必须接管而不是排除。
    整体包在 :where() 里让权重为 0，否则会压过下面的配对规则（实测过这个坑）。
    column-gap 要显式写——.ltx_biblist 自带 3em 的间距，subgrid 会用容器自己的值，右栏偏 12px */
-html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell))) {
+html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell))) {
   display: grid;
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
@@ -80,7 +83,7 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, tab
    都不必各写一条规则。构建会把嵌套编译成扁平选择器 */
 html[data-axt-mode="side"] .ltx_document,
 html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th,
-  .ltx_inline-block, .ltx_note, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell))) {
+  .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell))) {
   & > * {
     grid-column: 1 / -1;
   }
@@ -166,8 +169,9 @@ html[data-axt-mode="side"] [data-axt-fit="scroll"] {
 /* 堆叠区：这些格子里不做左右分栏，配对降级为上下堆叠。
    表格单元格与 inline-block 是段内嵌套的容器；多面板插图的分格只有半栏宽、本身又是 flex 项，
    硬分两列会溢出，而且它们够不到文档的轨道（父级是 flex），不降级就会各自长出隐式两列。
-   内层用 :is(...) 而不是 :where(...)：要压过上面 (0,2,1) 的容器规则 */
-html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block, .ltx_flex_cell) :is(.ltx_para, .ltx_abstract, :has(.axt-t)) {
+   内层用 :is(...) 而不是 :where(...)：要压过上面 (0,2,1) 的容器规则。
+   脚注子树要排除：改它的 display 会把 ar5iv 折叠起来的脚注掀开 */
+html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block, .ltx_flex_cell) :is(.ltx_para, .ltx_abstract, :has(.axt-t)):not(:is(.ltx_note, .ltx_note *)) {
   display: block;
 }
 
