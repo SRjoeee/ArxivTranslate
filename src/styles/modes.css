@@ -70,7 +70,7 @@ html[data-axt-mode="side"] .ltx_document {
    英文横跨分割线、中文挤成 39px 的窄条（实测 2609.00097）；这类网格必须接管而不是排除。
    整体包在 :where() 里让权重为 0，否则会压过下面的配对规则（实测过这个坑）。
    column-gap 要显式写——.ltx_biblist 自带 3em 的间距，subgrid 会用容器自己的值，右栏偏 12px */
-html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell))) {
+html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *))) {
   display: grid;
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
@@ -83,7 +83,7 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, tab
    都不必各写一条规则。构建会把嵌套编译成扁平选择器 */
 html[data-axt-mode="side"] .ltx_document,
 html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t):not(:is(.axt-t, table, thead, tbody, tr, td, th,
-  .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell))) {
+  .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *))) {
   & > * {
     grid-column: 1 / -1;
   }
@@ -177,6 +177,30 @@ html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block, .ltx_flex_cell) :is(.
 
 /* 镜像节点只在 side 模式出现（§7.2）：其他模式下它会让公式、图表重复一份 */
 html:not([data-axt-mode="side"]) .axt-mirror {
+  display: none;
+}
+
+/* 整块拆开的插图（§7.2）：左份是原件、只显示原文，右份是副本、只有译文。
+   插图里的图与公式没有译文，按块配对右栏就空着；整张图跨两栏又等于放弃对照，
+   所以整块复制一份。两份结构相同，行天然对齐。
+   **不缩放**：栏窄了让 ar5iv 自己重排（.ltx_flex_figure 本身就是 flex-flow: wrap，
+   实测 2312.17141 满栏 342px 高、半栏 546px 且不溢出）；实在不能重排的（宽公式、宽 SVG，
+   实测 8 张图里 3 张溢出 78 / 102 / 209px）退化为栏内横滑，字号一律不动 */
+html[data-axt-mode="side"] [data-axt-split] .axt-t {
+  display: none;
+}
+
+html[data-axt-mode="side"] :is([data-axt-split], .axt-split) {
+  max-width: 100%;
+  overflow: auto hidden;
+}
+
+/* stack 只看原件（它内部本来就是原文 + 译文上下排），only 只看副本（它只有译文） */
+html[data-axt-mode="stack"] .axt-split {
+  display: none;
+}
+
+html[data-axt-mode="only"] [data-axt-split] {
   display: none;
 }
 

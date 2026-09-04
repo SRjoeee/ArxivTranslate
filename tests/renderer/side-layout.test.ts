@@ -43,9 +43,12 @@ describe('side 模式的容器覆盖', () => {
   const files = readdirSync(FIXTURE_DIR).filter(f => f.endsWith('.html')).sort()
 
   it('样式表里的排除清单与 side-layout.ts 保持一致（TS 是事实来源）', () => {
-    const normalize = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean).sort().join(',')
-    // 子树排除在样式表里写成 `X *`，TS 侧由 isSideContainer 用 closest 实现（happy-dom 的 :is(X *) 恒假）
-    expect(normalize(deny)).toBe(normalize(`${SIDE_DENY}, ${SIDE_DENY_SUBTREE} *`))
+    const parts = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean)
+    const normalize = (v: string[]) => [...new Set(v)].sort().join(',')
+    // 子树排除在样式表里写成 `X, X *` 两条；TS 侧由 isSideContainer 用 closest 实现
+    //（happy-dom 的 :is(X *) 恒为 false，并进 SIDE_CONTAINER 会让测试与线上行为不一致）
+    const subtrees = parts(SIDE_DENY_SUBTREE).flatMap(x => [x, `${x} *`])
+    expect(normalize(parts(deny))).toBe(normalize([...parts(SIDE_DENY), ...subtrees]))
   })
 
   it('排除项只允许是本身不成网格的元素：ar5iv 自己的网格必须接管而不是排除', () => {

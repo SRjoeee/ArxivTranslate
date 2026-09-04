@@ -25,7 +25,11 @@ export const SIDE_DENY = [
  * `:is(.ltx_note *)` 恒为 false（原生 `.ltx_note *` 正常），并进去会让测试与线上行为不一致。
  * 运行时改用 isSideContainer() 判定。
  */
-export const SIDE_DENY_SUBTREE = '.ltx_note'
+export const SIDE_DENY_SUBTREE = [
+  '.ltx_note', // 脚注（上面那段）
+  // 整块拆开的插图：两份都不参与配对网格，内部一律交给 ar5iv 自己排（DESIGN §7.2）
+  '[data-axt-split]', '.axt-split',
+].join(', ')
 
 /** 会被 CSS 设成两栏网格的元素 */
 export const SIDE_CONTAINER = `:has(.axt-t):not(:is(${SIDE_DENY}))`
