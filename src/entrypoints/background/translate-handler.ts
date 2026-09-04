@@ -25,6 +25,8 @@ export interface ProviderStatus {
   /** 排查往返耗时用的墙钟：handler 收到与答复的时刻（毫秒） */
   receivedAt: number
   answeredAt: number
+  /** handler 内部分步耗时（毫秒），排查冷启动时的几秒空转 */
+  steps: { config: number; available: number; model: number }
 }
 
 export interface TranslateHandlerDeps {
@@ -93,9 +95,13 @@ export function createTranslateHandler(deps: TranslateHandlerDeps) {
 export function createStatusHandler(deps: { getProvider: () => Promise<TranslationProvider>; getModel: () => Promise<string | undefined> }) {
   return async (): Promise<ProviderStatus> => {
     const receivedAt = Date.now()
+    // getProvider 内部要先读配置，是 background 冷启动后的第一次 storage 访问
     const provider = await deps.getProvider()
+    const afterProvider = Date.now()
     const available = await provider.isAvailable()
+    const afterAvailable = Date.now()
     const model = await deps.getModel()
+    const afterModel = Date.now()
     return {
       providerId: provider.id,
       available,
@@ -104,7 +110,8 @@ export function createStatusHandler(deps: { getProvider: () => Promise<Translati
       maxBatchItems: provider.maxBatchItems,
       preservesMarkup: provider.preservesMarkup,
       receivedAt,
-      answeredAt: Date.now(),
+      answeredAt: afterModel,
+      steps: { config: afterProvider - receivedAt, available: afterAvailable - afterProvider, model: afterModel - afterAvailable },
     }
   }
 }

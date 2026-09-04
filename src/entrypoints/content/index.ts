@@ -43,7 +43,9 @@ export default defineContentScript({
         `[axt] start: config ${Math.round(tConfig - tStart)} ms, ping ${Math.round(tPing - tConfig)} ms`
         + ` (投递 ${pong.at - pingSentAt} ms, SW 年龄 ${Math.round((pong.at - pong.bootedAt) / 1000)} s)`
         + `, provider-status ${Math.round(performance.now() - tPing)} ms`
-        + ` (投递 ${status.receivedAt - statusSentAt} ms, 处理 ${status.answeredAt - status.receivedAt} ms, 回程 ${statusGotAt - status.answeredAt} ms)`
+        + ` (投递 ${status.receivedAt - statusSentAt} ms, 处理 ${status.answeredAt - status.receivedAt} ms`
+        + ` [读配置 ${status.steps.config} / 可用性 ${status.steps.available} / 取模型 ${status.steps.model}]`
+        + `, 回程 ${statusGotAt - status.answeredAt} ms)`
         + `, since page start ${Math.round(tStart)} ms`,
       )
       if (!status.available) return { started: false, reason: '未配置 API key，请先到设置页填写' }

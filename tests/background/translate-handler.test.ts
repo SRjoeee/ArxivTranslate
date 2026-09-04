@@ -67,6 +67,7 @@ describe('translate handler', () => {
     const result = await status()
     expect(result).toMatchObject({ providerId: 'mock', available: true, model: 'm/1', maxBatchChars: 1000, maxBatchItems: 4, preservesMarkup: true })
     expect(result.answeredAt).toBeGreaterThanOrEqual(result.receivedAt)
+    expect(result.steps.config).toBeGreaterThanOrEqual(0)
   })
 })
 
