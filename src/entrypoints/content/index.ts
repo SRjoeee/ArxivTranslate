@@ -67,7 +67,7 @@ export default defineContentScript({
         paper,
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
         transport: request => translate(request),
-        onProgress: p => { progress = p; scheduleFit() },
+        onProgress: p => { progress = p; scheduleSidePrep() },
         signal: controller.signal,
         // 视口优先 + 插入译文时的滚动锚定（DESIGN §10）
         isPriority: block => activeTracker.isNear(block),
@@ -85,18 +85,24 @@ export default defineContentScript({
       return { started: true }
     }
 
-    let mirrored = false
     let fitObserver: ResizeObserver | null = null
     let fitTimer = 0
 
-    /** 表格缩放要在译文到达、窗口变化后重算；合并成一次，避免每块都量一遍布局 */
-    function scheduleFit(): void {
+    /**
+     * side 模式的两件准备都依赖"译文已经在 DOM 里"：镜像要看哪些内容没有配对，
+     * 表格缩放要看哪些表格有了译文。译文是逐块到达的，所以随进度去抖重算，
+     * 而不是进入模式时跑一次（跑早了会把整篇内容当成没有配对的内容复制一遍）。
+     */
+    function scheduleSidePrep(): void {
       if (modes?.effective() !== 'side') return
       clearTimeout(fitTimer)
       fitTimer = window.setTimeout(() => {
         if (modes?.effective() !== 'side') return
+        const made = createMirrors(document)
         const fit = fitTables(document)
-        if (fit.fitted || fit.scrolled) console.debug(`[axt] tables refit: ${fit.fitted} scaled, ${fit.scrolled} scrollable`)
+        if (made || fit.fitted || fit.scrolled) {
+          console.debug(`[axt] side prep: +${made} mirrors, ${fit.fitted} tables scaled, ${fit.scrolled} scrollable`)
+        }
       }, 150)
     }
 
@@ -108,11 +114,7 @@ export default defineContentScript({
         clearTimeout(fitTimer)
         return
       }
-      const t0 = performance.now()
-      const made = mirrored ? 0 : createMirrors(document)
-      mirrored = true
-      const fit = fitTables(document)
-      console.debug(`[axt] side ready: ${made} mirrors, ${fit.fitted} tables scaled, ${fit.scrolled} scrollable, ${Math.round(performance.now() - t0)} ms`)
+      scheduleSidePrep()
       // 栏宽随窗口变化，缩放比例要跟着重算。只在宽度真的变了才重算——
       // 缩放表格本身也会让观察目标报告一次尺寸变化，不设这道闸就会自激振荡
       if (!fitObserver && typeof ResizeObserver === 'function') {
@@ -121,7 +123,7 @@ export default defineContentScript({
           const width = Math.round(entries[0]?.contentRect.width ?? 0)
           if (width === lastWidth) return
           lastWidth = width
-          scheduleFit()
+          scheduleSidePrep()
         })
         const target = document.querySelector(DOCUMENT_ROOT)
         if (target) fitObserver.observe(target)
@@ -148,7 +150,6 @@ export default defineContentScript({
       fitObserver?.disconnect()
       fitObserver = null
       clearTimeout(fitTimer)
-      mirrored = false
       const result = restore(document)
       progress = idle()
       return { removedNodes: result.removedNodes }

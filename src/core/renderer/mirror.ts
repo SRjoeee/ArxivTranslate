@@ -34,6 +34,8 @@ function needsMirror(child: Element): boolean {
   if (child.nextElementSibling?.classList.contains(T_CLASS)) return false
   // 内部含译文的元素本身是容器，它的子元素各自处理
   if (child.querySelector(`.${T_CLASS}`)) return false
+  // 内部还有等待翻译的块：整块复制过去，译文到达后就会既有副本又有译文
+  if (child.querySelector(`[${ID_ATTR}]`)) return false
   return /\S/.test(child.textContent ?? '') || child.querySelector(MEDIA) !== null || child.matches(MEDIA)
 }
 
@@ -44,6 +46,9 @@ function needsMirror(child: Element): boolean {
 export function createMirrors(root: Document | Element): number {
   const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))
   if (!scope) return 0
+  // 翻译根也要满足"内部含有译文"才算容器。少了这一条，翻译开始前调用会把摘要、章节
+  // 这些顶层元素整块复制到右栏——它们那时既没有译文也没有块标记（实测：整页内容重复一遍）
+  if (!scope.matches(SIDE_CONTAINER)) return 0
   const containers = [scope, ...Array.from(scope.querySelectorAll(SIDE_CONTAINER))]
   let made = 0
   for (const container of containers) {

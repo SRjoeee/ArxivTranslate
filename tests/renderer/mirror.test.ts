@@ -14,6 +14,26 @@ const withTranslation = (body: string) => {
 }
 
 describe('createMirrors', () => {
+  it('翻译开始前调用什么都不做——顶层元素那时既没有译文也没有块标记，会被整块复制（实测事故）', () => {
+    const doc = docOf('<div class="ltx_abstract"><h6 class="ltx_title ltx_title_abstract">Abstract</h6>'
+      + '<p class="ltx_p" id="a1">Long English abstract.</p></div>'
+      + '<section class="ltx_section"><h2 class="ltx_title ltx_title_section">Intro</h2>'
+      + '<div class="ltx_para"><p class="ltx_p" id="p1">Body.</p></div></section>')
+    expect(createMirrors(doc)).toBe(0)
+  })
+
+  it('翻译进行中：还没轮到的章节不镜像，否则译文到达后会既有副本又有译文', () => {
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">One.</p></div>'
+      + '<section class="ltx_section"><div class="ltx_para"><p class="ltx_p" id="p2">Two.</p></div></section>')
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    renderText(blocks[0] as TextBlock, frag(doc, '译文'))
+    createMirrors(doc)
+    const section = doc.querySelector('section.ltx_section')!
+    expect(section.nextElementSibling).toBeNull()
+    expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
+  })
+
   it('容器里没有译文的内容各补一份副本，标成 axt-t + axt-mirror', () => {
     const doc = withTranslation('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p>'
       + '<table class="ltx_equation" id="E1"><tbody><tr><td class="ltx_eqn_cell">x=1</td></tr></tbody></table></div>')
