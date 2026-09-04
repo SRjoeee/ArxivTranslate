@@ -3,12 +3,30 @@
 仓库开了 Codex 的 PR 自动审查（`chatgpt-codex-connector[bot]`）。它在 PR 开出或被 push 后开始审：
 先在 PR 上打一个 👀 反应（`eyes`）表示**审查中**，结束时留下三种终态信号之一。**看到终态信号之前不要合并**：
 
-| 信号 | 含义 | 怎么查 |
-|---|---|---|
-| PR 上一个 👀 反应 | 正在审，继续等 | `gh api repos/{owner}/{repo}/issues/<N>/reactions --jq '.[] \| select(.user.login \| test("codex")) \| .content'` 得到 `eyes` |
-| PR 上一个 👍 反应 | 审完了，没有建议 | 同上，得到 `+1` |
-| 一条 review（`COMMENTED`）+ 若干行内评论 | 有建议 | `gh api repos/{owner}/{repo}/pulls/<N>/comments --jq '.[] \| select(.user.login \| test("codex")) \| "\(.path):\(.line // .original_line) \(.body)"'` |
-| 一条 issue comment "You have reached your Codex usage limits" | 这次没审 | `gh pr view <N> --json comments` |
+三条查询规矩（Codex 在 #29 上指出的三个漏洞）：
+
+- **只认这一个账号**：`.user.login == "chatgpt-codex-connector[bot]"`，不要用 `test("codex")` 之类的子串匹配——公开仓库里任何 login 含 "codex" 的账号点个 👍 就能让 PR 看起来审完了。
+- **只认针对当前 HEAD 的信号**：行内评论与 review 都带 `commit_id`，只取等于 `git rev-parse HEAD` 的；反应没有 commit 字段，用 `created_at` 晚于本次 push 的时间来判断。上一轮的旧评论会一直留在接口里，不过滤的话新提交一 push 就"审完了"。
+- **翻页**：两个列表接口都加 `--paginate`，否则超过一页的反应 / 评论只看得到第一页。
+
+```sh
+HEAD=$(git rev-parse HEAD); PUSHED=$(git log -1 --format=%cI); BOT='chatgpt-codex-connector[bot]'
+# 反应：eyes = 审查中；+1 = 审完无建议（只认本次 push 之后的）
+gh api --paginate "repos/{owner}/{repo}/issues/<N>/reactions" \
+  --jq ".[] | select(.user.login == \"$BOT\") | select(.created_at > \"$PUSHED\") | .content"
+# review + 行内评论（只认针对当前 HEAD 的）
+gh api --paginate "repos/{owner}/{repo}/pulls/<N>/reviews"  --jq ".[] | select(.user.login == \"$BOT\") | select(.commit_id == \"$HEAD\") | .state"
+gh api --paginate "repos/{owner}/{repo}/pulls/<N>/comments" --jq ".[] | select(.user.login == \"$BOT\") | select(.commit_id == \"$HEAD\") | \"\(.path):\(.line // .original_line) \(.body)\""
+# 限额提示
+gh pr view <N> --json comments --jq ".comments[] | select(.author.login == \"$BOT\") | select(.body | test(\"usage limits\")) | .body"
+```
+
+| 信号 | 含义 |
+|---|---|
+| 本次 push 之后的 👀 反应 | 正在审，继续等 |
+| 本次 push 之后的 👍 反应 | 审完了，没有建议 |
+| 针对当前 HEAD 的 review（`COMMENTED`）+ 行内评论 | 有建议 |
+| "You have reached your Codex usage limits" | 这次没审 |
 
 只有 👀 或什么都没有 = 还在审（或还没轮到），继续等；通常几分钟内出终态。push 新提交会重新开始一轮。
 
@@ -24,11 +42,9 @@
 
 ```
 gh pr create …                     # 或 git push 到已有 PR
-# 等 CI + Codex 三种信号之一
+# 等 CI + Codex 针对当前 HEAD 的终态信号（查询见上）
 gh pr checks <N>
-gh api repos/{owner}/{repo}/issues/<N>/reactions …     # eyes = 还在审；+1 = 无建议
-gh api repos/{owner}/{repo}/pulls/<N>/comments …       # 行内评论？
-# 有评论 → 逐条核实 → 修 → push → 回到等待
+# 有评论 → 逐条核实 → 修 → push → 回到等待（HEAD 变了，旧信号作废）
 # 👍 或核实处理完 + CI 绿 → 请用户确认 → gh pr merge <N> --merge --delete-branch
 ```
 
