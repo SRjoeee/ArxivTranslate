@@ -33,4 +33,20 @@ describe('paperContext', () => {
       <p class="ltx_p">Let <math><semantics><mi>x</mi><annotation encoding="application/x-tex">\\mathbf{x}</annotation></semantics></math> be.</p></div></article>`, 'text/html')
     expect(paperContext(doc).abstract).toBe('Let x be.')
   })
+
+  it('标题里嵌着的出版元数据不算标题（2507.00150 把 .ltx_pubnotes 放在文档标题里）', () => {
+    const doc = load('2507.00150.html')
+    const notes = doc.querySelector('.ltx_title_document .ltx_pubnotes')
+    expect(notes).not.toBeNull()
+    const noteText = (notes!.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 30)
+    const { paperTitle } = paperContext(doc)
+    expect(paperTitle).toBeTruthy()
+    expect(paperTitle).not.toContain(noteText)
+  })
+
+  it('翻译过之后再抽，我们注入的译文不会混进摘要（Codex 在 #28 指出）', () => {
+    const doc = new DOMParser().parseFromString(`<article class="ltx_document"><div class="ltx_abstract"><h6 class="ltx_title">Abstract</h6>
+      <p class="ltx_p" data-axt-id="a1">We study graphs.</p><p class="ltx_p axt-t" data-axt-for="a1">我们研究图。</p></div></article>`, 'text/html')
+    expect(paperContext(doc).abstract).toBe('We study graphs.')
+  })
 })
