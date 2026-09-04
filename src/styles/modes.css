@@ -29,32 +29,58 @@ html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption,
 }
 
 /* ── side：左右对照（§7.2）────────────────────────────────────────────────
-   配对靠"原件 + 紧随其后的 .axt-t 兄弟"这一个结构事实，不为每种内容写规则：
-   容器里默认通栏，有译文（或镜像）的原件占左栏，译文占右栏。 */
-html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
-  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
-  .ltx_figure, .ltx_table, .ltx_float) {
+   两条列线**只在 .ltx_document 上定义一次**，其余容器用 subgrid 继承。
+   否则每个容器按自己的宽度各切一半，列表里缩进的段落、参考文献条目的分界线就会和正文错开
+   （实测同一页出现 720 / 715 / 736 三个位置；改 subgrid 后 106 个右栏元素里 102 个落在同一条线上，
+   其余是本来就居中的图表说明）。 */
+html[data-axt-mode="side"] .ltx_document {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* 必须是 minmax(0, 1fr) 而不是 1fr：1fr 等价于 minmax(auto, 1fr)，
+     那个 auto 下限是轨道内容的 min-content 宽度。英文列的下限是最长单词（还有宽表格、长公式），
+     中文可以逐字换行、下限接近 0，于是空间不够时英文列守住下限、中文列被单方面压窄
+     （实测文章列 600px 时两栏变成 317 / 227）。归零下限后两栏恒等宽，实测 272 / 272 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   column-gap: 1.5em;
   align-items: start;
 }
 
-html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
-  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
-  .ltx_figure, .ltx_table, .ltx_float) > * {
+/* 参与配对的容器：继承文档的列线，自身通栏。
+   column-gap 要一并写死——.ltx_biblist 自带 3em 的间距，不覆盖会让右栏偏移 12px。
+   .ltx_enumerate / .ltx_description 不在列表里：ar5iv 用自己的两列网格排序号，改成 subgrid 会毁掉编号 */
+html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
+  .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
+  .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
+  .ltx_itemize, .ltx_itemize > .ltx_item) {
+  display: grid;
+  grid-template-columns: subgrid;
+  grid-column: 1 / -1;
+  column-gap: 1.5em;
+  align-items: start;
+}
+
+/* 配对只依赖一个结构事实：原件后面紧跟一个 .axt-t 兄弟。
+   容器内默认通栏，有配对的原件占左栏、译文占右栏，标题 / 图表说明 / 参考文献片段都不必各写一条规则 */
+html[data-axt-mode="side"] .ltx_document > *,
+html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
+  .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
+  .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
+  .ltx_itemize, .ltx_itemize > .ltx_item) > * {
   grid-column: 1 / -1;
 }
 
-html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
-  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
-  .ltx_figure, .ltx_table, .ltx_float) > :has(+ .axt-t) {
+html[data-axt-mode="side"] .ltx_document > :has(+ .axt-t),
+html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
+  .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
+  .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
+  .ltx_itemize, .ltx_itemize > .ltx_item) > :has(+ .axt-t) {
   grid-column: 1;
 }
 
-html[data-axt-mode="side"] :is(.ltx_document, .ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection, .ltx_subsubsection,
-  .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_bibitem, .ltx_index, .ltx_glossary,
-  .ltx_figure, .ltx_table, .ltx_float) > .axt-t {
+html[data-axt-mode="side"] .ltx_document > .axt-t,
+html[data-axt-mode="side"] .ltx_document :is(.ltx_para, .ltx_abstract, .ltx_section, .ltx_subsection,
+  .ltx_subsubsection, .ltx_paragraph, .ltx_appendix, .ltx_acknowledgements, .ltx_bibliography, .ltx_biblist,
+  .ltx_bibitem, .ltx_index, .ltx_glossary, .ltx_figure, .ltx_table, .ltx_float, .ltx_flex_figure, .ltx_flex_cell,
+  .ltx_itemize, .ltx_itemize > .ltx_item) > .axt-t {
   grid-column: 2;
   margin-inline-start: 0;
 }
@@ -89,10 +115,12 @@ html[data-axt-mode="side"] .ltx_document > .ltx_title_document + .axt-t {
   margin-inline: auto;
 }
 
-/* --main-width 还被图片、代码块、单元格的 max-width 引用，变量放大后它们会跟着变宽；
-   这些内容本身没有双列需求，钉回原值（RESEARCH.md §3.2 的副作用一条） */
-html[data-axt-mode="side"] :is(.ltx_graphics, .ltx_listing, .ltx_td) {
-  max-width: 52rem;
+/* 图片、代码块、单元格的 max-width 在 ar5iv 里跟着 --main-width 走。
+   side 模式下它们要装进的是**一栏**而不是整个文章列，所以约束成所在格子的 100%
+   （2026-09-04 实测：钉成 52rem 会让 832px 的插图塞进 484px 的栏里，撑出栏外）。
+   宽高比由浏览器按内在尺寸保持，不需要额外写 height。 */
+html[data-axt-mode="side"] :is(.ltx_graphics, .ltx_listing, .ltx_td, img, svg) {
+  max-width: 100%;
 }
 
 /* ── only：仅译文（§7.4）──────────────────────────────────────────────────
