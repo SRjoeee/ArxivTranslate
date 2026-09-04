@@ -2,6 +2,7 @@
 // 整张图跨两栏又等于放弃对照，所以整块复制一份、副本里只留译文。
 import { describe, expect, it } from 'vitest'
 import { MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS, T_CLASS, restore, splitFigures } from '@/core/renderer'
+import { ID_ATTR } from '@/core/extractor'
 import { docOf } from './helpers'
 
 /** 一张带分图说明的插图：图形 + 说明 + 说明的译文 */
@@ -51,6 +52,25 @@ describe('splitFigures', () => {
       <figcaption class="ltx_caption">Table 1</figcaption>
       <figcaption class="ltx_caption ${T_CLASS}" data-axt-for="c1">表 1</figcaption></figure>`)
     expect(splitFigures(doc)).toBe(0)
+  })
+
+  it('表格浮动体的说明里有行内公式也不拆：说明里的 math 不是"游离"的媒体', () => {
+    // 实测 2312.17527 两个表格浮动体全被误拆（Codex 在 #26 指出）
+    const doc = docOf(`<figure class="ltx_table">
+      <table class="ltx_tabular"><tbody><tr><td>a</td></tr></tbody></table>
+      <table class="ltx_tabular ${T_CLASS}" data-axt-for="t1"><tbody><tr><td>甲</td></tr></tbody></table>
+      <figcaption class="ltx_caption" ${ID_ATTR}="c1">Table 1: <math>x</math></figcaption>
+      <figcaption class="ltx_caption ${T_CLASS}" data-axt-for="c1">表 1：<math>x</math></figcaption></figure>`)
+    expect(splitFigures(doc)).toBe(0)
+  })
+
+  it('译文内容变了（换目标语言重翻）要重建副本，只数个数会一直用旧的', () => {
+    const doc = docOf(figure())
+    splitFigures(doc)
+    doc.querySelector(`figure[${SPLIT_ATTR}] .ltx_caption.${T_CLASS}`)!.textContent = '图 1. 另一种译法'
+    expect(splitFigures(doc)).toBe(1)
+    expect(doc.querySelectorAll(`.${SPLIT_CLASS}`)).toHaveLength(1)
+    expect(doc.querySelector(`.${SPLIT_CLASS}`)!.textContent).toContain('另一种译法')
   })
 
   it('嵌套的分图交给最外层一起复制，不各拆各的', () => {

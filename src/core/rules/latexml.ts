@@ -88,10 +88,7 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
  * 图形与镜像占一行、说明与译文占下一行，左右各自完整。
  * 表格不在此列——整表克隆已经是它的译文（§5.3）。
  */
-export const MIRROR_SELECTORS = '.ltx_equation, .ltx_equationgroup, .ltx_graphics, svg.ltx_picture, .ltx_listing'
 
-/** §15.1 图片统计用选择器（审计脚本） */
-export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics' } as const
 
 export type RuleKind = 'skip' | 'table' | 'unit' | 'protect'
 
@@ -128,6 +125,20 @@ export function classify(el: Element): Classification | null {
   if (protect) return { kind: 'protect', rule: protect.id, descend: protect.descend ?? false }
   return null
 }
+
+/** 插图与图形（Phase 0 统计脚本用） */
+export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics' } as const
+
+/** 脚注（§7.2 两栏归位用）：容器、正文、正文的 class 名、自带的标号 */
+export const NOTE = {
+  root: '.ltx_note',
+  content: '.ltx_note_content',
+  contentClass: 'ltx_note_content',
+  marks: '.ltx_note_mark, .ltx_tag',
+} as const
+
+/** 插图整块拆分（§7.2）：没有译文、也翻不了的媒体——两栏各需要一份的正是这些 */
+export const FIGURE_MEDIA = 'img, svg, object, math, canvas, video, .ltx_picture'
 
 /**
  * ar5iv 自己把这些挂到页面外缘：出版元数据（DOI / 期刊 / CCS）与脚注的内容都是

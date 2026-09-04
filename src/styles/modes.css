@@ -187,10 +187,10 @@ html:not([data-axt-mode="side"]) .axt-mirror {
    `.ltx_note_outer` 用 float 加负的 margin-inline-end 推到文章外；更窄则折叠、hover 弹出）。
    那个位置是对的，不要动它——试过把边注收进本栏，正文被挤、列表项还被盖住（用户反馈"影响阅读"）。
    要解决的是**同一条脚注出现两次**：段落译文由占位符协议回填，脚注是受保护节点，
-   于是译文段落里会重建一份原文脚注。localizeNotes 把译文搬进那份副本（副本因此是原文 + 译文，
-   上下排），原件那份就多余了——它标上 data-axt-note 后由这条规则隐藏。
-   只隐藏**确实搬走过**的那份：没搬成时原样显示，不会把脚注弄丢 */
-html[data-axt-on] .ltx_note[data-axt-note="moved"] > .ltx_note_outer {
+   于是译文段落里会重建一份原文脚注。localizeNotes 把译文复制进那份副本（副本因此是原文 + 译文，
+   上下排），原件那份就多余了——它标上 data-axt-note 后由这条规则整框隐藏。
+   只隐藏**确实复制过**的那份：没复制成时原样显示，不会把脚注弄丢 */
+html[data-axt-on] .ltx_note[data-axt-note] > .ltx_note_outer {
   display: none;
 }
 

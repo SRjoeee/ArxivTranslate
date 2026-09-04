@@ -140,18 +140,19 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
         setState(batch.block, 'failed')
         progress.failed++
       }
-      return
-    }
-    for (const segment of batch.segments) {
-      const fragment = out.get(segment)
-      if (fragment) {
-        renderText(segment.block as TextBlock, fragment)
-        progress.done++
-      } else {
-        setState(segment.block, 'failed')
-        progress.failed++
+    } else {
+      for (const segment of batch.segments) {
+        const fragment = out.get(segment)
+        if (fragment) {
+          renderText(segment.block as TextBlock, fragment)
+          progress.done++
+        } else {
+          setState(segment.block, 'failed')
+          progress.failed++
+        }
       }
     }
+    // 两种批次都要上报：表格批次曾经 return 得太早，popup 计数与 side prep 都收不到（Codex 在 #26 指出）
     report()
   }
 

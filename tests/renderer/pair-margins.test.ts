@@ -71,4 +71,13 @@ describe('alignPairMargins', () => {
       ><span class="c ${T_CLASS}">甲</span><span class="c ${T_CLASS}">乙</span></article>`
     expect(alignPairMargins(document)).toBe(0)
   })
+
+  it('拆分克隆里的译文不参与对齐：它前面的兄弟不是原文', () => {
+    // 克隆件里原文成员已被摘掉，说明译文的前一个兄弟是插图，会抄到插图的边距（Codex 在 #26 指出）
+    document.head.innerHTML = '<style>img { margin-top: 30px }</style>'
+    document.body.innerHTML = `<article class="ltx_document"><figure class="ltx_figure axt-split ${T_CLASS}">
+      <img src="a.png"><figcaption class="ltx_caption ${T_CLASS}">图 1</figcaption></figure></article>`
+    expect(alignPairMargins(document)).toBe(0)
+    expect(document.querySelector('figcaption')!.getAttribute('style')).toBeNull()
+  })
 })

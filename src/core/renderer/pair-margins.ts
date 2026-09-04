@@ -9,6 +9,7 @@
 // 网格里每个格子的顶端 = 行顶 + 自身 margin-top，两边上边距不等就必然错位；
 // CSS 没有"取兄弟的计算值"的写法，所以把原文的上边距抄到译文上——只写我们自己的节点。
 import { T_CLASS } from './index'
+import { SIDE_DENY_SUBTREE } from './side-layout'
 
 function translations(root: Document | Element): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(`.${T_CLASS}`))
@@ -34,6 +35,9 @@ export function alignPairMargins(root: Document | Element): number {
   for (const t of translations(root)) {
     const original = t.previousElementSibling
     if (!original || original.classList.contains(T_CLASS)) continue
+    // 拆分克隆与脚注里"前一个兄弟"不是原文（克隆件里原文成员已被摘掉），不能当配对处理
+    //（实测 2312.17141 有 14 处说明译文会抄到插图的边距，Codex 在 #26 指出）
+    if (t.closest(SIDE_DENY_SUBTREE)) continue
     // 先擦掉上一轮的值，否则量到的是我们自己写进去的，栏宽或站点样式变了就再也修不回来
     const previous = t.style.marginTop
     if (previous) t.style.removeProperty('margin-top')

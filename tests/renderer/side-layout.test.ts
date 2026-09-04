@@ -110,9 +110,9 @@ describe('side 模式的容器覆盖', () => {
     expect(isSideContainer(content)).toBe(false) // 子树排除把它挡在外面
   })
 
-  it('脚注只留一份：译文搬进副本后，原件那份由样式隐藏', () => {
+  it('脚注只留一份：译文复制进副本后，原件那份由样式隐藏', () => {
     // 边注挂在页面右缘是 arXiv 自己的排法，不要改；要解决的是同一条脚注出现两次
-    expect(RULES).toMatch(/\.ltx_note\[data-axt-note="moved"\] > \.ltx_note_outer \{\s*display: none/)
+    expect(RULES).toMatch(/\.ltx_note\[data-axt-note\] > \.ltx_note_outer \{\s*display: none/)
     // 别再把边注收进本栏：正文被挤、列表项还会被 ar5iv 写死的 height:0 盖住
     expect(RULES).not.toMatch(/\.ltx_note_outer \{[^}]*margin-inline-end: 0/)
     // 搬进副本的译文另起一行，且不再套一层脚注框
