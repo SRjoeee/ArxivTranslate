@@ -1,0 +1,97 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`side 模式的容器覆盖 > 2312.17141.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {
+    "ltx_inline-block": 4,
+    "ltx_note": 2,
+  },
+  "connected": "820/826",
+}
+`;
+
+exports[`side 模式的容器覆盖 > 2312.17527.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {
+    "ltx_note": 4,
+  },
+  "connected": "149/153",
+}
+`;
+
+exports[`side 模式的容器覆盖 > 2401.00418.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {
+    "ltx_note": 2,
+  },
+  "connected": "250/252",
+}
+`;
+
+exports[`side 模式的容器覆盖 > 2401.00596.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {
+    "ltx_note": 15,
+  },
+  "connected": "174/189",
+}
+`;
+
+exports[`side 模式的容器覆盖 > 2410.00260.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {
+    "ltx_note": 2,
+  },
+  "connected": "218/220",
+}
+`;
+
+exports[`side 模式的容器覆盖 > 2507.00150.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {
+    "ltx_note": 7,
+  },
+  "connected": "188/195",
+}
+`;
+
+exports[`side 模式的容器覆盖 > 2608.29808.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {
+    "ltx_inline-block": 13,
+  },
+  "connected": "346/359",
+}
+`;
+
+exports[`side 模式的容器覆盖 > 2608.30667.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {},
+  "connected": "1/1",
+}
+`;
+
+exports[`side 模式的容器覆盖 > 2609.00245.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {
+    "ltx_note": 11,
+  },
+  "connected": "592/603",
+}
+`;
+
+exports[`side 模式的容器覆盖 > 2609.00246.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {
+    "ltx_note": 9,
+  },
+  "connected": "504/513",
+}
+`;
+
+exports[`side 模式的容器覆盖 > synthetic-structures.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+{
+  "blockedBy": {},
+  "connected": "31/31",
+}
+`;

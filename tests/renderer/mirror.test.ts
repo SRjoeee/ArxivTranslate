@@ -1,16 +1,44 @@
 import { describe, expect, it } from 'vitest'
-import { extract, type TextBlock } from '@/core/extractor'
+import { extract, markBlocks, type TextBlock } from '@/core/extractor'
 import { FOR_ATTR, MIRROR_CLASS, T_CLASS, createMirrors, renderText, restore } from '@/core/renderer'
 import { docOf, frag } from './helpers'
 
+/** 造出"某个容器里已有译文"的形状，容器判定才会生效 */
+const withTranslation = (body: string) => {
+  const doc = docOf(body)
+  const blocks = extract(doc)
+  markBlocks(blocks)
+  const first = blocks.find(b => b.kind === 'text') as TextBlock | undefined
+  if (first) renderText(first, frag(doc, '译文'))
+  return doc
+}
+
 describe('createMirrors', () => {
-  it('给没有译文的公式与图形各插一份副本，标成 axt-t + axt-mirror', () => {
-    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p>'
-      + '<table class="ltx_equation" id="E1"><tbody><tr><td class="ltx_eqn_cell">x=1</td></tr></tbody></table></div>'
-      + '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png"><figcaption class="ltx_caption">Cap.</figcaption></figure>')
-    expect(createMirrors(doc)).toBe(2)
-    const eq = doc.getElementById('E1')!
-    const mirror = eq.nextElementSibling!
+  it('翻译开始前调用什么都不做——顶层元素那时既没有译文也没有块标记，会被整块复制（实测事故）', () => {
+    const doc = docOf('<div class="ltx_abstract"><h6 class="ltx_title ltx_title_abstract">Abstract</h6>'
+      + '<p class="ltx_p" id="a1">Long English abstract.</p></div>'
+      + '<section class="ltx_section"><h2 class="ltx_title ltx_title_section">Intro</h2>'
+      + '<div class="ltx_para"><p class="ltx_p" id="p1">Body.</p></div></section>')
+    expect(createMirrors(doc)).toBe(0)
+  })
+
+  it('翻译进行中：还没轮到的章节不镜像，否则译文到达后会既有副本又有译文', () => {
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">One.</p></div>'
+      + '<section class="ltx_section"><div class="ltx_para"><p class="ltx_p" id="p2">Two.</p></div></section>')
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    renderText(blocks[0] as TextBlock, frag(doc, '译文'))
+    createMirrors(doc)
+    const section = doc.querySelector('section.ltx_section')!
+    expect(section.nextElementSibling).toBeNull()
+    expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
+  })
+
+  it('容器里没有译文的内容各补一份副本，标成 axt-t + axt-mirror', () => {
+    const doc = withTranslation('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p>'
+      + '<table class="ltx_equation" id="E1"><tbody><tr><td class="ltx_eqn_cell">x=1</td></tr></tbody></table></div>')
+    expect(createMirrors(doc)).toBe(1)
+    const mirror = doc.getElementById('E1')!.nextElementSibling!
     expect(mirror.classList.contains(T_CLASS)).toBe(true)
     expect(mirror.classList.contains(MIRROR_CLASS)).toBe(true)
     expect(mirror.tagName).toBe('TABLE')
@@ -18,30 +46,43 @@ describe('createMirrors', () => {
     expect(mirror.getAttribute(FOR_ATTR)).toMatch(/^mirror:/)
   })
 
-  it('幂等：重复调用不会叠加', () => {
-    const doc = docOf('<div class="ltx_para"><table class="ltx_equation" id="E1"><tbody><tr><td>x</td></tr></tbody></table></div>')
-    expect(createMirrors(doc)).toBe(1)
-    expect(createMirrors(doc)).toBe(0)
-    expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(1)
+  it('参考文献的序号与作者段也镜像——它们同样没有译文，右栏空着就断了对照', () => {
+    const doc = withTranslation('<ul class="ltx_biblist"><li class="ltx_bibitem" id="b1">'
+      + '<span class="ltx_tag ltx_tag_bibitem">[1]</span>'
+      + '<span class="ltx_bibblock">A. Author, B. Author.</span>'
+      + '<span class="ltx_bibblock">Some title.</span></li></ul>')
+    createMirrors(doc)
+    const item = doc.getElementById('b1')!
+    const kinds = Array.from(item.children).map(c => `${Array.from(c.classList).filter(x => x.startsWith('ltx_'))[0]}${c.classList.contains(MIRROR_CLASS) ? '(镜像)' : c.classList.contains(T_CLASS) ? '(译文)' : ''}`)
+    expect(kinds).toContain('ltx_tag(镜像)')
+    expect(kinds.filter(k => k === 'ltx_bibblock(镜像)').length).toBe(1)
   })
 
-  it('只镜像图形，不镜像整个 figure：说明由译文配对，右栏不会出现英文说明', () => {
-    const doc = docOf('<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png">'
+  it('等待翻译的块不镜像：否则译文到达后会同时存在副本与译文', () => {
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">One.</p><p class="ltx_p" id="p2">Two.</p></div>')
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    renderText(blocks[0] as TextBlock, frag(doc, '译文'))
+    createMirrors(doc)
+    // p2 还没翻译，但它是块，不能被镜像
+    expect(doc.getElementById('p2')!.nextElementSibling).toBeNull()
+    expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
+  })
+
+  it('已经有译文的块不镜像；内部含译文的容器自己不镜像，交给它的子元素', () => {
+    const doc = withTranslation('<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png">'
       + '<figcaption class="ltx_caption" id="c1">Cap.</figcaption></figure>')
-    const caption = extract(doc).find(b => b.id === 'c1') as TextBlock
-    renderText(caption, frag(doc, '说明。'))
-    expect(createMirrors(doc)).toBe(1)
+    createMirrors(doc)
     const figure = doc.getElementById('F1')!
     expect(figure.nextElementSibling).toBeNull()
-    const mirror = figure.querySelector(`.${MIRROR_CLASS}`)!
-    expect(mirror.tagName).toBe('IMG')
-    expect(figure.querySelectorAll(`.${T_CLASS}`)).toHaveLength(2)
+    expect(figure.querySelector(`.${MIRROR_CLASS}`)?.tagName).toBe('IMG')
   })
 
-  it('嵌套目标只镜像最外层', () => {
-    const doc = docOf('<div class="ltx_para"><table class="ltx_equationgroup" id="G1"><tbody><tr><td>'
-      + '<table class="ltx_equation"><tbody><tr><td>x</td></tr></tbody></table></td></tr></tbody></table></div>')
+  it('幂等：重复调用不会叠加', () => {
+    const doc = withTranslation('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p>'
+      + '<table class="ltx_equation" id="E1"><tbody><tr><td>x</td></tr></tbody></table></div>')
     expect(createMirrors(doc)).toBe(1)
+    expect(createMirrors(doc)).toBe(0)
     expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(1)
   })
 
@@ -51,8 +92,10 @@ describe('createMirrors', () => {
       + '<p class="ltx_p" id="p1">Text.</p><table class="ltx_equation" id="E1"><tbody><tr><td>x</td></tr></tbody></table>'
       + '</div></article>'
     const before = document.documentElement.outerHTML
+    const blocks = extract(document)
+    markBlocks(blocks)
+    renderText(blocks[0] as TextBlock, frag(document, '译文'))
     expect(createMirrors(document)).toBe(1)
-    expect(document.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(1)
     restore(document)
     expect(document.documentElement.outerHTML).toBe(before)
   })
