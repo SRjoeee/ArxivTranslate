@@ -7,7 +7,7 @@
 //
 // 只在第一次进入 side 模式时生成，之后留在 DOM 里由 CSS 控制显隐，
 // 所以模式切换仍然只改 <html> 上的一个属性。
-import { DOCUMENT_ROOT } from '@/core/rules/latexml'
+import { DOCUMENT_ROOT, MARGIN_ASIDE } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
 import { FOR_ATTR, T_CLASS } from './index'
 import { SIDE_CONTAINER, SIDE_STACK, isSideContainer } from './side-layout'
@@ -29,6 +29,8 @@ function strip(root: Element): void {
 
 function needsMirror(child: Element): boolean {
   if (child.classList.contains(T_CLASS)) return false
+  // ar5iv 浮到页面外缘的边注与出版元数据：镜像只会多一份重复（§7.2）
+  if (child.matches(MARGIN_ASIDE)) return false
   // 翻译单元：已经有译文，或译文还在路上，都不该再来一份副本
   if (child.hasAttribute(ID_ATTR)) return false
   if (child.nextElementSibling?.classList.contains(T_CLASS)) return false

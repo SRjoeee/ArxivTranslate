@@ -129,6 +129,14 @@ export function classify(el: Element): Classification | null {
   return null
 }
 
+/**
+ * ar5iv 自己把这些挂到页面外缘：出版元数据（DOI / 期刊 / CCS）与脚注的内容都是
+ * `float: inline-end` 加负边距浮出文章的。它们没有译文，镜像只会在另一栏多出一份重复，
+ * 而左栏那份的浮动内容还会落到隔壁栏上（实测 2312.17141：原件的内容浮到 1320→1752，压在右栏）。
+ * 不镜像时它自然通栏，浮动内容落回页面右缘（实测 2084→2516，与原版式一致）。
+ */
+export const MARGIN_ASIDE = '.ltx_pubnotes, .ltx_note'
+
 /** 文档主标题：靠 text-align:center 居中，不能与译文同行（§7.3） */
 const DOCUMENT_TITLE = '.ltx_title_document'
 

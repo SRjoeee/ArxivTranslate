@@ -114,4 +114,13 @@ describe('createMirrors', () => {
     createMirrors(doc)
     expect(doc.querySelectorAll('.ltx_flex_cell .axt-mirror')).toHaveLength(0)
   })
+
+  it('浮到页面外缘的边注与出版元数据不镜像：只会多一份重复', () => {
+    // 实测 2312.17141：DOI / 期刊 / CCS 那块被镜像成两份，左栏那份的浮动内容还压在右栏上
+    const doc = docOf(`
+      <span class="ltx_pubnotes ltx_pubnotes_meta"><span class="ltx_pubnotes_content">DOI: x</span></span>
+      <div class="ltx_para"><p class="ltx_p">x</p><p class="ltx_p ${T_CLASS}" data-axt-for="1">译</p></div>`)
+    createMirrors(doc)
+    expect(doc.querySelectorAll('.ltx_pubnotes')).toHaveLength(1)
+  })
 })
