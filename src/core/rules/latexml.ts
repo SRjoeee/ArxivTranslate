@@ -88,10 +88,14 @@ export const SKIP_RULES: readonly Rule[] = [
  * 这几类要翻，其余的 tag 是纯编号与符号，必须保持原样。
  *
  * 依据是全部 12 篇 fixture 的实测（`.ltx_tag` 共 1241 个）：
- * theorem 246 个全部形如 "Definition 1" / "Example 1"；figure 63 个里 58 个是 "Figure 1."；
- * table 43 个全是 "Table 1:"；appendix 20 个全是 "Appendix A"；float 13 个全是 "Algorithm 1"；
+ * theorem 246 个全部形如 "Definition 1" / "Example 1"；table 43 个全是 "Table 1:"；
+ * figure 63 个里 58 个是 "Figure 1."；appendix 20 个全是 "Appendix A"；float 13 个全是 "Algorithm 1"；
  * part / chapter 各 1 个。反过来 equation 的 344 个里只有 13 个带字母（"(let.lin)" 这类 LaTeX 标签，不能动），
  * section / subsection / ref 的 439 个里带字母的都是罗马数字（II、III.1），note 的 54 个是脚注标记。
+ *
+ * **光看类名不够**：LaTeXML 给子图面板的标签也用 `.ltx_tag_figure`，内容是纯标识符 `(a)` `(b)` `(c)`
+ *（387 个带名 tag 里有 5 个，实测于 2410.00260 与 2312.17141；Codex 在 #53 指出）。
+ * 这类翻了会被模型改写或重排，与面板的对应关系就断了。所以再加一道内容判定：要含**词**才翻。
  */
 export const NAMED_TAGS = [
   '.ltx_tag_theorem', // Definition 1.1 / Theorem 2 / Lemma 3
@@ -108,7 +112,7 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
   { id: 'math', selector: 'math, .ltx_Math', note: '行内公式；行间公式已被 equation 整块跳过' },
   { id: 'ref', selector: '.ltx_ref', note: '交叉引用，含内部 .ltx_ref_tag' },
   { id: 'cite', selector: '.ltx_cite', note: '引用标记' },
-  { id: 'tag', selector: `.ltx_tag:not(:is(${NAMED_TAGS}))`, note: '编号与符号：章节号、公式编号、列表符号、脚注标记、代码行号' },
+  { id: 'tag', selector: '.ltx_tag', note: '编号与符号：章节号、公式编号、列表符号、脚注标记、代码行号；带环境名的除外，见 isNamedTag' },
   { id: 'tt', selector: '.ltx_text.ltx_font_typewriter', note: '等宽文本，视为代码' },
   { id: 'note', selector: '.ltx_note', descend: true, note: '脚注容器：对外层段落是 void，内部的 .ltx_note_content 仍要被发现为块' },
   { id: 'note-mark', selector: '.ltx_note_mark, .ltx_note_type', note: '脚注标记与类型标签（容器外层与正文内各一次）' },
@@ -152,6 +156,15 @@ export function isBibAuthorBlock(el: Element): boolean {
   return siblings.length > 1 && siblings[0] === el
 }
 
+/**
+ * 带环境名、且确实含词的 tag：`Definition 1.1` 要翻，子图面板的 `(a)` 不能翻。
+ * 「含词」定为**连续两个及以上字母**——`(a)` 只有一个字母；罗马数字（II、III）虽然也满足，
+ * 但它们只出现在 section / subsection / ref 这些不在清单里的类上，够不着这里
+ */
+export function isNamedTag(el: Element): boolean {
+  return el.matches(NAMED_TAGS) && /[A-Za-z]{2,}/.test(el.textContent ?? '')
+}
+
 export function classify(el: Element): Classification | null {
   if (isBibAuthorBlock(el)) return { kind: 'skip', rule: 'bib-authors', descend: false }
   const skip = SKIP_RULES.find(r => el.matches(r.selector))
@@ -160,6 +173,8 @@ export function classify(el: Element): Classification | null {
   const unit = UNIT_RULES.find(r => el.matches(r.selector))
   if (unit) return { kind: 'unit', rule: unit.id, descend: true }
   const protect = PROTECT_RULES.find(r => el.matches(r.selector))
+  // 带环境名的 tag 不作 void：它内含 Definition / Table / Algorithm 这类要翻的词
+  if (protect?.id === 'tag' && isNamedTag(el)) return null
   if (protect) return { kind: 'protect', rule: protect.id, descend: protect.descend ?? false }
   return null
 }

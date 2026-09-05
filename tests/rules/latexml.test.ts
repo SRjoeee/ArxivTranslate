@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   PROTECT_RULES, RULES_VERSION, SKIP_RULES, TABLE_RULES, UNIT_RULES,
-  classify, documentRoot, hasTranslatableText, isNumericCell, visibleText,
+  classify, documentRoot, hasTranslatableText, isNamedTag, isNumericCell, visibleText,
 } from '@/core/rules/latexml'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
@@ -125,6 +125,26 @@ describe('带环境名的 tag 要翻译，纯编号的不翻（§5.2，用户反
         expect(tagOf(html)).toMatchObject({ kind: 'protect', rule: 'tag' })
       })
     }
+
+    // 光看类名不够：子图面板的标签也是 .ltx_tag_figure，内容却是纯标识符（Codex 在 #53 指出）
+    const panels: [string, string][] = [
+      ['子图面板 (a)', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">(a)</span></figcaption>'],
+      ['子图面板 (b)', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">(b)</span></figcaption>'],
+      ['纯编号的定理 tag', '<h6 class="ltx_title"><span class="ltx_tag ltx_tag_theorem">1.1</span></h6>'],
+    ]
+    for (const [name, html] of panels) {
+      it(`${name}仍作 void：翻了会与面板的对应关系断掉`, () => {
+        expect(tagOf(html)).toMatchObject({ kind: 'protect', rule: 'tag' })
+      })
+    }
+
+    it('判定要含连续两个字母：单字母标识符不算词', () => {
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">Figure 1.</span>'))).toBe(true)
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">(a)</span>'))).toBe(false)
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">(1)</span>'))).toBe(false)
+      // 类名不在清单里的，含词也不翻
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_section">Appendix</span>'))).toBe(false)
+    })
   })
 
 describe('classify：优先级 skip > table > unit > protect', () => {
