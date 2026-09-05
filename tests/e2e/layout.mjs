@@ -100,7 +100,7 @@ async function measureFrame(page) {
         `${m.asides.length} 个：${m.asides.slice(0, 3).map(a => `${a.l}–${a.r}`).join('，')}；文章右缘 ${m.art.r}`)
     }
     // 行间公式不能换行，宽过一栏的要按档缩放或栏内滚动（§7.2）：量所有配对了镜像的公式表，没有一张比栏宽
-    await page.evaluate(() => document.querySelector('#S1.SS4')?.scrollIntoView({ block: 'start' }))
+    await page.evaluate(() => document.getElementById('S1.SS4')?.scrollIntoView({ block: 'start' }))
     await quiesce(page)
     await sleep(1500) // side prep 的合并器最长等 1s
     const eqn = await page.evaluate(() => {
