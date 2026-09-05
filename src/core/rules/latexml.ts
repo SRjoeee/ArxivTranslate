@@ -156,13 +156,19 @@ export function isBibAuthorBlock(el: Element): boolean {
   return siblings.length > 1 && siblings[0] === el
 }
 
+/** 括号里的整段标识符：子图面板的 `(a)` `(ii)` `(iii)`、公式标签的 `(let.lin)` 都是这个形状 */
+const PARENTHESIZED = /[(（][^)）]*[)）]/g
+
 /**
- * 带环境名、且确实含词的 tag：`Definition 1.1` 要翻，子图面板的 `(a)` 不能翻。
- * 「含词」定为**连续两个及以上字母**——`(a)` 只有一个字母；罗马数字（II、III）虽然也满足，
- * 但它们只出现在 section / subsection / ref 这些不在清单里的类上，够不着这里
+ * 带环境名、且确实含词的 tag：`Definition 1.1` 要翻，子图面板的 `(a)` `(ii)` 不能翻。
+ *
+ * 判定分两步：**先去掉括号里的整段内容**，再看剩下的有没有连续两个及以上字母。
+ * 只看字母数不够——面板标识符可以是 `(ii)` `(iii)` 这种多字母罗马数字（Codex 在 #53 指出）；
+ * 而括号本来就是 LaTeXML 给标识符的形状，环境名从不带括号（`Definition 1.2 (Hall set)` 去掉括号后
+ * 仍有 "Definition"，照样判为要翻）
  */
 export function isNamedTag(el: Element): boolean {
-  return el.matches(NAMED_TAGS) && /[A-Za-z]{2,}/.test(el.textContent ?? '')
+  return el.matches(NAMED_TAGS) && /[A-Za-z]{2,}/.test((el.textContent ?? '').replace(PARENTHESIZED, ''))
 }
 
 export function classify(el: Element): Classification | null {

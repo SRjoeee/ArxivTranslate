@@ -138,6 +138,15 @@ describe('带环境名的 tag 要翻译，纯编号的不翻（§5.2，用户反
       })
     }
 
+    it('括号里的整段标识符不算词：面板标签可以是多字母罗马数字（Codex 在 #53 指出）', () => {
+      for (const label of ['(a)', '(ii)', '(iii)', '(iv)', '（乙）', '(A.1)']) {
+        expect([label, isNamedTag(el(`<span class="ltx_tag ltx_tag_figure">${label}</span>`))]).toEqual([label, false])
+      }
+      // 环境名从不带括号：去掉括号后仍有词的照样要翻
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_theorem">Definition 1.2 (Hall set)</span>'))).toBe(true)
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">Figure 3 (a)</span>'))).toBe(true)
+    })
+
     it('判定要含连续两个字母：单字母标识符不算词', () => {
       expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">Figure 1.</span>'))).toBe(true)
       expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">(a)</span>'))).toBe(false)
