@@ -145,6 +145,57 @@ await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 
 const promptGone = (await options.getByText('e2e 提示词').count()) === 0
 check('设置页：删除自定义提示词后选回默认', promptGone, `残留 ${promptGone ? 0 : 1}`)
 
+// ── 设置页：译文样式预设与缓存管理（§7.5 / §9）──────────────────────────
+{
+  await options.bringToFront()
+  await options.getByLabel('外观').selectOption('quote')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
+  const page = await context.newPage()
+  await page.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
+  // 只认真正的译文：加载圆环 / 失败控件 / 镜像与拆分克隆也带 .axt-t，但预设刻意不装饰它们，
+  // 轮询撞上 pending 节点会把「竖线为 0」误报成预设坏了（Codex 在 #52 指出）
+  const REAL = ':not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
+  await page.waitForFunction(sel => document.querySelector(sel) !== null, `.axt-t:not([data-axt-inline])${REAL}`, { timeout: 60_000 }).catch(() => undefined)
+  await page.waitForFunction(sel => document.querySelector(sel) !== null, `.axt-t[data-axt-inline]${REAL}`, { timeout: 30_000 }).catch(() => undefined)
+  const styled = await page.evaluate(real => {
+    const el = document.querySelector(`.axt-t:not([data-axt-inline])${real}`)
+    const inline = document.querySelector(`.axt-t[data-axt-inline]${real}`)
+    return {
+      attr: document.documentElement.dataset.axtStyle ?? null,
+      border: el ? Math.round(Number.parseFloat(getComputedStyle(el).borderInlineStartWidth)) : -1,
+      // 行内标题译文不该加线（会把「Abstract 摘要」挤歪）；没等到行内译文就如实报 null，不当作通过
+      inline: inline ? Math.round(Number.parseFloat(getComputedStyle(inline).borderInlineStartWidth)) : null,
+    }
+  }, REAL)
+  check('样式预设 quote：<html> 带属性、块级译文有竖线、同行标题译文没有', styled.attr === 'quote' && styled.border > 0 && styled.inline === 0, JSON.stringify(styled))
+  await page.screenshot({ path: `${SHOTS}/style-quote.png` })
+  await page.close()
+
+  // 下划线类要画到公式上：text-decoration 不传播到 math 这类原子行内盒，用户反馈过公式处虚线断掉
+  await options.bringToFront()
+  await options.getByLabel('外观').selectOption('dashed')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  // 换一篇数学密集的：PAPER 首屏没有行内公式，检查会空跑
+  const dashedPage = await context.newPage()
+  await dashedPage.goto('https://arxiv.org/html/2609.04056v1#axt-translate', { waitUntil: 'domcontentloaded' })
+  await dashedPage.waitForFunction(() => document.querySelectorAll('.axt-t math').length > 0, null, { timeout: 60_000 }).catch(() => undefined)
+  const dashed = await dashedPage.evaluate(() => {
+    const deco = el => { const cs = getComputedStyle(el); return `${cs.textDecorationLine}/${cs.textDecorationStyle}` }
+    const maths = [...document.querySelectorAll('.axt-t math')]
+    const block = document.querySelector('.axt-t:not([data-axt-inline])')
+    return { count: maths.length, math: maths.slice(0, 3).map(deco), block: block ? deco(block) : null }
+  })
+  check('样式预设 dashed：虚线画到译文里的公式上（text-decoration 不传播到原子行内盒）',
+    dashed.count > 0 && dashed.block === 'underline/dashed' && dashed.math.every(d => d === 'underline/dashed'),
+    `${dashed.count} 个公式，块级 ${dashed.block}，公式 ${dashed.math.join(' ')}`)
+  await dashedPage.screenshot({ path: `${SHOTS}/style-dashed.png` })
+  await dashedPage.close()
+
+}
+
 // ── 论文 1：看到哪翻到哪（§10）：不滚动只翻首屏附近；逐屏滚到底其余跟上；标题翻译；速率 ────
 {
   const { page, logs, requests, originalTitle, spinnersSeen } = await openPaper(PAPER, GOOGLE)
@@ -211,6 +262,24 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await popup.screenshot({ path: `${SHOTS}/popup-after-restore.png` })
   await popup.close()
   await page.close()
+}
+
+// ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
+{
+  await options.bringToFront()
+  await options.reload({ waitUntil: 'domcontentloaded' })
+  await options.getByLabel('外观').selectOption('none')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
+  // 前面两篇论文翻过，缓存里应当有条目；重载保证读到的是最新统计
+  await options.getByText(/已缓存 [1-9]\d* 条/).waitFor({ timeout: 15_000 }).catch(() => undefined)
+  const before = await options.getByText(/已缓存 \d+ 条/).textContent()
+  options.once('dialog', d => d.accept())
+  await options.getByRole('button', { name: '清空全部缓存' }).click()
+  await options.getByText(/已删除 \d+ 条/).waitFor({ timeout: 10_000 })
+  const after = await options.getByText(/已缓存 \d+ 条/).textContent()
+  check('缓存管理：显示条数，清空后归零', /已缓存 [1-9]/.test(before ?? '') && /已缓存 0 条/.test(after ?? ''), `清空前「${before}」，清空后「${after}」`)
 }
 
 // ── 错 key + 降级链开启（§8.5）：LLM 报 auth 后自动切到 google-web，整页照常翻完 ──

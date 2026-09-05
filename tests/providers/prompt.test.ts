@@ -30,7 +30,7 @@ describe('prompt', () => {
   })
 
   it('带版本号：目标语言改填英文名后升到 3', () => {
-    expect(PROMPT_VERSION).toBe('3')
+    expect(PROMPT_VERSION).toBe('4')
   })
 
   it('system prompt = 提示词库模板 + 协议块；协议块写明占位符与输出形状', () => {
@@ -81,6 +81,21 @@ describe('prompt', () => {
     expect(system).toContain(PROTOCOL_BLOCK)
     expect(prompt).toContain('Translate now.')
     expect(prompt).toContain('S1.p1.1')
+  })
+
+  it('自定义提示词漏写 {{glossary}} 也会把术语表发出去（Codex 在 #52 指出）', () => {
+    // 设置页承诺「术语表随每一批发出」，而「新建」出来的模板默认不含这个变量
+    const prompts = {
+      promptId: 'mine',
+      patterns: [{ id: 'mine', name: 'mine', systemPrompt: 'Target: {{targetLanguage}}', prompt: 'Translate: {{input}}' }],
+    }
+    const withGlossary = { ...request, context: { glossary: [{ term: 'graph', translation: '图' }] } }
+    expect(buildPrompts(withGlossary, prompts).prompt).toContain('graph -> 图')
+    // 没配术语表就不追加这一段，prompt 不平白变长
+    expect(buildPrompts(request, prompts).prompt).not.toContain('Glossary:')
+    // 模板自己写了 {{glossary}} 时不重复追加
+    const explicit = { promptId: 'mine', patterns: [{ id: 'mine', name: 'mine', systemPrompt: 'G: {{glossary}}', prompt: '{{input}}' }] }
+    expect(buildPrompts(withGlossary, explicit).prompt).not.toContain('Glossary:')
   })
 
   it('术语表格式化', () => {

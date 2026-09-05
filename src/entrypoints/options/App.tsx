@@ -1,12 +1,33 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
 import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
 import { DEFAULT_CONFIG, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { THINKING_HOSTS } from '@/providers/thinking'
+import { sanitizeCustomCss, type StylePreset } from '@/core/renderer/style-preset'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 import { sendMessage } from '@/shared/messages'
 import { PromptManager } from './PromptManager'
+
+/** 分组显示：整套照搬 KISS 的预设，加上 Read Frog 的绿与淡色底（§7.5） */
+const STYLE_GROUPS: [string, [StylePreset, string][]][] = [
+  ['基础', [['none', '与原文相同'], ['muted', '淡一档'], ['green', '绿色（Read Frog 默认）']]],
+  ['下划线', [['underline', '实线'], ['dotted', '点线'], ['dashed', '虚线'], ['dashed-bold', '粗虚线'], ['wavy', '波浪线'], ['wavy-bold', '粗波浪线']]],
+  ['边框', [['quote', '左侧竖线'], ['box', '细边框'], ['box-dashed', '虚线边框']]],
+  ['底色', [['marker', '荧光笔'], ['marker-gradient', '渐变荧光笔'], ['highlight', '高亮底'], ['tint', '淡色底']]],
+  ['特效', [['gradient', '渐变文字'], ['colorful', '多彩底'], ['glow', '发光'], ['blink', '呼吸'], ['blur', '模糊（悬停清晰）']]],
+  ['自定义', [['custom', '自定义 CSS']]],
+]
+
+const STYLE_NOTES: Partial<Record<StylePreset, string>> = {
+  none: '不加任何装饰',
+  green: 'Read Frog 译文的默认配色，对照阅读时最容易区分',
+  quote: '同行的短标题译文不加线，否则会把标题挤歪',
+  dashed: '下划线类不占空间，左右对照时不影响两栏对齐',
+  blur: '悬停才看清，适合自测与背诵',
+  gradient: '静态渐变；流动动画会持续占用 CPU，实测后去掉了',
+  custom: '只填声明，选择器由扩展补上',
+}
 
 const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
 
@@ -27,6 +48,21 @@ export function App() {
   const [testResult, setTestResult] = useState('')
   // 术语表在页面里是文本，保存时才解析成结构（成批粘贴比逐行编辑快）
   const [glossaryText, setGlossaryText] = useState('')
+  const [cache, setCache] = useState<{ entries: number; bytes: number } | null>(null)
+  const [cacheError, setCacheError] = useState('')
+  const [cacheNote, setCacheNote] = useState('')
+
+  const loadCacheStats = useCallback(async () => {
+    try {
+      const res = await sendMessage({ type: 'axt:cache-stats' })
+      // 读不到就说读不到：把失败显示成「已缓存 0 条」会让用户以为缓存是空的（Codex 在 #52 指出）
+      if (res.ok) { setCache({ entries: res.entries, bytes: res.bytes }); setCacheError('') }
+      else { setCache(null); setCacheError(res.message) }
+    } catch (e) {
+      setCache(null)
+      setCacheError(e instanceof Error ? e.message : String(e))
+    }
+  }, [])
 
   useEffect(() => {
     getConfig().then(c => {
@@ -34,7 +70,16 @@ export function App() {
       setHasStoredKey(c.openaiCompat.apiKey.length > 0)
       setGlossaryText(formatGlossaryText(c.glossary))
     })
-  }, [])
+    void loadCacheStats()
+    // 翻译发生在别的标签页：切回设置页时重新读一次，否则显示的永远是打开那一刻的数字
+    const onVisible = () => { if (!document.hidden) void loadCacheStats() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
+  }, [loadCacheStats])
 
   const patchOpenAI = (patch: Partial<Config['openaiCompat']>) =>
     setLocal(c => ({ ...c, openaiCompat: { ...c.openaiCompat, ...patch } }))
@@ -42,6 +87,11 @@ export function App() {
   async function save() {
     setNotice('')
     try {
+      // 自定义 CSS 只接受声明块：写了花括号会把整篇论文的排版改掉，而且很难看出原因
+      if (config.style.preset === 'custom') {
+        const css = sanitizeCustomCss(config.style.customCss)
+        if (!css.ok) throw new Error(`自定义样式：${css.reason}`)
+      }
       // 写错的术语行要报行号，不能静默丢掉——用户会以为术语已经生效
       const glossary = parseGlossary(glossaryText)
       if (glossary.issues.length > 0) {
@@ -101,6 +151,21 @@ export function App() {
       setTestResult(`失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setTesting(false)
+    }
+  }
+
+
+  /** 清空整库。设置页拿不到当前论文 id，所以只做全局清空（§9） */
+  async function clearCache() {
+    if (!window.confirm('清空全部译文缓存？之后重新翻译会重新请求引擎。')) return
+    setCacheNote('')
+    try {
+      const result = await sendMessage({ type: 'axt:cache-clear', paper: undefined })
+      if (!result.ok) throw new Error(result.message)
+      setCacheNote(`已删除 ${result.removed} 条`)
+      await loadCacheStats()
+    } catch (e) {
+      setCacheNote(`清空失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -176,6 +241,34 @@ export function App() {
         disabled={config.provider !== 'openai-compat'}
       />
 
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>译文样式</h2>
+      <label style={label}>
+        外观
+        <select style={field} value={config.style.preset} onChange={e => setLocal(c => ({ ...c, style: { ...c.style, preset: e.target.value as StylePreset } }))}>
+          {STYLE_GROUPS.map(([group, items]) => (
+            <optgroup key={group} label={group}>
+              {items.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </optgroup>
+          ))}
+        </select>
+        <small style={{ color: '#666' }}>{STYLE_NOTES[config.style.preset] ?? '译文只加装饰，字体与字号仍随论文原样'}</small>
+      </label>
+      {config.style.preset === 'custom' && (
+        <label style={label}>
+          自定义声明
+          <textarea
+            style={{ ...field, minHeight: 70, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}
+            value={config.style.customCss}
+            onChange={e => setLocal(c => ({ ...c, style: { ...c.style, customCss: e.target.value } }))}
+            placeholder="color: #1565c0; opacity: 0.95;"
+          />
+          <small style={{ display: 'block', color: '#666' }}>
+            只填花括号里的声明，扩展会补上选择器。不要写花括号、<code>@</code> 规则或标签。
+            译文继承原文的字体与字号，写 <code>font-size</code> 这类属性会破坏站点排版
+          </small>
+        </label>
+      )}
+
       <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译范围</h2>
       <label style={label}>
         预翻译距离（像素）
@@ -196,6 +289,21 @@ export function App() {
         <span>{notice}</span>
       </p>
       {testResult && <p style={{ padding: 8, background: '#f4f4f4', borderRadius: 4 }}>{testResult}</p>}
+
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>译文缓存</h2>
+      <p style={{ margin: '0 0 4px', fontSize: 13 }}>
+        {cache !== null
+          ? `已缓存 ${cache.entries} 条 · ${(cache.bytes / 1024 / 1024).toFixed(2)} MB`
+          : cacheError === '' ? '读取中…' : `读取缓存失败：${cacheError}`}
+      </p>
+      <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>
+        缓存按引擎、模型、提示词、术语表分开存；换了其中任何一样都不会命中旧译文，通常不需要手动清
+      </small>
+      <p>
+        <button type="button" onClick={clearCache}>清空全部缓存</button>
+        {' '}
+        <span style={{ color: '#666', fontSize: 12 }}>{cacheNote}</span>
+      </p>
     </main>
   )
 }

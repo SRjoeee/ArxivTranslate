@@ -41,10 +41,19 @@ export default defineBackground(() => {
         return true
       // IndexedDB 不可用时也要回话，否则调用方等到的是"message channel closed"（Codex 在 #7 指出）
       case 'axt:cache-clear':
-        translationCache.clear(message.paper).then(removed => sendResponse({ removed })).catch(() => sendResponse({ removed: 0 }))
+        // 失败要如实回报：吞掉异常回 { removed: 0 } 的话，IndexedDB 用不了时用户会以为已经清干净（Codex 在 #52 指出）
+        translationCache.clear(message.paper)
+          .then(removed => sendResponse({ ok: true, removed }))
+          .catch((e: unknown) => sendResponse({ ok: false, message: e instanceof Error ? e.message : String(e) }))
         return true
       case 'axt:cache-stats':
-        translationCache.stats().then(sendResponse).catch(() => sendResponse({ entries: 0, bytes: 0 }))
+        // 与 cache-clear 同一套协议：失败要如实回报，不能把「IndexedDB 用不了」显示成「缓存是空的」。
+        // 统计前先清过期条目——`get()` 只是把它们当未命中，从不删除，不清的话页面上会一直显示
+        // 一堆已经用不了的条数与体积；这也是 cleanup() 在运行时唯一的调用点（Codex 在 #52 指出）
+        translationCache.cleanup()
+          .then(() => translationCache.stats())
+          .then(stats => sendResponse({ ok: true, ...stats }))
+          .catch((e: unknown) => sendResponse({ ok: false, message: e instanceof Error ? e.message : String(e) }))
         return true
     }
   })

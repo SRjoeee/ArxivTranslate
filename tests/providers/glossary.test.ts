@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 
 describe('parseGlossary', () => {
-  it('逗号、全角逗号、制表符、分号都能分隔', () => {
-    const { entries, issues } = parseGlossary('weights, 权重\nbias，偏置\nloss\t损失\nlogits, 对数几率; prior, 先验')
+  it('逗号、全角逗号、制表符都能分隔原文与译文', () => {
+    const { entries, issues } = parseGlossary('weights, 权重\nbias，偏置\nloss\t损失\nlogits, 对数几率\nprior, 先验')
     expect(entries).toEqual([
       { term: 'weights', translation: '权重' },
       { term: 'bias', translation: '偏置' },
@@ -43,8 +43,15 @@ describe('parseGlossary', () => {
     ])
   })
 
-  it('行号按原始行计，一行里的多个分号条目共用行号', () => {
-    const { issues } = parseGlossary('weights, 权重\nbias; loss, 损失')
+  it('分号不是记录分隔符：译文里的分号原样留在译文里（Codex 在 #52 指出）', () => {
+    // 当成分隔会把一条合法映射悄悄拆成两条不相干的（`kernel` → `核`，外加一条读不懂的残句）
+    const { entries, issues } = parseGlossary('kernel, 核; 统计学中称核函数')
+    expect(entries).toEqual([{ term: 'kernel', translation: '核; 统计学中称核函数' }])
+    expect(issues).toEqual([])
+  })
+
+  it('行号按原始行计', () => {
+    const { issues } = parseGlossary('weights, 权重\nbias')
     expect(issues).toEqual([{ line: 2, text: 'bias', reason: '缺少分隔符，应写成「原文, 译文」' }])
   })
 
