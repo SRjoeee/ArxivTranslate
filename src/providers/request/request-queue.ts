@@ -19,6 +19,12 @@ export const REQUEST_TIMEOUT_ERROR_NAME = "RequestTimeoutError"
  */
 export const SATURATED_DISPATCH_ETA_MS = 1000
 
+/**
+ * 本项目新增（issue #43）：超时 / 取消之后，还愿意为一个尚未结束的 thunk 保留并发额度多久。
+ * 我们自己的 provider 都认 signal，abort 后毫秒级就结束；这道宽限只防「实现不认 signal」把队列锁死
+ */
+export const ABORT_GRACE_MS = 5_000
+
 /** 对象展开代替 deepmerge：显式传 undefined 的字段不能把已有值冲掉 */
 function withoutUndefined<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>
@@ -277,6 +283,27 @@ export class RequestQueue {
     return task.enqueuedAt + budget - now
   }
 
+  /** 排队中已经超出总预算的任务：现在拒掉，不让它在限流暂停里继续挂着（本项目新增，issue #43） */
+  private reapExpired(now: number) {
+    let reaped = false
+    for (const [hash, task] of [...this.waitingTasks]) {
+      if (this.remainingBudgetMs(task, now) > 0) continue
+      this.waitingTasks.delete(hash)
+      this.rejectDrainedTask(task, this.budgetExceededError(task))
+      reaped = true
+    }
+    if (reaped) this.waitingQueue.removeWhere(task => task.drained)
+  }
+
+  /** 排队任务里最早的期限还有多久到；没有期限就是 Infinity（本项目新增，issue #43） */
+  private nextDeadlineDelayMs(now: number): number {
+    let earliest = Number.POSITIVE_INFINITY
+    for (const task of this.waitingTasks.values()) {
+      earliest = Math.min(earliest, this.remainingBudgetMs(task, now))
+    }
+    return Math.max(0, earliest)
+  }
+
   private budgetExceededError(task: QueuedRequestTask): Error {
     const error = new Error(`Task ${task.id} exceeded its ${this.options.maxTotalMs}ms total budget`)
     // 归到 timeout：调用方要的答案是「这批翻不出来了」，与单次超时同一类
@@ -288,10 +315,16 @@ export class RequestQueue {
     this.refillTokens()
     this.clearScheduleTimer()
 
-    const pauseRemainingMs = this.pausedUntil - Date.now()
+    const startedAt = Date.now()
+    // 先回收已经过期的排队任务：限流暂停可能长达 5 分钟，而它们的预算只有 180 秒，
+    // 不回收就会在暂停里一直挂着，远超对调用方承诺的时限（本项目新增，issue #43；Codex 在 #56 指出）
+    this.reapExpired(startedAt)
+
+    const pauseRemainingMs = this.pausedUntil - startedAt
     if (pauseRemainingMs > 0) {
       if (this.waitingQueue.size() > 0) {
-        this.armScheduleTimer(pauseRemainingMs)
+        // 暂停结束与最早的期限，哪个先到就先醒
+        this.armScheduleTimer(Math.min(pauseRemainingMs, this.nextDeadlineDelayMs(startedAt)))
       }
       return
     }
@@ -325,10 +358,16 @@ export class RequestQueue {
       }
     }
 
-    // 并发满载时不要武装定时器：定时器只解决「时间到了才能发」，而槽位是被在飞请求占着的，
-    // 算出来的 delay 是 0，会一直以 0 毫秒空转直到有请求返回。执行结束的 finally 已经会再调
-    // schedule()（本项目新增，issue #43）
-    if (this.waitingQueue.size() > 0 && !this.isSaturated()) {
+    // 并发满载时不按「可以发了」武装定时器：槽位是被在飞请求占着的，算出来的 delay 是 0，
+    // 会一直以 0 毫秒空转直到有请求返回；执行结束时会再调一次 schedule()。
+    // 但**期限是时间事件**，满载时也要按最早的期限醒来把过期的回收掉（本项目新增，issue #43）
+    if (this.waitingQueue.size() > 0 && this.isSaturated()) {
+      const deadlineDelayMs = this.nextDeadlineDelayMs(Date.now())
+      if (Number.isFinite(deadlineDelayMs)) this.armScheduleTimer(deadlineDelayMs)
+      return
+    }
+
+    if (this.waitingQueue.size() > 0) {
       const nextTask = this.waitingQueue.peek()
       if (nextTask) {
         const now = Date.now()
@@ -337,7 +376,10 @@ export class RequestQueue {
           this.bucketTokens >= 1
             ? 0
             : Math.ceil(((1 - this.bucketTokens) / this.options.rate) * 1000)
-        const delay = Math.max(delayUntilScheduled, msUntilNextToken)
+        const delay = Math.min(
+          Math.max(delayUntilScheduled, msUntilNextToken),
+          this.nextDeadlineDelayMs(now),
+        )
 
         this.armScheduleTimer(delay)
       }
@@ -382,6 +424,9 @@ export class RequestQueue {
     // console.info(`🏃 Starting execution of task ${task.id} (attempt ${task.retryCount + 1}) at ${Date.now()}`)
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null
+    // 拿住 thunk 自己的 Promise：超时是竞速赢来的，thunk 那边可能还在跑，
+    // 并发额度要等它真的结束再还（本项目新增，issue #43；Codex 在 #56 指出）
+    let thunkPromise: Promise<unknown> | null = null
     const abortController = new AbortController()
     task.abortController = abortController
     // 单次尝试也不许超出剩余总预算：否则 120 秒的一次尝试可以在 180 秒预算只剩 1 秒时开跑
@@ -408,7 +453,10 @@ export class RequestQueue {
 
       // Race between the actual task and timeout; the signal cancels the
       // in-flight attempt on timeout so a retry never runs concurrently with it
-      const result = await Promise.race([task.thunk(abortController.signal), timeoutPromise])
+      thunkPromise = task.thunk(abortController.signal)
+      // 超时先赢的话没人再监听 thunk 的拒绝，挂个空 catch 免得算作未处理拒绝
+      thunkPromise.catch(() => undefined)
+      const result = await Promise.race([thunkPromise, timeoutPromise])
 
       // Clear timeout if task completed successfully
       if (timeoutId) {
@@ -506,9 +554,30 @@ export class RequestQueue {
       if (this.executingTasks.get(task.hash) === task) {
         this.executingTasks.delete(task.hash)
       }
+      this.releaseWhenSettled(thunkPromise)
+    }
+  }
+
+  /**
+   * 还回一个并发额度。等 thunk 自己结束再还——超时与取消都是 abort，而 abort 是协作式的，
+   * 立刻还额度会让替补请求与还在跑的那个叠在一起。宽限期兜底：真有不认 signal 的实现时，
+   * 宁可短暂超一点上限，也不能让队列被几个挂死的请求锁死（本项目新增，issue #43）
+   */
+  private releaseWhenSettled(thunk: Promise<unknown> | null) {
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      clearTimeout(graceTimer)
       this.activeExecutions--
       this.schedule()
     }
+    if (!thunk) {
+      release()
+      return
+    }
+    const graceTimer = setTimeout(release, ABORT_GRACE_MS)
+    thunk.then(release, release)
   }
 
   private duplicateTask(hash: string) {

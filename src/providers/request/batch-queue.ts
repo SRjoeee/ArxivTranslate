@@ -89,7 +89,8 @@ export interface BatchOptions<T, R> {
   // batch was outside every cancellable structure (retry backoff sleep).
   isScopeCancelled?: (scopeKey: string) => boolean
   executeBatch: (dataList: T[], meta: BatchExecutionMeta) => Promise<R[]>
-  executeIndividual?: (data: T) => Promise<R>
+  /** meta 与 executeBatch 拿到的是同一个对象：逐条兜底也要用同一个批次期限（Codex 在 #56 指出） */
+  executeIndividual?: (data: T, meta: BatchExecutionMeta) => Promise<R>
   onError?: (
     error: Error,
     context: { batchKey: string; retryCount: number; isFallback: boolean },
@@ -112,7 +113,7 @@ export class BatchQueue<T, R> {
   private getScope?: (data: T) => string | undefined
   private isScopeCancelled?: (scopeKey: string) => boolean
   private executeBatch: (dataList: T[], meta: BatchExecutionMeta) => Promise<R[]>
-  private executeIndividual?: (data: T) => Promise<R>
+  private executeIndividual?: (data: T, meta: BatchExecutionMeta) => Promise<R>
   private onError?: (
     error: Error,
     context: { batchKey: string; retryCount: number; isFallback: boolean },
@@ -404,7 +405,7 @@ export class BatchQueue<T, R> {
         // Same gate before the per-item fallback: the failed attempt's provider
         // call may have straddled the cancel.
         if (this.rejectIfAllScopesCancelled(tasks, meta)) return
-        return this.executeFallbackIndividual(tasks, batchKey)
+        return this.executeFallbackIndividual(tasks, batchKey, meta)
       }
 
       tasks.forEach((task) => task.reject(err))
@@ -425,14 +426,14 @@ export class BatchQueue<T, R> {
     return true
   }
 
-  private async executeFallbackIndividual(tasks: BatchTask<T, R>[], batchKey: string) {
+  private async executeFallbackIndividual(tasks: BatchTask<T, R>[], batchKey: string, meta: BatchExecutionMeta) {
     await Promise.allSettled(
       tasks.map(async (task) => {
         try {
           if (!this.executeIndividual) {
             throw new Error("executeIndividual is not defined")
           }
-          const result = await this.executeIndividual(task.data)
+          const result = await this.executeIndividual(task.data, meta)
           task.resolve(result)
         } catch (error) {
           const err = error as Error

@@ -1,6 +1,6 @@
 // 并发上限与总时限（issue #43）。移植来的队列只有令牌桶，本项目在其上加了这两道闸。
 import { describe, expect, it, vi } from 'vitest'
-import { RequestQueue, SATURATED_DISPATCH_ETA_MS } from '@/providers/request/request-queue'
+import { ABORT_GRACE_MS, RequestQueue, SATURATED_DISPATCH_ETA_MS } from '@/providers/request/request-queue'
 import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
 import { DEFAULT_MAX_CONCURRENT, DEFAULT_MAX_TOTAL_MS } from '@/providers/translate-service'
 
@@ -209,5 +209,69 @@ describe('期限与并发的边界（Codex 在 #56 的第二轮）', () => {
     expect(() => new RequestQueue(opts({ maxConcurrent: Number.NaN }))).toThrow()
     expect(() => new RequestQueue(opts({ maxTotalMs: 0 }))).toThrow()
     expect(() => new RequestQueue(opts({ maxConcurrent: 8, maxTotalMs: 1000 }))).not.toThrow()
+  })
+})
+
+describe('期限是时间事件，暂停与满载都拦不住（Codex 在 #56 的第三轮）', () => {
+  it('限流暂停比预算还长时，排队任务到点就被回收，不在暂停里一直挂着', async () => {
+    vi.useFakeTimers()
+    const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, maxRetries: 5, maxTotalMs: 1_000 }))
+    const limited = async () => { throw attachRequestErrorMeta(new Error('429 Too Many Requests'), { statusCode: 429, retryAfterMs: 300_000 }) }
+    queue.enqueue(limited, Date.now(), 'head').catch(() => undefined)
+    const queued = queue.enqueue(async () => 'never', Date.now(), 'tail')
+    const settled = expect(queued).rejects.toThrow(/total budget/)
+    // 修复前：schedule() 只在 pausedUntil（300 秒后）醒来，排队任务在暂停里挂满 5 分钟
+    await vi.advanceTimersByTimeAsync(2_000)
+    await settled
+    vi.useRealTimers()
+  })
+
+  it('超时之后并发额度要等 thunk 真的结束再还', async () => {
+    vi.useFakeTimers()
+    const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, timeoutMs: 50, maxRetries: 0 }))
+    let started = 0
+    let release!: () => void
+    // 无视 signal 的 thunk：超时竞速赢了，它自己还在跑
+    const stubborn = () => { started++; return new Promise<string>((_, rej) => { release = () => rej(new Error('late')) }) }
+    queue.enqueue(stubborn, Date.now(), 'a').catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(started).toBe(1)
+    queue.enqueue(stubborn, Date.now(), 'b').catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(200) // 第一个早就超时了
+    expect(started).toBe(1)
+    release()
+    await vi.advanceTimersByTimeAsync(10)
+    expect(started).toBe(2)
+    vi.useRealTimers()
+  })
+
+  it('thunk 永远不结束时宽限期到点也要还额度：不能让队列被锁死', async () => {
+    vi.useFakeTimers()
+    const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, timeoutMs: 50, maxRetries: 0 }))
+    let started = 0
+    const hang = () => { started++; return new Promise<string>(() => undefined) }
+    queue.enqueue(hang, Date.now(), 'a').catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(10)
+    queue.enqueue(hang, Date.now(), 'b').catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(ABORT_GRACE_MS - 100)
+    expect(started).toBe(1)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(started).toBe(2)
+    vi.useRealTimers()
+  })
+
+  it('逐条兜底与批级重试用同一个批次期限', async () => {
+    const { BatchQueue } = await import('@/providers/request/batch-queue')
+    const seen: number[] = []
+    const batch = new BatchQueue<{ text: string }, string>({
+      maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 1, maxRetries: 0,
+      enableFallbackToIndividual: true,
+      getBatchKey: () => 'k', getCharacters: i => i.text.length,
+      executeBatch: async (_items, meta) => { seen.push(meta.startedAt); return [] },
+      executeIndividual: async (item, meta) => { seen.push(meta.startedAt); return `译:${item.text}` },
+    })
+    expect(await batch.enqueue({ text: 'A' })).toBe('译:A')
+    expect(seen).toHaveLength(2)
+    expect(seen[0]).toBe(seen[1])
   })
 })

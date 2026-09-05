@@ -174,6 +174,11 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     const capacity = provider.rateLimit?.capacity ?? deps.queue?.capacity ?? DEFAULT_RATE_LIMIT.capacity
     const queueOptions = { ...DEFAULT_QUEUE_OPTIONS, ...deps.queue, rate, capacity }
     const maxTotalMs = queueOptions.maxTotalMs
+    /**
+     * 期限按**整批**算，不按每次入队算：批级重试与逐条兜底都带着同一个 meta 再来，
+     * 各自重算就等于 4 次重试 4 份预算（Codex 在 #56 指出）
+     */
+    const deadlineOf = (meta: { startedAt: number }) => maxTotalMs === undefined ? undefined : meta.startedAt + maxTotalMs
     const requestQueue = new RequestQueue(queueOptions)
     const batchQueue = provider.kind === 'llm'
       ? new BatchQueue<QueueItem, string>({
@@ -194,16 +199,15 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
             const chars = items.reduce((n, item) => n + item.text.length, 0)
             const hash = items.map(item => item.dedupKey ?? item.uid).join('|')
             const scheduleAt = Math.min(...items.map(item => item.scheduleAt))
-            // 期限按**整批**算：批级重试会带着同一个 meta 再来一次，不给它一份新预算
-            const deadlineAt = maxTotalMs === undefined ? undefined : meta.startedAt + maxTotalMs
-            return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt })
+            return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
           },
-          executeIndividual: item => requestQueue.enqueue(
+          executeIndividual: (item, meta) => requestQueue.enqueue(
             async signal => (await translateItems([item], [item.id], signal))[0]!,
             item.scheduleAt,
             item.dedupKey ?? item.uid,
             item.scope ? [item.scope] : undefined,
-            { timeoutMs: timeoutFor(item.text.length) },
+            // 逐条兜底是同一批文本的最后一程，不能再拿一份完整预算（Codex 在 #56 指出）
+            { timeoutMs: timeoutFor(item.text.length), deadlineAt: deadlineOf(meta) },
           ),
           onError: (error, context) => {
             console.warn(`[axt] 批次失败（${context.isFallback ? '逐条兜底' : `第 ${context.retryCount} 次重试前`}）：${error.message}`)
