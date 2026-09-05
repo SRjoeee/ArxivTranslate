@@ -13,6 +13,8 @@ export interface PageStatus {
   /** 用户选定的模式，自动降级不改它 */
   preference: Mode
   progress: Progress
+  /** 实际在用的引擎（§8.5）：与配置的不同就说明降级了，popup 据此提示 */
+  engine?: { id: string; displayName: string; demoted?: { displayName: string; kind: string; message: string } }
 }
 
 /** 消息表：type → { request, response } */

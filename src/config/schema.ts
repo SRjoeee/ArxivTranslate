@@ -4,7 +4,7 @@ import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
 import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
-export const CONFIG_VERSION = 4
+export const CONFIG_VERSION = 5
 
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
@@ -25,6 +25,8 @@ export const configSchema = z.object({
     promptId: z.string().min(1),
     patterns: z.array(z.object({ id: z.string().min(1), name: z.string(), systemPrompt: z.string(), prompt: z.string() })),
   }).default(DEFAULT_PROMPTS_CONFIG),
+  /** 引擎降级链（§8.5）：首选引擎失败时自动切到免费引擎，别让整页翻译停死 */
+  fallback: z.object({ enabled: z.boolean() }).default({ enabled: true }),
   /** 按视口翻译的范围（§10，Read Frog 的 preload）：视口下方多少像素算临近（0–10000）、露出多少比例算进入（0–1） */
   preload: z.object({
     margin: z.number().min(0).max(10_000),
@@ -46,6 +48,7 @@ export const DEFAULT_CONFIG: Config = {
   },
   targetLanguage: DEFAULT_LANG_CODE,
   mode: 'stack',
+  fallback: { enabled: true },
   prompts: DEFAULT_PROMPTS_CONFIG,
   preload: { ...DEFAULT_PRELOAD },
 }

@@ -179,6 +179,12 @@ export function App() {
                 </select>
               </p>
             )}
+            {page.engine?.demoted && (
+              <p style={{ margin: '0 0 8px', padding: 6, background: '#fff4e5', borderRadius: 4, fontSize: 12, lineHeight: 1.5 }}>
+                {page.engine.demoted.displayName}不可用（{page.engine.demoted.kind}），已降级到{page.engine.displayName}。
+                译文质量不如 LLM；修好设置后恢复原文再翻即可切回
+              </p>
+            )}
             <ProgressLine page={page} />
             {page.progress.failed > 0 && page.progress.state !== 'idle' && (
               <p style={{ margin: '6px 0 0' }}>

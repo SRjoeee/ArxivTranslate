@@ -387,6 +387,8 @@ export interface TranslateResult {
 
 `preservesMarkup: true` 的免费引擎仍走 §6.3 的校验，失败后降级 runs；runs 路径退为纯兜底。
 
+**`anthropic` / `gemini` 暂不实现** [决定，2026-09-05]：两者与 `openai-compat` 走同一套 AI SDK 协议，而默认端点 OpenRouter 本身就代理 Claude 与 Gemini 全系模型——直连只对"手里有官方 key"的用户多一点价值，代价是两个 SDK 包、两套配置形状与设置页字段。按"搬不搬只看有无负面影响"的判据是有负担、收益小，等有人真的需要直连再加。表里保留它们作为接口形状的说明。
+
 `google-web` 取代原定的 `google-gtx`（`translate_a/single`）：2026-09-04 实测 `translateHtml` 一次请求可带 150 条、556 ms 返回且占位符完好，而 gtx 是单条接口（RESEARCH.md §6.6）。gtx 与微软 edge 通道不接（后者 auth 端点已 404，RESEARCH.md §5）。免费引擎的定位是**大批量回归测试**与视口首屏的即时译文，最终译文仍以 LLM 为准：机器翻译会把 "weights" 译成"重量"，术语准确度不够。
 
 ### 8.2 LLM 调用约定
@@ -422,6 +424,18 @@ export interface TranslateResult {
 
 ---
 
+### 8.5 引擎降级链 [决定，2026-09-05]
+
+硬规则 4 要求"失败必须可恢复并触发 fallback 链，不能让扩展整体挂掉"。在这之前，key 过期、额度用尽或网络抖动会让 `run.ts` 命中 `no-key` / `auth` 后 `scheduler.disconnect()`，整页翻译停死、读者对着半篇译文干等。
+
+- **链的形状**：配置里选的引擎在前，其后接不与它重复的免费引擎（当前只有 `google-web`，`chrome-builtin` 接上后插在它之前）。组装在 `providers/index.ts` 的 `buildChain`，两道过滤：`isAvailable()` 为假的剔除（免得链里躺着必然失败的一环），但**首个引擎不可用时保留**——popup 要据此提示"未配置 API key"，而不是悄悄换成免费引擎
+- **不进 `translate-service`** [决定]：那里已经是"一个 provider 一套队列 + 缓存 + 批处理"的闭包，缓存键带 `providerId | model | promptKey`，不同引擎的译文天然分开存。链做成外面薄薄一层 `providers/fallback.ts`（约 110 行）：每个步骤一个完整服务，链只管在失败时把**同一个 call** 交给下一步。塞进服务内部会把队列、攒批、缓存三件事和引擎选择耦在一起
+- **降级期限分两档**：`no-key` / `auth` 是配置问题、不会自己好，本会话内永久降级；`network` / `timeout` / `rate-limit` / `invalid-response` / `unknown` 是瞬时的，降级 60s 冷却后自动恢复，该引擎一旦成功立即清空记录。队列自己的重试（retry-policy）跑完才会走到链上，所以链不叠加重试；冷却是为了避免持续故障时每次调用都白等一遍最长 120s 的批次超时。`aborted` 永不降级也永不记账——会话取消不是引擎的错，换个引擎重来只会再被取消一次
+- **全部降级后退回最后一步**：宁可再失败一次并把错误如实报给 `run.ts`（它据此停下并画失败小部件），也不能出现"无引擎可用"的状态
+- **能力不变量**：`preservesMarkup` 决定渲染路径，而 `run.ts` 只在开始时取一次 `capabilities`；中途换路径会让先后渲染的块两套形状。因此链要求所有步骤的 `preservesMarkup` 一致，不一致的在组装时剔除并告警。v1 三个 provider 都是 `true`，这条是给将来的护栏
+- **可见性**：`PageStatus.engine` 带实际引擎与降级原因，popup 在降级时显示一条提示，写明免费引擎术语准确度不如 LLM（§8.1 的"weights → 重量"）以及"修好设置后恢复原文再翻即可切回"。降级同时打一条 `console.warn`，e2e 与用户排查都靠它
+- **开关**：配置 v5 的 `fallback.enabled`，默认开启；关掉后链只有配置的那个引擎，行为与实现之前完全一致。e2e 两条分别守住这两种行为
+
 ## 9. 缓存与配置
 
 - 译文缓存：IndexedDB，**Dexie**，移植 FluentRead `services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层），crypto-js 换成 Web Crypto SHA-256（v0.4 修订，原定 idb-keyval）
@@ -429,7 +443,7 @@ export interface TranslateResult {
 - 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有（IndexedDB 按扩展 origin 隔离，跨论文共享），content 侧通过 `axt:cache-get` / `axt:cache-put` 读写；provider 请求本身不经过 background（§8.0）
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
 - **坏译文不入库、重发不读库** [决定，2026-09-05]：markup 路径的请求带 `accept` 回调（进程内调用才有，过不了消息边界），translate-service 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）；占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
-- 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
+- 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、v5 加 `fallback: { enabled }`（默认开，§8.5）、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
 ---
 
@@ -463,7 +477,7 @@ export interface TranslateResult {
 | 占位符 | Vitest | 序列化 → 假译文 → 回填，往返后受保护节点等价；校验器对各类破坏（丢 id、多 id、嵌套错）都能识别 |
 | 渲染 | Vitest + happy-dom | 翻译 → 切换三模式 → 恢复，恢复后 DOM 与原始逐节点相等 |
 | provider | Vitest（mock fetch）| 请求拼装与响应解析；免费接口另有可选的 live 测试，默认跳过 |
-| 端到端 | Playwright（`pnpm e2e`，`tests/e2e/extension.mjs`，2026-09-05 起） | 起一个装着 `.output/chrome-mv3` 的 Chromium（`channel: 'chromium'` 的新 headless 支持扩展），驱动设置页与 popup、读控制台与网络：google-web 整篇翻完与速率、刷新命中缓存、翻译中途恢复原文（译文与 `data-axt-*` 全清、不再发请求）、错 key 的 auth 排空整队、设置页的语言与自定义提示词保存后重载仍在。不碰用户浏览器与 key，LLM 只测错 key 不花钱。**布局断言**在 `tests/e2e/layout.mjs`（`pnpm e2e:layout`，2026-09-05 起）：side 模式在 1440 / 2000px 下不横向溢出、文章居中且两侧对称、正文吃满（≤ 96rem）、两栏等宽、行间公式装进一栏、右侧沟槽元素落在文章右缘与视口之间、只含公式的列表项与兄弟项标记对齐（含 `(Assumption 1)` 这类宽标记不盖正文）、单列 flex 图里的表格与脚注左右配对、多面板 flex 图仍并排且无镜像、正文脚注副本落在沟槽里，以及 2312.17141 上的**主线程长任务预算**（最长 ≤ 400ms、合计 ≤ 1.5s，守 side prep 的量法不退回克隆） |
+| 端到端 | Playwright（`pnpm e2e`，`tests/e2e/extension.mjs`，2026-09-05 起） | 起一个装着 `.output/chrome-mv3` 的 Chromium（`channel: 'chromium'` 的新 headless 支持扩展），驱动设置页与 popup、读控制台与网络：google-web 整篇翻完与速率、刷新命中缓存、翻译中途恢复原文（译文与 `data-axt-*` 全清、不再发请求）、错 key 时降级链把整页翻完（popup 显示降级提示）、关掉降级后恢复 auth 排空整队、设置页的语言与自定义提示词保存后重载仍在。不碰用户浏览器与 key，LLM 只测错 key 不花钱。**布局断言**在 `tests/e2e/layout.mjs`（`pnpm e2e:layout`，2026-09-05 起）：side 模式在 1440 / 2000px 下不横向溢出、文章居中且两侧对称、正文吃满（≤ 96rem）、两栏等宽、行间公式装进一栏、右侧沟槽元素落在文章右缘与视口之间、只含公式的列表项与兄弟项标记对齐（含 `(Assumption 1)` 这类宽标记不盖正文）、单列 flex 图里的表格与脚注左右配对、多面板 flex 图仍并排且无镜像、正文脚注副本落在沟槽里，以及 2312.17141 上的**主线程长任务预算**（最长 ≤ 400ms、合计 ≤ 1.5s，守 side prep 的量法不退回克隆） |
 | 手动清单 | 用户在自己的 Chrome | 走真实 key 的 LLM 路径；锚点跳转、脚注弹出、公式渲染、Ctrl+F、打印 |
 
 fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取，覆盖多领域与多结构，含一篇转换失败页；全部为 oxide 0.7.6）。规则测试用 happy-dom 解析，1.8 MB 页面约 0.6 s，可直接跑全量 fixture。

@@ -144,6 +144,14 @@ export function App() {
       <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>决定"怎么翻"；收发协议（JSON 段落与占位符规则）由扩展自动追加，任何提示词都改不掉。换提示词后旧译文不再命中缓存</small>
       <PromptManager value={config.prompts} onChange={prompts => setLocal(c => ({ ...c, prompts }))} />
 
+      <label style={{ ...label, marginTop: 20 }}>
+        <input type="checkbox" checked={config.fallback.enabled} onChange={e => setLocal(c => ({ ...c, fallback: { enabled: e.target.checked } }))} />
+        {' '}引擎失败时自动降级
+        <small style={{ display: 'block', color: '#666' }}>
+          key 失效、额度用尽或网络异常时自动切到免费引擎，整页翻译不会停死；免费引擎的术语准确度不如 LLM（会把 weights 译成"重量"），popup 会提示当前用的是哪个引擎。关掉则失败时停下并报错
+        </small>
+      </label>
+
       <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译范围</h2>
       <label style={label}>
         预翻译距离（像素）
