@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "fixtures:stats": "tsx scripts/fixtures-stats.ts",
-    "check:output": "node scripts/check-output.mjs"
+    "check:output": "node scripts/check-output.mjs",
+    "e2e": "node tests/e2e/extension.mjs"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",
@@ -22,6 +23,7 @@
     "@wxt-dev/module-react": "^1.2.2",
     "fake-indexeddb": "^6.2.5",
     "happy-dom": "^20.13.2",
+    "playwright": "^1.63.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
