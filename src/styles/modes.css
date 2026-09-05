@@ -7,6 +7,16 @@
   color: var(--axt-color, inherit);
 }
 
+/* 等待态（§7.6）：pending 译文节点里只有一个圆环，圆环颜色照 Read Frog 的 host-theme.css（浅 / 深两档） */
+html[data-axt-on] {
+  --axt-muted: oklch(0.556 0 0);
+}
+@media (prefers-color-scheme: dark) {
+  html[data-axt-on] {
+    --axt-muted: oklch(0.708 0 0);
+  }
+}
+
 /* stack / only：译文紧跟原文，压掉站点为该标签留的大边距。
    side 模式不能这么做——译文与原文同处一行，边距不一致会让两边错位
    （实测 h2 差 19px、figure 差 64px），那里让译文沿用 class 自带的边距 */

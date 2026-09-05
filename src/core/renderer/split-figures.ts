@@ -13,7 +13,11 @@ import { DOCUMENT_ROOT, FIGURE_MEDIA } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
 import { hashText } from '@/shared/hash'
 import { MIRROR_CLASS } from './mirror'
+import { PENDING_CLASS } from './pending'
 import { FOR_ATTR, T_CLASS } from './index'
+
+/** 真正的译文：等待态的 pending 节点（只有一个圆环，§7.6）不算 */
+const REAL_TRANSLATION = `.${T_CLASS}:not(.${PENDING_CLASS})`
 
 /** 原件上的标记（原节点只允许追加 data-axt-*，§7.1） */
 export const SPLIT_ATTR = 'data-axt-split'
@@ -24,7 +28,7 @@ const KEY_ATTR = 'data-axt-split-key'
 
 /** 译文的签名：数量相同但内容变了（换目标语言重翻）也要重建，只数个数会一直用陈旧的副本（Codex 在 #26 指出） */
 function translationKey(fig: Element): string {
-  const texts = Array.from(fig.querySelectorAll(`.${T_CLASS}`), t => t.textContent ?? '')
+  const texts = Array.from(fig.querySelectorAll(REAL_TRANSLATION), t => t.textContent ?? '')
   return `${texts.length}:${hashText(JSON.stringify(texts))}`
 }
 
@@ -40,7 +44,7 @@ function hasLooseMedia(fig: Element): boolean {
 function needsSplit(fig: Element): boolean {
   if (fig.classList.contains(T_CLASS)) return false // 克隆件自己
   if (fig.parentElement?.closest('figure')) return false // 嵌套的分图交给最外层一起复制
-  if (!fig.querySelector(`.${T_CLASS}`)) return false // 内部没有译文：整块没配对，交给镜像
+  if (!fig.querySelector(REAL_TRANSLATION)) return false // 内部没有译文（pending 不算）：整块没配对，交给镜像
   return hasLooseMedia(fig) // 没有游离媒体的浮动体（如表格）不必整块复制，它的表本来就有译文克隆
 }
 
@@ -72,6 +76,8 @@ export function splitFigures(root: Document | Element): number {
     for (const stale of Array.from(fig.querySelectorAll(`.${MIRROR_CLASS}`))) stale.remove()
 
     const clone = fig.cloneNode(true) as Element
+    // 还在等译文的对：副本里去掉圆环、留原文，译文到了 key 变化会重建
+    for (const pending of Array.from(clone.querySelectorAll(`.${PENDING_CLASS}`))) pending.remove()
     // 克隆件只留译文：每对里把原文成员摘掉（译文自己不会被摘）
     for (const original of Array.from(clone.querySelectorAll('*'))) {
       if (original.classList.contains(T_CLASS)) continue

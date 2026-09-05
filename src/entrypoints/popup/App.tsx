@@ -52,13 +52,13 @@ export function App() {
     return () => clearInterval(id)
   }, [page, refresh, loadStats])
 
-  // 翻译进行中每 500 ms 轮询进度
-  const running = page?.progress.state === 'running'
+  // 翻译开着时每 500 ms 轮询进度：滚动会继续触发，没有"翻完"的终点（§10）
+  const on = page?.progress.state === 'on'
   useEffect(() => {
-    if (!running) return
+    if (!on) return
     const id = setInterval(refresh, 500)
     return () => clearInterval(id)
-  }, [running, refresh])
+  }, [on, refresh])
 
   async function translate() {
     setNote('')
@@ -99,7 +99,7 @@ export function App() {
     refresh()
   }
 
-  const canTranslate = !!page?.paper && !!provider?.available && !running
+  const canTranslate = !!page?.paper && !!provider?.available && !on
   const canRestore = !!page && page.progress.state !== 'idle'
 
   return (
@@ -118,7 +118,7 @@ export function App() {
         : (
           <section>
             <p style={{ margin: '0 0 8px' }}>
-              <button onClick={translate} disabled={!canTranslate}>{running ? '翻译中…' : '翻译'}</button>
+              <button onClick={translate} disabled={!canTranslate}>{on ? '已开启' : '翻译'}</button>
               {' '}
               <button onClick={restorePage} disabled={!canRestore}>恢复原文</button>
             </p>
@@ -147,10 +147,11 @@ export function App() {
 
 function ProgressLine({ page }: { page: PageStatus }) {
   const p = page.progress
+  // 看到哪翻到哪（§10）：显示"已翻 / 已进入视口（共多少）"，翻译是开着的状态，没有"翻完"
+  const counts = `已翻 ${p.done} / 已触发 ${p.requested}（共 ${p.total}）${p.failed ? `，失败 ${p.failed}` : ''}${p.cached ? `，缓存命中 ${p.cached}` : ''}`
   const text = p.state === 'idle' ? '未翻译'
-    : p.state === 'running' ? `翻译中 ${p.done}/${p.total}${p.failed ? `，失败 ${p.failed}` : ''}`
-    : p.state === 'cancelled' ? `已中止（${p.done}/${p.total}）`
-    : `已翻译 ${p.done}/${p.total}${p.failed ? `，失败 ${p.failed}` : ''}，缓存命中 ${p.cached}`
+    : p.state === 'on' ? `${counts}${p.inFlight > 0 ? ' · 翻译中…' : ' · 就绪，滚动继续翻'}`
+    : `已停止：${counts}`
   return (
     <p style={{ margin: 0 }}>
       {text}
