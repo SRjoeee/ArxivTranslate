@@ -191,12 +191,21 @@ const ROMAN_ID = /^(?:[IVXLCDM]{2,}|[IVXLM])(?:[.\-–][A-Za-z0-9]+)*$/i
  * 而括号本来就是 LaTeXML 给标识符的形状，环境名从不带括号（`Definition 1.2 (Hall set)` 去掉括号后
  * 仍有 "Definition"，照样判为要翻）
  */
+/**
+ * 括号里是不是「词」而不是标识符：`(Hall set)`、`(Figure 1)` 里有非罗马数字的词，保留；
+ * `(a)`、`(ii)`、`(A.1)` 只有标识符，去掉。整段去掉会把 `(Figure 1)` 这种整体带括号的标签
+ * 连环境名一起丢掉，于是永远不翻（Codex 在 #53 指出）
+ */
+const hasNonRomanWord = (inner: string): boolean =>
+  (inner.match(/[A-Za-z]{2,}/g) ?? []).some(word => !ROMAN_ID.test(word))
+
 export function isNamedTag(el: Element): boolean {
   if (!el.matches(NAMED_TAGS)) return false
-  const text = (el.textContent ?? '').replace(PARENTHESIZED, '')
+  const text = (el.textContent ?? '').replace(PARENTHESIZED, group => (hasNonRomanWord(group) ? group : ''))
   if (!/[A-Za-z]{2,}/.test(text)) return false
-  // 末尾的编号 token：`Table XIII:` → `XIII`
-  const last = text.trim().replace(/[.:：。]+$/, '').split(/\s+/).pop() ?? ''
+  // 末尾的编号 token：`Table XIII:` → `XIII`。先去标点再 trim：`Table IV :` 去掉冒号后尾巴是空格，
+  // 不 trim 的话 pop() 拿到空串、罗马数字判定被绕过（Codex 在 #53 指出）
+  const last = text.replace(/[\s.:：。()（）]+$/, '').trim().split(/\s+/).pop() ?? ''
   return !ROMAN_ID.test(last)
 }
 
