@@ -2,8 +2,9 @@
 import { z } from 'zod'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
+import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
-export const CONFIG_VERSION = 3
+export const CONFIG_VERSION = 4
 
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
@@ -16,7 +17,8 @@ export const configSchema = z.object({
     // 用 default 让旧版本存储（没有这个字段）仍能通过校验
     thinking: z.enum(['enabled', 'disabled']).default('disabled'),
   }),
-  targetLanguage: z.string().min(2),
+  /** ISO 639-3（v4 起；languages.ts），LLM 填英文名、Google 转 BCP-47 */
+  targetLanguage: langCodeSchema,
   mode: z.enum(['stack', 'side', 'only']),
   /** 提示词库（移植自 Read Frog）：当前选用的 id + 用户自定义 */
   prompts: z.object({
@@ -42,7 +44,7 @@ export const DEFAULT_CONFIG: Config = {
     model: 'deepseek/deepseek-v4-flash',
     thinking: 'disabled',
   },
-  targetLanguage: 'zh-CN',
+  targetLanguage: DEFAULT_LANG_CODE,
   mode: 'stack',
   prompts: DEFAULT_PROMPTS_CONFIG,
   preload: { ...DEFAULT_PRELOAD },

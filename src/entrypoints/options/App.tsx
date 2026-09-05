@@ -1,15 +1,9 @@
 import { useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
+import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
 import { DEFAULT_CONFIG, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { sendMessage } from '@/shared/messages'
-
-const LANGUAGES: [string, string][] = [
-  ['zh-CN', '简体中文'],
-  ['zh-TW', '繁體中文'],
-  ['ja', '日本語'],
-  ['en', 'English'],
-]
 
 const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
 
@@ -131,8 +125,8 @@ export function App() {
       </label>
       <label style={label}>
         目标语言
-        <select style={field} value={config.targetLanguage} onChange={e => setLocal(c => ({ ...c, targetLanguage: e.target.value }))}>
-          {LANGUAGES.map(([code, name]) => <option key={code} value={code}>{name}（{code}）</option>)}
+        <select style={field} value={config.targetLanguage} onChange={e => setLocal(c => ({ ...c, targetLanguage: e.target.value as LangCode }))}>
+          {LANG_CODES.map(code => <option key={code} value={code}>{languageLabel(code)}</option>)}
         </select>
       </label>
 

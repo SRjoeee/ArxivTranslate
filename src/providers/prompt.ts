@@ -7,9 +7,10 @@ import {
   DEFAULT_PROMPTS_CONFIG, getTokenCellText, renderTemplate, resolvePromptReplacementValue, selectPrompt,
   type PromptsConfig, type PromptToken,
 } from './prompt-library'
+import { englishName } from '@/config/languages'
 import type { TranslateRequest } from './types'
 
-export const PROMPT_VERSION = '2'
+export const PROMPT_VERSION = '3'
 
 /** 收发协议：不随提示词库变化 */
 export const PROTOCOL_BLOCK = [
@@ -37,7 +38,8 @@ export function buildPrompts(request: TranslateRequest, prompts: PromptsConfig =
   const template = selectPrompt(prompts)
   const context = request.context
   const values: Record<PromptToken, string> = {
-    targetLanguage: request.target,
+    // 填英文语言名而不是语言码（Read Frog 的做法）："zh-CN native translator" 不如 "Simplified Mandarin Chinese"
+    targetLanguage: englishName(request.target),
     input: JSON.stringify(request.segments),
     paperTitle: resolvePromptReplacementValue(context?.paperTitle, NOT_AVAILABLE),
     abstract: resolvePromptReplacementValue(context?.abstract, NOT_AVAILABLE),

@@ -2,6 +2,7 @@
 import { storage } from 'wxt/utils/storage'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
+import { fromBcp47 } from './languages'
 import { CONFIG_VERSION, DEFAULT_CONFIG, configSchema, type Config } from './schema'
 
 export const configItem = storage.defineItem<Config>('local:config', {
@@ -11,7 +12,9 @@ export const configItem = storage.defineItem<Config>('local:config', {
     // v1 -> v2：加提示词库；已存的 API key 与其他字段原样保留
     2: (v1: Omit<Config, 'version' | 'prompts' | 'preload'>) => ({ ...v1, version: 2 as const, prompts: DEFAULT_PROMPTS_CONFIG }),
     // v2 -> v3：加按视口翻译的范围（§10）
-    3: (v2: Omit<Config, 'version' | 'preload'> & { version: 2 }) => ({ ...v2, version: 3 as const, preload: { ...DEFAULT_PRELOAD } }),
+    3: (v2: Omit<Config, 'version' | 'preload' | 'targetLanguage'> & { version: 2; targetLanguage: string }) => ({ ...v2, version: 3 as const, preload: { ...DEFAULT_PRELOAD } }),
+    // v3 -> v4：目标语言从 BCP-47 换成 ISO 639-3（zh-CN → cmn、zh-TW → cmn-Hant、ja → jpn）
+    4: (v3: Omit<Config, 'version' | 'targetLanguage'> & { version: 3; targetLanguage: string }) => ({ ...v3, version: 4 as const, targetLanguage: fromBcp47(v3.targetLanguage) }),
   },
 })
 
