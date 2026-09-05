@@ -135,3 +135,55 @@ describe('缓存身份包含端点（issue #45 实验 3）', () => {
     expect(await keyOf(google)).toBe(await keyOf({ id: 'google-web' }))
   })
 })
+
+describe('取消跨了消息边界（issue #42）', () => {
+  it('恢复原文：cancel 带着会话 scope 发给 background，晚到的成功译文也不再落到 DOM 上', async () => {
+    const { createMessageTransport } = await import('@/shared/transport')
+    const doc = docWith(paragraphs(3))
+    const before = doc.documentElement.outerHTML
+    const blocks = extract(doc)
+
+    const sent: { type: string }[] = []
+    let release: (() => void) | null = null
+    const held = new Promise<void>(resolve => { release = resolve })
+    // background 替身：翻译请求挂住不回，取消请求立刻回
+    const send = (async (message: { type: string; request?: { segments: { id: string; text: string }[] } }) => {
+      sent.push(message)
+      if (message.type === 'axt:cancel-scope') return { cancelled: 2 }
+      await held
+      return { ok: true, result: { segments: message.request!.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' }, cached: 0 }
+    }) as never
+    const transport = createMessageTransport(send)
+
+    const run = startTranslation({
+      doc,
+      blocks,
+      target: 'cmn',
+      mode: 'stack',
+      paper: '0000.00000',
+      capabilities: { maxBatchChars: 1000, maxBatchItems: 10, preservesMarkup: true },
+      preload: { margin: 1000, threshold: 0 },
+      scope: 'session-1',
+      transport: call => transport.translate(call),
+    })
+    await run.ready
+    const pending = run.translate(blocks)
+    // 请求已经发出去、还挂在 background 那头
+    await Promise.resolve()
+    expect(sent.map(m => m.type)).toEqual(['axt:translate'])
+
+    // 用户点「恢复原文」：content 停会话、发取消、清 DOM
+    run.stop()
+    expect(await transport.cancel('session-1')).toBe(2)
+    restore(doc)
+
+    // 撤不掉的那次请求这时才回来
+    release!()
+    await pending
+
+    expect(sent.map(m => m.type)).toEqual(['axt:translate', 'axt:cancel-scope'])
+    expect(doc.querySelectorAll('[data-axt-id]')).toHaveLength(0)
+    expect(doc.querySelectorAll('.axt-t')).toHaveLength(0)
+    expect(doc.documentElement.outerHTML).toBe(before)
+  })
+})
