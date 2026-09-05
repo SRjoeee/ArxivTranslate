@@ -906,8 +906,15 @@ export function label(code: LangCode): string {
 /** 给按 BCP-47 收目标语言的引擎（google-web）；没有两字母码的语言原样传 ISO 639-3 码 */
 const BCP47: Partial<Record<LangCode, string>> = ISO6393_TO_6391
 
+/**
+ * 两字母码撞车的语言不能压成同一个标签：yue 与 cmn 在表里都是 zh，发 zh 就成了普通话。
+ * Google 的 translateHtml 直接认 yue（实测返回"巴士站喺邊"，zh 返回"公交车站在哪里"；Codex 在 #39 指出）
+ */
+const BCP47_OVERRIDES: Partial<Record<LangCode, string>> = { yue: 'yue' }
+
 export function toBcp47(code: string): string {
-  return (isLangCode(code) && BCP47[code]) || code
+  if (!isLangCode(code)) return code
+  return BCP47_OVERRIDES[code] ?? BCP47[code] ?? code
 }
 
 /**
@@ -916,10 +923,12 @@ export function toBcp47(code: string): string {
  */
 export function fromBcp47(tag: string): LangCode {
   if (isLangCode(tag)) return tag
+  // BCP-47 不分大小写（zh-tw 与 zh-TW 是同一个标签；Codex 在 #39 指出）
+  const wanted = tag.toLowerCase()
   const entries = Object.entries(ISO6393_TO_6391) as [LangCode, string][]
-  const exact = entries.find(([, bcp]) => bcp === tag)
+  const exact = entries.find(([, bcp]) => bcp.toLowerCase() === wanted)
   if (exact) return exact[0]
-  const primary = tag.split('-')[0]!.toLowerCase()
+  const primary = wanted.split('-')[0]!
   const byPrimary = entries.find(([, bcp]) => bcp.split('-')[0]!.toLowerCase() === primary)
   return byPrimary ? byPrimary[0] : DEFAULT_LANG_CODE
 }

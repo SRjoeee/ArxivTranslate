@@ -104,12 +104,16 @@ export function App() {
     refresh()
   }
 
-  /** 提示词切换（对应 Read Frog popup 的 translate-prompt-selector）：立即落盘，下次点"翻译"生效 */
+  /**
+   * 提示词切换（对应 Read Frog popup 的 translate-prompt-selector）：立即落盘，下次点"翻译"生效。
+   * 只改 prompts，其余字段以**此刻存着的**为准：切换对照模式是 content script 写的配置，popup 挂载时的快照已经过期，
+   * 整个写回会把模式改回去（Codex 在 #39 指出）
+   */
   async function choosePrompt(promptId: string) {
-    if (!config) return
-    const next = { ...config, prompts: { ...config.prompts, promptId } }
-    setLocalConfig(next)
     try {
+      const latest = await getConfig()
+      const next = { ...latest, prompts: { ...latest.prompts, promptId } }
+      setLocalConfig(next)
       await setConfig(next)
       if (on) setNote('提示词已保存，恢复原文后再点"翻译"生效')
     } catch (e) {

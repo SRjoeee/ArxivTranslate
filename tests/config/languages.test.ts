@@ -34,6 +34,8 @@ describe('languages', () => {
     expect(toBcp47('cmn')).toBe('zh')
     expect(toBcp47('cmn-Hant')).toBe('zh-TW')
     expect(toBcp47('jpn')).toBe('ja')
+    // 表里 yue 也是 zh，但端点直接认 yue（实测返回粤语）；压成 zh 就成了普通话
+    expect(toBcp47('yue')).toBe('yue')
     const noShort = LANG_CODES.find(code => !(code in ISO6393_TO_6391))!
     expect(toBcp47(noShort)).toBe(noShort)
   })
@@ -41,6 +43,8 @@ describe('languages', () => {
   it('迁移：BCP-47 反查，精确优先、再按主语言、最后回退简体中文', () => {
     expect(fromBcp47('zh-CN')).toBe('cmn')
     expect(fromBcp47('zh-TW')).toBe('cmn-Hant')
+    expect(fromBcp47('zh-tw')).toBe('cmn-Hant')
+    expect(fromBcp47('ZH-Hant-TW')).toBe('cmn')
     expect(fromBcp47('zh')).toBe('cmn')
     expect(fromBcp47('ja')).toBe('jpn')
     expect(fromBcp47('en')).toBe('eng')
