@@ -40,7 +40,7 @@ src/
     extractor/          # 块提取
     protector/          # 占位符：序列化、校验、回填、runs 切段
     renderer/           # 兄弟节点插入、模式切换、恢复
-    scheduler/          # 视口优先与后台排队
+    scheduler/          # 按视口触发的一次性观察器、会话 id、标题翻译、主线程切片
   providers/
     types.ts            # TranslationProvider 接口（见 DESIGN.md §8）
     openai-compat.ts  anthropic.ts  gemini.ts  chrome-builtin.ts  google-gtx.ts
