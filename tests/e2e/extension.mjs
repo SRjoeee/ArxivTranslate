@@ -168,6 +168,27 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.screenshot({ path: `${SHOTS}/style-quote.png` })
   await page.close()
 
+  // 下划线类要画到公式上：text-decoration 不传播到 math 这类原子行内盒，用户反馈过公式处虚线断掉
+  await options.bringToFront()
+  await options.getByLabel('外观').selectOption('dashed')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  // 换一篇数学密集的：PAPER 首屏没有行内公式，检查会空跑
+  const dashedPage = await context.newPage()
+  await dashedPage.goto('https://arxiv.org/html/2609.04056v1#axt-translate', { waitUntil: 'domcontentloaded' })
+  await dashedPage.waitForFunction(() => document.querySelectorAll('.axt-t math').length > 0, null, { timeout: 60_000 }).catch(() => undefined)
+  const dashed = await dashedPage.evaluate(() => {
+    const deco = el => { const cs = getComputedStyle(el); return `${cs.textDecorationLine}/${cs.textDecorationStyle}` }
+    const maths = [...document.querySelectorAll('.axt-t math')]
+    const block = document.querySelector('.axt-t:not([data-axt-inline])')
+    return { count: maths.length, math: maths.slice(0, 3).map(deco), block: block ? deco(block) : null }
+  })
+  check('样式预设 dashed：虚线画到译文里的公式上（text-decoration 不传播到原子行内盒）',
+    dashed.count > 0 && dashed.block === 'underline/dashed' && dashed.math.every(d => d === 'underline/dashed'),
+    `${dashed.count} 个公式，块级 ${dashed.block}，公式 ${dashed.math.join(' ')}`)
+  await dashedPage.screenshot({ path: `${SHOTS}/style-dashed.png` })
+  await dashedPage.close()
+
 }
 
 // ── 论文 1：看到哪翻到哪（§10）：不滚动只翻首屏附近；逐屏滚到底其余跟上；标题翻译；速率 ────

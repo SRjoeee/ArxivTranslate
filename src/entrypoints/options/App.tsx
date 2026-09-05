@@ -9,13 +9,25 @@ import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 import { sendMessage } from '@/shared/messages'
 import { PromptManager } from './PromptManager'
 
-const STYLE_OPTIONS: [StylePreset, string, string][] = [
-  ['none', '与原文相同', '不加任何装饰'],
-  ['muted', '淡一档', '译文颜色淡一些，扫读时一眼分出译文'],
-  ['quote', '左侧竖线', '像引用块；同行的短标题译文不加线'],
-  ['dashed', '虚线下划', '不占空间，左右对照时不影响两栏对齐'],
-  ['custom', '自定义 CSS', '只填声明，选择器由扩展补上'],
+/** 分组显示：整套照搬 KISS 的预设，加上 Read Frog 的绿与淡色底（§7.5） */
+const STYLE_GROUPS: [string, [StylePreset, string][]][] = [
+  ['基础', [['none', '与原文相同'], ['muted', '淡一档'], ['green', '绿色（Read Frog 默认）']]],
+  ['下划线', [['underline', '实线'], ['dotted', '点线'], ['dashed', '虚线'], ['dashed-bold', '粗虚线'], ['wavy', '波浪线'], ['wavy-bold', '粗波浪线']]],
+  ['边框', [['quote', '左侧竖线'], ['box', '细边框'], ['box-dashed', '虚线边框']]],
+  ['底色', [['marker', '荧光笔'], ['marker-gradient', '渐变荧光笔'], ['highlight', '高亮底'], ['tint', '淡色底']]],
+  ['特效', [['gradient', '渐变文字'], ['colorful', '多彩底'], ['glow', '发光'], ['blink', '呼吸'], ['blur', '模糊（悬停清晰）']]],
+  ['自定义', [['custom', '自定义 CSS']]],
 ]
+
+const STYLE_NOTES: Partial<Record<StylePreset, string>> = {
+  none: '不加任何装饰',
+  green: 'Read Frog 译文的默认配色，对照阅读时最容易区分',
+  quote: '同行的短标题译文不加线，否则会把标题挤歪',
+  dashed: '下划线类不占空间，左右对照时不影响两栏对齐',
+  blur: '悬停才看清，适合自测与背诵',
+  gradient: '带动画；系统开了「减少动态效果」时自动静止',
+  custom: '只填声明，选择器由扩展补上',
+}
 
 const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
 
@@ -226,9 +238,13 @@ export function App() {
       <label style={label}>
         外观
         <select style={field} value={config.style.preset} onChange={e => setLocal(c => ({ ...c, style: { ...c.style, preset: e.target.value as StylePreset } }))}>
-          {STYLE_OPTIONS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          {STYLE_GROUPS.map(([group, items]) => (
+            <optgroup key={group} label={group}>
+              {items.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </optgroup>
+          ))}
         </select>
-        <small style={{ color: '#666' }}>{STYLE_OPTIONS.find(([id]) => id === config.style.preset)?.[2]}</small>
+        <small style={{ color: '#666' }}>{STYLE_NOTES[config.style.preset] ?? '译文只加装饰，字体与字号仍随论文原样'}</small>
       </label>
       {config.style.preset === 'custom' && (
         <label style={label}>

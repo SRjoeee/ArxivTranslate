@@ -1,6 +1,23 @@
 // 译文样式预设的 id 与自定义 CSS 的校验（DESIGN §7.5）。规则本身在 src/styles/presets.css。
-export const STYLE_PRESETS = ['none', 'muted', 'quote', 'dashed', 'custom'] as const
+export const STYLE_PRESETS = [
+  'none',
+  // 下划线类：由 presets.css 的 --axt-deco 机制驱动，必须同时画到公式等原子行内元素上
+  'underline', 'dotted', 'dashed', 'dashed-bold', 'wavy', 'wavy-bold',
+  // 边框类
+  'box', 'box-dashed', 'quote',
+  // 底色类
+  'marker', 'marker-gradient', 'highlight', 'tint',
+  // 文字类
+  'muted', 'green', 'gradient', 'colorful',
+  // 动效与其他
+  'blur', 'glow', 'blink',
+  'custom',
+] as const
+
 export type StylePreset = (typeof STYLE_PRESETS)[number]
+
+/** 下划线类：presets.css 里有一条共享规则同时作用到译文与其中的 math / inline-block（§7.5） */
+export const DECORATION_PRESETS: readonly StylePreset[] = ['underline', 'dotted', 'dashed', 'dashed-bold', 'wavy', 'wavy-bold']
 
 export const STYLE_ATTR_NAME = 'data-axt-style'
 

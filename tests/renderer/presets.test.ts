@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { CUSTOM_STYLE_SELECTOR, STYLE_PRESETS, STYLE_ATTR_NAME, customStyleRule, enable, restore, sanitizeCustomCss } from '@/core/renderer'
+import { CUSTOM_STYLE_SELECTOR, DECORATION_PRESETS, STYLE_PRESETS, STYLE_ATTR_NAME, customStyleRule, enable, restore, sanitizeCustomCss } from '@/core/renderer'
 import { docOf } from './helpers'
 
 const CSS = readFileSync(join(import.meta.dirname, '../../src/styles/presets.css'), 'utf8')
@@ -11,9 +11,9 @@ const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
 describe('样式预设（§7.5）', () => {
   it('每个预设都有对应规则，none 只是"不加装饰"所以没有规则', () => {
     for (const preset of STYLE_PRESETS) {
-      const has = RULES.includes(`html[data-axt-style="${preset}"]`)
+      const has = RULES.includes(`[data-axt-style="${preset}"]`)
       // none 是默认（不写规则）；custom 的规则由 customStyleRule 运行时拼
-      expect(has).toBe(preset !== 'none' && preset !== 'custom')
+      expect([preset, has]).toEqual([preset, preset !== 'none' && preset !== 'custom'])
     }
   })
 
@@ -21,6 +21,30 @@ describe('样式预设（§7.5）', () => {
     // font: inherit 曾把摘要标题的 1.4rem 覆盖成父级默认值；display / margin 会破坏 side 的网格配对
     for (const property of ['font:', 'font-size', 'font-family', 'line-height', 'display:', 'margin:', 'margin-top', 'width:']) {
       expect(RULES).not.toContain(property)
+    }
+  })
+
+  it('下划线类必须显式画到 math / inline-block 上：text-decoration 不传播到原子行内盒', () => {
+    // 用户反馈的漏线就是这个：公式与行内盒处虚线断掉（2026-09-05 实测 text-decoration-line 计算值为 none）
+    const shared = /html:is\(([^)]*)\) :is\(\.axt-t, \.axt-t :is\(math, \.ltx_inline-block, svg, img\)\)/.exec(RULES)
+    expect(shared).not.toBeNull()
+    for (const preset of DECORATION_PRESETS) {
+      expect(shared![1]).toContain(`[data-axt-style="${preset}"]`)
+    }
+  })
+
+  it('共享规则只列下划线类，不能写成通配：否则会把站点给链接画的线抹掉', () => {
+    // html[data-axt-style] .axt-t { text-decoration: … } 会给所有预设写上 none
+    expect(RULES).not.toMatch(/html\[data-axt-style\][^{]*\{[^}]*text-decoration/)
+  })
+
+  it('动效尊重系统的「减少动态效果」', () => {
+    expect(RULES).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?animation: none/)
+  })
+
+  it('动画名带 axt- 前缀（硬规则 5）', () => {
+    for (const name of RULES.match(/@keyframes ([\w-]+)/g) ?? []) {
+      expect(name.replace('@keyframes ', '')).toMatch(/^axt-/)
     }
   })
 
