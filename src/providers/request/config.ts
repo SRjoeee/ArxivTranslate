@@ -10,6 +10,10 @@ export const MIN_BATCH_ITEMS = 1
 export const requestQueueConfigSchema = z.object({
   capacity: z.number().gte(MIN_TRANSLATE_CAPACITY),
   rate: z.number().gte(MIN_TRANSLATE_RATE),
+  // 本项目新增（issue #43）：0 / 负数 / NaN 会让「在飞数 < 上限」永远不成立，队列直接卡死；
+  // 总时限同理，非正数等于每个任务一入队就过期（Codex 在 #56 指出）
+  maxConcurrent: z.number().int().positive().optional(),
+  maxTotalMs: z.number().positive().optional(),
 })
 
 export const batchQueueConfigSchema = z.object({

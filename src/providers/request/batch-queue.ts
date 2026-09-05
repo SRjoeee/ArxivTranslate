@@ -66,6 +66,12 @@ export interface BatchExecutionMeta {
    * downstream RequestQueue so cancelling the scopes aborts the whole batch.
    */
   scopes: readonly string[] | undefined
+  /**
+   * 本项目新增（issue #43）：本批次**创建**（首条入队）的时刻，不是派发时刻——派发闸可以把
+   * 欠满的批次按住最多 MAX_BATCH_HOLD_MS，这段等待也要算进总时限。同一个 meta 会原样传给
+   * 每次批级重试与逐条兜底，调用方据此给整批算一个不随重试重置的截止时刻（Codex 在 #56 指出）
+   */
+  startedAt: number
 }
 
 export interface BatchOptions<T, R> {
@@ -73,6 +79,11 @@ export interface BatchOptions<T, R> {
   maxItemsPerBatch: number
   batchDelay: number
   maxRetries?: number
+  /**
+   * 本项目新增（issue #43）：整批的总时限，与下游队列的 maxTotalMs 同一个数。批级重试的退避
+   * 也要受它约束——否则临近截止时仍会先睡 1–8 s 再入队，下游才发现已过期（Codex 在 #56 指出）
+   */
+  maxTotalMs?: number
   enableFallbackToIndividual?: boolean
   dispatchGate?: DispatchGate
   getBatchKey: (data: T) => string
@@ -83,7 +94,8 @@ export interface BatchOptions<T, R> {
   // batch was outside every cancellable structure (retry backoff sleep).
   isScopeCancelled?: (scopeKey: string) => boolean
   executeBatch: (dataList: T[], meta: BatchExecutionMeta) => Promise<R[]>
-  executeIndividual?: (data: T) => Promise<R>
+  /** meta 与 executeBatch 拿到的是同一个对象：逐条兜底也要用同一个批次期限（Codex 在 #56 指出） */
+  executeIndividual?: (data: T, meta: BatchExecutionMeta) => Promise<R>
   onError?: (
     error: Error,
     context: { batchKey: string; retryCount: number; isFallback: boolean },
@@ -98,6 +110,7 @@ export class BatchQueue<T, R> {
   private maxItemsPerBatch: number
   private batchDelay: number
   private maxRetries: number
+  private maxTotalMs?: number
   private enableFallbackToIndividual: boolean
   private dispatchGate?: DispatchGate
   private getBatchKey: (data: T) => string
@@ -106,7 +119,7 @@ export class BatchQueue<T, R> {
   private getScope?: (data: T) => string | undefined
   private isScopeCancelled?: (scopeKey: string) => boolean
   private executeBatch: (dataList: T[], meta: BatchExecutionMeta) => Promise<R[]>
-  private executeIndividual?: (data: T) => Promise<R>
+  private executeIndividual?: (data: T, meta: BatchExecutionMeta) => Promise<R>
   private onError?: (
     error: Error,
     context: { batchKey: string; retryCount: number; isFallback: boolean },
@@ -117,6 +130,7 @@ export class BatchQueue<T, R> {
     this.maxItemsPerBatch = config.maxItemsPerBatch
     this.batchDelay = config.batchDelay
     this.maxRetries = config.maxRetries ?? 3
+    this.maxTotalMs = config.maxTotalMs
     this.enableFallbackToIndividual = config.enableFallbackToIndividual ?? true
     this.dispatchGate = config.dispatchGate
     this.getBatchKey = config.getBatchKey
@@ -254,21 +268,27 @@ export class BatchQueue<T, R> {
       }
 
       const ageMs = now - batch.createdAt
+      // 持批上限还要受总时限约束：期限到了就放行，让下游队列按 deadlineAt 当场拒掉，
+      // 否则 maxTotalMs 短于 MAX_BATCH_HOLD_MS 时批次会在门闸后面多挂几十秒（本项目新增，issue #43；Codex 在 #56 指出）
+      const holdCapMs = Math.min(MAX_BATCH_HOLD_MS, this.maxTotalMs ?? Number.POSITIVE_INFINITY)
       // A dispatch slot is (nearly) available downstream — flushing now costs
       // nothing. Without a gate this is always true, preserving the original
       // flush-at-batchDelay latency.
       const slotNear = etaMs <= this.batchDelay
-      if (ageMs >= this.batchDelay && (slotNear || ageMs >= MAX_BATCH_HOLD_MS)) {
+      if (ageMs >= this.batchDelay && (slotNear || ageMs >= holdCapMs)) {
         batchesToFlush.push(batchKey)
         continue
       }
 
       // Hold: wake when the min-age elapses, or poll the gate again soon —
       // whichever is later — so held batches keep absorbing arrivals while
-      // dispatch is blocked.
-      const wakeMs = Math.max(
-        this.batchDelay - ageMs,
-        Math.min(Math.max(etaMs - this.batchDelay, this.batchDelay), MAX_GATE_POLL_MS),
+      // dispatch is blocked. 但不能晚于期限
+      const wakeMs = Math.min(
+        Math.max(
+          this.batchDelay - ageMs,
+          Math.min(Math.max(etaMs - this.batchDelay, this.batchDelay), MAX_GATE_POLL_MS),
+        ),
+        Math.max(0, holdCapMs - ageMs),
       )
       nextWakeMs = Math.min(nextWakeMs, wakeMs)
     }
@@ -347,7 +367,7 @@ export class BatchQueue<T, R> {
       }
       scopes.push(...task.cancelScopes)
     }
-    const meta: BatchExecutionMeta = { scopes: scopes ? [...new Set(scopes)] : undefined }
+    const meta: BatchExecutionMeta = { scopes: scopes ? [...new Set(scopes)] : undefined, startedAt: pendingBatch.createdAt }
 
     void this.executeBatchWithRetry(tasks, batchKey, meta, 0)
   }
@@ -379,8 +399,10 @@ export class BatchQueue<T, R> {
       this.onError?.(err, { batchKey, retryCount, isFallback: false })
 
       // Only retry on count mismatch errors (LLM returned wrong number of results)
-      if (retryCount < this.maxRetries && err instanceof BatchCountMismatchError) {
-        const delay = this.calculateBackoffDelay(retryCount)
+      const delay = this.calculateBackoffDelay(retryCount)
+      // 退避之后还得有预算再试一次；没有就直接走逐条兜底（本项目新增，issue #43）
+      const withinBudget = this.maxTotalMs === undefined || Date.now() - meta.startedAt + delay < this.maxTotalMs
+      if (retryCount < this.maxRetries && err instanceof BatchCountMismatchError && withinBudget) {
         await this.sleep(delay)
         // During the backoff this batch lived in NO cancellable structure
         // (its RequestQueue task already completed, it left pendingBatchMap at
@@ -398,7 +420,7 @@ export class BatchQueue<T, R> {
         // Same gate before the per-item fallback: the failed attempt's provider
         // call may have straddled the cancel.
         if (this.rejectIfAllScopesCancelled(tasks, meta)) return
-        return this.executeFallbackIndividual(tasks, batchKey)
+        return this.executeFallbackIndividual(tasks, batchKey, meta)
       }
 
       tasks.forEach((task) => task.reject(err))
@@ -419,14 +441,14 @@ export class BatchQueue<T, R> {
     return true
   }
 
-  private async executeFallbackIndividual(tasks: BatchTask<T, R>[], batchKey: string) {
+  private async executeFallbackIndividual(tasks: BatchTask<T, R>[], batchKey: string, meta: BatchExecutionMeta) {
     await Promise.allSettled(
       tasks.map(async (task) => {
         try {
           if (!this.executeIndividual) {
             throw new Error("executeIndividual is not defined")
           }
-          const result = await this.executeIndividual(task.data)
+          const result = await this.executeIndividual(task.data, meta)
           task.resolve(result)
         } catch (error) {
           const err = error as Error
