@@ -3,4 +3,7 @@
 // 插入内容时补偿滚动（实测插入 600px，锚点位移 0）；移植来的 JS 锚定每批强制两次全页布局，
 // side 模式下每次 130–150ms，是翻译期间主线程被占满的主因。
 export { VIEWPORT_OBSERVER_OPTIONS, createViewportTracker, type ViewportTracker } from './viewport'
+export { DEFAULT_PRELOAD, createLazyScheduler, type LazyScheduler, type PreloadOptions } from './lazy'
+export { beginSession, endSession, getSessionId } from './session'
+export { createWorkPacer, pauseIfBudgetSpent, yieldToMain } from './pacer'
 export { createCoalescer, type Coalescer, type CoalesceOptions } from './coalesce'
