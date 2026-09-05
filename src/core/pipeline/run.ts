@@ -2,9 +2,10 @@
 import { markBlocks, type TextBlock } from '@/core/extractor'
 import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate } from '@/core/protector'
-import { enable, renderTable, renderText, setState, type Mode } from '@/core/renderer'
+import { clearTranslation, enable, markPartial, renderTable, renderText, setState, type Mode } from '@/core/renderer'
 import type { RenderPath } from '@/cache/key'
-import type { TranslateMessageRequest, TranslateMessageResponse } from '@/entrypoints/background/translate-handler'
+import type { TranslateMessageResponse } from '@/entrypoints/background/translate-handler'
+import type { TranslateCall } from '@/providers/translate-service'
 import { planBatches, type Batch, type Segment } from './batches'
 import type { Block } from '@/core/extractor'
 
@@ -18,7 +19,7 @@ export interface Progress {
   fatal?: string
 }
 
-export type Transport = (request: TranslateMessageRequest) => Promise<TranslateMessageResponse>
+export type Transport = (request: TranslateCall) => Promise<TranslateMessageResponse>
 
 export interface RunOptions {
   doc: Document
@@ -53,12 +54,23 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
   markBlocks(blocks)
   for (const block of blocks) setState(block, 'pending')
 
-  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string) => {
+  type SendOptions = { bypassCache?: boolean; accept?: TranslateCall['accept'] }
+  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string, opts: SendOptions = {}) => {
     const context: TranslateContext = { ...options.context, ...(sectionTitle ? { sectionTitle } : {}) }
     return transport({
       request: { segments: items, source: 'en', target: options.target, context: Object.keys(context).length ? context : undefined },
-      cache: { paper: options.paper, renderPath },
+      cache: { paper: options.paper, renderPath, ...(opts.bypassCache ? { bypass: true } : {}) },
+      ...(opts.accept ? { accept: opts.accept } : {}),
     })
+  }
+
+  /** markup 路径的译文只有通过占位符校验才写缓存：坏译文入了库，每次都要先读到它再花一次请求（Codex 在 #30 指出） */
+  const acceptFor = (segments: Segment[]): NonNullable<TranslateCall['accept']> => {
+    const byId = new Map(segments.map(s => [s.id, s]))
+    return (id, text) => {
+      const segment = byId.get(id)
+      return !segment || validate(text, segment.protected).ok
+    }
   }
 
   const noteFatal = (res: Extract<TranslateMessageResponse, { ok: false }>) => {
@@ -86,10 +98,13 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
     }
   }
 
-  /** 占位符校验失败：单块重发一次，再失败走 runs（§6.3） */
+  /**
+   * 占位符校验失败：单块重发一次，再失败走 runs（§6.3）。
+   * 重发不读缓存：那份坏译文在校验之前就已经写进缓存，照常读只会原样拿回来（Codex 在 #9 指出）
+   */
   async function retrySingle(segment: Segment, sectionTitle?: string): Promise<DocumentFragment | null> {
     if (stopped()) return null
-    const res = await send([{ id: segment.id, text: segment.text }], 'markup', sectionTitle)
+    const res = await send([{ id: segment.id, text: segment.text }], 'markup', sectionTitle, { bypassCache: true, accept: acceptFor([segment]) })
     if (res.ok) {
       progress.cached += res.cached
       const text = res.result.segments[0]?.text
@@ -106,7 +121,7 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
       for (const segment of segments) out.set(segment, await viaRuns(segment, sectionTitle))
       return
     }
-    const res = await send(segments.map(s => ({ id: s.id, text: s.text })), 'markup', sectionTitle)
+    const res = await send(segments.map(s => ({ id: s.id, text: s.text })), 'markup', sectionTitle, { accept: acceptFor(segments) })
     if (aborted()) return
     if (!res.ok) {
       noteFatal(res)
@@ -138,11 +153,20 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
     if (batch.kind === 'table' && batch.block) {
       const cells = new Map<Element, DocumentFragment>()
       for (const [segment, fragment] of out) if (fragment && segment.cell) cells.set(segment.cell.el, fragment)
-      if (cells.size > 0) {
-        renderTable(batch.block!, cells)
+      // 有一格没翻出来就算失败，用户能分辨"翻了一半"与"翻完了"（Codex 在 #9 指出）。
+      // 半份克隆照常显示：原表保持 translated（only 模式仍只显示克隆），另加 partial 标记；
+      // 直接标 failed 会让 only 模式把原表与半份克隆一起露出来（Codex 在 #30 指出）
+      if (cells.size === batch.segments.length) {
+        renderTable(batch.block, cells)
         progress.done++
       } else {
-        setState(batch.block, 'failed')
+        if (cells.size > 0) {
+          renderTable(batch.block, cells)
+          markPartial(batch.block)
+        } else {
+          clearTranslation(batch.block)
+          setState(batch.block, 'failed')
+        }
         progress.failed++
       }
     } else {
@@ -152,6 +176,7 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
           renderText(segment.block as TextBlock, fragment)
           progress.done++
         } else {
+          clearTranslation(segment.block)
           setState(segment.block, 'failed')
           progress.failed++
         }

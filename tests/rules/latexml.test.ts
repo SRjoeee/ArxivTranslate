@@ -32,7 +32,7 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.4.0')
+    expect(RULES_VERSION).toBe('0.5.0')
   })
 })
 
@@ -179,5 +179,12 @@ describe('fixture 不变量', () => {
 
   it('没有翻译根时返回 null', () => {
     expect(documentRoot(new DOMParser().parseFromString('<html><body></body></html>', 'text/html'))).toBeNull()
+  })
+
+  it('传入的元素本身就是翻译根时返回它自己（Codex 在 #2 / #3 指出 querySelector 只搜后代）', () => {
+    const doc = new DOMParser().parseFromString('<html><body><article class="ltx_document"><p class="ltx_p">x</p></article></body></html>', 'text/html')
+    const article = doc.querySelector('article')!
+    expect(documentRoot(article)).toBe(article)
+    expect(documentRoot(doc.querySelector('p')!)).toBeNull()
   })
 })

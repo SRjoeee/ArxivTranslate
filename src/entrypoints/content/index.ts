@@ -53,6 +53,9 @@ export default defineContentScript({
       modes?.stop()
       modes = createModeController(document, requested ?? config.mode, { onChange: enterSide })
       controller = new AbortController()
+      // 被恢复或被新一轮取代的运行，其回调一律忽略：旧运行最后一次上报会把 idle 覆盖成 cancelled，
+      // popup 于是允许再开一轮并发翻译（Codex 在 #9 指出）
+      const run = controller
       progress = { ...idle(), state: 'running' }
       tracker?.disconnect()
       tracker = createViewportTracker(blocks)
@@ -75,17 +78,23 @@ export default defineContentScript({
         context,
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
         transport: request => translate(request),
-          onProgress: p => { progress = p; prep.schedule() },
-        signal: controller.signal,
+        onProgress: p => {
+          if (controller !== run) return
+          progress = p
+          prep.schedule()
+        },
+        signal: run.signal,
         // 视口优先（DESIGN §10）；视口不跳交给浏览器原生 scroll anchoring，这里不再做布局读取
         isPriority: block => activeTracker.isNear(block),
       })
         .finally(() => activeTracker.disconnect())
         .then(p => {
+          if (controller !== run) return
           progress = p
           console.debug(`[axt] translation ${p.state}: ${p.done}/${p.total} done, ${p.failed} failed, ${p.cached} cached, ${Math.round(performance.now() - t1)} ms${p.fatal ? `, fatal: ${p.fatal}` : ''}`)
         })
         .catch(e => {
+          if (controller !== run) return
           progress = { ...progress, state: 'done', fatal: e instanceof Error ? e.message : String(e) }
           console.error('[axt] translation crashed', e)
         })
@@ -155,6 +164,7 @@ export default defineContentScript({
 
     function restorePage(): { removedNodes: number } {
       controller?.abort()
+      controller = null
       tracker?.disconnect()
       tracker = null
       modes?.stop()

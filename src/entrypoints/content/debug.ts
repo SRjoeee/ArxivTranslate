@@ -1,6 +1,7 @@
 // #axt-debug 调试描边：标记块并给块加虚线框。样式只在调试时注入（不走 manifest CSS），
 // 以便恢复原文时能整体移除（DESIGN §7.1）。不监听 hashchange，改 hash 后需刷新页面。
 import { ID_ATTR, markBlocks, type Block } from '@/core/extractor'
+import { STYLE_ATTR } from '@/core/renderer'
 
 const DEBUG_ATTR = 'data-axt-debug'
 const STYLE_MARK = 'debug'
@@ -14,9 +15,9 @@ const STYLE = `
 export function enableDebug(blocks: Block[]): void {
   markBlocks(blocks)
   document.documentElement.setAttribute(DEBUG_ATTR, '')
-  if (!document.querySelector(`style[data-axt="${STYLE_MARK}"]`)) {
+  if (!document.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)) {
     const style = document.createElement('style')
-    style.setAttribute('data-axt', STYLE_MARK)
+    style.setAttribute(STYLE_ATTR, STYLE_MARK)
     style.textContent = STYLE
     document.head.append(style)
   }

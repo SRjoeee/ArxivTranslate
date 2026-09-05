@@ -22,7 +22,20 @@ export type TranslateMessageRequest = {
   request: Omit<TranslateRequest, 'signal'>
   providerId?: string
   /** 不带即不缓存（如设置页的连接测试） */
-  cache?: { paper: string; renderPath: RenderPath }
+  cache?: {
+    paper: string
+    renderPath: RenderPath
+    /** 只写不读：占位符校验失败后的重发，不能再拿回那份坏译文（§6.3） */
+    bypass?: boolean
+  }
+}
+
+/**
+ * 进程内调用可以多带一个校验回调：只把它放行的译文写进缓存——坏译文根本不该入库，
+ * 否则每次都要先读到它再花一次请求（Codex 在 #30 指出）。函数过不了消息边界，background 路径上没有它
+ */
+export type TranslateCall = TranslateMessageRequest & {
+  accept?: (id: string, text: string) => boolean
 }
 
 export type TranslateMessageResponse =
@@ -75,7 +88,63 @@ export function createTranslateService(deps: TranslateServiceDeps) {
     return queue
   }
 
-  return async ({ request, providerId, cache }: TranslateMessageRequest): Promise<TranslateMessageResponse> => {
+  /**
+   * 429 时暂停整条队列：concurrency 只是并发上限，撞上限流的那个任务自己睡着时，
+   * 其余 worker 还会继续往同一个端点打（Codex 在 #6 / #10 指出）。
+   * 队列到时自动恢复；多次暂停取最晚的那个截止时间。
+   * 已在飞的任务不受 queue.pause() 约束，所以它们**每次尝试前**也要过 awaitPause 这道闸：
+   * 自己睡醒了但别的任务把暂停延长了，就接着等（Codex 在 #30 指出）
+   */
+  const pausedUntil = new Map<string, number>()
+  const pauses = new Map<string, Promise<void>>()
+  const sleepFn = () => deps.retry?.sleep ?? ((wait: number) => new Promise<void>(resolve => setTimeout(resolve, wait)))
+  const pauseQueue = (provider: TranslationProvider, ms: number) => {
+    const queue = queueFor(provider)
+    const until = Date.now() + ms
+    if ((pausedUntil.get(provider.id) ?? 0) >= until) return
+    pausedUntil.set(provider.id, until)
+    queue.pause()
+    const done = sleepFn()(ms).then(() => {
+      // 被更长的暂停取代：由那一次负责恢复
+      if (pausedUntil.get(provider.id) !== until) return
+      pausedUntil.delete(provider.id)
+      pauses.delete(provider.id)
+      // 暂停一结束就登记"该放探针了"：任务的睡眠与暂停同时到期，到闸口时已经看不到暂停
+      probeDue.add(provider.id)
+      queue.start()
+    })
+    pauses.set(provider.id, done)
+  }
+  /**
+   * 暂停结束只放**一个探针**，其余等它的结果再走（照 Read Frog request-queue 的 post-pause probe）：
+   * 不然所有睡醒的任务会在同一毫秒一起打端点，限流刚解除又被撞回去（Codex 在 #30 指出）。
+   * 探针又撞 429 → 策略再次暂停，等待者回到循环顶部接着等；探针成功或因别的原因失败 → 大家照常并发。
+   * 探针失败时多让一个宏任务：withRetry 要在拒绝传到它手里之后才会登记新的暂停
+   */
+  const probes = new Map<string, Promise<unknown>>()
+  const probeDue = new Set<string>()
+  const gated = async <T>(provider: TranslationProvider, run: () => Promise<T>): Promise<T> => {
+    for (;;) {
+      let pending: Promise<void> | undefined
+      while ((pending = pauses.get(provider.id))) await pending
+      const probe = probes.get(provider.id)
+      if (probe) {
+        await probe.then(() => undefined, () => new Promise<void>(resolve => setTimeout(resolve, 0)))
+        continue
+      }
+      if (!probeDue.has(provider.id)) return run()
+      probeDue.delete(provider.id)
+      const attempt = run()
+      probes.set(provider.id, attempt)
+      try {
+        return await attempt
+      } finally {
+        if (probes.get(provider.id) === attempt) probes.delete(provider.id)
+      }
+    }
+  }
+
+  return async ({ request, providerId, cache, accept }: TranslateCall): Promise<TranslateMessageResponse> => {
     try {
       const provider = await deps.getProvider(providerId)
       const model = (await deps.getModel?.()) ?? ''
@@ -89,11 +158,14 @@ export function createTranslateService(deps: TranslateServiceDeps) {
           cacheKeyFor({ providerId: provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text }),
         ))
         request.segments.forEach((segment, i) => keys.set(segment.id, computed[i]!))
-        const hits = await store.getMany(computed)
-        request.segments.forEach((segment, i) => {
-          const hit = hits[i]
-          if (hit !== null && hit !== undefined) translated.set(segment.id, hit)
-        })
+        // 重发只写不读：坏译文已经在库里，读回来只会再坏一次
+        if (!cache.bypass) {
+          const hits = await store.getMany(computed)
+          request.segments.forEach((segment, i) => {
+            const hit = hits[i]
+            if (hit !== null && hit !== undefined) translated.set(segment.id, hit)
+          })
+        }
       }
       const cached = translated.size
 
@@ -103,16 +175,23 @@ export function createTranslateService(deps: TranslateServiceDeps) {
       let resultModel: string | undefined = model || undefined
       if (misses.length > 0) {
         const timeoutMs = deps.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
-        const result = (await queueFor(provider).add(() =>
-          withRetry(() => withTimeout(signal => provider.translate({ ...request, segments: misses, signal }), timeoutMs), deps.retry),
-        )) as TranslateResult
+        const retry: RetryOptions = {
+          ...deps.retry,
+          onPause: ms => {
+            deps.retry?.onPause?.(ms)
+            pauseQueue(provider, ms)
+          },
+        }
+        const attempt = () => gated(provider, () => withTimeout(signal => provider.translate({ ...request, segments: misses, signal }), timeoutMs))
+        const result = (await queueFor(provider).add(() => withRetry(attempt, retry))) as TranslateResult
         resultProvider = result.provider
         resultModel = result.model
         const writes: CacheEntry[] = []
         for (const segment of result.segments) {
           translated.set(segment.id, segment.text)
           const key = keys.get(segment.id)
-          if (store && cache && key) writes.push({ key, translation: segment.text, paper: cache.paper })
+          // 调用方带了校验就只写它放行的：占位符坏了的译文不入库
+          if (store && cache && key && (!accept || accept(segment.id, segment.text))) writes.push({ key, translation: segment.text, paper: cache.paper })
         }
         if (store && writes.length > 0) await store.putMany(writes)
       }

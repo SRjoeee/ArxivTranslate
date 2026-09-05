@@ -1,7 +1,7 @@
 // 脚注两栏归位（DESIGN §7.2）。译文段落由占位符协议回填，脚注是受保护节点，
 // 于是译文里会重建一份**原文**脚注；这里把该脚注的译文复制进去，页面右缘只挂一份边注。
 import { describe, expect, it } from 'vitest'
-import { T_CLASS, localizeNotes } from '@/core/renderer'
+import { T_CLASS, delocalizeNotes, localizeNotes } from '@/core/renderer'
 import { docOf } from './helpers'
 
 /** 一段带脚注的正文：原文段落（内含脚注与脚注译文）+ 段落译文（内含回填出来的脚注副本） */
@@ -50,6 +50,27 @@ describe('localizeNotes', () => {
     localizeNotes(doc)
     expect(doc.querySelectorAll(`.ltx_note_content.${T_CLASS}`)).toHaveLength(1)
     expect(sourceNote(doc).querySelector(`.${T_CLASS}`)!.textContent).toContain('中文脚注')
+  })
+
+  it('删段落译文前撤销归位：原件不再被隐藏，脚注不会在所有模式下消失（Codex 在 #30 指出）', () => {
+    const doc = withNote()
+    localizeNotes(doc)
+    expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(true)
+    const paragraph = doc.querySelector(`.ltx_p:not(.${T_CLASS})`)!
+    expect(delocalizeNotes(paragraph)).toBe(1)
+    expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
+  })
+
+  it('删脚注译文前撤销归位：外层段落译文里的副本译文一并删掉，原件露出来', () => {
+    const doc = withNote()
+    localizeNotes(doc)
+    doc.querySelector(`.ltx_p:not(.${T_CLASS})`)!.setAttribute('data-axt-id', 'p1')
+    const noteBlock = sourceNote(doc).querySelector(`.ltx_note_content:not(.${T_CLASS})`)!
+    expect(delocalizeNotes(noteBlock)).toBe(1)
+    expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
+    expect(doc.querySelector('.axt-note-t')).toBeNull()
+    // 没归位过的块：什么都不做
+    expect(delocalizeNotes(noteBlock)).toBe(0)
   })
 
   it('二次翻译：段落译文被整个换掉后，新副本再次归位', () => {

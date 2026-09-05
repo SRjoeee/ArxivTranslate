@@ -1,6 +1,7 @@
 // 块提取（DESIGN.md §4.1）。extract() 只读 DOM；markBlocks() 才写 data-axt-id。
 // 遍历策略与分类解耦：分类来自 rules/latexml 的 classify()，这里只决定"是否产出"与"是否下钻"。
-import { TABLE_RULES, classify, documentRoot, isNumericCell, visibleText } from '@/core/rules/latexml'
+import { isInjected } from '@/core/marks'
+import { classify, documentRoot, isNumericCell, tableCells } from '@/core/rules/latexml'
 
 export interface Cell {
   el: Element
@@ -37,28 +38,51 @@ const LETTER = /\p{L}/u
 /**
  * 自有文本：只收集分类为 null 的子树里的文本节点。skip / protect 是不可翻译内容，
  * unit / table 是嵌套单元（各自成块，不算外层的）——比规则模块的 visibleText 多剪后两类。
+ * 我们自己插进去的译文 / 镜像也不算（再次提取时它们已经在原块内部）。
  */
 function ownText(el: Element): string {
   const parts: string[] = []
   const walk = (node: Element) => {
     for (const child of Array.from(node.childNodes)) {
       if (child.nodeType === TEXT_NODE) parts.push((child as Text).data)
-      else if (child.nodeType === ELEMENT_NODE && !classify(child as Element)) walk(child as Element)
+      else if (child.nodeType === ELEMENT_NODE && !isInjected(child as Element) && !classify(child as Element)) walk(child as Element)
     }
   }
   walk(el)
   return parts.join('')
 }
 
+/**
+ * 单元格的文本：排除 skip / protect 与嵌套表（嵌套表的格各自是格）；格内的 .ltx_p 等单元计入——
+ * 它们不另成块，由 protector 序列化时走进去（§5.3）。
+ */
+function cellText(el: Element): string {
+  const parts: string[] = []
+  const walk = (node: Element) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === TEXT_NODE) {
+        parts.push((child as Text).data)
+      } else if (child.nodeType === ELEMENT_NODE) {
+        const c = child as Element
+        if (isInjected(c)) continue
+        const kind = classify(c)?.kind
+        if (kind === 'skip' || kind === 'protect' || kind === 'table') continue
+        walk(c)
+      }
+    }
+  }
+  walk(el)
+  return parts.join('')
+}
+
+/** 任意深度的格都算：嵌套 tabular 的格是外层块的格，只装着嵌套表的外层格没有自有文本、按数值格原样复制 */
 function cellsOf(table: Element): Cell[] {
-  return Array.from(table.querySelectorAll(TABLE_RULES.cell))
-    .filter(td => td.closest(TABLE_RULES.root) === table)
-    .map(el => ({ el, numeric: isNumericCell(visibleText(el)) }))
+  return tableCells(table).map(el => ({ el, numeric: isNumericCell(cellText(el)) }))
 }
 
 /** 至少一个单元格既非数值格又含字母，这张表才有翻译的必要；空排版表、纯公式表不成块 */
 function hasTranslatableCell(cells: Cell[]): boolean {
-  return cells.some(c => !c.numeric && LETTER.test(visibleText(c.el)))
+  return cells.some(c => !c.numeric && LETTER.test(cellText(c.el)))
 }
 
 /** 从翻译根开始按文档序提取块；找不到翻译根返回空数组。不修改 DOM */
@@ -80,6 +104,8 @@ export function extract(root: Document | Element): Block[] {
   const stack: Element[] = [start]
   while (stack.length) {
     const el = stack.pop()!
+    // 我们自己插的译文 / 镜像带着原块的 class，会被规则认成块；再次提取时它们已经在页面里（Codex 在 #8 指出）
+    if (el !== start && isInjected(el)) continue
     const c = el === start ? null : classify(el)
     let descend = true
     if (c) {

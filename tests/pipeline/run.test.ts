@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { runTranslation, type Transport } from '@/core/pipeline/run'
-import { FOR_ATTR, STATE_ATTR, T_CLASS } from '@/core/renderer'
+import { FOR_ATTR, PARTIAL_ATTR, STATE_ATTR, T_CLASS } from '@/core/renderer'
 import { TABLE_RULES } from '@/core/rules/latexml'
-import type { TranslateMessageRequest } from '@/entrypoints/background/translate-handler'
+import type { TranslateCall } from '@/providers/translate-service'
 
 const PAGE =
   '<p class="ltx_p" id="p1">One <math class="ltx_Math"><mi>x</mi></math>.</p>'
@@ -14,8 +14,8 @@ const PAGE =
 const docOf = () => new DOMParser().parseFromString(`<!doctype html><html><head></head><body><article class="ltx_document">${PAGE}</article></body></html>`, 'text/html')
 
 /** 恒等 transport：原样返回；可用 mutate 篡改某些段 */
-function makeTransport(mutate?: (req: TranslateMessageRequest, seg: { id: string; text: string }, calls: number) => string | { error: string }) {
-  const requests: TranslateMessageRequest[] = []
+function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: string }, calls: number) => string | { error: string }) {
+  const requests: TranslateCall[] = []
   const transport: Transport = async req => {
     requests.push(req)
     const segments: { id: string; text: string }[] = []
@@ -59,7 +59,10 @@ describe('runTranslation', () => {
     const progress = await run(doc, transport)
     expect(progress.failed).toBe(0)
     expect(progress.done).toBe(4)
-    expect(requests.some(r => r.request.segments.length === 1 && r.request.segments[0]?.id === 'p2')).toBe(true)
+    const retry = requests.find(r => r.request.segments.length === 1 && r.request.segments[0]?.id === 'p2')
+    // 重发只写不读：坏译文已经进了缓存，照常读只会原样拿回来（Codex 在 #9 指出）
+    expect(retry?.cache).toEqual({ paper: 'test', renderPath: 'markup', bypass: true })
+    expect(requests[0]?.cache).toEqual({ paper: 'test', renderPath: 'markup' })
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)?.querySelector('math')).not.toBeNull()
   })
 
@@ -73,6 +76,11 @@ describe('runTranslation', () => {
     expect(progress.failed).toBe(0)
     const runsReq = requests.find(r => r.cache?.renderPath === 'runs')
     expect(runsReq?.request.segments.map(s => s.id)).toEqual(['p2#r0', 'p2#r1'])
+    // markup 请求带校验回调：坏译文不许写缓存，好的放行；runs 请求不带（拼回时才校验）
+    const markup = requests.find(r => r.cache?.renderPath === 'markup')!
+    expect(markup.accept?.('p2', '坏了')).toBe(false)
+    expect(markup.accept?.('p2', markup.request.segments.find(s => s.id === 'p2')!.text)).toBe(true)
+    expect(runsReq?.accept).toBeUndefined()
     const node = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)
     expect(node?.querySelector('math')).not.toBeNull()
     expect(node?.textContent).toContain('Two')
@@ -135,5 +143,56 @@ describe('runTranslation', () => {
       expect(r.request.context?.paperTitle).toBe('P')
       expect(r.request.context?.abstract).toBe('A')
     }
+  })
+
+  it('表格翻了一半：已翻出的格照常显示，但块标失败、计入 failed（Codex 在 #9 指出）', async () => {
+    const doc = new DOMParser().parseFromString(
+      '<!doctype html><html><head></head><body><article class="ltx_document">'
+      + '<table class="ltx_tabular" id="T2"><tbody><tr><td class="ltx_td">Alpha</td><td class="ltx_td">Beta</td></tr></tbody></table>'
+      + '</article></body></html>', 'text/html',
+    )
+    const { transport } = makeTransport((_req, seg) => (seg.id === 'T2#c1' ? { error: 'unknown' } : undefined as unknown as string))
+    const progress = await run(doc, transport)
+    expect(progress).toMatchObject({ done: 0, failed: 1 })
+    // 原表仍是 translated（only 模式只显示克隆，不会原表与半份克隆一起露出来），另打 partial 标记
+    const original = doc.getElementById('T2')!
+    expect(original.getAttribute(STATE_ATTR)).toBe('translated')
+    expect(original.hasAttribute(PARTIAL_ATTR)).toBe(true)
+    const clone = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="T2"]`)
+    expect(Array.from(clone?.querySelectorAll(TABLE_RULES.cell) ?? []).map(td => td.textContent)).toEqual(['Alpha', 'Beta'])
+    // 再翻全部成功：标记随之清掉
+    await run(doc, makeTransport().transport)
+    expect(original.hasAttribute(PARTIAL_ATTR)).toBe(false)
+  })
+
+  it('短标题再翻失败：删译文的同时摘掉同行标记，否则没有译文的标题仍被压成 inline-block（Codex 在 #30 指出）', async () => {
+    const doc = new DOMParser().parseFromString(
+      '<!doctype html><html><head></head><body><article class="ltx_document">'
+      + '<h2 class="ltx_title ltx_title_section" id="s1">Introduction</h2><p class="ltx_p" id="p1">Text.</p>'
+      + '</article></body></html>', 'text/html',
+    )
+    await run(doc, makeTransport().transport)
+    const title = doc.getElementById('s1')!
+    expect(title.hasAttribute('data-axt-inline')).toBe(true)
+    const { transport } = makeTransport((_req, seg) => (seg.id === 's1' ? { error: 'unknown' } : undefined as unknown as string))
+    await run(doc, transport)
+    expect(title.getAttribute(STATE_ATTR)).toBe('failed')
+    expect(title.hasAttribute('data-axt-inline')).toBe(false)
+    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="s1"]`)).toBeNull()
+    // 再翻成功：标记加回来
+    await run(doc, makeTransport().transport)
+    expect(title.hasAttribute('data-axt-inline')).toBe(true)
+  })
+
+  it('再翻失败的块要删掉上一轮的译文，不能挂着旧译文冒充这一轮（Codex 在 #9 指出）', async () => {
+    const doc = docOf()
+    await run(doc, makeTransport().transport)
+    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)).not.toBeNull()
+    const { transport } = makeTransport((_req, seg) => (seg.id === 'p1' ? { error: 'unknown' } : undefined as unknown as string))
+    const progress = await run(doc, transport)
+    expect(progress.failed).toBe(1)
+    expect(doc.getElementById('p1')?.getAttribute(STATE_ATTR)).toBe('failed')
+    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)).toBeNull()
+    expect(doc.querySelectorAll(`.${T_CLASS}[${FOR_ATTR}="p3"]`)).toHaveLength(1)
   })
 })

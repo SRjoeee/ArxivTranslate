@@ -18,6 +18,7 @@ Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起
 2. 并非所有论文都有 HTML：60 篇候选中 4 篇 404（无 LaTeX 源或转换失败未发布）。扩展只需处理有 HTML 的页面，无需额外判断。
 3. 转换失败但已发布的页面存在（`2608.30667`）：`<title>` 为 "Untitled Document"，正文只有一个 `.ltx_p`，`.ltx_ERROR` 标出未定义宏。扩展在这类页面上必须安静退出或只翻译能翻译的部分，不能报错。
 4. 抓取注意事项：`export.arxiv.org` 的 http 会 301 到 https，curl 需 `-L`；API 的 `[a TO b]` 需 `-g` 关闭 glob；单个请求偶发挂起，必须设 `--max-time`；遵守 3 秒间隔。
+5. **旧式 id 的论文也有 HTML**（2026-09-05 curl 核实 Codex #9 的评论）：`/html/hep-th/9901001` 返回完整的 LaTeXML 页面（`article.ltx_document`，标题 "String Junctions and Their Duals…"），`/html/math/0601001` 同样 200。`paperIdFromUrl` 因此要收 `archive[.subject]/YYMMNNN[vN]`。
 
 ## 2. 规则覆盖率审计
 
@@ -170,6 +171,14 @@ body                                  ← ≥1280px 时 display:grid（见 3.2�
 ### 3.4 阅读模式与我们的模式的关系
 
 arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `.ltx_page_navbar`。我们的 side 模式如需隐藏导航栏，直接设 `html[data-axt-mode="side"] .ltx_page_navbar { display:none }` 即可，不要写 arXiv 的属性（那会被它持久化到 localStorage）。
+
+### 3.5 列表与多面板图的站点规则（2026-09-05，`ar5iv.0.9.1.min.css`）
+
+样式入口 `/static/browse/0.3.4/css/arxiv-html-papers-20260823.css` 只有两行 `@import`：`ar5iv.0.9.1.min.css` 进 `layer(ar5iv)`，`arxiv-html-papers-theme-20260807.css` 进 `layer(arxiv-theme)`（抓取要 `curl -L`）。与 side 模式列表排版直接相关的：
+
+- `li.ltx_item > .ltx_tag { display: inline; margin-inline-start: -2.5rem; padding-inline-end: .5rem; text-align: end }`——itemize 的标记悬挂 2.5rem，modes.css 里标记槽的 2.5rem 由此而来
+- `.ltx_enumerate { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: .5em; padding-inline-start: 0 }`，`.ltx_enumerate > .ltx_item { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1 }`——enumerate 的编号列按**内容宽度**，长标签（"(Assumption 1)"）在原版式里不会溢出；我们固定 2.5rem 的绝对定位槽会（Codex #25），但站点**没有** `--ltx-enum-leftmargin` 之类的变量可取，按变量取宽的提议不成立
+- 嵌套列表的缩进只有 `.ltx_item > .ltx_para > :is(.ltx_enumerate, .ltx_itemize, .ltx_description) { margin-inline-start: var(--space-xs) }` 加内层自己的编号列；side 模式把标记改成绝对定位后这一层缩进丢了（Codex #25，2609.00245 的 (k.i) 列表），留给真实浏览器布局测试那批一起处理
 
 ## 4. 参考文件地图（DESIGN.md §4 各模块）
 

@@ -10,11 +10,11 @@ describe('enableDebug', () => {
     const blocks = extract(document)
     enableDebug(blocks)
     expect(document.documentElement.hasAttribute('data-axt-debug')).toBe(true)
-    expect(document.querySelectorAll('style[data-axt="debug"]')).toHaveLength(1)
+    expect(document.querySelectorAll('style[data-axt-style="debug"]')).toHaveLength(1)
     expect(document.getElementById('p1')?.getAttribute('data-axt-id')).toBe('p1')
     expect(document.getElementById('T')?.getAttribute('data-axt-id')).toBe('T')
 
     enableDebug(blocks)
-    expect(document.querySelectorAll('style[data-axt="debug"]')).toHaveLength(1)
+    expect(document.querySelectorAll('style[data-axt-style="debug"]')).toHaveLength(1)
   })
 })

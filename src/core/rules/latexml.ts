@@ -2,8 +2,8 @@
 // 依据 DESIGN.md §5.1 / §5.2 / §5.3 / §5.6 / §6.1，实测依据见 docs/RESEARCH.md §2。
 // 本文件只放数据表与纯函数，不含遍历；遍历在 src/core/extractor。
 
-/** 任何表或函数的行为变化都要递增；进缓存键 */
-export const RULES_VERSION = '0.4.0'
+/** 任何表或函数的行为变化都要递增；进缓存键。0.5.0：单元格取任意深度、格内单元走进去序列化（§5.3） */
+export const RULES_VERSION = '0.5.0'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -50,6 +50,16 @@ export const UNIT_RULES: readonly Rule[] = [
 
 /** §5.3 表格：最外层 .ltx_tabular 作为一个单元（遍历不下钻即取到最外层），单元格是块内的段，th 也带 ltx_td */
 export const TABLE_RULES = { root: '.ltx_tabular', cell: '.ltx_td' } as const
+
+/** 表格块的全部单元格，按文档序、任意深度：嵌套 tabular 的格也是外层块的格（§5.3） */
+export function tableCells(table: Element): Element[] {
+  return Array.from(table.querySelectorAll(TABLE_RULES.cell))
+}
+
+/** protector 序列化时要知道根是不是单元格：格里的翻译单元不另成块，要走进去（§5.3） */
+export function isTableCell(el: Element): boolean {
+  return el.matches(TABLE_RULES.cell)
+}
 
 /** §5.2 块级整体跳过：不产出、不下钻。出现在翻译单元内部时（如段落里的 .ltx_ERROR）对该单元等价于 void */
 export const SKIP_RULES: readonly Rule[] = [
@@ -160,6 +170,8 @@ export function isInlineTitleCandidate(el: Element): boolean {
 }
 
 export function documentRoot(doc: Document | Element): Element | null {
+  // 传进来的若已经是翻译根本身，querySelector 只搜后代会漏掉它（Codex 在 #2 / #3 指出）
+  if ('matches' in doc && doc.matches(DOCUMENT_ROOT)) return doc
   return doc.querySelector(DOCUMENT_ROOT)
 }
 

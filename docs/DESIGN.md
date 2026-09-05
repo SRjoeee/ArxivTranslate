@@ -91,7 +91,7 @@ interface Block {
   kind: 'text' | 'table'
   el: Element       // 原节点，永不修改子树
   unit: string      // 命中的规则 id（p / title / caption / note / bibitem / ack / keywords / table）
-  cells?: { el: Element; numeric: boolean }[]   // 仅 table：最外层 .ltx_tabular 内的 .ltx_td，numeric 由 §5.3 判定
+  cells?: { el: Element; numeric: boolean }[]   // 仅 table：最外层 .ltx_tabular 内任意深度的 .ltx_td（嵌套 tabular 的格也算），numeric 由 §5.3 判定
 }
 ```
 
@@ -115,7 +115,7 @@ interface Block {
 | `.ltx_title`（不含 `.ltx_title_acknowledgements` / `.ltx_title_keywords`）, `.ltx_subtitle` | 各级标题与副标题。内含 `.ltx_tag`（章节号）需作 void 占位符；定理的 run-in 标题（"Theorem 1."）也在此列 |
 | `.ltx_caption` | 图表说明。内含 `.ltx_tag`（"Table 1: "，其中嵌套 `.ltx_text`）需作 void 占位符 |
 | `.ltx_note_content` | 脚注正文，作为独立块。脚注是**嵌套块**：整个 `.ltx_note`（标记 + `.ltx_note_outer > .ltx_note_content`）位于段落内部，外层段落把 `.ltx_note` 视为 void 占位符；`.ltx_note_content` 内部的第二个 `.ltx_note_mark` 与 `.ltx_note_type` 作 void |
-| （表格） | 不走本表：整张最外层 `.ltx_tabular` 由 §5.3 的 TABLE 规则作为一个单元处理，单元格 `.ltx_td` 是表格块内的段，不是独立块 |
+| （表格） | 不走本表：整张最外层 `.ltx_tabular` 由 §5.3 的 TABLE 规则作为一个单元处理，单元格 `.ltx_td`（含嵌套 tabular 的）是表格块内的段，不是独立块；格内的 `.ltx_p` 由 protector 序列化时走进去（§5.3） |
 | `.ltx_bibblock` | 参考文献条目内的片段（作者 / 标题 / 出处）；没有分段的条目用 `.ltx_bibitem` 兜底，见 5.4 |
 | `.ltx_acknowledgements` | 致谢。正文是容器里的裸文本，容器本身就是单元；它的 run-in 标题**不单独成块**（2026-09-04 修订），否则外层单元会把标题当 void 占位符克隆一份英文，页面上出现两个英文标题加一段中文正文（实测 2609.00095）。不成块时标题是成对占位符，随外层一起翻、原位还原。`.ltx_keywords` 同理 |
 | `.ltx_keywords` | 关键词 |
@@ -146,6 +146,9 @@ interface Block {
 - side / stack 模式：在原表**下方**插入一份译文克隆表，克隆内逐格翻译，数值格原样复制
 - only 模式：隐藏原表，显示克隆表
 - 不在单元格内做左右对照
+- **单元格是块内的段，格里的翻译单元不另成块**（2026-09-05）：extractor 不下钻表格，所以 protector 序列化单元格时要把格内的 `.ltx_p` / 标题当普通 paired 走进去，而不是像段落里的嵌套单元那样作 void——否则整格只剩一个占位符、文字全丢（实测 2410.00260 表 1 的 38 个格；Codex 在 #5 指出）
+- **嵌套 tabular**：内层的格也是外层块的格（`tableCells` 取任意深度）；只装着嵌套表的外层格没有自有文本，按数值格原样复制。渲染时逐格替换前重新定位克隆表里的格——外层格的译文里带着内层表的克隆，先替换外层再替换内层
+- **部分失败算失败**：表内有一格翻不出来，已翻出的格照常显示、计入失败数，用户能分辨"翻了一半"与"翻完了"（Codex 在 #9 指出）。原表**保持 `translated`**、另加 `data-axt-partial` 画提示线——直接标 `failed` 会让 only 模式把原表与半份克隆一起露出来（Codex 在 #30 指出）
 - 数值格判定（Phase 0 用 5,487 个真实单元格校准，RESEARCH.md §2.6）：**排除 protect / skip 子树后的可见文本**（不能直接用 `textContent`，MathML 的 `annotation` 会混入 TeX 源码；单元格内的 `.ltx_p` 文本计入）满足以下任一即原样复制：
   - `^(?=.*\d)[\s\d.,+\-±×^%()/*eE−–—:;~<>=≤≥∼]+(\s*[a-zA-Zμ°%]{1,4})?$`——必须含数字，避免 `ERROR` 这类以 E 开头的词被当成指数误判
   - `^[✓✗✔✘–—−\-·×*]+$`——纯符号格
@@ -181,7 +184,7 @@ interface Block {
 
 ## 6. 占位符引擎
 
-位置：`src/core/protector/`。这是项目最难、最值钱的模块，必须原创，读 Read Frog 与 KISS 的实现后再动手。
+位置：`src/core/protector/`。这是项目最难、最值钱的模块，已原创实现（Phase 2；CLAUDE.md 的移植边界把它列为例外），完整性校验的思路参考了 Read Frog `html-attribute-markers.ts`。
 
 ### 6.1 节点分类
 
@@ -298,7 +301,7 @@ interface ProtectedBlock {
 
 - 原块 `display: none`（不是删除、不是替换文本节点）；选择器是 `[data-axt-state="translated"]`，所以只隐藏真的有译文的块
 - 参考文献条目**不再豁免**（2026-09-04 修订）：条目改为按 `.ltx_bibblock` 分段翻译后（§5.4），作者段本来就不翻、没有 `data-axt-state`，只译文模式下自然保留，条目仍完整可读。旧豁免是整条翻译时代的遗留
-- 未翻译成功的块保持原文可见（`pending` / `failed` 显式 `display: revert`）
+- 未翻译成功的块保持原文可见：隐藏规则只匹配 `data-axt-state="translated"`，`pending` / `failed` 不被匹配即可。**不要**写 `display: revert`——revert 会把站点的 display 一并撤销（`.ltx_bibblock` 从 block 变回 inline），2026-09-05 已删（Codex 在 #19 指出）
 
 ### 7.5 译文样式
 
@@ -382,6 +385,7 @@ export interface TranslateResult {
 - 视为**随时会断**的东西：独立文件、独立错误类型、失败自动切到 fallback 链的下一个
 - fallback 链默认：用户选定 provider → `chrome-builtin` → `google-web`
 - `google-web` 一次请求多条（默认 100 条 / 8000 字一批，并发 2），指数退避处理 429；超时预算照 FluentRead 的做法给单次尝试与总时长各设上限
+- **429 暂停整条队列**（2026-09-05）：p-queue 的 concurrency 只是并发上限，撞上限流的任务自己睡着时其余 worker 还会往同一端点打（Codex 在 #6 / #10 指出）；暂停时长取 Retry-After 与退避的较大者，到时自动恢复；在飞的任务每次尝试前也要等共享暂停，暂停结束**只放一个探针**、其余等它成功再走（照 Read Frog request-queue 的 post-pause probe，Codex 在 #30 指出睡醒的任务会在同一刻一起撞端点）。`no-key` / `auth` / `aborted` 不重试——移植的策略不认识这些 kind，曾把 no-key 当未知错误重试 4 次、白等 7 s
 - **思考模式默认关闭**（照 KISS 的 THINKING_API_REGISTRY）：按端点域名选字段——OpenRouter `reasoning: { effort: "none" }`、DeepSeek 官方 `thinking: { type: "disabled" }`、百炼 / 硅基流动 `enable_thinking: false`，未登记端点不发；经 AI SDK `providerOptions` 进请求体（`src/providers/thinking.ts`）
 - **即时引擎**：`chrome-builtin` 模型就绪时（`availability() === 'available'`）单句 10–20 ms 且离线，用它先渲染视口内的块，用户选定的 LLM 译文到达后原位替换；缓存键含 provider，两者互不覆盖。用户可在设置里关闭
 
@@ -391,7 +395,7 @@ export interface TranslateResult {
 - 首次下载期间 `availability()` 不会变成 `downloading`，`monitor` 也没有 `downloadprogress` 事件（实测 67 s 内一直是 `downloadable`），UI 用不确定态"正在下载语言包"提示；下载完成后再次 `create()` 才会有 0→1 的进度事件（约 8 s 的本地加载）
 - 语言包按语言对独立下载（en→zh 与 en→ja 各一份）
 - 译文需归一化句号后的多余空格（「。 」→「。」）
-- content script 隔离世界是否同样暴露 `Translator` 待 Phase 1 用真实 content script 验证 [待验证]
+- content script 隔离世界是否同样暴露 `Translator` 待接 `chrome-builtin` 时用真实 content script 验证 [待验证]
 
 ---
 
@@ -401,6 +405,7 @@ export interface TranslateResult {
 - 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
 - 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有（IndexedDB 按扩展 origin 隔离，跨论文共享），content 侧通过 `axt:cache-get` / `axt:cache-put` 读写；provider 请求本身不经过 background（§8.0）
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
+- **坏译文不入库、重发不读库** [决定，2026-09-05]：markup 路径的请求带 `accept` 回调（进程内调用才有，过不了消息边界），translate-service 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）；占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
 - 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
 ---
@@ -437,7 +442,7 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 - [x] 抓 8–10 篇不同年份/领域的 arXiv HTML 存为 fixture，跑 `ltx_*` 类名直方图，校订第 5 节的选择器，结果写入 `docs/RESEARCH.md`
 - [x] clone 三个参考仓库到 `reference/`（gitignore），为每个模块写一行"参考哪个文件"，写入 `docs/RESEARCH.md`
 - [x] curl 验证 `google-gtx`、微软 `translatetext`、Google `translateHtml` 今天是否可用、是否保留标签（结论：采用 `translateHtml`，见 §8.1）
-- [x] 验证 content script 内能否直接调 `Translator` API，模型下载是否需要用户手势
+- [ ] 验证 content script 内能否直接调 `Translator` API（页面主世界已测，RESEARCH.md §6；隔离世界待接 `chrome-builtin` 时验证，§8.4）；模型下载是否需要用户手势（已测：仅首次下载语言包需要）
 - [x] 确认 arXiv 主容器与导航栏的选择器，以及 arXiv 自身 JS 是否会与我们冲突
 
 **Phase 1 — 骨架 + 规则（测试先行，三个分支依次合入）**
@@ -474,7 +479,7 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 
 **边界 [决定，v0.3 修订]**：默认优先移植三个参考项目的成熟实现——它们已迭代多年，能整段拿来用的就拿来用，移植后按本项目命名与目录改造。原创的例外只有三种：(1) arXiv 适配（`rules/latexml.ts`、`extractor` 的 LaTeXML 路径，Phase 1 已完成）；(2) `renderer`——三个项目的译文渲染都改动、包裹或替换原节点（Read Frog 把译文追加进原元素、仅译文模式直接改文本节点；FluentRead 用 host 包裹原节点；KISS `replaceWith` 替换），与 §7.1 的 DOM 不变量冲突；(3) 移植会与不变量冲突或让代码变乱时改写并说明理由。各模块的移植来源见 RESEARCH.md §4。
 
-**许可证 [决定]**：项目以 GPL-3.0 开源，非商业，与三个参考项目同许可证，可直接移植。GPL §5 要求保留声明并标明修改：移植文件的文件头写 `// 移植自 reference/<repo>/<path>@<commit>（GPL-3.0），有修改`，并在 `docs/THIRD_PARTY.md` 登记。
+**许可证 [决定]**：项目以 GPL-3.0 开源，非商业，与三个参考项目同许可证，可直接移植。GPL §5 要求保留声明并标明修改：移植文件的文件头写 `// 移植自 reference/<repo>/<path>@<commit>（GPL-3.0），<YYYY-MM-DD> 移植、有修改`（§5(a) 要求修改声明带相关日期），并在 `docs/THIRD_PARTY.md` 登记。
 
 **面向其他论文站点 [v2]**：extractor 以"站点适配器"接口组织，LaTeXML 适配器是第一个；通用启发式 walker（移植 Read Frog `dom/filter.ts`、`dom/traversal.ts`）作为第二个适配器在 v2 接入其他站点。v1 范围（§1）不变。
 

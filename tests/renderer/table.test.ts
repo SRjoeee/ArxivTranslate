@@ -52,4 +52,20 @@ describe('renderTable', () => {
     expect(clones).toHaveLength(1)
     expect(clones[0]?.querySelector(TABLE_RULES.cell)?.textContent).toBe('二')
   })
+
+  it('嵌套 tabular：外层格的译文带着内层表的克隆，内层格随后在新克隆里替换（§5.3）', () => {
+    const doc = docOf(
+      '<table class="ltx_tabular" id="outer"><tbody><tr><td class="ltx_td">Outer cell'
+      + '<table class="ltx_tabular" id="inner"><tbody><tr><td class="ltx_td">Alpha</td><td class="ltx_td">Beta</td></tr></tbody></table>'
+      + '</td></tr></tbody></table>',
+    )
+    const t = extract(doc).find(b => b.kind === 'table') as TableBlock
+    expect(t.cells).toHaveLength(3)
+    // 模拟 rehydrate：外层格的译文里含内层表的克隆（英文）
+    const outer = frag(doc, '外层<table class="ltx_tabular"><tbody><tr><td class="ltx_td">Alpha</td><td class="ltx_td">Beta</td></tr></tbody></table>')
+    const node = renderTable(t, new Map([[t.cells[0]!.el, outer], [t.cells[1]!.el, frag(doc, '甲')], [t.cells[2]!.el, frag(doc, '乙')]]))
+    const tds = Array.from(node.querySelectorAll(TABLE_RULES.cell))
+    expect(tds.map(td => td.textContent)).toEqual(['外层甲乙', '甲', '乙'])
+    expect(doc.getElementById('inner')?.textContent).toBe('AlphaBeta')
+  })
 })

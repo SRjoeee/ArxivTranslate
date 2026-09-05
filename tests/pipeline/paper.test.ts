@@ -14,4 +14,11 @@ describe('paperIdFromUrl', () => {
     expect(paperIdFromUrl('https://arxiv.org/html/')).toBeNull()
     expect(paperIdFromUrl('not a url')).toBeNull()
   })
+
+  it('旧式 id（archive/YYMMNNN，可带学科与版本）：arXiv 已为旧文生成 HTML（实测 /html/hep-th/9901001；Codex 在 #9 指出）', () => {
+    expect(paperIdFromUrl('https://arxiv.org/html/hep-th/9901001')).toBe('hep-th/9901001')
+    expect(paperIdFromUrl('https://arxiv.org/html/math.GT/0601001v2')).toBe('math.GT/0601001v2')
+    expect(paperIdFromUrl('https://arxiv.org/html/cond-mat.mes-hall/0601001/')).toBe('cond-mat.mes-hall/0601001')
+    expect(paperIdFromUrl('https://arxiv.org/html/hep-th/99010')).toBeNull()
+  })
 })

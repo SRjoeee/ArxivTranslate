@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
-import { DEFAULT_CONFIG, type Config } from '@/config/schema'
+import { DEFAULT_CONFIG, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { sendMessage } from '@/shared/messages'
 
@@ -41,16 +41,39 @@ export function App() {
   async function save() {
     setNotice('')
     try {
-      const next: Config = { ...config, openaiCompat: { ...config.openaiCompat, apiKey: keyInput || config.openaiCompat.apiKey } }
+      // 先校验再申请权限：字段有错时不该先把 host 权限拿到手（Codex 在 #6 指出）
+      const parsed = configSchema.safeParse({ ...config, openaiCompat: { ...config.openaiCompat, apiKey: keyInput || config.openaiCompat.apiKey } })
+      if (!parsed.success) throw new Error(parsed.error.issues.map(i => `${i.path.join('.')}：${i.message}`).join('；'))
+      const next = parsed.data
+      const previous = await getConfig()
       // 免费端点自带 CORS，不需要 host 权限；只有走 LLM 时才申请
       if (next.provider === 'openai-compat') await ensureHostPermission(next.openaiCompat.baseURL)
       await setConfig(next)
+      await releaseHostPermission(previous.openaiCompat.baseURL, next.openaiCompat.baseURL)
       setLocal(next)
       setHasStoredKey(next.openaiCompat.apiKey.length > 0)
       setKeyInput('')
       setNotice('已保存')
     } catch (e) {
       setNotice(`保存失败：${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  /**
+   * 留空只表示"不改"，删除要有显式动作（Codex 在 #6 指出）。
+   * 只动已存的那份：表单里未保存的改动（比如换了 Base URL）不能借这个动作绕过校验与权限申请（Codex 在 #30 指出）
+   */
+  async function clearKey() {
+    setNotice('')
+    try {
+      const stored = await getConfig()
+      await setConfig({ ...stored, openaiCompat: { ...stored.openaiCompat, apiKey: '' } })
+      setLocal(c => ({ ...c, openaiCompat: { ...c.openaiCompat, apiKey: '' } }))
+      setHasStoredKey(false)
+      setKeyInput('')
+      setNotice('已清除 API key')
+    } catch (e) {
+      setNotice(`清除失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -99,6 +122,8 @@ export function App() {
       <label style={label}>
         API key{hasStoredKey ? '（已配置，留空则不改）' : ''}
         <input style={field} type="password" value={keyInput} onChange={e => setKeyInput(e.target.value)} autoComplete="off" placeholder={hasStoredKey ? '••••••••' : 'sk-…'} disabled={config.provider !== 'openai-compat'} />
+        {hasStoredKey && <button type="button" style={{ marginTop: 4, font: 'inherit', fontSize: 12 }} onClick={clearKey}>清除已存的 key</button>}
+        <small style={{ display: 'block', color: '#666' }}>本机端点（localhost / 127.0.0.1）可以不填</small>
       </label>
       <label style={label}>
         模型
@@ -123,10 +148,27 @@ export function App() {
   )
 }
 
+function originPattern(url: string): string | null {
+  try {
+    return `${new URL(url).origin}/*`
+  } catch {
+    return null
+  }
+}
+
 /** 自定义端点需要该 origin 的 host 权限；保存按钮就是用户手势 */
 async function ensureHostPermission(baseURL: string) {
-  const origin = `${new URL(baseURL).origin}/*`
+  const origin = originPattern(baseURL)
+  if (!origin) throw new Error('Base URL 不合法')
   if (await browser.permissions.contains({ origins: [origin] })) return
   const granted = await browser.permissions.request({ origins: [origin] })
   if (!granted) throw new Error(`未授予对 ${origin} 的访问权限`)
+}
+
+/** 换了端点就收回旧 origin 的权限，免得越换越多；manifest 里固定申请的不收（Codex 在 #6 指出） */
+async function releaseHostPermission(previousURL: string, currentURL: string) {
+  const previous = originPattern(previousURL)
+  if (!previous || previous === originPattern(currentURL)) return
+  if ((browser.runtime.getManifest().host_permissions ?? []).includes(previous)) return
+  await browser.permissions.remove({ origins: [previous] }).catch(() => undefined)
 }

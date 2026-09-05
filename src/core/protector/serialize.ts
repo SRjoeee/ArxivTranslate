@@ -1,7 +1,10 @@
 // 序列化（DESIGN §6.2）：块 → 带占位符的文本 + 槽位表。纯读，不改 DOM。
 // void / paired 的判定完全复用规则模块：classify() 命中任何类别（skip / protect / unit / table）即 void——
 // 这同时覆盖了嵌套单元（脚注容器、段内 .ltx_p）；未命中且含文本的元素是 paired，未命中且无文本的也作 void。
-import { classify } from '@/core/rules/latexml'
+// 唯一例外是表格单元格（§5.3）：extractor 不下钻表格，格里的 .ltx_p / 标题不会另成块，
+// 序列化时要当普通 paired 走进去，否则整格只剩一个占位符、文字全丢（实测 2410.00260 表 1；Codex 在 #5 指出）。
+import { isInjected } from '@/core/marks'
+import { classify, isTableCell } from '@/core/rules/latexml'
 import { escapeText } from './text'
 
 export interface ProtectedBlock {
@@ -27,6 +30,7 @@ export function serialize(root: Element): ProtectedBlock {
   const parts: string[] = []
   let voidCount = 0
   let next = 1
+  const inCell = isTableCell(root)
 
   const walk = (node: Element) => {
     for (const child of Array.from(node.childNodes)) {
@@ -34,9 +38,13 @@ export function serialize(root: Element): ProtectedBlock {
         parts.push(escapeText((child as Text).data))
       } else if (child.nodeType === ELEMENT_NODE) {
         const el = child as Element
+        // 我们自己插的译文 / 镜像不是原文：再次翻译时它们已经在原块内部（Codex 在 #8 指出）
+        if (isInjected(el)) continue
         const id = next++
         slots.set(id, el)
-        if (classify(el) || !hasText(el)) {
+        const c = classify(el)
+        const isVoid = c ? !(inCell && c.kind === 'unit' && hasText(el)) : !hasText(el)
+        if (isVoid) {
           voidCount++
           parts.push(`<x id="${id}"/>`)
         } else {

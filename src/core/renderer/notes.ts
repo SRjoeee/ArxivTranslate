@@ -17,8 +17,9 @@
 //
 // 隐藏只认 data-axt-note 标记、且标记只在复制成功时才打：第一版用一条无条件的 CSS 藏原件译文，
 // JS 没跑到中文就凭空消失。现在没跑到时只是退回"原件里原文 + 译文并排"的旧样子，不丢内容。
+import { ID_ATTR } from '@/core/extractor'
+import { T_CLASS } from '@/core/marks'
 import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
-import { T_CLASS } from './index'
 
 /** 原件上的标记：译文已复制进副本，这份边注由样式隐藏 */
 const LOCALIZED_ATTR = 'data-axt-note'
@@ -68,4 +69,29 @@ export function localizeNotes(root: Document | Element): number {
     })
   }
   return localized
+}
+
+/**
+ * 撤销与某块相关的脚注归位，在删掉它的译文之前调用（Codex 在 #30 指出）：
+ * 块里的脚注——副本随这块的译文一起没了，原件不能再藏着；
+ * 块本身是脚注正文——它的译文副本在外层段落的译文里，删掉副本、原件露出来。
+ * 否则再翻失败时原件边注仍被样式隐藏、副本却已删除，脚注在所有模式下都消失。返回撤销的条数
+ */
+export function delocalizeNotes(block: Element): number {
+  let undone = 0
+  for (const note of Array.from(block.querySelectorAll(`[${LOCALIZED_ATTR}]`))) {
+    note.removeAttribute(LOCALIZED_ATTR)
+    undone += 1
+  }
+  const note = block.closest(NOTE.root)
+  if (!note?.hasAttribute(LOCALIZED_ATTR)) return undone
+  note.removeAttribute(LOCALIZED_ATTR)
+  undone += 1
+  const outer = note.parentElement?.closest(`[${ID_ATTR}]`)
+  const translation = outer?.nextElementSibling
+  if (!outer || !translation?.classList.contains(T_CLASS)) return undone
+  const sources = Array.from(outer.querySelectorAll(`${NOTE.content}:not(.${T_CLASS})`))
+  const copies = Array.from(translation.querySelectorAll(`${NOTE.content}:not(.${T_CLASS})`))
+  copies[sources.indexOf(block)]?.querySelector(`:scope > .${NOTE_T_CLASS}`)?.remove()
+  return undone
 }
