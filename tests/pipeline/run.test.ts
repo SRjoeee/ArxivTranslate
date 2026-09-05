@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { runTranslation, type Transport } from '@/core/pipeline/run'
-import { FOR_ATTR, STATE_ATTR, T_CLASS } from '@/core/renderer'
+import { FOR_ATTR, PARTIAL_ATTR, STATE_ATTR, T_CLASS } from '@/core/renderer'
 import { TABLE_RULES } from '@/core/rules/latexml'
 import type { TranslateMessageRequest } from '@/entrypoints/background/translate-handler'
 
@@ -149,9 +149,15 @@ describe('runTranslation', () => {
     const { transport } = makeTransport((_req, seg) => (seg.id === 'T2#c1' ? { error: 'unknown' } : undefined as unknown as string))
     const progress = await run(doc, transport)
     expect(progress).toMatchObject({ done: 0, failed: 1 })
-    expect(doc.getElementById('T2')?.getAttribute(STATE_ATTR)).toBe('failed')
+    // 原表仍是 translated（only 模式只显示克隆，不会原表与半份克隆一起露出来），另打 partial 标记
+    const original = doc.getElementById('T2')!
+    expect(original.getAttribute(STATE_ATTR)).toBe('translated')
+    expect(original.hasAttribute(PARTIAL_ATTR)).toBe(true)
     const clone = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="T2"]`)
     expect(Array.from(clone?.querySelectorAll(TABLE_RULES.cell) ?? []).map(td => td.textContent)).toEqual(['Alpha', 'Beta'])
+    // 再翻全部成功：标记随之清掉
+    await run(doc, makeTransport().transport)
+    expect(original.hasAttribute(PARTIAL_ATTR)).toBe(false)
   })
 
   it('再翻失败的块要删掉上一轮的译文，不能挂着旧译文冒充这一轮（Codex 在 #9 指出）', async () => {

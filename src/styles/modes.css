@@ -23,8 +23,11 @@ html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption,
   margin-inline-start: 0.5em;
 }
 
-/* 翻译失败的块：左侧一条细提示线，原文照常可读（§7.4） */
-[data-axt-state="failed"] {
+/* 翻译失败的块：左侧一条细提示线，原文照常可读（§7.4）。
+   翻了一半的表（data-axt-partial）同样画线，但它仍是 translated，only 模式下照常只显示克隆 */
+[data-axt-state="failed"],
+[data-axt-partial],
+[data-axt-partial] + .axt-t {
   box-shadow: inset 3px 0 0 var(--axt-failed-color, rgba(220, 38, 38, 0.6));
 }
 

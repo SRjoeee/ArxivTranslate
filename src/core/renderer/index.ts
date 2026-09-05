@@ -16,6 +16,11 @@ export const ON_ATTR = 'data-axt-on'
 export const MODE_ATTR = 'data-axt-mode'
 /** 短标题同行（§7.3）：原标题与译文都带此属性 */
 export const INLINE_ATTR = 'data-axt-inline'
+/**
+ * 表翻了一半（§5.3）：原表仍是 translated（only 模式照常只显示克隆），另加此标记画失败提示线、计入失败数。
+ * 不能直接标 failed——only 模式只隐藏 translated，原表与半份克隆会一起露出来（Codex 在 #30 指出）
+ */
+export const PARTIAL_ATTR = 'data-axt-partial'
 /** 原标题可见文本不超过这个长度才与译文同行 */
 export const INLINE_TITLE_MAX_CHARS = 60
 
@@ -43,6 +48,12 @@ export function setMode(doc: Document, mode: Mode): void {
 
 export function setState(block: Block, state: BlockState): void {
   block.el.setAttribute(STATE_ATTR, state)
+  // 状态一变，上一轮的"翻了一半"标记就过期了；部分成功要在 setState 之后再标
+  block.el.removeAttribute(PARTIAL_ATTR)
+}
+
+export function markPartial(block: Block): void {
+  block.el.setAttribute(PARTIAL_ATTR, '')
 }
 
 /**

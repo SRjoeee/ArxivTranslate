@@ -155,4 +155,27 @@ describe('createTranslateService', () => {
     expect(ra.ok && rb.ok).toBe(true)
     expect(order.indexOf('call:b')).toBeGreaterThan(order.indexOf('sleep'))
   })
+
+  it('在飞的任务每次尝试前也要过共享暂停这道闸：自己睡醒了、暂停还没结束就接着等（Codex 在 #30 指出）', async () => {
+    let calls = 0
+    const resolvers: (() => void)[] = []
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => {
+        if (calls++ === 0) throw attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
+        return { segments: r.segments, provider: 'mock' }
+      }, 'gated'),
+      retry: { sleep: () => new Promise<void>(resolve => { resolvers.push(resolve) }) },
+    })
+    const a = service(req(['a']))
+    // 429 后有两次 sleep：withRetry 自己的，与队列暂停的
+    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
+    // 只放行任务自己的那次：它醒了，但共享暂停还在，不能再打端点
+    resolvers[0]!()
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(calls).toBe(1)
+    resolvers[1]!()
+    const ra = await a
+    expect(ra.ok).toBe(true)
+    expect(calls).toBe(2)
+  })
 })

@@ -83,21 +83,31 @@ export function createTranslateService(deps: TranslateServiceDeps) {
   /**
    * 429 时暂停整条队列：concurrency 只是并发上限，撞上限流的那个任务自己睡着时，
    * 其余 worker 还会继续往同一个端点打（Codex 在 #6 / #10 指出）。
-   * 已在飞的任务各自按策略等待；队列到时自动恢复。多次暂停取最晚的那个截止时间
+   * 队列到时自动恢复；多次暂停取最晚的那个截止时间。
+   * 已在飞的任务不受 queue.pause() 约束，所以它们**每次尝试前**也要过 awaitPause 这道闸：
+   * 自己睡醒了但别的任务把暂停延长了，就接着等（Codex 在 #30 指出）
    */
   const pausedUntil = new Map<string, number>()
+  const pauses = new Map<string, Promise<void>>()
+  const sleepFn = () => deps.retry?.sleep ?? ((wait: number) => new Promise<void>(resolve => setTimeout(resolve, wait)))
   const pauseQueue = (provider: TranslationProvider, ms: number) => {
     const queue = queueFor(provider)
     const until = Date.now() + ms
     if ((pausedUntil.get(provider.id) ?? 0) >= until) return
     pausedUntil.set(provider.id, until)
     queue.pause()
-    const sleep = deps.retry?.sleep ?? (wait => new Promise<void>(resolve => setTimeout(resolve, wait)))
-    void sleep(ms).then(() => {
+    const done = sleepFn()(ms).then(() => {
+      // 被更长的暂停取代：由那一次负责恢复
       if (pausedUntil.get(provider.id) !== until) return
       pausedUntil.delete(provider.id)
+      pauses.delete(provider.id)
       queue.start()
     })
+    pauses.set(provider.id, done)
+  }
+  const awaitPause = async (provider: TranslationProvider) => {
+    let pending: Promise<void> | undefined
+    while ((pending = pauses.get(provider.id))) await pending
   }
 
   return async ({ request, providerId, cache }: TranslateMessageRequest): Promise<TranslateMessageResponse> => {
@@ -138,9 +148,11 @@ export function createTranslateService(deps: TranslateServiceDeps) {
             pauseQueue(provider, ms)
           },
         }
-        const result = (await queueFor(provider).add(() =>
-          withRetry(() => withTimeout(signal => provider.translate({ ...request, segments: misses, signal }), timeoutMs), retry),
-        )) as TranslateResult
+        const attempt = async () => {
+          await awaitPause(provider)
+          return withTimeout(signal => provider.translate({ ...request, segments: misses, signal }), timeoutMs)
+        }
+        const result = (await queueFor(provider).add(() => withRetry(attempt, retry))) as TranslateResult
         resultProvider = result.provider
         resultModel = result.model
         const writes: CacheEntry[] = []

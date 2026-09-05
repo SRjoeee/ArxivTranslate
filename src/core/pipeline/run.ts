@@ -2,7 +2,7 @@
 import { markBlocks, type TextBlock } from '@/core/extractor'
 import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate } from '@/core/protector'
-import { clearTranslation, enable, renderTable, renderText, setState, type Mode } from '@/core/renderer'
+import { clearTranslation, enable, markPartial, renderTable, renderText, setState, type Mode } from '@/core/renderer'
 import type { RenderPath } from '@/cache/key'
 import type { TranslateMessageRequest, TranslateMessageResponse } from '@/entrypoints/background/translate-handler'
 import { planBatches, type Batch, type Segment } from './batches'
@@ -141,14 +141,20 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
     if (batch.kind === 'table' && batch.block) {
       const cells = new Map<Element, DocumentFragment>()
       for (const [segment, fragment] of out) if (fragment && segment.cell) cells.set(segment.cell.el, fragment)
-      if (cells.size > 0) renderTable(batch.block, cells)
-      else clearTranslation(batch.block)
-      // 有一格没翻出来就算失败：已翻出的格照常显示，但块标失败、计入失败数，
-      // 用户能分辨"翻了一半"与"翻完了"（Codex 在 #9 指出）
+      // 有一格没翻出来就算失败，用户能分辨"翻了一半"与"翻完了"（Codex 在 #9 指出）。
+      // 半份克隆照常显示：原表保持 translated（only 模式仍只显示克隆），另加 partial 标记；
+      // 直接标 failed 会让 only 模式把原表与半份克隆一起露出来（Codex 在 #30 指出）
       if (cells.size === batch.segments.length) {
+        renderTable(batch.block, cells)
         progress.done++
       } else {
-        setState(batch.block, 'failed')
+        if (cells.size > 0) {
+          renderTable(batch.block, cells)
+          markPartial(batch.block)
+        } else {
+          clearTranslation(batch.block)
+          setState(batch.block, 'failed')
+        }
         progress.failed++
       }
     } else {
