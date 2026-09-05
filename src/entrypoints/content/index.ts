@@ -1,17 +1,16 @@
 import { getConfig, setConfig } from '@/config/storage'
 import { getProvider } from '@/providers'
 import { createTranslateService, type TranslateService } from '@/providers/translate-service'
-import { getRandomUUID } from '@/shared/uuid'
 import { extract, paperContext, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
-import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
+import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
 import {
   alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, localizeNotes, restore,
   splitFigures,
   type Mode, type ModeController,
 } from '@/core/renderer'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { createCoalescer, createViewportTracker, type ViewportTracker } from '@/core/scheduler'
+import { DEFAULT_PRELOAD, beginSession, createCoalescer, endSession, getSessionId } from '@/core/scheduler'
 import { isAxtMessage } from '@/shared/messages'
 import { createMessageCachePort } from './cache-port'
 import { enableDebug } from './debug'
@@ -34,16 +33,24 @@ export default defineContentScript({
     let modes: ModeController | null = null
     let savedMode: Mode = 'stack'
     void getConfig().then(config => { savedMode = config.mode })
-    let controller: AbortController | null = null
-    // 本轮运行的翻译服务与取消范围：恢复原文时按 scope 把排队与在飞的请求一起撤掉（DESIGN §10）
+    // 一次会话 = 一个翻译服务 + 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
     let service: TranslateService | null = null
-    let scope: string | null = null
-    let tracker: ViewportTracker | null = null
-    const idle = (): Progress => ({ state: 'idle', total: blocks.length, done: 0, failed: 0, cached: 0 })
+    let run: TranslationRun | null = null
+    const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
     let progress: Progress = idle()
 
+    /** 结束当前会话：断开观察器、删 pending、撤掉排队与在飞的请求；页面上的译文留着 */
+    function endRun(): void {
+      run?.stop()
+      run = null
+      const session = endSession()
+      // 先撤请求再丢服务：排队的批次不再发出，在飞的 fetch 被 abort，结果回来也不渲染不写缓存
+      if (service && session) service.cancel(session)
+      service = null
+    }
+
     async function start(requested?: Mode): Promise<{ started: boolean; reason?: string }> {
-      if (progress.state === 'running') return { started: false, reason: '翻译进行中' }
+      if (progress.state === 'on') return { started: false, reason: '翻译已开启，滚动会继续翻' }
       if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
       if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
       // provider 直接在 content 侧构造与调用（DESIGN §8.0）：MV3 的 service worker 会在等待中被挂起，
@@ -56,14 +63,9 @@ export default defineContentScript({
 
       modes?.stop()
       modes = createModeController(document, requested ?? config.mode, { onChange: enterSide })
-      controller = new AbortController()
-      // 被恢复或被新一轮取代的运行，其回调一律忽略：旧运行最后一次上报会把 idle 覆盖成 cancelled，
-      // popup 于是允许再开一轮并发翻译（Codex 在 #9 指出）
-      const run = controller
-      progress = { ...idle(), state: 'running' }
-      tracker?.disconnect()
-      tracker = createViewportTracker(blocks)
-      const activeTracker = tracker
+      endRun() // 上一轮停下但没恢复原文的会话（致命错误后重试）
+      const session = beginSession()
+      progress = { ...idle(), state: 'on' }
       enterSide(modes.effective())
       const translate = createTranslateService({
         getProvider: async () => provider,
@@ -71,11 +73,10 @@ export default defineContentScript({
         getModel: async () => (config.provider === 'openai-compat' ? config.openaiCompat.model : undefined),
         cache: createMessageCachePort(),
       })
-      const runScope = getRandomUUID()
       service = translate
-      scope = runScope
       const t1 = performance.now()
-      void runTranslation({
+      let wasBusy = false
+      run = startTranslation({
         doc: document,
         blocks,
         target: config.targetLanguage,
@@ -85,27 +86,22 @@ export default defineContentScript({
         context,
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
         transport: request => translate.translate(request),
-        scope: runScope,
+        scope: session,
+        preload: DEFAULT_PRELOAD,
         onProgress: p => {
-          if (controller !== run) return
+          // 会话已结束（恢复原文 / 重开）：旧运行的回调一律忽略
+          if (getSessionId() !== session) return
           progress = p
           prep.schedule()
+          // 翻译是"开着"的状态，没有终点；每次从忙到闲打一条日志，e2e 与手测靠它
+          const busy = p.inFlight > 0
+          if (wasBusy && !busy) {
+            console.debug(`[axt] session idle: ${p.done}/${p.requested} requested of ${p.total}, ${p.failed} failed, ${p.cached} cached, ${Math.round(performance.now() - t1)} ms${p.fatal ? `, fatal: ${p.fatal}` : ''}`)
+          }
+          wasBusy = busy
         },
-        signal: run.signal,
-        // 视口优先（DESIGN §10）；视口不跳交给浏览器原生 scroll anchoring，这里不再做布局读取
-        isPriority: block => activeTracker.isNear(block),
       })
-        .finally(() => activeTracker.disconnect())
-        .then(p => {
-          if (controller !== run) return
-          progress = p
-          console.debug(`[axt] translation ${p.state}: ${p.done}/${p.total} done, ${p.failed} failed, ${p.cached} cached, ${Math.round(performance.now() - t1)} ms${p.fatal ? `, fatal: ${p.fatal}` : ''}`)
-        })
-        .catch(e => {
-          if (controller !== run) return
-          progress = { ...progress, state: 'done', fatal: e instanceof Error ? e.message : String(e) }
-          console.error('[axt] translation crashed', e)
-        })
+      run.ready.catch(e => console.error('[axt] translation crashed', e))
       return { started: true }
     }
 
@@ -171,14 +167,7 @@ export default defineContentScript({
     }
 
     function restorePage(): { removedNodes: number } {
-      // 先撤请求再中止运行：排队的批次不再发出，在飞的 fetch 被 abort，结果回来也不渲染不写缓存
-      if (service && scope) service.cancel(scope)
-      service = null
-      scope = null
-      controller?.abort()
-      controller = null
-      tracker?.disconnect()
-      tracker = null
+      endRun()
       modes?.stop()
       modes = null
       fitObserver?.disconnect()
@@ -186,6 +175,7 @@ export default defineContentScript({
       prep.cancel()
       const result = restore(document)
       progress = idle()
+      console.debug(`[axt] translation stopped: ${result.removedNodes} nodes removed`)
       return { removedNodes: result.removedNodes }
     }
 

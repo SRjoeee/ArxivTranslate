@@ -20,6 +20,8 @@ export const DEFAULT_PRELOAD: PreloadOptions = { margin: 1000, threshold: 0 }
 export interface LazyScheduler {
   /** 手动把块交出去（无 IntersectionObserver 的环境、重试）；已交过的不再交 */
   trigger(blocks: Block[]): void
+  /** 只认领不回调：调用方自己去翻这些块，观察器不再管它们 */
+  claim(blocks: Block[]): void
   /** 还没进入视口的块数 */
   waiting(): number
   disconnect(): void
@@ -71,12 +73,20 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
   }
   enterAnchors(seeded)
 
+  const release = (picked: Block[]) => {
+    for (const block of picked) {
+      for (const [anchor, carried] of byAnchor) if (carried.includes(block)) observer?.unobserve(anchor)
+    }
+  }
+
   return {
     trigger(picked) {
-      for (const block of picked) {
-        for (const [anchor, carried] of byAnchor) if (carried.includes(block)) observer?.unobserve(anchor)
-      }
+      release(picked)
       fire(picked)
+    },
+    claim(picked) {
+      release(picked)
+      for (const block of picked) waiting.delete(block)
     },
     waiting: () => waiting.size,
     disconnect() {

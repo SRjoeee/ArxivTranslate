@@ -71,6 +71,8 @@ export function createLightweightSpinner(ownerDoc: Document): HTMLElement {
       [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }],
       { duration: 600, iterations: Infinity, easing: 'linear' },
     )
+    // 取消时 finished 会以 AbortError 拒绝：规范把它标成已处理，happy-dom 没有，会当未处理的拒绝报出来
+    animation.finished?.catch(() => undefined)
     spinnerAnimations.set(spinner, animation)
     activeSpinnerAnimationCount++
   } else {

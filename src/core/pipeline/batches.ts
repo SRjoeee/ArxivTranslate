@@ -22,7 +22,28 @@ export interface Batch {
 
 const TITLE_MAX = 80
 
-export function planBatches(blocks: Block[], options: { maxBatchChars: number; maxBatchItems: number }): Batch[] {
+const titleOf = (block: Block) => (block.el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX)
+
+/**
+ * 每个块所属的章节标题：按文档序扫一遍，标题块之后的块都归它。
+ * 按视口翻时一批里多半没有标题块（标题早在视口上方），所以要在开始时对整篇算一次（§10）
+ */
+export function sectionTitles(blocks: Block[]): Map<Block, string> {
+  const map = new Map<Block, string>()
+  let title: string | undefined
+  for (const block of blocks) {
+    if (block.kind === 'text' && block.unit === 'title') title = titleOf(block)
+    if (title) map.set(block, title)
+  }
+  return map
+}
+
+/** 不传 sectionOf 时从传入的块序列里推章节（标题块开启新批次）；传了就按它，章节变化处切批 */
+export function planBatches(
+  blocks: Block[],
+  options: { maxBatchChars: number; maxBatchItems: number },
+  sectionOf?: (block: Block) => string | undefined,
+): Batch[] {
   const batches: Batch[] = []
   let current: Segment[] = []
   let currentChars = 0
@@ -37,6 +58,18 @@ export function planBatches(blocks: Block[], options: { maxBatchChars: number; m
   }
 
   for (const block of blocks) {
+    if (sectionOf) {
+      const next = sectionOf(block)
+      if (next !== sectionTitle) {
+        flush()
+        sectionTitle = next
+      }
+    } else if (block.kind === 'text' && block.unit === 'title') {
+      // 标题：更新章节上下文，并开启新批次
+      flush()
+      sectionTitle = titleOf(block)
+    }
+
     if (block.kind === 'table') {
       flush()
       const segments: Segment[] = []
@@ -47,12 +80,6 @@ export function planBatches(blocks: Block[], options: { maxBatchChars: number; m
       })
       batches.push({ kind: 'table', segments, sectionTitle, block })
       continue
-    }
-
-    // 标题：更新章节上下文，并开启新批次
-    if (block.unit === 'title') {
-      flush()
-      sectionTitle = (block.el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX)
     }
 
     const protectedBlock = serialize(block.el)
