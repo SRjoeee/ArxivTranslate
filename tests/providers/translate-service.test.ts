@@ -156,6 +156,47 @@ describe('createTranslateService', () => {
     expect(order.indexOf('call:b')).toBeGreaterThan(order.indexOf('sleep'))
   })
 
+  it('accept 回调：没放行的译文照常返回，但不写缓存（Codex 在 #30 指出）', async () => {
+    const { port, writes } = fakePort()
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => ({ segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' })),
+      cache: port,
+    })
+    const res = await service({ ...req(['a', 'b']), accept: (id: string) => id !== 'a' })
+    expect(res.ok && res.result.segments.map(s => s.text)).toEqual(['译:text-a', '译:text-b'])
+    expect(writes).toHaveLength(1)
+    expect(writes[0]!.map(w => w.translation)).toEqual(['译:text-b'])
+  })
+
+  it('暂停结束只放一个探针：其余等它成功再走，不会在同一刻一起撞端点（Codex 在 #30 指出）', async () => {
+    let calls = 0
+    const resolvers: (() => void)[] = []
+    let releaseProbe: (() => void) | undefined
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => {
+        calls++
+        if (calls <= 2) throw attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
+        if (calls === 3) await new Promise<void>(resolve => { releaseProbe = resolve })
+        return { segments: r.segments, provider: 'mock' }
+      }, 'probed'),
+      retry: { sleep: () => new Promise<void>(resolve => { resolvers.push(resolve) }) },
+    })
+    // 并发 2：a、b 同时发出、同时撞 429
+    const a = service(req(['a']))
+    const b = service(req(['b']))
+    await vi.waitFor(() => expect(calls).toBe(2))
+    await vi.waitFor(() => expect(resolvers.length).toBeGreaterThanOrEqual(3))
+    resolvers.splice(0).forEach(resolve => resolve())
+    // 两个都睡醒了，但只有探针在飞
+    await vi.waitFor(() => expect(calls).toBe(3))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(calls).toBe(3)
+    releaseProbe!()
+    const [ra, rb] = await Promise.all([a, b])
+    expect(ra.ok && rb.ok).toBe(true)
+    expect(calls).toBe(4)
+  })
+
   it('在飞的任务每次尝试前也要过共享暂停这道闸：自己睡醒了、暂停还没结束就接着等（Codex 在 #30 指出）', async () => {
     let calls = 0
     const resolvers: (() => void)[] = []

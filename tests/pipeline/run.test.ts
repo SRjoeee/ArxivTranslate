@@ -3,7 +3,7 @@ import { extract } from '@/core/extractor'
 import { runTranslation, type Transport } from '@/core/pipeline/run'
 import { FOR_ATTR, PARTIAL_ATTR, STATE_ATTR, T_CLASS } from '@/core/renderer'
 import { TABLE_RULES } from '@/core/rules/latexml'
-import type { TranslateMessageRequest } from '@/entrypoints/background/translate-handler'
+import type { TranslateCall } from '@/providers/translate-service'
 
 const PAGE =
   '<p class="ltx_p" id="p1">One <math class="ltx_Math"><mi>x</mi></math>.</p>'
@@ -14,8 +14,8 @@ const PAGE =
 const docOf = () => new DOMParser().parseFromString(`<!doctype html><html><head></head><body><article class="ltx_document">${PAGE}</article></body></html>`, 'text/html')
 
 /** 恒等 transport：原样返回；可用 mutate 篡改某些段 */
-function makeTransport(mutate?: (req: TranslateMessageRequest, seg: { id: string; text: string }, calls: number) => string | { error: string }) {
-  const requests: TranslateMessageRequest[] = []
+function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: string }, calls: number) => string | { error: string }) {
+  const requests: TranslateCall[] = []
   const transport: Transport = async req => {
     requests.push(req)
     const segments: { id: string; text: string }[] = []
@@ -76,6 +76,11 @@ describe('runTranslation', () => {
     expect(progress.failed).toBe(0)
     const runsReq = requests.find(r => r.cache?.renderPath === 'runs')
     expect(runsReq?.request.segments.map(s => s.id)).toEqual(['p2#r0', 'p2#r1'])
+    // markup 请求带校验回调：坏译文不许写缓存，好的放行；runs 请求不带（拼回时才校验）
+    const markup = requests.find(r => r.cache?.renderPath === 'markup')!
+    expect(markup.accept?.('p2', '坏了')).toBe(false)
+    expect(markup.accept?.('p2', markup.request.segments.find(s => s.id === 'p2')!.text)).toBe(true)
+    expect(runsReq?.accept).toBeUndefined()
     const node = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)
     expect(node?.querySelector('math')).not.toBeNull()
     expect(node?.textContent).toContain('Two')

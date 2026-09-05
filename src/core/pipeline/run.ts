@@ -4,7 +4,8 @@ import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate } from '@/core/protector'
 import { clearTranslation, enable, markPartial, renderTable, renderText, setState, type Mode } from '@/core/renderer'
 import type { RenderPath } from '@/cache/key'
-import type { TranslateMessageRequest, TranslateMessageResponse } from '@/entrypoints/background/translate-handler'
+import type { TranslateMessageResponse } from '@/entrypoints/background/translate-handler'
+import type { TranslateCall } from '@/providers/translate-service'
 import { planBatches, type Batch, type Segment } from './batches'
 import type { Block } from '@/core/extractor'
 
@@ -18,7 +19,7 @@ export interface Progress {
   fatal?: string
 }
 
-export type Transport = (request: TranslateMessageRequest) => Promise<TranslateMessageResponse>
+export type Transport = (request: TranslateCall) => Promise<TranslateMessageResponse>
 
 export interface RunOptions {
   doc: Document
@@ -53,12 +54,23 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
   markBlocks(blocks)
   for (const block of blocks) setState(block, 'pending')
 
-  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string, bypassCache = false) => {
+  type SendOptions = { bypassCache?: boolean; accept?: TranslateCall['accept'] }
+  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string, opts: SendOptions = {}) => {
     const context: TranslateContext = { ...options.context, ...(sectionTitle ? { sectionTitle } : {}) }
     return transport({
       request: { segments: items, source: 'en', target: options.target, context: Object.keys(context).length ? context : undefined },
-      cache: { paper: options.paper, renderPath, ...(bypassCache ? { bypass: true } : {}) },
+      cache: { paper: options.paper, renderPath, ...(opts.bypassCache ? { bypass: true } : {}) },
+      ...(opts.accept ? { accept: opts.accept } : {}),
     })
+  }
+
+  /** markup 路径的译文只有通过占位符校验才写缓存：坏译文入了库，每次都要先读到它再花一次请求（Codex 在 #30 指出） */
+  const acceptFor = (segments: Segment[]): NonNullable<TranslateCall['accept']> => {
+    const byId = new Map(segments.map(s => [s.id, s]))
+    return (id, text) => {
+      const segment = byId.get(id)
+      return !segment || validate(text, segment.protected).ok
+    }
   }
 
   const noteFatal = (res: Extract<TranslateMessageResponse, { ok: false }>) => {
@@ -92,7 +104,7 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
    */
   async function retrySingle(segment: Segment, sectionTitle?: string): Promise<DocumentFragment | null> {
     if (stopped()) return null
-    const res = await send([{ id: segment.id, text: segment.text }], 'markup', sectionTitle, true)
+    const res = await send([{ id: segment.id, text: segment.text }], 'markup', sectionTitle, { bypassCache: true, accept: acceptFor([segment]) })
     if (res.ok) {
       progress.cached += res.cached
       const text = res.result.segments[0]?.text
@@ -109,7 +121,7 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
       for (const segment of segments) out.set(segment, await viaRuns(segment, sectionTitle))
       return
     }
-    const res = await send(segments.map(s => ({ id: s.id, text: s.text })), 'markup', sectionTitle)
+    const res = await send(segments.map(s => ({ id: s.id, text: s.text })), 'markup', sectionTitle, { accept: acceptFor(segments) })
     if (aborted()) return
     if (!res.ok) {
       noteFatal(res)

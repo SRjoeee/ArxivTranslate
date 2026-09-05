@@ -385,7 +385,7 @@ export interface TranslateResult {
 - 视为**随时会断**的东西：独立文件、独立错误类型、失败自动切到 fallback 链的下一个
 - fallback 链默认：用户选定 provider → `chrome-builtin` → `google-web`
 - `google-web` 一次请求多条（默认 100 条 / 8000 字一批，并发 2），指数退避处理 429；超时预算照 FluentRead 的做法给单次尝试与总时长各设上限
-- **429 暂停整条队列**（2026-09-05）：p-queue 的 concurrency 只是并发上限，撞上限流的任务自己睡着时其余 worker 还会往同一端点打（Codex 在 #6 / #10 指出）；暂停时长取 Retry-After 与退避的较大者，到时自动恢复。`no-key` / `auth` / `aborted` 不重试——移植的策略不认识这些 kind，曾把 no-key 当未知错误重试 4 次、白等 7 s
+- **429 暂停整条队列**（2026-09-05）：p-queue 的 concurrency 只是并发上限，撞上限流的任务自己睡着时其余 worker 还会往同一端点打（Codex 在 #6 / #10 指出）；暂停时长取 Retry-After 与退避的较大者，到时自动恢复；在飞的任务每次尝试前也要等共享暂停，暂停结束**只放一个探针**、其余等它成功再走（照 Read Frog request-queue 的 post-pause probe，Codex 在 #30 指出睡醒的任务会在同一刻一起撞端点）。`no-key` / `auth` / `aborted` 不重试——移植的策略不认识这些 kind，曾把 no-key 当未知错误重试 4 次、白等 7 s
 - **思考模式默认关闭**（照 KISS 的 THINKING_API_REGISTRY）：按端点域名选字段——OpenRouter `reasoning: { effort: "none" }`、DeepSeek 官方 `thinking: { type: "disabled" }`、百炼 / 硅基流动 `enable_thinking: false`，未登记端点不发；经 AI SDK `providerOptions` 进请求体（`src/providers/thinking.ts`）
 - **即时引擎**：`chrome-builtin` 模型就绪时（`availability() === 'available'`）单句 10–20 ms 且离线，用它先渲染视口内的块，用户选定的 LLM 译文到达后原位替换；缓存键含 provider，两者互不覆盖。用户可在设置里关闭
 
@@ -405,7 +405,7 @@ export interface TranslateResult {
 - 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
 - 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有（IndexedDB 按扩展 origin 隔离，跨论文共享），content 侧通过 `axt:cache-get` / `axt:cache-put` 读写；provider 请求本身不经过 background（§8.0）
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
-- **重发不读缓存** [决定，2026-09-05]：占位符校验失败后的单块重发带 `cache.bypass`，只写不读——坏译文在校验之前就已经进了缓存，照常读只会原样拿回来，然后每次都退到 runs 路径（Codex 在 #9 指出）；重发成功即覆盖那条坏记录
+- **坏译文不入库、重发不读库** [决定，2026-09-05]：markup 路径的请求带 `accept` 回调（进程内调用才有，过不了消息边界），translate-service 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）；占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
 - 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
 ---

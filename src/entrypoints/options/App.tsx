@@ -59,13 +59,16 @@ export function App() {
     }
   }
 
-  /** 留空只表示"不改"，删除要有显式动作（Codex 在 #6 指出） */
+  /**
+   * 留空只表示"不改"，删除要有显式动作（Codex 在 #6 指出）。
+   * 只动已存的那份：表单里未保存的改动（比如换了 Base URL）不能借这个动作绕过校验与权限申请（Codex 在 #30 指出）
+   */
   async function clearKey() {
     setNotice('')
     try {
-      const next: Config = { ...config, openaiCompat: { ...config.openaiCompat, apiKey: '' } }
-      await setConfig(next)
-      setLocal(next)
+      const stored = await getConfig()
+      await setConfig({ ...stored, openaiCompat: { ...stored.openaiCompat, apiKey: '' } })
+      setLocal(c => ({ ...c, openaiCompat: { ...c.openaiCompat, apiKey: '' } }))
       setHasStoredKey(false)
       setKeyInput('')
       setNotice('已清除 API key')

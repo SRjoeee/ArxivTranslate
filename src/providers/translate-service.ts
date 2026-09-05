@@ -30,6 +30,14 @@ export type TranslateMessageRequest = {
   }
 }
 
+/**
+ * 进程内调用可以多带一个校验回调：只把它放行的译文写进缓存——坏译文根本不该入库，
+ * 否则每次都要先读到它再花一次请求（Codex 在 #30 指出）。函数过不了消息边界，background 路径上没有它
+ */
+export type TranslateCall = TranslateMessageRequest & {
+  accept?: (id: string, text: string) => boolean
+}
+
 export type TranslateMessageResponse =
   | { ok: true; result: TranslateResult; cached: number }
   | { ok: false; error: { kind: ProviderErrorKind; message: string } }
@@ -101,16 +109,42 @@ export function createTranslateService(deps: TranslateServiceDeps) {
       if (pausedUntil.get(provider.id) !== until) return
       pausedUntil.delete(provider.id)
       pauses.delete(provider.id)
+      // 暂停一结束就登记"该放探针了"：任务的睡眠与暂停同时到期，到闸口时已经看不到暂停
+      probeDue.add(provider.id)
       queue.start()
     })
     pauses.set(provider.id, done)
   }
-  const awaitPause = async (provider: TranslationProvider) => {
-    let pending: Promise<void> | undefined
-    while ((pending = pauses.get(provider.id))) await pending
+  /**
+   * 暂停结束只放**一个探针**，其余等它的结果再走（照 Read Frog request-queue 的 post-pause probe）：
+   * 不然所有睡醒的任务会在同一毫秒一起打端点，限流刚解除又被撞回去（Codex 在 #30 指出）。
+   * 探针又撞 429 → 策略再次暂停，等待者回到循环顶部接着等；探针成功或因别的原因失败 → 大家照常并发。
+   * 探针失败时多让一个宏任务：withRetry 要在拒绝传到它手里之后才会登记新的暂停
+   */
+  const probes = new Map<string, Promise<unknown>>()
+  const probeDue = new Set<string>()
+  const gated = async <T>(provider: TranslationProvider, run: () => Promise<T>): Promise<T> => {
+    for (;;) {
+      let pending: Promise<void> | undefined
+      while ((pending = pauses.get(provider.id))) await pending
+      const probe = probes.get(provider.id)
+      if (probe) {
+        await probe.then(() => undefined, () => new Promise<void>(resolve => setTimeout(resolve, 0)))
+        continue
+      }
+      if (!probeDue.has(provider.id)) return run()
+      probeDue.delete(provider.id)
+      const attempt = run()
+      probes.set(provider.id, attempt)
+      try {
+        return await attempt
+      } finally {
+        if (probes.get(provider.id) === attempt) probes.delete(provider.id)
+      }
+    }
   }
 
-  return async ({ request, providerId, cache }: TranslateMessageRequest): Promise<TranslateMessageResponse> => {
+  return async ({ request, providerId, cache, accept }: TranslateCall): Promise<TranslateMessageResponse> => {
     try {
       const provider = await deps.getProvider(providerId)
       const model = (await deps.getModel?.()) ?? ''
@@ -148,10 +182,7 @@ export function createTranslateService(deps: TranslateServiceDeps) {
             pauseQueue(provider, ms)
           },
         }
-        const attempt = async () => {
-          await awaitPause(provider)
-          return withTimeout(signal => provider.translate({ ...request, segments: misses, signal }), timeoutMs)
-        }
+        const attempt = () => gated(provider, () => withTimeout(signal => provider.translate({ ...request, segments: misses, signal }), timeoutMs))
         const result = (await queueFor(provider).add(() => withRetry(attempt, retry))) as TranslateResult
         resultProvider = result.provider
         resultModel = result.model
@@ -159,7 +190,8 @@ export function createTranslateService(deps: TranslateServiceDeps) {
         for (const segment of result.segments) {
           translated.set(segment.id, segment.text)
           const key = keys.get(segment.id)
-          if (store && cache && key) writes.push({ key, translation: segment.text, paper: cache.paper })
+          // 调用方带了校验就只写它放行的：占位符坏了的译文不入库
+          if (store && cache && key && (!accept || accept(segment.id, segment.text))) writes.push({ key, translation: segment.text, paper: cache.paper })
         }
         if (store && writes.length > 0) await store.putMany(writes)
       }

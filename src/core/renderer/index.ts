@@ -5,6 +5,7 @@ import type { Block, TableBlock, TextBlock } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
 import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
 import modesCss from '@/styles/modes.css?inline'
+import { delocalizeNotes } from './notes'
 
 export type Mode = 'stack' | 'side' | 'only'
 export type BlockState = 'pending' | 'translated' | 'failed'
@@ -61,6 +62,8 @@ export function markPartial(block: Block): void {
  * 再翻失败时也要删——换了引擎 / 目标语言后页面不能还挂着上一轮的译文冒充这一轮的（Codex 在 #9 指出）
  */
 export function clearTranslation(block: Block): void {
+  // 脚注归位的标记与副本跟着译文走：译文没了，原件边注要重新露出来
+  delocalizeNotes(block.el)
   const parent = block.el.parentElement
   if (!parent) return
   for (const sibling of Array.from(parent.children)) {
