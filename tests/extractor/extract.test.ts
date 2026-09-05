@@ -84,14 +84,31 @@ describe('extract：表格块', () => {
     expect(extract(docOf('<table class="ltx_tabular"><tbody><tr><td class="ltx_td">?</td><td class="ltx_td">1</td></tr></tbody></table>'))).toHaveLength(0)
   })
 
-  it('嵌套 tabular 只产出最外层，内层单元格不在外层 cells 里', () => {
+  it('嵌套 tabular 只产出最外层块，内层单元格也是外层块的格（§5.3）', () => {
     const nested =
       '<table class="ltx_tabular" id="outer"><tbody><tr><td class="ltx_td">Outer cell'
-      + '<table class="ltx_tabular" id="inner"><tbody><tr><td class="ltx_td">1</td><td class="ltx_td">2</td></tr></tbody></table>'
+      + '<table class="ltx_tabular" id="inner"><tbody><tr><td class="ltx_td">Alpha</td><td class="ltx_td">2</td></tr></tbody></table>'
       + '</td></tr></tbody></table>'
     const blocks = extract(docOf(nested))
     expect(blocks.map(b => b.id)).toEqual(['outer'])
-    expect((blocks[0] as TableBlock).cells).toHaveLength(1)
+    const cells = (blocks[0] as TableBlock).cells
+    expect(cells.map(c => c.el.className)).toEqual(['ltx_td', 'ltx_td', 'ltx_td'])
+    expect(cells.map(c => c.numeric)).toEqual([false, false, true])
+  })
+
+  it('只装着嵌套表的外层格没有自有文本，按数值格原样复制；内层格的文字才是要翻的（实测 2410.00260 表 3）', () => {
+    const nested =
+      '<table class="ltx_tabular" id="outer"><tbody><tr><td class="ltx_td">'
+      + '<table class="ltx_tabular" id="inner"><tbody><tr><td class="ltx_td">Alpha</td></tr></tbody></table>'
+      + '</td></tr></tbody></table>'
+    const cells = (extract(docOf(nested))[0] as TableBlock).cells
+    expect(cells.map(c => c.numeric)).toEqual([true, false])
+  })
+
+  it('再次提取时原块内已有的译文 / 镜像不算原文（Codex 在 #8 指出）', () => {
+    const blocks = extract(docOf('<li class="ltx_item"><span class="ltx_tag">1.</span><span class="axt-t axt-mirror">mirror text</span><p class="ltx_p">Inner.</p><p class="ltx_p axt-t">译文</p></li>'))
+    // 列表项的自有文本只有镜像里的字，剔除后没有字母，不成块；段落照常成块
+    expect(blocks.map(b => b.unit)).toEqual(['p'])
   })
 })
 

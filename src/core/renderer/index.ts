@@ -2,13 +2,14 @@
 // 不变量：译文节点只作为原块的下一个兄弟插入；原节点只追加 data-axt-id / data-axt-state；
 // 全局状态只在 <html> 上；restore 后 DOM 与翻译前逐节点相等。
 import type { Block, TableBlock, TextBlock } from '@/core/extractor'
-import { TABLE_RULES, isInlineTitleCandidate, visibleText } from '@/core/rules/latexml'
+import { T_CLASS } from '@/core/marks'
+import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
 import modesCss from '@/styles/modes.css?inline'
 
 export type Mode = 'stack' | 'side' | 'only'
 export type BlockState = 'pending' | 'translated' | 'failed'
 
-export const T_CLASS = 'axt-t'
+export { T_CLASS }
 export const FOR_ATTR = 'data-axt-for'
 export const STATE_ATTR = 'data-axt-state'
 export const ON_ATTR = 'data-axt-on'
@@ -18,7 +19,8 @@ export const INLINE_ATTR = 'data-axt-inline'
 /** 原标题可见文本不超过这个长度才与译文同行 */
 export const INLINE_TITLE_MAX_CHARS = 60
 
-const STYLE_ATTR = 'data-axt'
+/** 注入的 <style> 的标记属性；恢复原文时按它整体移除。曾叫 data-axt，不合硬规则 5 的 data-axt- 前缀（Codex 在 #3 指出） */
+export const STYLE_ATTR = 'data-axt-style'
 const STYLE_MARK = 'modes'
 const AXT_ATTR_PREFIX = 'data-axt-'
 
@@ -43,8 +45,11 @@ export function setState(block: Block, state: BlockState): void {
   block.el.setAttribute(STATE_ATTR, state)
 }
 
-/** 同一块重复渲染（重试、换引擎）时只保留最新一份 */
-function removeExisting(block: Block): void {
+/**
+ * 删掉该块已有的译文：同一块重复渲染（重试、换引擎）时只保留最新一份；
+ * 再翻失败时也要删——换了引擎 / 目标语言后页面不能还挂着上一轮的译文冒充这一轮的（Codex 在 #9 指出）
+ */
+export function clearTranslation(block: Block): void {
   const parent = block.el.parentElement
   if (!parent) return
   for (const sibling of Array.from(parent.children)) {
@@ -79,7 +84,7 @@ function shouldInline(block: TextBlock): boolean {
 
 /** 文本块：与原块同标签名的新元素，内容是 protector 回填的 fragment（克隆已剥 id） */
 export function renderText(block: TextBlock, content: DocumentFragment): Element {
-  removeExisting(block)
+  clearTranslation(block)
   const node = block.el.ownerDocument.createElement(block.el.tagName)
   node.append(content)
   stripCloned(node, false)
@@ -99,15 +104,17 @@ export function renderText(block: TextBlock, content: DocumentFragment): Element
  * 有译文的单元格替换内容，数值格与公式格保持克隆内容。cells 的键是原表里的单元格元素。
  */
 export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragment>): Element {
-  removeExisting(block)
+  clearTranslation(block)
   const clone = block.el.cloneNode(true) as Element
   stripCloned(clone, true)
-  // 两棵树结构相同：原表的直接单元格与克隆表的直接单元格按同序对应
-  const cloneCells = Array.from(clone.querySelectorAll(TABLE_RULES.cell)).filter(td => td.closest(TABLE_RULES.root) === clone)
+  // 两棵树结构相同：原表的单元格与克隆表的单元格按同序对应（tableCells 取任意深度，嵌套 tabular 的格也在内）。
+  // 每格替换前重新定位：外层格的译文里带着嵌套表的克隆，先替换外层再替换内层，
+  // 事先取好的内层引用会指向已被丢弃的节点（§5.3）
   block.cells.forEach((cell, i) => {
     const content = cells.get(cell.el)
-    const target = cloneCells[i]
-    if (!content || !target) return
+    if (!content) return
+    const target = tableCells(clone)[i]
+    if (!target) return
     target.textContent = ''
     target.append(content)
   })
@@ -126,6 +133,8 @@ export function restore(doc: Document): { removedNodes: number; strippedAttrs: n
     node.remove()
     removedNodes++
   }
+  // 先删样式再剥属性：样式标记本身也是 data-axt-* 属性，剥完就找不到它了
+  for (const style of Array.from(doc.querySelectorAll(`style[${STYLE_ATTR}]`))) style.remove()
   for (const el of Array.from(doc.querySelectorAll('*'))) {
     for (const attr of Array.from(el.attributes)) {
       if (attr.name.startsWith(AXT_ATTR_PREFIX)) {
@@ -134,7 +143,6 @@ export function restore(doc: Document): { removedNodes: number; strippedAttrs: n
       }
     }
   }
-  for (const style of Array.from(doc.querySelectorAll(`style[${STYLE_ATTR}]`))) style.remove()
   return { removedNodes, strippedAttrs }
 }
 

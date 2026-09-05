@@ -16,7 +16,7 @@ describe('enable / setMode', () => {
     enable(document, 'stack')
     expect(document.documentElement.hasAttribute(ON_ATTR)).toBe(true)
     expect(document.documentElement.getAttribute(MODE_ATTR)).toBe('stack')
-    expect(document.querySelectorAll('style[data-axt="modes"]')).toHaveLength(1)
+    expect(document.querySelectorAll('style[data-axt-style="modes"]')).toHaveLength(1)
     setMode(document, 'side')
     expect(document.documentElement.getAttribute(MODE_ATTR)).toBe('side')
     restore(document)
