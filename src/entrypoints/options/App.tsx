@@ -4,9 +4,18 @@ import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/lang
 import { DEFAULT_CONFIG, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { THINKING_HOSTS } from '@/providers/thinking'
+import { sanitizeCustomCss, type StylePreset } from '@/core/renderer/style-preset'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 import { sendMessage } from '@/shared/messages'
 import { PromptManager } from './PromptManager'
+
+const STYLE_OPTIONS: [StylePreset, string, string][] = [
+  ['none', '与原文相同', '不加任何装饰'],
+  ['muted', '淡一档', '译文颜色淡一些，扫读时一眼分出译文'],
+  ['quote', '左侧竖线', '像引用块；同行的短标题译文不加线'],
+  ['dashed', '虚线下划', '不占空间，左右对照时不影响两栏对齐'],
+  ['custom', '自定义 CSS', '只填声明，选择器由扩展补上'],
+]
 
 const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
 
@@ -26,6 +35,8 @@ export function App() {
   const [testResult, setTestResult] = useState('')
   // 术语表在页面里是文本，保存时才解析成结构（成批粘贴比逐行编辑快）
   const [glossaryText, setGlossaryText] = useState('')
+  const [cache, setCache] = useState<{ entries: number; bytes: number } | null>(null)
+  const [cacheNote, setCacheNote] = useState('')
 
   useEffect(() => {
     getConfig().then(c => {
@@ -33,6 +44,7 @@ export function App() {
       setHasStoredKey(c.openaiCompat.apiKey.length > 0)
       setGlossaryText(formatGlossaryText(c.glossary))
     })
+    sendMessage({ type: 'axt:cache-stats' }).then(setCache).catch(() => setCache(null))
   }, [])
 
   const patchOpenAI = (patch: Partial<Config['openaiCompat']>) =>
@@ -41,6 +53,11 @@ export function App() {
   async function save() {
     setNotice('')
     try {
+      // 自定义 CSS 只接受声明块：写了花括号会把整篇论文的排版改掉，而且很难看出原因
+      if (config.style.preset === 'custom') {
+        const css = sanitizeCustomCss(config.style.customCss)
+        if (!css.ok) throw new Error(`自定义样式：${css.reason}`)
+      }
       // 写错的术语行要报行号，不能静默丢掉——用户会以为术语已经生效
       const glossary = parseGlossary(glossaryText)
       if (glossary.issues.length > 0) {
@@ -100,6 +117,19 @@ export function App() {
       setTestResult(`失败：${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setTesting(false)
+    }
+  }
+
+  /** 清空整库。设置页拿不到当前论文 id，所以只做全局清空（§9） */
+  async function clearCache() {
+    if (!window.confirm('清空全部译文缓存？之后重新翻译会重新请求引擎。')) return
+    setCacheNote('')
+    try {
+      const { removed } = await sendMessage({ type: 'axt:cache-clear', paper: undefined })
+      setCacheNote(`已删除 ${removed} 条`)
+      setCache(await sendMessage({ type: 'axt:cache-stats' }))
+    } catch (e) {
+      setCacheNote(`清空失败：${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -175,6 +205,30 @@ export function App() {
         disabled={config.provider !== 'openai-compat'}
       />
 
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>译文样式</h2>
+      <label style={label}>
+        外观
+        <select style={field} value={config.style.preset} onChange={e => setLocal(c => ({ ...c, style: { ...c.style, preset: e.target.value as StylePreset } }))}>
+          {STYLE_OPTIONS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+        </select>
+        <small style={{ color: '#666' }}>{STYLE_OPTIONS.find(([id]) => id === config.style.preset)?.[2]}</small>
+      </label>
+      {config.style.preset === 'custom' && (
+        <label style={label}>
+          自定义声明
+          <textarea
+            style={{ ...field, minHeight: 70, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}
+            value={config.style.customCss}
+            onChange={e => setLocal(c => ({ ...c, style: { ...c.style, customCss: e.target.value } }))}
+            placeholder="color: #1565c0; opacity: 0.95;"
+          />
+          <small style={{ display: 'block', color: '#666' }}>
+            只填花括号里的声明，扩展会补上选择器。不要写花括号、<code>@</code> 规则或标签。
+            译文继承原文的字体与字号，写 <code>font-size</code> 这类属性会破坏站点排版
+          </small>
+        </label>
+      )}
+
       <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译范围</h2>
       <label style={label}>
         预翻译距离（像素）
@@ -195,6 +249,18 @@ export function App() {
         <span>{notice}</span>
       </p>
       {testResult && <p style={{ padding: 8, background: '#f4f4f4', borderRadius: 4 }}>{testResult}</p>}
+
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>译文缓存</h2>
+      <p style={{ margin: '0 0 8px', color: '#666', fontSize: 13 }}>
+        {cache === null ? '读取中…' : `已缓存 ${cache.entries} 条 · ${(cache.bytes / 1024 / 1024).toFixed(2)} MB`}
+        <br />
+        缓存按引擎、模型、提示词、术语表分开存；换了其中任何一样都不会命中旧译文，通常不需要手动清
+      </p>
+      <p>
+        <button type="button" onClick={clearCache}>清空全部缓存</button>
+        {' '}
+        <span style={{ color: '#666', fontSize: 12 }}>{cacheNote}</span>
+      </p>
     </main>
   )
 }
