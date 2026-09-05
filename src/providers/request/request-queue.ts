@@ -36,6 +36,8 @@ export interface RequestTask {
 }
 
 type QueuedRequestTask = RequestTask & {
+  /** 本项目新增：入队时刻，用于 maxTotalMs 的总时限判断（issue #43） */
+  enqueuedAt: number
   hash: string
   abortController?: AbortController
   // Cancellation scopes subscribed to this task. Dedup can attach several
@@ -52,6 +54,19 @@ export interface QueueOptions {
   maxRetries: number
   baseRetryDelayMs: number
   retryPolicy?: RequestRetryPolicy
+  /**
+   * 本项目新增（issue #43）：同时在飞的上限。令牌桶只管**速率**，不管并发——
+   * 响应一慢，令牌照常按 rate 补充并派发，在飞数只受排队任务数限制（实测 rate=1/capacity=1 时
+   * 三个不完成的任务全部同时在飞）。一篇论文几十个批次同时打向同一个端点会招致 429、
+   * 撞浏览器的连接上限。默认 Infinity（不改移植原行为），由调用方显式设定
+   */
+  maxConcurrent?: number
+  /**
+   * 本项目新增（issue #43）：单个任务从入队到最终失败的总时限，跨所有重试与限流暂停。
+   * `timeoutMs` 只管单次尝试；持续 429 时暂停窗口会把总时长拖到分钟级（实测 60 秒还没结束），
+   * 而调用方需要的是「多久之后我可以认为这批翻不出来了」。默认 Infinity（不改移植原行为）
+   */
+  maxTotalMs?: number
 }
 
 export class RequestQueue {
@@ -113,6 +128,7 @@ export class RequestQueue {
       resolve,
       reject,
       scheduleAt,
+      enqueuedAt: Date.now(),
       createdAt: Date.now(),
       retryCount: 0,
       rateLimitRetryCount: 0,
@@ -229,7 +245,8 @@ export class RequestQueue {
       return
     }
 
-    while (this.bucketTokens >= 1 && this.waitingQueue.size() > 0) {
+    const maxConcurrent = this.options.maxConcurrent ?? Number.POSITIVE_INFINITY
+    while (this.bucketTokens >= 1 && this.waitingQueue.size() > 0 && this.executingTasks.size < maxConcurrent) {
       const now = Date.now()
 
       const task = this.waitingQueue.peek()
@@ -343,8 +360,12 @@ export class RequestQueue {
         consecutiveRateLimits: this.consecutiveRateLimits,
       })
 
-      // Check if we should retry
-      if (decision.action === "retry") {
+      // 总时限到了就不再重试：尝试次数有限但每次限流暂停都可能很长，
+      // 调用方需要一个「多久之后可以认为这批翻不出来」的确定答案（本项目新增，issue #43）
+      const totalBudget = this.options.maxTotalMs
+      if (totalBudget !== undefined && decision.action !== "fail" && now - task.enqueuedAt >= totalBudget) {
+        task.reject(error)
+      } else if (decision.action === "retry") {
         task.retryCount++
         // Schedule retry
         const retryAt = now + decision.delayMs

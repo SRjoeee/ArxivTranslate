@@ -66,7 +66,23 @@ export interface TranslateService {
 
 /** Read Frog 的默认队列参数（DEFAULT_CONFIG.pageTranslation.requestQueueConfig 与 translation-queues.ts 里的常量） */
 export const DEFAULT_RATE_LIMIT = { rate: 8, capacity: 20 } as const
-const DEFAULT_QUEUE_OPTIONS = { timeoutMs: 20_000, maxRetries: 2, baseRetryDelayMs: 1_000 } as const
+/**
+ * 同时在飞的上限与单批总时限（issue #43）。令牌桶只管速率，响应一慢在飞数就没有上限——
+ * 一篇 220 块的论文能攒出 50 多个批次，全部同时打向一个端点会招致 429、撞浏览器连接上限。
+ * 取 8 与 rate 相同：响应快于 1 秒时这道闸根本不触发，慢响应下才封顶。
+ * 总时限 180 秒：单次尝试最长 120 秒（20s + 15ms/字），持续 429 时暂停窗口会把总时长拖到分钟级
+ *（实测 60 秒还没结束），到点就让这批失败、由用户重试，好过无限期悬着
+ */
+export const DEFAULT_MAX_CONCURRENT = 8
+export const DEFAULT_MAX_TOTAL_MS = 180_000
+
+const DEFAULT_QUEUE_OPTIONS = {
+  timeoutMs: 20_000,
+  maxRetries: 2,
+  baseRetryDelayMs: 1_000,
+  maxConcurrent: DEFAULT_MAX_CONCURRENT,
+  maxTotalMs: DEFAULT_MAX_TOTAL_MS,
+} as const
 const BATCH_DELAY_MS = 100
 const BATCH_MAX_RETRIES = 3
 /** 批次超时随字数放大：基数 + 每字 15ms，上限 120s（Read Frog utils/constants/translate.ts）。1000 字的批 35s */
