@@ -85,6 +85,12 @@ export const BUILT_IN_PROMPTS: Readonly<Record<string, PromptTemplate>> = {
 
 export const BUILT_IN_PROMPT_IDS = Object.keys(BUILT_IN_PROMPTS)
 
+/** 内置提示词的一句话说明，设置页显示（Read Frog 放在 i18n 里，这里直接中文） */
+export const BUILT_IN_PROMPT_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  [DEFAULT_PROMPT_ID]: '通用学术翻译：术语用既定译法，人名、期刊名、代码与链接保留原文',
+  [PRECISION_REWRITE_PROMPT_ID]: '"翻译即改写"：摆脱原文句法、消除翻译腔，按目标语言的表达习惯重写，术语与格式照旧',
+}
+
 /** 存进配置的形状：当前选用的 id + 用户自定义的提示词 */
 export interface PromptsConfig {
   promptId: string

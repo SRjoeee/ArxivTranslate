@@ -26,6 +26,8 @@
 | `tests/providers/request/*.test.ts` | `reference/read-frog/src/utils/request/__tests__/*@9b44f82` | 2026-09-05 | 六个测试文件移植：改 import 路径；`batch-queue.test.ts` 依赖的分隔符解析、hash、`executeTranslate` 换成测试内替身。`batch-separator-parsing.test.ts` 测的是它自己的分隔符解析，不搬 |
 | `src/core/renderer/spinner.ts` | `reference/read-frog/src/utils/host/translate/ui/spinner.ts@9b44f82` | 2026-09-05 | 圆环与动画注册表原样；class / 颜色变量改本项目前缀；去掉它的请求胶水 `getTranslatedTextAndRemoveSpinner`（含 React 错误组件），加 `cancelSpinnersIn` |
 | `src/core/scheduler/pacer.ts` | `reference/read-frog/src/utils/scheduler.ts@9b44f82` | 2026-09-05 | 原样移植，仅加文件头 |
+| `src/config/languages.ts` | `@read-frog/definitions@0.4.4`（Read Frog 的依赖包，`LANG_CODE_ISO6393_OPTIONS`、`LANG_CODE_TO_EN_NAME`、`LANG_CODE_TO_ZH_NAME`、`LANG_CODE_TO_LOCALE_NAME`、`ISO6393_TO_6391`） | 2026-09-05 | 只搬五张语言表（整包 98% 是它的 SRS / 电子书 schema，不装依赖）；辅助函数（英文名、标签、BCP-47 双向转换）是本项目的 |
+| `src/providers/prompt-file.ts` | `reference/read-frog/src/components/prompt-configurator/utils/prompt-file.ts@9b44f82` | 2026-09-05 | 功能重写：文件形状相同（可互相导入），校验换 zod，去掉 file-saver |
 | `src/core/scheduler/session.ts` | `reference/read-frog/src/utils/host/translate/translation-session.ts@9b44f82` | 2026-09-05 | 去掉 providerRef 的两个函数；函数改名 begin / end / getSessionId |
 
 登记格式：`src/<path>` ← `reference/<repo>/<path>@<commit>`，一句话说明改了什么（改名、去掉配置依赖、适配块模型等）。改写幅度大到不再像原文件的也要登记。

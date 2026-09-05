@@ -121,6 +121,30 @@ await options.fill(marginInput, '1000')
 await options.getByRole('button', { name: '保存', exact: true }).click()
 await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 
+// ── 设置页：目标语言（配置 v4 的 ISO 639-3 码）与自定义提示词保存后重载仍在 ──────
+const langSelect = options.getByRole('combobox', { name: /^目标语言/ })
+await langSelect.selectOption('jpn')
+await options.getByRole('button', { name: '新建', exact: true }).click()
+await options.getByLabel('名称').fill('e2e 提示词')
+await options.getByRole('button', { name: '加入列表', exact: true }).click()
+await options.getByRole('radio').last().check()
+await options.getByRole('button', { name: '保存', exact: true }).click()
+await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+await options.reload({ waitUntil: 'domcontentloaded' })
+await options.getByText('e2e 提示词').waitFor({ timeout: 5_000 }).catch(() => undefined)
+const langBack = await options.getByRole('combobox', { name: /^目标语言/ }).inputValue()
+const promptRow = options.getByRole('radio').last()
+const promptBack = (await options.getByText('e2e 提示词').count()) === 1 && (await promptRow.isChecked())
+check('设置页：目标语言 jpn 与自定义提示词保存后重载仍在且被选中', langBack === 'jpn' && promptBack, `语言 ${langBack}，提示词 ${promptBack}`)
+// 删掉再存回默认：后面的错 key 段要走默认提示词
+options.once('dialog', d => d.accept())
+await options.getByRole('button', { name: '删除', exact: true }).click()
+await options.getByRole('combobox', { name: /^目标语言/ }).selectOption('cmn')
+await options.getByRole('button', { name: '保存', exact: true }).click()
+await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+const promptGone = (await options.getByText('e2e 提示词').count()) === 0
+check('设置页：删除自定义提示词后选回默认', promptGone, `残留 ${promptGone ? 0 : 1}`)
+
 // ── 论文 1：看到哪翻到哪（§10）：不滚动只翻首屏附近；逐屏滚到底其余跟上；标题翻译；速率 ────
 {
   const { page, logs, requests, originalTitle, spinnersSeen } = await openPaper(PAPER, GOOGLE)

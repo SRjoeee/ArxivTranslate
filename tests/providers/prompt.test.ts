@@ -6,18 +6,29 @@ import type { TranslateRequest } from '@/providers/types'
 const request: TranslateRequest = {
   segments: [{ id: 'S1.p1.1', text: 'Let <x id="1"/> be a graph.' }, { id: 'S1.p2.1', text: 'Then <t id="1">bold</t>.' }],
   source: 'en',
-  target: 'zh-CN',
+  target: 'cmn',
   context: { paperTitle: 'Graphs', abstract: 'We study graphs.', sectionTitle: 'Introduction' },
 }
 
 describe('prompt', () => {
-  it('带版本号：提示词库接入后升到 2', () => {
-    expect(PROMPT_VERSION).toBe('2')
+  it('自定义提示词两段都没写 {{targetLanguage}} 时，用户消息前面补一行目标语言', () => {
+    const prompts = { promptId: 'mine', patterns: [{ id: 'mine', name: 'mine', systemPrompt: 'Be terse.', prompt: '{{input}}' }] }
+    const { prompt } = buildPrompts(request, prompts)
+    expect(prompt.startsWith('Target language: Simplified Mandarin Chinese')).toBe(true)
+    // 写了就不重复补
+    const withTarget = { promptId: 'mine', patterns: [{ id: 'mine', name: 'mine', systemPrompt: 'Translate into {{targetLanguage}}.', prompt: '{{input}}' }] }
+    expect(buildPrompts(request, withTarget).prompt.startsWith('Target language:')).toBe(false)
+  })
+
+  it('带版本号：目标语言改填英文名后升到 3', () => {
+    expect(PROMPT_VERSION).toBe('3')
   })
 
   it('system prompt = 提示词库模板 + 协议块；协议块写明占位符与输出形状', () => {
     const { system } = buildPrompts(request)
-    expect(system).toContain('zh-CN')
+    // 语言码换成英文名（Read Frog 的做法）
+    expect(system).toContain('Simplified Mandarin Chinese')
+    expect(system).not.toContain('cmn')
     expect(system).toContain('<x id')
     expect(system).toContain('<t id')
     // 输出形状写死：不支持 json_schema 的端点也能给出正确的顶层键
@@ -57,7 +68,7 @@ describe('prompt', () => {
       patterns: [{ id: 'mine', name: 'mine', systemPrompt: 'Be terse. Target: {{targetLanguage}}', prompt: 'Translate now.' }],
     }
     const { system, prompt } = buildPrompts(request, prompts)
-    expect(system.startsWith('Be terse. Target: zh-CN')).toBe(true)
+    expect(system.startsWith('Be terse. Target: Simplified Mandarin Chinese')).toBe(true)
     expect(system).toContain(PROTOCOL_BLOCK)
     expect(prompt).toContain('Translate now.')
     expect(prompt).toContain('S1.p1.1')

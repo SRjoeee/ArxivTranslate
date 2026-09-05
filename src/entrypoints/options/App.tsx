@@ -1,15 +1,11 @@
 import { useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
+import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
 import { DEFAULT_CONFIG, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
+import { THINKING_HOSTS } from '@/providers/thinking'
 import { sendMessage } from '@/shared/messages'
-
-const LANGUAGES: [string, string][] = [
-  ['zh-CN', '简体中文'],
-  ['zh-TW', '繁體中文'],
-  ['ja', '日本語'],
-  ['en', 'English'],
-]
+import { PromptManager } from './PromptManager'
 
 const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
 
@@ -130,11 +126,23 @@ export function App() {
         <input style={field} value={config.openaiCompat.model} onChange={e => patchOpenAI({ model: e.target.value })} placeholder="deepseek/deepseek-v4-flash" disabled={config.provider !== 'openai-compat'} />
       </label>
       <label style={label}>
+        思考模式
+        <select style={field} value={config.openaiCompat.thinking} onChange={e => patchOpenAI({ thinking: e.target.value as Config['openaiCompat']['thinking'] })} disabled={config.provider !== 'openai-compat'}>
+          <option value="disabled">关闭（默认，翻译不需要推理，开着每批慢一个数量级）</option>
+          <option value="enabled">开启</option>
+        </select>
+        <small style={{ color: '#666' }}>{thinkingHint(config.openaiCompat.baseURL)}</small>
+      </label>
+      <label style={label}>
         目标语言
-        <select style={field} value={config.targetLanguage} onChange={e => setLocal(c => ({ ...c, targetLanguage: e.target.value }))}>
-          {LANGUAGES.map(([code, name]) => <option key={code} value={code}>{name}（{code}）</option>)}
+        <select style={field} value={config.targetLanguage} onChange={e => setLocal(c => ({ ...c, targetLanguage: e.target.value as LangCode }))}>
+          {LANG_CODES.map(code => <option key={code} value={code}>{languageLabel(code)}</option>)}
         </select>
       </label>
+
+      <h2 style={{ fontSize: 15, marginTop: 24, opacity: config.provider === 'openai-compat' ? 1 : 0.5 }}>提示词（LLM 引擎）</h2>
+      <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>决定"怎么翻"；收发协议（JSON 段落与占位符规则）由扩展自动追加，任何提示词都改不掉。换提示词后旧译文不再命中缓存</small>
+      <PromptManager value={config.prompts} onChange={prompts => setLocal(c => ({ ...c, prompts }))} />
 
       <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译范围</h2>
       <label style={label}>
@@ -158,6 +166,19 @@ export function App() {
       {testResult && <p style={{ padding: 8, background: '#f4f4f4', borderRadius: 4 }}>{testResult}</p>}
     </main>
   )
+}
+
+/** 只有登记过的端点会带思考字段（thinking.ts），其他端点开关无效，提前说清 */
+function thinkingHint(baseURL: string): string {
+  let host = ''
+  try {
+    host = new URL(baseURL).hostname
+  } catch {
+    return ''
+  }
+  return THINKING_HOSTS.includes(host)
+    ? `会按 ${host} 的字段格式发送开关`
+    : `${host} 未登记（支持：${THINKING_HOSTS.join('、')}），不发送思考字段，按端点默认行为`
 }
 
 function originPattern(url: string): string | null {
