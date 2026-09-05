@@ -256,6 +256,17 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 - ~~content script 的隔离世界是否同样暴露 `Translator`~~ **已实测（2026-09-05，Chrome 153）**：用一个只做探测的临时扩展（不改本项目源码）在 `arxiv.org/html/*` 注入 content script，隔离世界里 `'Translator' in self` 与 `'LanguageDetector' in self` 均为 `true`、`isSecureContext` 为 `true`、`Translator.availability({en→zh})` 与同页主世界同为 `downloadable`（en→ja 亦然）。Web API 确实不受 world 隔离影响，`chrome-builtin` 可以直接在 content script 里用。
 - 语言包大小未测（Chrome 不暴露字节数，`total` 恒为 1）；67 s 的下载时长对应本机网络，仅作量级参考。
 
+### 6.4 service worker 里也有 `Translator`（2026-09-05，Chrome 153，Playwright 装载当前构建）
+
+Codex 在 #50 断言 MV3 的 background service worker 不暴露 `Translator`，据此推论 background 侧的可用性判断永远报「不可用」。实测相反：
+
+| 上下文 | `'Translator' in self` | `Translator.availability({ en → zh })` |
+|---|---|---|
+| background service worker | true（function） | `downloadable` |
+| popup 页面 | true（function） | `downloadable` |
+
+worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在 background 判断 chrome-builtin 是否可用是准确的。仍然成立的边界：worker 里没有用户手势，语言包为 `downloadable` 时 `create()` 抛 `NotAllowedError`，所以下载入口只能放在 popup 的点击处理函数里（DESIGN §8.4）。
+
 ## 6.5 MV3 service worker 是当前延迟的根因（2026-09-04）
 
 页面加载后要等几十秒才开始翻译，逐层测下来结论如下（日志见 content 的 `[axt] start:`）：
