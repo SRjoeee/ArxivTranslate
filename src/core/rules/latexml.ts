@@ -2,8 +2,12 @@
 // 依据 DESIGN.md §5.1 / §5.2 / §5.3 / §5.6 / §6.1，实测依据见 docs/RESEARCH.md §2。
 // 本文件只放数据表与纯函数，不含遍历；遍历在 src/core/extractor。
 
-/** 任何表或函数的行为变化都要递增；进缓存键。0.5.0：单元格取任意深度、格内单元走进去序列化（§5.3） */
-export const RULES_VERSION = '0.6.1'
+/**
+ * 任何表或函数的行为变化都要递增；进缓存键。0.5.0：单元格取任意深度、格内单元走进去序列化（§5.3）。
+ * 0.6.2：带环境名的 tag 改为可翻，纯标识符（`(a)`、`(ii)`）仍保护——分类语义变了，
+ * 旧缓存不该跨过去（Codex 在 #53 指出）
+ */
+export const RULES_VERSION = '0.6.2'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -160,15 +164,37 @@ export function isBibAuthorBlock(el: Element): boolean {
 const PARENTHESIZED = /[(（][^)）]*[)）]/g
 
 /**
+ * 罗马数字编号的 tag 一律不翻：机器翻译会把它**本地化**，而指向它的 `.ltx_ref` 是受保护的原文，
+ * 一翻正文与交叉引用就对不上。2026-09-05 用 google-gtx 实测（Codex 在 #53 指出）：
+ *
+ * | 原文 | 译文 |     | 原文 | 译文 |
+ * |---|---|---|---|---|
+ * | `Table IV:` | 表四： |  | `Table 4:` | 表 4： |
+ * | `Table X:` | 表十： |  | `Appendix A` | 附录A |
+ * | `Part I` | 第一部分 |  | `Appendix C` / `D` | 附录C / 附录D |
+ *
+ * 阿拉伯数字、字母编号、括号面板都原样保留，只有罗马数字会被改写；Google 自己也只把
+ * I / V / X / L / M 当数字，单个 C、D 当字母，这里照此判定。同一篇论文的编号风格是一致的，
+ * 所以读者不会同时看到「表 4」与「Table IV」
+ */
+const ROMAN_ID = /^(?:[IVXLCDM]{2,}|[IVXLM])$/
+
+/**
  * 带环境名、且确实含词的 tag：`Definition 1.1` 要翻，子图面板的 `(a)` `(ii)` 不能翻。
  *
- * 判定分两步：**先去掉括号里的整段内容**，再看剩下的有没有连续两个及以上字母。
+ * 判定分三步：**先去掉括号里的整段内容**，再看剩下的有没有连续两个及以上字母，
+ * 最后排除罗马数字编号（见 ROMAN_ID）。
  * 只看字母数不够——面板标识符可以是 `(ii)` `(iii)` 这种多字母罗马数字（Codex 在 #53 指出）；
  * 而括号本来就是 LaTeXML 给标识符的形状，环境名从不带括号（`Definition 1.2 (Hall set)` 去掉括号后
  * 仍有 "Definition"，照样判为要翻）
  */
 export function isNamedTag(el: Element): boolean {
-  return el.matches(NAMED_TAGS) && /[A-Za-z]{2,}/.test((el.textContent ?? '').replace(PARENTHESIZED, ''))
+  if (!el.matches(NAMED_TAGS)) return false
+  const text = (el.textContent ?? '').replace(PARENTHESIZED, '')
+  if (!/[A-Za-z]{2,}/.test(text)) return false
+  // 末尾的编号 token：`Table XIII:` → `XIII`
+  const last = text.trim().replace(/[.:：。]+$/, '').split(/\s+/).pop() ?? ''
+  return !ROMAN_ID.test(last)
 }
 
 export function classify(el: Element): Classification | null {

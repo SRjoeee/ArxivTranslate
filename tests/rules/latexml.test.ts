@@ -32,7 +32,7 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.6.1')
+    expect(RULES_VERSION).toBe('0.6.2')
   })
 })
 
@@ -103,12 +103,23 @@ describe('带环境名的 tag 要翻译，纯编号的不翻（§5.2，用户反
       ['表格', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table 1:</span> Cap.</figcaption>'],
       ['算法', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_float">Algorithm 1</span> Cap.</figcaption>'],
       ['附录', '<h2 class="ltx_title ltx_title_appendix"><span class="ltx_tag ltx_tag_appendix">Appendix A</span> More</h2>'],
-      ['部分', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part I</span> X</h1>'],
+      ['部分', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part 1</span> X</h1>'],
       ['章', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_chapter">Chapter 1</span> X</h1>'],
     ]
     for (const [name, html] of named) {
       it(`${name}的 tag 不再是 void：里面有环境名`, () => {
         expect(tagOf(html)).toBeNull()
+      })
+    }
+
+    // 罗马数字编号的照旧作 void：实测机器翻译会把 IV 译成「四」，与受保护的 .ltx_ref 对不上
+    const roman: [string, string][] = [
+      ['罗马编号的表', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table IV:</span> Cap.</figcaption>'],
+      ['罗马编号的部分', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part I</span> X</h1>'],
+    ]
+    for (const [name, html] of roman) {
+      it(`${name}仍是 void`, () => {
+        expect(tagOf(html)).toMatchObject({ kind: 'protect', rule: 'tag' })
       })
     }
 
@@ -145,6 +156,17 @@ describe('带环境名的 tag 要翻译，纯编号的不翻（§5.2，用户反
       // 环境名从不带括号：去掉括号后仍有词的照样要翻
       expect(isNamedTag(el('<span class="ltx_tag ltx_tag_theorem">Definition 1.2 (Hall set)</span>'))).toBe(true)
       expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">Figure 3 (a)</span>'))).toBe(true)
+    })
+
+    it('罗马数字编号的 tag 不翻：机器翻译会把它本地化，与受保护的 .ltx_ref 对不上', () => {
+      // 2026-09-05 用 google-gtx 实测：Table IV: → 表四：，Table X: → 表十：，Part I → 第一部分
+      for (const text of ['Table I:', 'Table IV:', 'Table X:', 'Table XIII:', 'Part I', 'Appendix V']) {
+        expect([text, isNamedTag(el(`<span class="ltx_tag ltx_tag_table">${text}</span>`))]).toEqual([text, false])
+      }
+      // 阿拉伯数字与字母编号实测都原样保留，照翻
+      for (const text of ['Table 4:', 'Appendix A', 'Appendix C', 'Appendix D', 'Definition 1.1.', 'Corollary A.3.']) {
+        expect([text, isNamedTag(el(`<span class="ltx_tag ltx_tag_table">${text}</span>`))]).toEqual([text, true])
+      }
     })
 
     it('判定要含连续两个字母：单字母标识符不算词', () => {
