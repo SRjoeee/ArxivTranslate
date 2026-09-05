@@ -136,6 +136,18 @@ export function App() {
         </select>
       </label>
 
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译范围</h2>
+      <label style={label}>
+        预翻译距离（像素）
+        <input style={field} type="number" min={0} max={10000} step={100} value={config.preload.margin} onChange={e => setLocal(c => ({ ...c, preload: { ...c.preload, margin: Number(e.target.value) } }))} />
+        <small style={{ color: '#666' }}>屏幕下方多远的段落提前翻译。越小越省 API 费用；改动在下次开始翻译时生效</small>
+      </label>
+      <label style={label}>
+        可见阈值（0 到 1）
+        <input style={field} type="number" min={0} max={1} step={0.1} value={config.preload.threshold} onChange={e => setLocal(c => ({ ...c, preload: { ...c.preload, threshold: Number(e.target.value) } }))} />
+        <small style={{ color: '#666' }}>段落露出多少比例才翻译；0 表示碰到边缘就翻</small>
+      </label>
+
       <p>
         <button onClick={save}>保存</button>
         {' '}

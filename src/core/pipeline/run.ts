@@ -5,8 +5,9 @@ import { ID_ATTR, type Block, type TextBlock } from '@/core/extractor'
 import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate } from '@/core/protector'
 import {
-  clearAllPending, clearTranslation, enable, markPartial, renderPending, renderTable, renderText, setState, type Mode,
+  clearAllPending, clearTranslation, enable, markPartial, renderFailed, renderPending, renderTable, renderText, type Mode,
 } from '@/core/renderer'
+import { setState } from '@/core/renderer'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
 import { createWorkPacer, pauseIfBudgetSpent } from '@/core/scheduler/pacer'
 import type { RenderPath } from '@/cache/key'
@@ -56,12 +57,19 @@ export interface TranslationRun {
   /** 结束会话：断开观察器、删掉 pending 节点，之后不再渲染也不再上报 */
   stop(): void
   progress(): Progress
+  /** 翻失败的块（文档序）；popup 的"重试失败"把它们再交给 translate */
+  failed(): Block[]
 }
 
 const FATAL_KINDS = new Set(['no-key', 'auth'])
 
 type Outcome = 'waiting' | 'requested' | 'done' | 'failed'
-type BatchResult = Map<Segment, DocumentFragment | null>
+/** 一段的结果：译文，或失败原因（给失败态小部件看，§7.6） */
+type SegmentResult = { fragment: DocumentFragment } | { error: string }
+type BatchResult = Map<Segment, SegmentResult>
+const CANCELLED: SegmentResult = { error: '已取消' }
+const MISMATCH: SegmentResult = { error: '译文的占位符与原文对不上' }
+const errorOf = (res: Extract<TranslateMessageResponse, { ok: false }>): SegmentResult => ({ error: `${res.error.kind}: ${res.error.message}` })
 
 export function startTranslation(options: RunOptions): TranslationRun {
   const { doc, blocks, transport } = options
@@ -133,23 +141,23 @@ export function startTranslation(options: RunOptions): TranslationRun {
   }
 
   /** runs 兜底（§6.5）：按 void 切段逐段翻译再拼回 */
-  async function viaRuns(segment: Segment, sectionTitle?: string): Promise<DocumentFragment | null> {
-    if (halted()) return null
+  async function viaRuns(segment: Segment, sectionTitle?: string): Promise<SegmentResult> {
+    if (halted()) return CANCELLED
     const layout = splitRuns(segment.protected)
-    if (layout.runs.length === 0) return joinRuns([], layout, segment.protected, doc)
+    if (layout.runs.length === 0) return { fragment: joinRuns([], layout, segment.protected, doc) }
     const res = await send(layout.runs.map((text, i) => ({ id: `${segment.id}#r${i}`, text })), 'runs', sectionTitle)
     if (!res.ok) {
       noteFatal(res)
-      return null
+      return errorOf(res)
     }
     cached += res.cached
     const byId = new Map(res.result.segments.map(s => [s.id, s.text]))
     const texts = layout.runs.map((_, i) => byId.get(`${segment.id}#r${i}`))
-    if (texts.some(t => t === undefined)) return null
+    if (texts.some(t => t === undefined)) return { error: '译文条数与原文对不上' }
     try {
-      return joinRuns(texts as string[], layout, segment.protected, doc)
+      return { fragment: joinRuns(texts as string[], layout, segment.protected, doc) }
     } catch {
-      return null
+      return MISMATCH
     }
   }
 
@@ -157,13 +165,13 @@ export function startTranslation(options: RunOptions): TranslationRun {
    * 占位符校验失败：单块重发一次，再失败走 runs（§6.3）。
    * 重发不读缓存：那份坏译文在校验之前就已经写进缓存，照常读只会原样拿回来（Codex 在 #9 指出）
    */
-  async function retrySingle(segment: Segment, sectionTitle?: string): Promise<DocumentFragment | null> {
-    if (halted()) return null
+  async function retrySingle(segment: Segment, sectionTitle?: string): Promise<SegmentResult> {
+    if (halted()) return CANCELLED
     const res = await send([{ id: segment.id, text: segment.text }], 'markup', sectionTitle, { bypassCache: true, accept: acceptFor([segment]) })
     if (res.ok) {
       cached += res.cached
       const text = res.result.segments[0]?.text
-      if (text !== undefined && validate(text, segment.protected).ok) return rehydrate(text, segment.protected, doc)
+      if (text !== undefined && validate(text, segment.protected).ok) return { fragment: rehydrate(text, segment.protected, doc) }
     } else {
       noteFatal(res)
     }
@@ -186,7 +194,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
         await translateSegments(segments.slice(0, mid), sectionTitle, out)
         await translateSegments(segments.slice(mid), sectionTitle, out)
       } else {
-        for (const segment of segments) out.set(segment, null)
+        for (const segment of segments) out.set(segment, errorOf(res))
       }
       return
     }
@@ -194,7 +202,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
     const byId = new Map(res.result.segments.map(s => [s.id, s.text]))
     for (const segment of segments) {
       const text = byId.get(segment.id)
-      if (text !== undefined && validate(text, segment.protected).ok) out.set(segment, rehydrate(text, segment.protected, doc))
+      if (text !== undefined && validate(text, segment.protected).ok) out.set(segment, { fragment: rehydrate(text, segment.protected, doc) })
       else out.set(segment, await retrySingle(segment, sectionTitle))
     }
   }
@@ -213,7 +221,11 @@ export function startTranslation(options: RunOptions): TranslationRun {
     if (stopped) return // stop() 已经把 pending 清掉、不再上报
     if (batch.kind === 'table' && batch.block) {
       const cells = new Map<Element, DocumentFragment>()
-      for (const [segment, fragment] of out) if (fragment && segment.cell) cells.set(segment.cell.el, fragment)
+      let reason = '未知错误'
+      for (const [segment, result] of out) {
+        if ('fragment' in result) { if (segment.cell) cells.set(segment.cell.el, result.fragment) }
+        else reason = result.error
+      }
       // 有一格没翻出来就算失败（Codex 在 #9 指出）；半份克隆照常显示，原表保持 translated 另加 partial 标记（Codex 在 #30 指出）
       if (cells.size === batch.segments.length) {
         renderTable(batch.block, cells)
@@ -223,21 +235,20 @@ export function startTranslation(options: RunOptions): TranslationRun {
           renderTable(batch.block, cells)
           markPartial(batch.block)
         } else {
-          clearTranslation(batch.block)
-          setState(batch.block, 'failed')
+          renderFailed(batch.block, reason, () => { void translate([batch.block!]) })
         }
         outcome.set(batch.block, 'failed')
       }
     } else {
       for (const segment of batch.segments) {
-        const fragment = out.get(segment)
-        if (fragment) {
-          renderText(segment.block as TextBlock, fragment)
+        const result = out.get(segment)
+        if (result && 'fragment' in result) {
+          renderText(segment.block as TextBlock, result.fragment)
           outcome.set(segment.block, 'done')
         } else {
-          // 删掉 pending 与上一轮的译文：换了引擎 / 目标语言后再翻失败，页面不能还挂着旧译文（Codex 在 #9 指出）
-          clearTranslation(segment.block)
-          setState(segment.block, 'failed')
+          // 删掉 pending 与上一轮的译文（换了引擎 / 目标语言后再翻失败，页面不能还挂着旧译文，Codex 在 #9 指出），
+          // 插失败态小部件：原因 + 重试（§7.6）
+          renderFailed(segment.block, result?.error ?? '未知错误', () => { void translate([segment.block]) })
           outcome.set(segment.block, 'failed')
         }
       }
@@ -262,5 +273,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
     clearAllPending(doc)
   }
 
-  return { ready, translate, stop, progress }
+  const failed = () => blocks.filter(block => outcome.get(block) === 'failed')
+
+  return { ready, translate, stop, progress, failed }
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { extract, type Block } from '@/core/extractor'
 import { startTranslation, type Progress, type Transport } from '@/core/pipeline/run'
-import { FOR_ATTR, INLINE_ATTR, PARTIAL_ATTR, PENDING_CLASS, STATE_ATTR, T_CLASS } from '@/core/renderer'
+import { ERROR_CLASS, FOR_ATTR, INLINE_ATTR, PARTIAL_ATTR, PENDING_CLASS, STATE_ATTR, T_CLASS } from '@/core/renderer'
 import { TABLE_RULES } from '@/core/rules/latexml'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import type { TranslateCall } from '@/providers/translate-service'
@@ -144,13 +144,40 @@ describe('startTranslation', () => {
   it('批次报错：对半拆分到单段，只标记真正失败的块，pending 随之删掉', async () => {
     const doc = docOf()
     const blocks = extract(doc)
-    const { transport } = makeTransport((req, seg) => (req.request.segments.some(s => s.id === 'p1') && seg.id === 'p1' ? { error: 'unknown' } : undefined as unknown as string))
+    let fail = true
+    const { transport } = makeTransport((_req, seg) => (fail && seg.id === 'p1' ? { error: 'unknown' } : undefined as unknown as string))
     const run = await start(doc, blocks, transport)
     await run.translate(blocks)
     expect(run.progress()).toMatchObject({ failed: 1, done: 5, inFlight: 0 })
     expect(doc.getElementById('p1')?.getAttribute(STATE_ATTR)).toBe('failed')
-    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)).toBeNull()
-    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)).not.toBeNull()
+    // 失败块旁是带原因的小部件（§7.6），不是译文
+    const widget = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)!
+    expect(widget.classList.contains(ERROR_CLASS)).toBe(true)
+    expect(widget.getAttribute('title')).toBe('unknown: unknown')
+    expect(doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
+    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)?.classList.contains(ERROR_CLASS)).toBe(false)
+    // failed() 列出失败块；再交给 translate 就是重试，成功后小部件换成译文
+    expect(run.failed().map(b => b.id)).toEqual(['p1'])
+    fail = false
+    await run.translate(run.failed())
+    expect(run.progress()).toMatchObject({ failed: 0, done: 6 })
+    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)?.classList.contains(ERROR_CLASS)).toBe(false)
+    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)?.querySelector('math')).not.toBeNull()
+  })
+
+  it('小部件上的"重试"按钮走同一条重试路径', async () => {
+    const doc = docOf()
+    const blocks = extract(doc)
+    let fail = true
+    const { transport } = makeTransport((_req, seg) => (fail && seg.id === 'p1' ? { error: 'network' } : undefined as unknown as string))
+    const run = await start(doc, blocks, transport)
+    await run.translate([byId(blocks, 'p1')])
+    const widget = doc.querySelector(`.${ERROR_CLASS}[${FOR_ATTR}="p1"]`)!
+    fail = false
+    widget.shadowRoot!.querySelector('button')!.click()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(run.progress()).toMatchObject({ failed: 0, done: 1 })
+    expect(doc.querySelector(`.${ERROR_CLASS}`)).toBeNull()
   })
 
   it('no-key：致命错误后会话停下，不再发新批次', async () => {
@@ -246,7 +273,8 @@ describe('startTranslation', () => {
     await (await start(doc, blocks, transport)).translate(blocks)
     expect(title.getAttribute(STATE_ATTR)).toBe('failed')
     expect(title.hasAttribute(INLINE_ATTR)).toBe(false)
-    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="s1"]`)).toBeNull()
+    // 旁边只剩失败态小部件，没有译文
+    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="s1"]`)?.classList.contains(ERROR_CLASS)).toBe(true)
     await (await start(doc, blocks, makeTransport().transport)).translate(blocks)
     expect(title.hasAttribute(INLINE_ATTR)).toBe(true)
   })
@@ -261,7 +289,9 @@ describe('startTranslation', () => {
     await run.translate(blocks)
     expect(run.progress().failed).toBe(1)
     expect(doc.getElementById('p1')?.getAttribute(STATE_ATTR)).toBe('failed')
-    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)).toBeNull()
+    const sibling = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)!
+    expect(sibling.classList.contains(ERROR_CLASS)).toBe(true)
+    expect(sibling.querySelector('math')).toBeNull()
     expect(doc.querySelectorAll(`.${T_CLASS}[${FOR_ATTR}="p3"]`)).toHaveLength(1)
   })
 })

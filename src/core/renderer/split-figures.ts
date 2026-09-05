@@ -16,8 +16,8 @@ import { MIRROR_CLASS } from './mirror'
 import { PENDING_CLASS } from './pending'
 import { FOR_ATTR, T_CLASS } from './index'
 
-/** 真正的译文：等待态的 pending 节点（只有一个圆环，§7.6）不算 */
-const REAL_TRANSLATION = `.${T_CLASS}:not(.${PENDING_CLASS})`
+/** 真正的译文：等待态的 pending 节点与失败态的小部件（§7.6）都不算 */
+const REAL_TRANSLATION = `.${T_CLASS}:not(.${PENDING_CLASS}):not(.axt-error)`
 
 /** 原件上的标记（原节点只允许追加 data-axt-*，§7.1） */
 export const SPLIT_ATTR = 'data-axt-split'
@@ -76,8 +76,8 @@ export function splitFigures(root: Document | Element): number {
     for (const stale of Array.from(fig.querySelectorAll(`.${MIRROR_CLASS}`))) stale.remove()
 
     const clone = fig.cloneNode(true) as Element
-    // 还在等译文的对：副本里去掉圆环、留原文，译文到了 key 变化会重建
-    for (const pending of Array.from(clone.querySelectorAll(`.${PENDING_CLASS}`))) pending.remove()
+    // 还在等译文 / 翻失败的对：副本里去掉圆环与小部件、留原文，译文到了 key 变化会重建
+    for (const pending of Array.from(clone.querySelectorAll(`.${PENDING_CLASS}, .axt-error`))) pending.remove()
     // 克隆件只留译文：每对里把原文成员摘掉（译文自己不会被摘）
     for (const original of Array.from(clone.querySelectorAll('*'))) {
       if (original.classList.contains(T_CLASS)) continue
