@@ -69,10 +69,10 @@ export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationPr
     displayName: 'Google 网页翻译（免费）',
     kind: 'mt',
     preservesMarkup: true,
-    // 端点一次能吃很多条；批次给大、并发给小（DESIGN §8.3）
+    // 端点一次能吃很多条；批次给大、速率给小——免费端点经不起 8/s 的默认速率（DESIGN §8.3）
     maxBatchChars: 8000,
     maxBatchItems: 100,
-    concurrency: 2,
+    rateLimit: { rate: 2, capacity: 2 },
     async isAvailable() {
       // 免费端点不需要凭据；是否可达留给实际请求，失败走 fallback 链
       return true

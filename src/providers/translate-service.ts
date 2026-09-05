@@ -1,10 +1,15 @@
 // 翻译服务：查缓存 → 只把未命中的段落交给 provider → 回写缓存。
-// 与运行上下文无关：缓存通过 CachePort 注入，background 用本地 Dexie，content 用消息代理（DESIGN §8.0）。
-import PQueue from 'p-queue'
+// 请求层是移植的 Read Frog utils/request（DESIGN §8.2、§10）：RequestQueue 管速率（令牌桶）、超时、重试、
+// 429 暂停与暂停后的单探针、401 / no-key 排空整队、按 scope 取消；BatchQueue 把同一批次键的段落攒成一批，
+// 派发闸让它在限流期间多攒少发。组装方式照 Read Frog 的 background/translation-queues.ts，只是跑在 content 侧（§8.0）。
+// 与运行上下文无关：缓存通过 CachePort 注入，background 用本地 Dexie，content 用消息代理。
 import { cacheKeyFor, type RenderPath } from '@/cache/key'
-import { withRetry, type RetryOptions } from './retry'
+import { getRandomUUID } from '@/shared/uuid'
+import { BatchCountMismatchError, BatchQueue, type BatchOptions } from './request/batch-queue'
+import { CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
+import { REQUEST_TIMEOUT_ERROR_NAME, RequestQueue, type QueueOptions } from './request/request-queue'
 import { attachRequestErrorMeta } from './request/retry-policy'
-import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
+import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslationProvider } from './types'
 
 export interface CacheEntry {
   key: string
@@ -31,120 +36,158 @@ export type TranslateMessageRequest = {
 }
 
 /**
- * 进程内调用可以多带一个校验回调：只把它放行的译文写进缓存——坏译文根本不该入库，
- * 否则每次都要先读到它再花一次请求（Codex 在 #30 指出）。函数过不了消息边界，background 路径上没有它
+ * 进程内调用可以多带两样：校验回调（只把它放行的译文写进缓存——坏译文根本不该入库，Codex 在 #30 指出）
+ * 与取消范围（一次运行一个 id，恢复原文时整体撤掉）。两者都过不了消息边界，background 路径上没有
  */
 export type TranslateCall = TranslateMessageRequest & {
   accept?: (id: string, text: string) => boolean
+  scope?: string
 }
 
 export type TranslateMessageResponse =
-  | { ok: true; result: TranslateResult; cached: number }
+  | { ok: true; result: { segments: { id: string; text: string }[]; provider: string; model?: string }; cached: number }
   | { ok: false; error: { kind: ProviderErrorKind; message: string } }
 
 export interface TranslateServiceDeps {
   getProvider: (providerId?: string) => Promise<TranslationProvider>
   getModel?: () => Promise<string | undefined>
   cache?: CachePort
-  retry?: RetryOptions
-  /** 单次请求的上限；默认 60s。LLM 翻一批含几十个占位符的段落可能要十几秒，但不会到一分钟 */
-  requestTimeoutMs?: number
+  /** 队列参数覆盖（测试用）：timeoutMs 是批次超时公式的基数；rate / capacity 以 provider.rateLimit 优先，其次这里，最后 8 / 20 */
+  queue?: Partial<QueueOptions>
+  /** 攒批参数覆盖（测试用） */
+  batch?: Partial<Pick<BatchOptions<QueueItem, string>, 'batchDelay' | 'maxRetries' | 'enableFallbackToIndividual'>>
 }
 
-const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
+export interface TranslateService {
+  translate(call: TranslateCall): Promise<TranslateMessageResponse>
+  /** 撤掉该 scope 排队与在飞的请求；返回撤掉的条数。之后带同一 scope 的调用直接返回 aborted */
+  cancel(scope: string): number
+}
 
-/**
- * 给一次请求加上限。没有上限时一个挂住的连接会让整篇翻译永远停在"进行中"
- *（实测 2312.17527：153 块翻了 152 块，最后一块等了 220s 还没回，`translation done` 永远不打）。
- * 用 race 而不是只传 signal：provider 不配合 signal 时也能被切断；超时按可重试的 timeout 处理，
- * 重试用尽才把这一块标成失败，其余块不受影响。
- */
-async function withTimeout<T>(run: (signal: AbortSignal) => Promise<T>, ms: number): Promise<T> {
-  const timeout = AbortSignal.timeout(ms)
-  const cutoff = new Promise<never>((_, reject) => {
-    timeout.addEventListener('abort', () => {
-      reject(attachRequestErrorMeta(new ProviderError('timeout', `请求超过 ${ms}ms 没有返回`), { kind: 'timeout', isRetryable: true }))
-    }, { once: true })
+/** Read Frog 的默认队列参数（DEFAULT_CONFIG.pageTranslation.requestQueueConfig 与 translation-queues.ts 里的常量） */
+export const DEFAULT_RATE_LIMIT = { rate: 8, capacity: 20 } as const
+const DEFAULT_QUEUE_OPTIONS = { timeoutMs: 20_000, maxRetries: 2, baseRetryDelayMs: 1_000 } as const
+const BATCH_DELAY_MS = 100
+const BATCH_MAX_RETRIES = 3
+/** 批次超时随字数放大：基数 + 每字 15ms，上限 120s（Read Frog utils/constants/translate.ts）。1000 字的批 35s */
+const BATCH_TIMEOUT_PER_CHAR_MS = 15
+const MAX_BATCH_TIMEOUT_MS = 120_000
+
+/** 进队列的一段：BatchQueue 按 batchKey 攒批、按 dedupKey 去重、按 scope 取消；结果只是译文字符串（去重会把同一结果交给两个条目） */
+interface QueueItem {
+  uid: string
+  id: string
+  text: string
+  batchKey: string
+  dedupKey?: string
+  scope?: string
+  scheduleAt: number
+  provider: TranslationProvider
+  request: Pick<TranslateRequest, 'source' | 'target' | 'context'>
+}
+
+interface ProviderQueues {
+  requestQueue: RequestQueue
+  /** 只有 LLM 才攒批（Read Frog 的 shouldUseBatchQueue）；免费引擎一次调用一个任务 */
+  batchQueue: BatchQueue<QueueItem, string> | null
+}
+
+/** provider 看到的 id 必须唯一：不同调用的段可能同 id（同一段落重发、连接测试连发三次）混进一批 */
+function uniqueIds(items: QueueItem[]): string[] {
+  const seen = new Set<string>()
+  return items.map((item, i) => {
+    const id = seen.has(item.id) ? `${item.id}~${i}` : item.id
+    seen.add(id)
+    return id
   })
-  try {
-    return await Promise.race([run(timeout), cutoff])
-  } catch (error) {
-    // provider 配合 signal 时抛的是 aborted；只要是我们的超时触发的，就按 timeout 算
-    if (timeout.aborted && error instanceof ProviderError && error.kind === 'aborted') {
-      throw attachRequestErrorMeta(new ProviderError('timeout', `请求超过 ${ms}ms 没有返回`, { cause: error }), { kind: 'timeout', isRetryable: true })
-    }
-    throw error
-  }
 }
 
-export function createTranslateService(deps: TranslateServiceDeps) {
-  const queues = new Map<string, PQueue>()
-  const queueFor = (provider: TranslationProvider) => {
-    let queue = queues.get(provider.id)
-    if (!queue) {
-      queue = new PQueue({ concurrency: provider.concurrency })
-      queues.set(provider.id, queue)
-    }
-    return queue
-  }
+export function createTranslateService(deps: TranslateServiceDeps): TranslateService {
+  const queues = new Map<string, ProviderQueues>()
+  const cancelledScopes = new CancelledScopeRegistry()
+  const baseTimeoutMs = deps.queue?.timeoutMs ?? DEFAULT_QUEUE_OPTIONS.timeoutMs
+  const timeoutFor = (chars: number) => Math.min(baseTimeoutMs + chars * BATCH_TIMEOUT_PER_CHAR_MS, MAX_BATCH_TIMEOUT_MS)
 
   /**
-   * 429 时暂停整条队列：concurrency 只是并发上限，撞上限流的那个任务自己睡着时，
-   * 其余 worker 还会继续往同一个端点打（Codex 在 #6 / #10 指出）。
-   * 队列到时自动恢复；多次暂停取最晚的那个截止时间。
-   * 已在飞的任务不受 queue.pause() 约束，所以它们**每次尝试前**也要过 awaitPause 这道闸：
-   * 自己睡醒了但别的任务把暂停延长了，就接着等（Codex 在 #30 指出）
+   * 把 provider 报的"id 对不上 / 结构坏了"换成 BatchQueue 认的批次错误，并标成不可重试：
+   * RequestQueue 不再按未知错误重试，BatchQueue 重试 3 次后逐条兜底。不标的话逐条兜底前要先打 3 × 4 = 12 次；
+   * 标了 kind 也免得消息里带的模型原始输出被 "429" / "timeout" 的正则误判
    */
-  const pausedUntil = new Map<string, number>()
-  const pauses = new Map<string, Promise<void>>()
-  const sleepFn = () => deps.retry?.sleep ?? ((wait: number) => new Promise<void>(resolve => setTimeout(resolve, wait)))
-  const pauseQueue = (provider: TranslationProvider, ms: number) => {
-    const queue = queueFor(provider)
-    const until = Date.now() + ms
-    if ((pausedUntil.get(provider.id) ?? 0) >= until) return
-    pausedUntil.set(provider.id, until)
-    queue.pause()
-    const done = sleepFn()(ms).then(() => {
-      // 被更长的暂停取代：由那一次负责恢复
-      if (pausedUntil.get(provider.id) !== until) return
-      pausedUntil.delete(provider.id)
-      pauses.delete(provider.id)
-      // 暂停一结束就登记"该放探针了"：任务的睡眠与暂停同时到期，到闸口时已经看不到暂停
-      probeDue.add(provider.id)
-      queue.start()
-    })
-    pauses.set(provider.id, done)
-  }
-  /**
-   * 暂停结束只放**一个探针**，其余等它的结果再走（照 Read Frog request-queue 的 post-pause probe）：
-   * 不然所有睡醒的任务会在同一毫秒一起打端点，限流刚解除又被撞回去（Codex 在 #30 指出）。
-   * 探针又撞 429 → 策略再次暂停，等待者回到循环顶部接着等；探针成功或因别的原因失败 → 大家照常并发。
-   * 探针失败时多让一个宏任务：withRetry 要在拒绝传到它手里之后才会登记新的暂停
-   */
-  const probes = new Map<string, Promise<unknown>>()
-  const probeDue = new Set<string>()
-  const gated = async <T>(provider: TranslationProvider, run: () => Promise<T>): Promise<T> => {
-    for (;;) {
-      let pending: Promise<void> | undefined
-      while ((pending = pauses.get(provider.id))) await pending
-      const probe = probes.get(provider.id)
-      if (probe) {
-        await probe.then(() => undefined, () => new Promise<void>(resolve => setTimeout(resolve, 0)))
-        continue
-      }
-      if (!probeDue.has(provider.id)) return run()
-      probeDue.delete(provider.id)
-      const attempt = run()
-      probes.set(provider.id, attempt)
-      try {
-        return await attempt
-      } finally {
-        if (probes.get(provider.id) === attempt) probes.delete(provider.id)
-      }
+  const asBatchError = (e: unknown, expected: number): unknown =>
+    e instanceof ProviderError && e.kind === 'invalid-response'
+      ? attachRequestErrorMeta(new BatchCountMismatchError(expected, 0, [e.message]), { kind: 'bad-request', isRetryable: false })
+      : e
+
+  const translateItems = async (items: QueueItem[], ids: string[], signal: AbortSignal | undefined): Promise<string[]> => {
+    const first = items[0]!
+    try {
+      const result = await first.provider.translate({ ...first.request, segments: items.map((item, i) => ({ id: ids[i]!, text: item.text })), signal })
+      const byId = new Map(result.segments.map(s => [s.id, s.text]))
+      return ids.map(id => byId.get(id) ?? '')
+    } catch (e) {
+      throw asBatchError(e, items.length)
     }
   }
 
-  return async ({ request, providerId, cache, accept }: TranslateCall): Promise<TranslateMessageResponse> => {
+  const queuesFor = (provider: TranslationProvider): ProviderQueues => {
+    const existing = queues.get(provider.id)
+    if (existing) return existing
+    const rate = provider.rateLimit?.rate ?? deps.queue?.rate ?? DEFAULT_RATE_LIMIT.rate
+    const capacity = provider.rateLimit?.capacity ?? deps.queue?.capacity ?? DEFAULT_RATE_LIMIT.capacity
+    const requestQueue = new RequestQueue({ ...DEFAULT_QUEUE_OPTIONS, ...deps.queue, rate, capacity })
+    const batchQueue = provider.kind === 'llm'
+      ? new BatchQueue<QueueItem, string>({
+          maxCharactersPerBatch: provider.maxBatchChars,
+          maxItemsPerBatch: provider.maxBatchItems,
+          batchDelay: deps.batch?.batchDelay ?? BATCH_DELAY_MS,
+          maxRetries: deps.batch?.maxRetries ?? BATCH_MAX_RETRIES,
+          enableFallbackToIndividual: deps.batch?.enableFallbackToIndividual ?? true,
+          // 派发闸：限流期间没有空位时批次继续攒到上限，而不是每 100ms 刷出一小批排在队里冻着
+          dispatchGate: { nextDispatchEtaMs: () => requestQueue.nextDispatchEtaMs() },
+          getBatchKey: item => item.batchKey,
+          getCharacters: item => item.text.length,
+          getDedupKey: item => item.dedupKey,
+          getScope: item => item.scope,
+          isScopeCancelled: scope => cancelledScopes.has(scope),
+          executeBatch: (items, meta) => {
+            const ids = uniqueIds(items)
+            const chars = items.reduce((n, item) => n + item.text.length, 0)
+            const hash = items.map(item => item.dedupKey ?? item.uid).join('|')
+            const scheduleAt = Math.min(...items.map(item => item.scheduleAt))
+            return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars) })
+          },
+          executeIndividual: item => requestQueue.enqueue(
+            async signal => (await translateItems([item], [item.id], signal))[0]!,
+            item.scheduleAt,
+            item.dedupKey ?? item.uid,
+            item.scope ? [item.scope] : undefined,
+            { timeoutMs: timeoutFor(item.text.length) },
+          ),
+          onError: (error, context) => {
+            console.warn(`[axt] 批次失败（${context.isFallback ? '逐条兜底' : `第 ${context.retryCount} 次重试前`}）：${error.message}`)
+          },
+        })
+      : null
+    const pair = { requestQueue, batchQueue }
+    queues.set(provider.id, pair)
+    return pair
+  }
+
+  /** 免费引擎：一次调用的未命中段落作一个任务，不攒批 */
+  const enqueueWhole = ({ requestQueue }: ProviderQueues, items: QueueItem[]): Promise<string>[] => {
+    const first = items[0]!
+    const chars = items.reduce((n, item) => n + item.text.length, 0)
+    const all = requestQueue.enqueue(
+      signal => translateItems(items, items.map(item => item.id), signal),
+      first.scheduleAt,
+      items.map(item => item.dedupKey ?? item.uid).join('|'),
+      first.scope ? [first.scope] : undefined,
+      { timeoutMs: timeoutFor(chars) },
+    )
+    return items.map((_, i) => all.then(texts => texts[i]!))
+  }
+
+  const translate = async ({ request, providerId, cache, accept, scope }: TranslateCall): Promise<TranslateMessageResponse> => {
     try {
       const provider = await deps.getProvider(providerId)
       const model = (await deps.getModel?.()) ?? ''
@@ -167,45 +210,84 @@ export function createTranslateService(deps: TranslateServiceDeps) {
           })
         }
       }
+      // 读缓存时让出过主线程，这期间 scope 可能已被撤销（Read Frog translation-queues.ts 也在 await 之后查一次）
+      if (scope && cancelledScopes.has(scope)) return { ok: false, error: { kind: 'aborted', message: `已取消（scope: ${scope}）` } }
       const cached = translated.size
 
-      // 2. 只翻译未命中的
+      // 2. 未命中的逐段入队；同一次调用的段落批次键相同，会攒在一起
       const misses = request.segments.filter(s => !translated.has(s.id))
-      let resultProvider = provider.id
-      let resultModel: string | undefined = model || undefined
       if (misses.length > 0) {
-        const timeoutMs = deps.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
-        const retry: RetryOptions = {
-          ...deps.retry,
-          onPause: ms => {
-            deps.retry?.onPause?.(ms)
-            pauseQueue(provider, ms)
-          },
-        }
-        const attempt = () => gated(provider, () => withTimeout(signal => provider.translate({ ...request, segments: misses, signal }), timeoutMs))
-        const result = (await queueFor(provider).add(() => withRetry(attempt, retry))) as TranslateResult
-        resultProvider = result.provider
-        resultModel = result.model
+        const pair = queuesFor(provider)
+        const now = Date.now()
+        const batchKey = JSON.stringify([provider.id, model, provider.promptKey ?? '', request.target, cache?.renderPath ?? '', request.context ?? null])
+        const items: QueueItem[] = misses.map(segment => ({
+          uid: getRandomUUID(),
+          id: segment.id,
+          text: segment.text,
+          batchKey,
+          dedupKey: cache && !cache.bypass ? keys.get(segment.id) : undefined,
+          scope,
+          scheduleAt: now,
+          provider,
+          request: { source: request.source, target: request.target, context: request.context },
+        }))
+        const batchQueue = pair.batchQueue
+        const settled = await Promise.allSettled(batchQueue ? items.map(item => batchQueue.enqueue(item)) : enqueueWhole(pair, items))
+
+        // 3. 先把成功且放行的写缓存：一次调用的段可能横跨两批，一批失败另一批的成果不能丢，
+        //    否则 run.ts 对半拆分重发是白花钱
         const writes: CacheEntry[] = []
-        for (const segment of result.segments) {
-          translated.set(segment.id, segment.text)
-          const key = keys.get(segment.id)
-          // 调用方带了校验就只写它放行的：占位符坏了的译文不入库
-          if (store && cache && key && (!accept || accept(segment.id, segment.text))) writes.push({ key, translation: segment.text, paper: cache.paper })
-        }
+        const failures: unknown[] = []
+        settled.forEach((outcome, i) => {
+          const item = items[i]!
+          if (outcome.status === 'rejected') {
+            failures.push(outcome.reason)
+            return
+          }
+          translated.set(item.id, outcome.value)
+          const key = keys.get(item.id)
+          if (store && cache && key && (!accept || accept(item.id, outcome.value))) writes.push({ key, translation: outcome.value, paper: cache.paper })
+        })
         if (store && writes.length > 0) await store.putMany(writes)
+        if (failures.length > 0) return { ok: false, error: toErrorInfo(pickError(failures)) }
       }
 
-      // 3. 按原顺序合并
+      // 4. 按原顺序合并
       const segments = request.segments.map(s => ({ id: s.id, text: translated.get(s.id) ?? '' }))
-      return { ok: true, result: { segments, provider: resultProvider, model: resultModel }, cached }
+      return { ok: true, result: { segments, provider: provider.id, model: model || undefined }, cached }
     } catch (e) {
       return { ok: false, error: toErrorInfo(e) }
     }
   }
+
+  const cancel = (scope: string): number => {
+    // 先登记再排空：登记是同步的，还挂在读缓存上的调用醒来就能看到；
+    // 先撤批处理再撤请求队列，反过来攒着的批次会在两次排空之间刷出新任务（Read Frog translation-queues.ts:616）
+    cancelledScopes.markScope(scope)
+    let cancelled = 0
+    for (const { requestQueue, batchQueue } of queues.values()) {
+      cancelled += batchQueue?.cancelByScope(scope) ?? 0
+      cancelled += requestQueue.cancelByScope(scope)
+    }
+    return cancelled
+  }
+
+  return { translate, cancel }
+}
+
+/** 一次调用里多段失败时报哪个：配置错误优先（run.ts 据此停下），其次真正的失败，最后才是取消 */
+function pickError(errors: unknown[]): unknown {
+  const kinds = errors.map(e => toErrorInfo(e).kind)
+  const fatal = kinds.findIndex(kind => kind === 'no-key' || kind === 'auth')
+  if (fatal >= 0) return errors[fatal]
+  const real = kinds.findIndex(kind => kind !== 'aborted')
+  return real >= 0 ? errors[real] : errors[0]
 }
 
 export function toErrorInfo(e: unknown): { kind: ProviderErrorKind; message: string } {
   if (e instanceof ProviderError) return { kind: e.kind, message: e.message }
+  if (isTranslationCancelledError(e)) return { kind: 'aborted', message: (e as Error).message }
+  if (e instanceof Error && e.name === REQUEST_TIMEOUT_ERROR_NAME) return { kind: 'timeout', message: e.message }
+  if (e instanceof BatchCountMismatchError) return { kind: 'invalid-response', message: e.message }
   return { kind: 'unknown', message: e instanceof Error ? e.message : String(e) }
 }

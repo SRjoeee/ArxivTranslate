@@ -61,7 +61,7 @@ export default defineContentScript({
       tracker = createViewportTracker(blocks)
       const activeTracker = tracker
       enterSide(modes.effective())
-      const translate = createTranslateService({
+      const service = createTranslateService({
         getProvider: async () => provider,
         // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
         getModel: async () => (config.provider === 'openai-compat' ? config.openaiCompat.model : undefined),
@@ -77,7 +77,7 @@ export default defineContentScript({
         // 标题 + 摘要每批都带（DESIGN §8.2）
         context,
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
-        transport: request => translate(request),
+        transport: request => service.translate(request),
         onProgress: p => {
           if (controller !== run) return
           progress = p

@@ -31,7 +31,7 @@ export interface RunOptions {
   transport: Transport
   onProgress?: (progress: Progress) => void
   signal?: AbortSignal
-  /** content 侧同时在飞的批次数；background 的 p-queue 再按 provider 限流 */
+  /** content 侧同时在飞的批次数；translate-service 里移植的 request-queue 再按 provider 的速率限流（§8.2） */
   concurrency?: number
   /** 视口优先（§10）：取下一批时优先取含此谓词为真的块的批次 */
   isPriority?: (block: Block) => boolean

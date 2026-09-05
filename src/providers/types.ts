@@ -1,5 +1,7 @@
 // Provider 统一接口（DESIGN §8）。每个引擎一个文件，禁止跨文件共享未公开接口的细节。
 
+import { attachRequestErrorMeta, type RequestErrorMeta } from './request/retry-policy'
+
 export interface TranslateSegment {
   id: string
   text: string
@@ -42,8 +44,8 @@ export interface TranslationProvider {
   maxBatchChars: number
   /** 单次请求段落数上限 */
   maxBatchItems: number
-  /** 并发上限，交给 p-queue */
-  concurrency: number
+  /** 请求速率（令牌桶：每秒 rate 个、最多攒 capacity 个）；不声明则用服务默认的 8 / 20，即 Read Frog 的默认值（§8.2） */
+  rateLimit?: { rate: number; capacity: number }
   /** 健康检查：key 是否配置、端点是否可达、内置模型是否可用 */
   isAvailable(): Promise<boolean>
   translate(request: TranslateRequest): Promise<TranslateResult>
@@ -53,9 +55,27 @@ export interface TranslationProvider {
 
 export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'invalid-response' | 'timeout' | 'aborted' | 'unknown'
 
+/**
+ * 每种 kind 对应的重试元数据，构造时就挂上：移植的 retry-policy 只认它自己的 kind，
+ * 认不出 no-key / aborted 就会当未知错误重试（实测 no-key 被调 4 次、白等 7s）。
+ * 在构造函数里挂而不是在 provider 的 catch 里挂，是因为 no-key、id 对不上这些错误在 try 之外直接 throw。
+ * provider 随后按状态码补的元数据（Retry-After、SDK 的 isRetryable）叠在这份之上
+ */
+const META_BY_KIND: Record<ProviderErrorKind, RequestErrorMeta> = {
+  'no-key': { kind: 'access-denied', isRetryable: false }, // 与 401 / 403 同：不重试，整条队列排空
+  'auth': { kind: 'access-denied', isRetryable: false },
+  'aborted': { isRetryable: false },
+  'invalid-response': { isRetryable: false },
+  'rate-limit': { kind: 'rate-limit' },
+  'timeout': { kind: 'timeout', isRetryable: true },
+  'network': { kind: 'network', isRetryable: true },
+  'unknown': {},
+}
+
 export class ProviderError extends Error {
   constructor(readonly kind: ProviderErrorKind, message: string, options?: { cause?: unknown }) {
     super(message, options)
     this.name = 'ProviderError'
+    attachRequestErrorMeta(this, META_BY_KIND[kind])
   }
 }
