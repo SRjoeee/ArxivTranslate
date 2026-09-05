@@ -409,12 +409,28 @@ export interface TranslateResult {
 - prompt 带版本号 `PROMPT_VERSION`（提示词库接入升到 2；`{{targetLanguage}}` 改填英文语言名升到 3），写入缓存键；**提示词身份 `promptKey`**（内置用 id，自定义带两段分别编码的全文）与**上下文原文**（标题 / 摘要 / 章节 / 术语表，结构化序列化；免费引擎不看上下文，不带）也进缓存键的 SHA-256 载荷——换了提示词、或同一段文字出现在另一篇论文里，都不能命中旧译文。**不先压成 32 位 hash**：DJB2 撞了外层 SHA-256 也分不开（Codex 在 #28 给出实例 `19k04n01vcr73f` / `1efm0uaep90s9`）；配置 v1→v2 迁移补 `prompts` 字段、保留 API key
 - **`{{targetLanguage}}` 填英文语言名，不填语言码** [决定，2026-09-05，照 Read Frog `translate-text.ts`]："professional zh-CN native translator" 不如 "Simplified Mandarin Chinese"；名字来自 `config/languages.ts`（移植 `@read-frog/definitions` 的表，ISO 639-3 码），不认识的码原样填
 - **提示词与思考模式的入口**（清理期第 3 项，2026-09-05）：设置页有提示词管理（内置只读可"复制并自定义"、自定义可新建 / 编辑 / 删除、变量按钮插到光标处、JSON 导入 / 导出且文件形状与 Read Frog 一致，可互相导入）与思考模式开关（未登记的端点提示不发字段）；popup 有提示词下拉（即时落盘，下次开始翻译生效）。Read Frog 的对应组件依赖 base-ui、jotai、Tailwind 与它的 i18n，为一页十来个字段引整套 UI 栈不值，逻辑按文件搬（`prompt-file.ts`）、UI 用设置页现有的朴素 React 重写。Read Frog 现已把思考开关改成 AI SDK 的 `reasoning` 档位（none…xhigh），我们仍是 KISS 式按端点发开关字段，档位模型待 AI SDK 侧验证后另议
+- **攒批不看引擎种类，只看它一次能装多少** [决定，2026-09-06，实测撞到]：`BatchQueue` 原来只给 `kind: 'llm'` 建，照抄 Read Frog 的 `shouldUseBatchQueue`。但那条判断的前提是**它的免费引擎是单条接口**，我们的不是——`translateHtml` 一次能带 150 条（RESEARCH §6.6），内置引擎声明 20 条。照抄等于把免费引擎最大的优势扔掉。现在每个 provider 都建 `BatchQueue`，`maxItemsPerBatch` 为 1 的 provider 由它自然退化成一条一个请求，不需要第二条路径（`enqueueWhole` 随之删除）
+- **不看上下文的引擎，上下文不进批次键**：`batchKey` 原来无条件带 `request.context`，而 `run.ts` 会往里塞 `sectionTitle`，每换一节就换一次键——免费引擎的批次跨不了章节，攒批等于没开。缓存键早就有同一条判断（`context: provider.promptKey ? request.context : undefined`），批次键漏了，现在对齐
 - 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`（默认照 Read Frog：1000 字 / 4 段；速率同样照它的令牌桶默认值 8 请求/秒、突发 20，服务内再按批次键攒 100ms——小批高并发，首屏快）；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
 - 批次失败：对半拆分重试 → 单块 → 标记失败
 
 - **每次请求有上限，超时按可重试错误处理** [决定，2026-09-05；同日改由移植的 request-queue 承担]：没有上限时一个挂住的连接会让整篇翻译永远停在"进行中"——实测 2312.17527 走真实 API：153 块翻了 152 块，最后一块（1600 字、32 个占位符）等了 220s 还没回，`translation done` 永远不打、popup 一直转。上限随字数放大：20 s + 每字 15 ms，最多 120 s（Read Frog 的常量；1000 字的批 35 s，那个 1600 字的块 44 s），request-queue 用 `Promise.race` 加超时并 abort 在飞请求（provider 不配合 signal 也能切断），超时归入 retry-policy 的 `timeout` 类别走重试（默认 2 次），用尽后只这一块标失败
 
 ### 8.3 免费引擎约定
+
+- **节流分两种闸：并发上限管「同时挂着几个」，令牌桶管「每秒发几个」** [决定，2026-09-06，实测撞到]。`google-web` 原本是 p-queue 的 `concurrency: 2`（同时 2 个在飞，不限速率），2026-09-05 移植 `RequestQueue` 时误写成 `rateLimit: { rate: 2 }`（每秒 2 个）。两者语义不同：Google 的响应中位只有 **63 ms**，却被令牌桶按 500 ms 一个卡着。现在 `TranslationProvider` 单独声明 `maxConcurrent`，`google-web` 回到 `maxConcurrent: 2`，速率放到 `rate: 20 / capacity: 8` **只兜病态突发**——中途试过 `rate: 4`，它立刻又变成新瓶颈（24 个请求跑满 5.3 秒），速率闸不该是常态约束。
+
+  三个缺陷叠在一起的实测（2410.00260，google-web，全新空缓存，逐屏滚到底）：
+
+  | | 修复前 | 修复后 |
+  |---|---|---|
+  | 整篇耗时 | 31 615 ms / 213 块（**148 ms 每块**）| 2 959 ms / 190 块（**15.6 ms 每块**）|
+  | 请求数 | 65 | **21** |
+  | 每请求段数 | 中位 2、平均 4.2 | 中位 11、平均 11.2 |
+  | 相邻请求间隔 | 中位 500 ms（= 1/rate）| — |
+  | HTTP 状态 | 200 | 200（没有被限流）|
+
+  **9.5 倍**，而且请求数降到三分之一——对这个非官方端点反而更客气。`pnpm e2e` 有两条守着：平均 ≥ 5 段/请求、同时在飞 ≤ 2。
 
 - 视为**随时会断**的东西：独立文件、独立错误类型、失败自动切到 fallback 链的下一个
 - fallback 链默认：用户选定 provider → `chrome-builtin` → `google-web`
