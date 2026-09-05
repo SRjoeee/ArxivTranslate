@@ -42,10 +42,24 @@ describe('样式预设（§7.5）', () => {
     expect(RULES).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?animation: none/)
   })
 
+  it('只有走合成器的动画可以留：改样式的持续动画在长论文上要烧 CPU（Codex 在 #52 指出）', () => {
+    // 实测 600 个译文块 4 秒内的主线程任务：glow 的 text-shadow 动画 1028 ms、gradient 的
+    // background-position 动画 573 ms；改静态后都是 1 ms。blink 改的是 opacity，3 ms，可以留
+    const animated = [...RULES.matchAll(/html\[data-axt-style="([\w-]+)"\][^{]*\{[^}]*animation:\s*axt-/g)].map(m => m[1])
+    expect(animated).toEqual(['blink'])
+    expect(RULES).not.toContain('axt-gradient-flow')
+    expect(RULES).not.toContain('axt-glow')
+  })
+
   it('动画名带 axt- 前缀（硬规则 5）', () => {
     for (const name of RULES.match(/@keyframes ([\w-]+)/g) ?? []) {
       expect(name.replace('@keyframes ', '')).toMatch(/^axt-/)
     }
+  })
+
+  it('荧光笔按行高重复：渐变默认只铺一次，多行段落就只有最后一行有色（Codex 在 #52 指出）', () => {
+    expect(RULES).toMatch(/html\[data-axt-style="marker"\] \.axt-t,\s*html\[data-axt-style="marker-gradient"\] \.axt-t \{[^}]*background-size: 100% 1lh/)
+    expect(RULES).toMatch(/background-repeat: repeat-y/)
   })
 
   it('quote 不加在行内标题译文上：会把「Abstract 摘要」这类同行标题挤歪', () => {

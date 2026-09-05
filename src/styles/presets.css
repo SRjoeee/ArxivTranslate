@@ -60,6 +60,15 @@ html[data-axt-style="quote"] .axt-t:not([data-axt-inline]) {
 }
 
 /* ── 底色类：背景画在译文盒子上，公式与行内盒一并覆盖，没有下划线那种断线问题 ──────── */
+/* 荧光笔要**逐行**画：渐变默认按整个盒子的高度铺一次，多行段落就只有最后一行有色
+   （Codex 在 #52 指出，实测三行段落只涂到第三行）。用 1lh 作重复单位，
+   它就是元素的实际行高，字号变了也跟着变（实测 16px/1.8 与 22px/2.2 都逐行对齐） */
+html[data-axt-style="marker"] .axt-t,
+html[data-axt-style="marker-gradient"] .axt-t {
+  background-size: 100% 1lh;
+  background-repeat: repeat-y;
+}
+
 html[data-axt-style="marker"] .axt-t {
   background-image: linear-gradient(transparent 55%, color-mix(in oklab, var(--axt-green) 45%, transparent) 55%);
 }
@@ -95,14 +104,15 @@ html[data-axt-style="green"] .axt-t {
   --axt-color: var(--axt-green);
 }
 
-/* 渐变文字。实测公式跟着渐变一起显示，不会因为 color: transparent 变不可见 */
+/* 渐变文字。实测公式跟着渐变一起显示，不会因为 color: transparent 变不可见。
+   **静态，不做流动动画**：KISS 原版让 background-position 循环流动，实测 600 个译文块时
+   4 秒内主线程任务 573 ms、样式重算 257 ms（静止时是 2 ms），持续烧掉七分之一个核；
+   一篇论文要读几十分钟，这种装饰不值这个代价（Codex 在 #52 指出，本项目实测后改为静态） */
 html[data-axt-style="gradient"] .axt-t {
-  background-image: linear-gradient(90deg, oklch(0.65 0.2 264), oklch(0.6 0.24 310), oklch(0.68 0.21 8), oklch(0.65 0.2 264));
-  background-size: 200% auto;
+  background-image: linear-gradient(90deg, oklch(0.65 0.2 264), oklch(0.6 0.24 310), oklch(0.68 0.21 8));
   color: transparent;
   background-clip: text;
   -webkit-background-clip: text;
-  animation: axt-gradient-flow 6s linear infinite;
 }
 
 html[data-axt-style="colorful"] .axt-t {
@@ -129,30 +139,22 @@ html[data-axt-style="blur"] .axt-t:hover {
   opacity: 1;
 }
 
+/* 发光同样静态：呼吸动画改的是 text-shadow，每帧都要重算样式并重绘，
+   实测 600 块时 4 秒内主线程任务 1028 ms、样式重算 549 ms、布局 144 ms——四种预设里最贵的一个 */
 html[data-axt-style="glow"] .axt-t {
-  animation: axt-glow 2.4s ease-in-out infinite alternate;
+  text-shadow: 0 0 6px color-mix(in oklab, var(--axt-green) 55%, transparent);
 }
 
 html[data-axt-style="blink"] .axt-t {
   animation: axt-blink 1.6s ease-in-out infinite;
 }
 
-/* 动效一律尊重系统的「减少动态效果」设置 */
+/* 只剩 blink 还在动。它改的是 opacity，走合成器、不触发样式重算与重绘，
+   实测 600 块时 4 秒内主线程任务 3 ms，与静止无异；仍然尊重系统的「减少动态效果」 */
 @media (prefers-reduced-motion: reduce) {
-  html[data-axt-style="gradient"] .axt-t,
-  html[data-axt-style="glow"] .axt-t,
   html[data-axt-style="blink"] .axt-t {
     animation: none;
   }
-}
-
-@keyframes axt-gradient-flow {
-  to { background-position: 200% center; }
-}
-
-@keyframes axt-glow {
-  from { text-shadow: 0 0 2px color-mix(in oklab, var(--axt-green) 45%, transparent); }
-  to { text-shadow: 0 0 8px color-mix(in oklab, var(--axt-green) 70%, transparent); }
 }
 
 @keyframes axt-blink {

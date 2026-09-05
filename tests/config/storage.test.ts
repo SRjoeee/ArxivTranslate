@@ -174,6 +174,15 @@ describe('provider 选择', () => {
     await expect(setConfig({ ...DEFAULT_CONFIG, glossary: [{ term: 'x', translation: '' }] })).rejects.toThrow()
   })
 
+  it('单条与总长都有上限：整篇文档被当成一条粘进来要拒掉（Codex 在 #52 指出）', async () => {
+    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: [{ term: 'x'.repeat(121), translation: '译' }] })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: [{ term: 'x', translation: '译'.repeat(201) }] })).rejects.toThrow()
+    // 100 条 × 每条 60 字符 = 6000，正好在线上；再多一条就超
+    const at = Array.from({ length: 100 }, () => ({ term: 'a'.repeat(30), translation: '译'.repeat(30) }))
+    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: at })).resolves.toBeUndefined()
+    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: [...at, { term: 'a', translation: '译' }] })).rejects.toThrow()
+  })
+
   it('降级链：配置引擎在前，免费引擎兜底；关掉开关时只剩配置的那个', async () => {
     const { buildChain } = await import('@/providers')
     const withKey = { ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-x' } }

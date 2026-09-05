@@ -40,7 +40,7 @@ export interface AxtMessages {
   'axt:cache-get': { request: { keys: string[] }; response: { hits: (string | null)[] } }
   /** content → background：批量写缓存；调用方不等结果 */
   'axt:cache-put': { request: { entries: { key: string; translation: string; paper: string }[] }; response: { written: number } }
-  'axt:cache-clear': { request: { paper?: string }; response: { removed: number } }
+  'axt:cache-clear': { request: { paper?: string }; response: { ok: true; removed: number } | { ok: false; message: string } }
   'axt:cache-stats': { request: Record<never, never>; response: { entries: number; bytes: number } }
   /** popup → content：把翻失败的块再翻一遍（§7.6） */
   'axt:retry-failed': { request: Record<never, never>; response: { retried: number } }

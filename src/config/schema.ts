@@ -30,7 +30,15 @@ export const configSchema = z.object({
    * 术语表（§8.2）：每批 prompt 都带上，让同一篇里的术语译法统一。只对 LLM 有效，免费引擎不看上下文。
    * 上限 200 条——200 条约 2–3 KB、约 700 token，与摘要同量级；再多就该按段落命中过滤，那是 v2 的事
    */
-  glossary: z.array(z.object({ term: z.string().min(1), translation: z.string().min(1) })).max(200).default([]),
+  glossary: z.array(z.object({
+    // 单条也要限长：只限条数的话，一整篇文档被当成一条粘进来照样收下，
+    // 然后进每一批 prompt 与每个分段的缓存键（Codex 在 #52 指出）
+    term: z.string().min(1).max(120),
+    translation: z.string().min(1).max(200),
+  })).max(200).refine(
+    entries => entries.reduce((n, e) => n + e.term.length + e.translation.length, 0) <= 6000,
+    { message: '术语表总长超过 6000 字，会显著增加每一批的 token' },
+  ).default([]),
   /** 译文样式（§7.5）：预设只做叠加装饰，custom 只填声明块、选择器由扩展补 */
   style: z.object({
     preset: z.enum(STYLE_PRESETS),

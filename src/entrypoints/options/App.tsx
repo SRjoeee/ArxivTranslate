@@ -25,7 +25,7 @@ const STYLE_NOTES: Partial<Record<StylePreset, string>> = {
   quote: '同行的短标题译文不加线，否则会把标题挤歪',
   dashed: '下划线类不占空间，左右对照时不影响两栏对齐',
   blur: '悬停才看清，适合自测与背诵',
-  gradient: '带动画；系统开了「减少动态效果」时自动静止',
+  gradient: '静态渐变；流动动画会持续占用 CPU，实测后去掉了',
   custom: '只填声明，选择器由扩展补上',
 }
 
@@ -154,8 +154,9 @@ export function App() {
     if (!window.confirm('清空全部译文缓存？之后重新翻译会重新请求引擎。')) return
     setCacheNote('')
     try {
-      const { removed } = await sendMessage({ type: 'axt:cache-clear', paper: undefined })
-      setCacheNote(`已删除 ${removed} 条`)
+      const result = await sendMessage({ type: 'axt:cache-clear', paper: undefined })
+      if (!result.ok) throw new Error(result.message)
+      setCacheNote(`已删除 ${result.removed} 条`)
       await loadCacheStats()
     } catch (e) {
       setCacheNote(`清空失败：${e instanceof Error ? e.message : String(e)}`)
