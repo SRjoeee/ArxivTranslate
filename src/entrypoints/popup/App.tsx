@@ -177,7 +177,8 @@ export function App() {
     refresh()
   }
 
-  const canTranslate = !!page?.paper && !!provider?.available && !on
+  // 首选引擎不可用但链上有兜底时照样能翻（§8.5）：不看 fallback 的话会出现「有 Google 兜底、按钮却是灰的」
+  const canTranslate = !!page?.paper && (!!provider?.available || !!provider?.fallback) && !on
   const canRestore = !!page && page.progress.state !== 'idle'
 
   return (
@@ -192,9 +193,11 @@ export function App() {
           ? '引擎状态未知'
           : provider.available
             ? `引擎：${provider.providerId} · ${provider.model ?? ''}`
-            : provider.providerId === 'chrome-builtin'
-              ? '内置翻译的语言包还没准备好，点下面的按钮下载'
-              : '未配置 API key，请先到设置页填写'}
+            : provider.fallback
+              ? `${provider.providerId} 不可用，将使用${provider.fallback.displayName}`
+              : provider.providerId === 'chrome-builtin'
+                ? '内置翻译的语言包还没准备好，点下面的按钮下载'
+                : '未配置 API key，请先到设置页填写'}
       </p>
 
       {page === null
