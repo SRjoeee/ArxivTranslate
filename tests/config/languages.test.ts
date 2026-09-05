@@ -39,6 +39,10 @@ describe('languages', () => {
     // ckb（索拉尼）与 kmr（库尔曼吉）表里都是 ku，端点分得清（实测），ckb 保留原码
     expect(toBcp47('ckb')).toBe('ckb')
     expect(ISO6393_TO_6391.ckb).toBe('ku') // 表里确实压成了 ku，覆盖才有意义
+    // 表里叫 "Malay ... (Arabic)"，发 ms 会得到拉丁字母（实测 ms-Arab 才是爪夷文）
+    expect(toBcp47('zlm')).toBe('ms-Arab')
+    // 端点做不到的三个维持原样（bs / uz / az 加不加 -Cyrl 返回完全相同）
+    for (const code of ['bos', 'uzn', 'azj'] as const) expect(toBcp47(code)).toBe(ISO6393_TO_6391[code])
     const noShort = LANG_CODES.find(code => !(code in ISO6393_TO_6391))!
     expect(toBcp47(noShort)).toBe(noShort)
   })

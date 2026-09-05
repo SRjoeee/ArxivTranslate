@@ -907,11 +907,16 @@ export function label(code: LangCode): string {
 const BCP47: Partial<Record<LangCode, string>> = ISO6393_TO_6391
 
 /**
- * 表里被压成同一个两字母码、而端点其实分得清的语言，保留 ISO 639-3 码直接发（Codex 在 #39 两轮指出）：
- * yue 与 cmn 都是 zh，发 zh 就成了普通话（实测 yue 返回"巴士站喺邊"，zh 返回"公交车站在哪里"）；
- * ckb（索拉尼）与 kmr（库尔曼吉）都是 ku，发 ku 就成了库尔曼吉（实测 ckb 返回阿拉伯字母的 "وێستگەی پاس"，ku / kmr 返回拉丁字母的 "Rawestgeha"）
+ * 两字母码丢掉了语言身份或文字，而端点其实分得清的，改发别的标签（Codex 在 #39 三轮指出，逐条实测）：
+ * - yue 与 cmn 都是 zh，发 zh 就成了普通话（实测 yue 返回"巴士站喺邊"，zh 返回"公交车站在哪里"）
+ * - ckb（索拉尼）与 kmr（库尔曼吉）都是 ku，发 ku 就成了库尔曼吉（实测 ckb 返回阿拉伯字母 "وێستگەی پاس"，ku 返回拉丁字母 "Rawestgeha"）
+ * - zlm 在表里就叫 "Malay (individual language) (Arabic)"，发 ms 得到拉丁字母的马来语（实测 ms-Arab 返回爪夷文 "دمان ڤرهنتين بس؟"）
+ *
+ * 表里另外三个带文字标注的条目**端点做不到**，只能维持现状（实测 bs / bs-Cyrl、uz / uz-Cyrl、az / az-Cyrl 返回完全相同的拉丁字母结果）：
+ * bos "Bosnian (Cyrillic)"、uzn "Northern Uzbek (Cyrillic)"、azj "North Azerbaijani (Cyrillic)"。
+ * srp "Serbian (Cyrillic)" 本来就对（sr 一律返回西里尔字母）。LLM 路径不受影响：它拿的是英文名，文字标注在名字里
  */
-const BCP47_OVERRIDES: Partial<Record<LangCode, string>> = { yue: 'yue', ckb: 'ckb' }
+const BCP47_OVERRIDES: Partial<Record<LangCode, string>> = { yue: 'yue', ckb: 'ckb', zlm: 'ms-Arab' }
 
 export function toBcp47(code: string): string {
   if (!isLangCode(code)) return code
