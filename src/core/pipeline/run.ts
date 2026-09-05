@@ -119,23 +119,13 @@ export function startTranslation(options: RunOptions): TranslationRun {
     scheduler = createLazyScheduler(blocks, { ...options.preload, onEnter: entered => { void translate(entered) } })
   })()
 
-  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string, opts: { bypassCache?: boolean; accept?: TranslateCall['accept'] } = {}) => {
+  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string, opts: { bypassCache?: boolean } = {}) => {
     const context: TranslateContext = { ...options.context, ...(sectionTitle ? { sectionTitle } : {}) }
     return transport({
       request: { segments: items, source: 'en', target: options.target, context: Object.keys(context).length ? context : undefined },
       cache: { paper: options.paper, renderPath, ...(opts.bypassCache ? { bypass: true } : {}) },
-      ...(opts.accept ? { accept: opts.accept } : {}),
       ...(options.scope ? { scope: options.scope } : {}),
     })
-  }
-
-  /** markup 路径的译文只有通过占位符校验才写缓存：坏译文入了库，每次都要先读到它再花一次请求（Codex 在 #30 指出） */
-  const acceptFor = (segments: Segment[]): NonNullable<TranslateCall['accept']> => {
-    const byId = new Map(segments.map(s => [s.id, s]))
-    return (id, text) => {
-      const segment = byId.get(id)
-      return !segment || validate(text, segment.protected).ok
-    }
   }
 
   const noteFatal = (res: Extract<TranslateMessageResponse, { ok: false }>) => {
@@ -173,7 +163,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
    */
   async function retrySingle(segment: Segment, sectionTitle?: string): Promise<SegmentResult> {
     if (halted()) return CANCELLED
-    const res = await send([{ id: segment.id, text: segment.text }], 'markup', sectionTitle, { bypassCache: true, accept: acceptFor([segment]) })
+    const res = await send([{ id: segment.id, text: segment.text }], 'markup', sectionTitle, { bypassCache: true })
     if (res.ok) {
       cached += res.cached
       const text = res.result.segments[0]?.text
@@ -190,7 +180,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
       for (const segment of segments) out.set(segment, await viaRuns(segment, sectionTitle))
       return
     }
-    const res = await send(segments.map(s => ({ id: s.id, text: s.text })), 'markup', sectionTitle, { accept: acceptFor(segments) })
+    const res = await send(segments.map(s => ({ id: s.id, text: s.text })), 'markup', sectionTitle)
     if (stopped) return
     if (!res.ok) {
       noteFatal(res)
