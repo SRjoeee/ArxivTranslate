@@ -160,7 +160,7 @@ describe('带环境名的 tag 要翻译，纯编号的不翻（§5.2，用户反
 
     it('罗马数字编号的 tag 不翻：机器翻译会把它本地化，与受保护的 .ltx_ref 对不上', () => {
       // 2026-09-05 用 google-gtx 实测：Table IV: → 表四：，Table X: → 表十：，Part I → 第一部分
-      for (const text of ['Table I:', 'Table IV:', 'Table X:', 'Table XIII:', 'Part I', 'Appendix V', 'Table IV.1:', 'Theorem IV-A', 'Lemma II.3.']) {
+      for (const text of ['Table I:', 'Table IV:', 'Table X:', 'Table XIII:', 'Part I', 'Appendix V', 'Table IV.1:', 'Theorem IV-A', 'Lemma II.3.', 'Table iv:', 'Theorem ii.3', 'Part i']) {
         expect([text, isNamedTag(el(`<span class="ltx_tag ltx_tag_table">${text}</span>`))]).toEqual([text, false])
       }
       // 阿拉伯数字与字母编号实测都原样保留，照翻

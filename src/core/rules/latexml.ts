@@ -178,8 +178,9 @@ const PARENTHESIZED = /[(（][^)）]*[)）]/g
  * 所以读者不会同时看到「表 4」与「Table IV」
  */
 // 复合编号也算：`Table IV.1:` 的末尾 token 是 `IV.1`、`Theorem IV-A` 是 `IV-A`，首段是罗马数字就会被本地化
-// （2026-09-05 实测 google-gtx：`Table IV.1` → 表四.1；Codex 在 #53 指出）
-const ROMAN_ID = /^(?:[IVXLCDM]{2,}|[IVXLM])(?:[.\-–][A-Za-z0-9]+)*$/
+// （2026-09-05 实测 google-gtx：`Table IV.1` → 表四.1）。LaTeX 的 \roman 给出小写，同样会被本地化
+// （`Table iv:` → 表四：、`Theorem ii.3` → 定理二.3），所以不分大小写（Codex 在 #53 指出）
+const ROMAN_ID = /^(?:[IVXLCDM]{2,}|[IVXLM])(?:[.\-–][A-Za-z0-9]+)*$/i
 
 /**
  * 带环境名、且确实含词的 tag：`Definition 1.1` 要翻，子图面板的 `(a)` `(ii)` 不能翻。
