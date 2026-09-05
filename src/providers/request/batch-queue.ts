@@ -67,9 +67,9 @@ export interface BatchExecutionMeta {
    */
   scopes: readonly string[] | undefined
   /**
-   * 本项目新增（issue #43）：本批次首次派发的时刻。同一个 meta 会原样传给每次批级重试，
-   * 所以调用方可以据此给整批算一个不随重试重置的截止时刻——否则 4 次重试就是 4 份完整预算
-   * （Codex 在 #56 指出）
+   * 本项目新增（issue #43）：本批次**创建**（首条入队）的时刻，不是派发时刻——派发闸可以把
+   * 欠满的批次按住最多 MAX_BATCH_HOLD_MS，这段等待也要算进总时限。同一个 meta 会原样传给
+   * 每次批级重试与逐条兜底，调用方据此给整批算一个不随重试重置的截止时刻（Codex 在 #56 指出）
    */
   startedAt: number
 }
@@ -79,6 +79,11 @@ export interface BatchOptions<T, R> {
   maxItemsPerBatch: number
   batchDelay: number
   maxRetries?: number
+  /**
+   * 本项目新增（issue #43）：整批的总时限，与下游队列的 maxTotalMs 同一个数。批级重试的退避
+   * 也要受它约束——否则临近截止时仍会先睡 1–8 s 再入队，下游才发现已过期（Codex 在 #56 指出）
+   */
+  maxTotalMs?: number
   enableFallbackToIndividual?: boolean
   dispatchGate?: DispatchGate
   getBatchKey: (data: T) => string
@@ -105,6 +110,7 @@ export class BatchQueue<T, R> {
   private maxItemsPerBatch: number
   private batchDelay: number
   private maxRetries: number
+  private maxTotalMs?: number
   private enableFallbackToIndividual: boolean
   private dispatchGate?: DispatchGate
   private getBatchKey: (data: T) => string
@@ -124,6 +130,7 @@ export class BatchQueue<T, R> {
     this.maxItemsPerBatch = config.maxItemsPerBatch
     this.batchDelay = config.batchDelay
     this.maxRetries = config.maxRetries ?? 3
+    this.maxTotalMs = config.maxTotalMs
     this.enableFallbackToIndividual = config.enableFallbackToIndividual ?? true
     this.dispatchGate = config.dispatchGate
     this.getBatchKey = config.getBatchKey
@@ -354,7 +361,7 @@ export class BatchQueue<T, R> {
       }
       scopes.push(...task.cancelScopes)
     }
-    const meta: BatchExecutionMeta = { scopes: scopes ? [...new Set(scopes)] : undefined, startedAt: Date.now() }
+    const meta: BatchExecutionMeta = { scopes: scopes ? [...new Set(scopes)] : undefined, startedAt: pendingBatch.createdAt }
 
     void this.executeBatchWithRetry(tasks, batchKey, meta, 0)
   }
@@ -386,8 +393,10 @@ export class BatchQueue<T, R> {
       this.onError?.(err, { batchKey, retryCount, isFallback: false })
 
       // Only retry on count mismatch errors (LLM returned wrong number of results)
-      if (retryCount < this.maxRetries && err instanceof BatchCountMismatchError) {
-        const delay = this.calculateBackoffDelay(retryCount)
+      const delay = this.calculateBackoffDelay(retryCount)
+      // 退避之后还得有预算再试一次；没有就直接走逐条兜底（本项目新增，issue #43）
+      const withinBudget = this.maxTotalMs === undefined || Date.now() - meta.startedAt + delay < this.maxTotalMs
+      if (retryCount < this.maxRetries && err instanceof BatchCountMismatchError && withinBudget) {
         await this.sleep(delay)
         // During the backoff this batch lived in NO cancellable structure
         // (its RequestQueue task already completed, it left pendingBatchMap at

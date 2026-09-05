@@ -189,6 +189,9 @@ export class RequestQueue {
     if (retryPolicy) {
       this.retryPolicy = retryPolicy
     }
+    // 本项目新增（issue #43）：maxConcurrent / maxTotalMs 只约束**此后**的派发与判定；
+    // 在飞的尝试按当时的预算跑完。缩短预算时立刻重排一次，排队中已过期的马上回收（Codex 在 #56 指出）
+    this.schedule()
     // Clamp, never refill-to-full: a capacity edit must not grant a free
     // burst, and repeated identical calls (config sync) must be no-ops.
     this.bucketTokens = Math.min(this.bucketTokens, this.options.capacity)

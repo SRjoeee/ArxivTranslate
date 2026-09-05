@@ -286,3 +286,62 @@ describe('同步抛出的 thunk（Codex 在 #56 的第四轮）', () => {
     expect(await queue.enqueue(async () => 'b', Date.now(), 'b')).toBe('b')
   })
 })
+
+describe('期限从批次创建算起、退避受预算约束（Codex 在 #56 的第五轮）', () => {
+  it('派发闸按住的时间也算进总时限：meta.startedAt 是批次创建时刻，不是派发时刻', async () => {
+    vi.useFakeTimers()
+    const { BatchQueue } = await import('@/providers/request/batch-queue')
+    let eta = 5_000 // 先说「没空位」，让欠满的批次被按住
+    const seen: number[] = []
+    const batch = new BatchQueue<{ text: string }, string>({
+      maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 10, maxRetries: 0,
+      dispatchGate: { nextDispatchEtaMs: () => eta },
+      getBatchKey: () => 'k', getCharacters: i => i.text.length,
+      executeBatch: async (items, meta) => { seen.push(meta.startedAt); return items.map(i => `译:${i.text}`) },
+    })
+    const created = Date.now()
+    const result = batch.enqueue({ text: 'A' })
+    await vi.advanceTimersByTimeAsync(3_000) // 被按住 3 秒
+    eta = 0
+    await vi.advanceTimersByTimeAsync(1_500)
+    expect(await result).toBe('译:A')
+    // 修复前 startedAt 是派发时刻（≈ created + 3000），期限会把按住的 3 秒漏掉
+    expect(seen[0]! - created).toBeLessThan(100)
+    vi.useRealTimers()
+  })
+
+  it('临近截止时不再先睡退避再入队：直接走逐条兜底', async () => {
+    vi.useFakeTimers()
+    const { BatchQueue } = await import('@/providers/request/batch-queue')
+    let individual = 0
+    const batch = new BatchQueue<{ text: string }, string>({
+      maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 1, maxRetries: 3, maxTotalMs: 200,
+      enableFallbackToIndividual: true,
+      getBatchKey: () => 'k', getCharacters: i => i.text.length,
+      executeBatch: async () => [], // 条数对不上
+      executeIndividual: async item => { individual++; return `译:${item.text}` },
+    })
+    const result = batch.enqueue({ text: 'A' })
+    // 退避最少 1 秒，超出 200 ms 的预算；修复前这里要睡满再说
+    await vi.advanceTimersByTimeAsync(50)
+    expect(await result).toBe('译:A')
+    expect(individual).toBe(1)
+    vi.useRealTimers()
+  })
+
+  it('setQueueOptions 缩短总预算后立刻回收已过期的排队任务；在飞的按原预算跑完', async () => {
+    vi.useFakeTimers()
+    const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, timeoutMs: 10_000, maxRetries: 0, maxTotalMs: 60_000 }))
+    let released!: () => void
+    const head = queue.enqueue(() => new Promise<string>(r => { released = () => r('head') }), Date.now(), 'head')
+    const tail = queue.enqueue(async () => 'tail', Date.now(), 'tail')
+    const tailSettled = expect(tail).rejects.toThrow(/total budget/)
+    await vi.advanceTimersByTimeAsync(2_000)
+    queue.setQueueOptions({ maxTotalMs: 1_000 }) // 排队 2 秒的 tail 立刻超预算
+    await vi.advanceTimersByTimeAsync(10)
+    await tailSettled
+    released()
+    expect(await head).toBe('head') // 在飞的不受影响
+    vi.useRealTimers()
+  })
+})

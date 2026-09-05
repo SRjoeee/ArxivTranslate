@@ -19,7 +19,7 @@
 | `src/providers/google-web.ts` | `reference/read-frog/src/utils/host/translate/api/google.ts@9b44f82` | 2026-09-04 | 端点、API key 常量、请求体与响应解析照搬；改为一次请求多条（原版一条一请求）；去掉 preserveLineBreaks 的换行标记与 `entities` 依赖（我们送的是占位符标记文本，protector 已转义）；错误按本项目的 ProviderError 分类 |
 | `src/providers/request/retry-policy.ts` | `reference/read-frog/src/utils/request/retry-policy.ts@9b44f82` | 2026-09-03 | 整段移植；加文件头来源行，按本项目严格类型检查微调；由同目录的 `request-queue.ts` 驱动（2026-09-05 起；此前由已删除的 `src/providers/retry.ts` 驱动） |
 | `src/providers/request/request-queue.ts` | `reference/read-frog/src/utils/request/request-queue.ts@9b44f82` | 2026-09-05 | 整段移植（2026-09-05 二次修改：新增 `maxConcurrent` 与 `maxTotalMs` 两个可选项，默认值不改原行为，见 DESIGN §10 与 issue #43）：`deepmerge-ts` 换成对象展开、配置 schema 换成本目录 `config.ts`、UUID 换成 `src/shared/uuid.ts`、计时器类型改 `ReturnType<typeof setTimeout>`、超时错误加 `name` 便于服务层归类 |
-| `src/providers/request/batch-queue.ts` | `reference/read-frog/src/utils/request/batch-queue.ts@9b44f82` | 2026-09-05 | 整段移植：只改配置 schema 与 UUID 的 import、计时器类型 |
+| `src/providers/request/batch-queue.ts` | `reference/read-frog/src/utils/request/batch-queue.ts@9b44f82` | 2026-09-05 | 整段移植：只改配置 schema 与 UUID 的 import、计时器类型（2026-09-05 二次修改，issue #43：`BatchExecutionMeta` 增加 `startedAt`（批次创建时刻）、`executeIndividual` 同样接收 meta、新增可选 `maxTotalMs` 让批级退避受总时限约束） |
 | `src/providers/request/priority-queue.ts` | `reference/read-frog/src/utils/request/priority-queue.ts@9b44f82` | 2026-09-05 | 原样移植，仅加文件头 |
 | `src/providers/request/cancellation.ts` | `reference/read-frog/src/utils/request/cancellation.ts@9b44f82` | 2026-09-05 | 原样移植，仅加文件头 |
 | `src/shared/uuid.ts` | `reference/read-frog/src/utils/crypto-polyfill.ts@9b44f82` | 2026-09-05 | 原样移植，改名 |

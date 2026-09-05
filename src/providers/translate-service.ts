@@ -186,6 +186,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           maxItemsPerBatch: provider.maxBatchItems,
           batchDelay: deps.batch?.batchDelay ?? BATCH_DELAY_MS,
           maxRetries: deps.batch?.maxRetries ?? BATCH_MAX_RETRIES,
+          maxTotalMs,
           enableFallbackToIndividual: deps.batch?.enableFallbackToIndividual ?? true,
           // 派发闸：限流期间没有空位时批次继续攒到上限，而不是每 100ms 刷出一小批排在队里冻着
           dispatchGate: { nextDispatchEtaMs: () => requestQueue.nextDispatchEtaMs() },
