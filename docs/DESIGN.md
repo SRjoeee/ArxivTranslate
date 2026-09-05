@@ -288,17 +288,18 @@ interface ProtectedBlock {
 - `.ltx_para` 内非成对的子元素（行间公式、图表等）设 `grid-column: 1 / -1` 通栏
 - 标题、图表说明：降级为上下堆叠（它们的父级是整个 section，做不了 grid）
 - 表格：整表克隆置于下方（见 5.3）
-- **宽度契约** [决定，2026-09-05 重做；2026-09-04 版作废]：arXiv 的 body 是五列网格 `1fr nav article aside 1fr`（主题 `--nav-width: minmax(14rem, 25rem)`、文章 52rem 居中；第 4 列没有命名区域，只给 ar5iv 挂在文章右侧的边注 / 致谢 / 出版说明留位）。side 模式把三列的分配**一起**定，各列一个闭式 token（都是 `100vw` 的函数，依赖列宽的规则直接引用，不需要 JS 量轨道）：`--axt-nav-w: clamp(14rem, 20vw, 25rem)`（arXiv 原生范围）、`--axt-aside-w`（< 96rem 为 1rem——ar5iv 在那以下不显示边注，只折叠成 hover 弹出；≥ 96rem 为 `clamp(12rem, 16vw, 27rem)`）、`--axt-article-w: min(84rem, 100vw - nav - aside - 2rem)`（**两栏各 ≤ 40rem**，每行约 75 字符；旧版 96rem 让两栏各 756px、每行 95 字符，超出舒适阅读宽度）、`--axt-margin-w` 是两侧 `1fr` 平分的余量。ar5iv 的 `--main-width` / `--main-width-margin` 跟着文章列走。实测（Playwright，两篇论文一致）：
+- **宽度契约** [决定，2026-09-05 重做两次；2026-09-04 版作废]：arXiv 的 body 是五列网格 `1fr nav article aside 1fr`（主题 `--nav-width: minmax(14rem, 25rem)`、文章 52rem 居中；第 4 列没有命名区域，只给 ar5iv 挂在文章右侧的边注 / 致谢 / 出版说明留位）。side 模式把三列的分配**一起**定，原则是**主内容优先、两侧对称**：`--axt-article-w: clamp(58rem, 62vw, 84rem)`（下限保证两栏各 ≥ 28rem，上限让两栏各 ≤ 40rem、每行约 75 字符）；剩余空间**左右均分**给目录与右侧沟槽，同一个 token `--axt-side-w: clamp(8rem, (100vw - article) / 2, 25rem)`，文章因此始终居中，窗口越宽两侧越展开，封顶 25rem（arXiv 目录的上限）后多余的落到两侧 `1fr` 页边距（`--axt-margin-w`）。三个 token 都是 `100vw` 的闭式函数，依赖列宽的规则直接引用、不需要 JS 量轨道；ar5iv 的 `--main-width` / `--main-width-margin` 跟着文章列走。实测（Playwright，两篇论文一致）：
 
-  | 视口 | 导航 | 文章（每栏） | 右侧 | 旧版 导航 / 每栏 / 右侧 |
-  |---|---|---|---|---|
-  | 1280 | 256 | 976（460） | 16 | 176 / 420 / 176 |
-  | 1440 | 288 | 1104（524） | 16 | 176 / 500 / 176 |
-  | 1600 | 320 | 992（468） | 256 | 176 / 580 / 176 |
-  | 2000 | 400 | 1248（596） | 320 | 176 / 756 / 176 |
-  | 2560 | 400 | 1344（644） | 410 | 176 / 756 / 176 |
+  | 视口 | 两侧各 | 文章（每栏） | 旧版 导航 / 每栏 / 右侧 |
+  |---|---|---|---|
+  | 1280 | 176 | 928（436） | 176 / 420 / 176 |
+  | 1333 | 203 | 928（436） | 176 / 434 / 176 |
+  | 1440 | 256 | 928（436） | 176 / 500 / 176 |
+  | 1536 | 292 | 952（448） | 176 / 580 / 176 |
+  | 2000 | 380 | 1240（592） | 176 / 756 / 176 |
+  | 2560 | 400（页边距 208） | 1344（644） | 176 / 756 / 176 |
 
-  旧版只把导航压到 `minmax(8rem, 12rem)`、文章拿 96rem：导航 176px（TOC 条目三行折行）、右侧 176px（致谢块被压成窄条）。**右侧沟槽的几何必须跟 token 走**：ar5iv 的四组规则（`.ltx_note_outer` 按 96 / 109rem 写死 20 / 27rem 两档并用负 `margin-inline-end` 推出文章、`.ltx_pubnotes_content` 与 `.ltx_role_thanks` 的 `min(27rem, (100vw - main) / 2 - 2rem)`、作者区末位单位块的 `inset = (100dvw - main) / 2`）都假设文章居中、两侧沟槽等宽；side 模式两侧不等宽，只放宽导航不管右侧会把它们推出视口。这些规则在 `@media (width >= 96rem)` 里按 `--axt-aside-w` / `--axt-margin-w` 重写，盒子一律占 `[文章右缘 + 1rem, 文章右缘 + aside - 1rem]`，显隐与 hover / focus 交互原样不动。还没翻译的段落里脚注原件从**左栏**起浮，要再多推一栏加一个栏距（栏宽 = (文章列 − 主题给 `.ltx_page_content` 的 1rem 左右外边距 − 栏距) / 2；`--axt-gap` 因此改用 rem，em 会在脚注的 .85rem 字号里被重新解释），译文到达后副本从右栏起浮、原件隐藏，两种状态实测同落在沟槽里（2312.17141，2000px：1680–1968 / 1664–1952）。只覆盖 `--main-width` 不动轨道会横向溢出（隐藏导航栏不会收掉它的轨道，实测 1500px 视口溢出 388px），把轨道归零又会让 TOC 消失，两者都不可取
+  **两次走错的路**：(1) 导航压到 `minmax(8rem, 12rem)`、文章拿 96rem——导航 176px（TOC 条目三行折行）、两栏各 756px（每行 95 字符，超出舒适阅读宽度）、右侧 176px（致谢块被压成窄条）；(2) 按视口给导航 14–25rem、右侧只在 ≥ 96rem 留位——1333px 的窗口里导航 267、右侧 16，整篇被推到右边、没有留白（用户打回："主内容始终要在屏幕中央得到最优的阅读体验，空间够了再用两侧显示目录和脚注"）。**右侧沟槽的几何必须跟 token 走**：ar5iv 的四组规则（`.ltx_note_outer` 按 96 / 109rem 写死 20 / 27rem 两档并用负 `margin-inline-end` 推出文章、`.ltx_pubnotes_content` 与 `.ltx_role_thanks` 的 `min(27rem, (100vw - main) / 2 - 2rem)`、作者区末位单位块的 `inset = (100dvw - main) / 2`）是给 52rem 文章配的，我们的沟槽在 1600px 只有 19rem，照写会溢出视口。这些规则在 `@media (width >= 96rem)` 里按 `--axt-side-w` / `--axt-margin-w` 重写，盒子一律占 `[文章右缘 + 1rem, 文章右缘 + side - 1rem]`，显隐与 hover / focus 交互原样不动；96rem 以下 ar5iv 本来就不显示边注（折叠成 hover 弹出），沟槽只是对称的留白。还没翻译的段落里脚注原件从**左栏**起浮，要再多推一栏加一个栏距（栏宽 = (文章列 − 主题给 `.ltx_page_content` 的 1rem 左右外边距 − 栏距) / 2；`--axt-gap` 因此改用 rem，em 会在脚注的 .85rem 字号里被重新解释），译文到达后副本从右栏起浮、原件隐藏，两种状态实测同落在沟槽里。只覆盖 `--main-width` 不动轨道会横向溢出（隐藏导航栏不会收掉它的轨道，实测 1500px 视口溢出 388px），把轨道归零又会让 TOC 消失，两者都不可取
 - 用 `matchMedia('(max-width: 1279px)')` 监听（与 arXiv 主题折叠导航栏的 1280px 断点对齐）：变窄自动切到 stack，变宽切回 side；用户手动选的模式记为偏好，自动降级不覆盖偏好。实现见 `src/core/renderer/responsive.ts` 的 `createModeController`，popup 显示偏好、状态里同时带实际生效的模式
 
 ### 7.3 stack（上下对照）
@@ -460,7 +461,7 @@ export interface TranslateResult {
 | 占位符 | Vitest | 序列化 → 假译文 → 回填，往返后受保护节点等价；校验器对各类破坏（丢 id、多 id、嵌套错）都能识别 |
 | 渲染 | Vitest + happy-dom | 翻译 → 切换三模式 → 恢复，恢复后 DOM 与原始逐节点相等 |
 | provider | Vitest（mock fetch）| 请求拼装与响应解析；免费接口另有可选的 live 测试，默认跳过 |
-| 端到端 | Playwright（`pnpm e2e`，`tests/e2e/extension.mjs`，2026-09-05 起） | 起一个装着 `.output/chrome-mv3` 的 Chromium（`channel: 'chromium'` 的新 headless 支持扩展），驱动设置页与 popup、读控制台与网络：google-web 整篇翻完与速率、刷新命中缓存、翻译中途恢复原文（译文与 `data-axt-*` 全清、不再发请求）、错 key 的 auth 排空整队。不碰用户浏览器与 key，LLM 只测错 key 不花钱。layout 类断言待补（清理期第 4 项） |
+| 端到端 | Playwright（`pnpm e2e`，`tests/e2e/extension.mjs`，2026-09-05 起） | 起一个装着 `.output/chrome-mv3` 的 Chromium（`channel: 'chromium'` 的新 headless 支持扩展），驱动设置页与 popup、读控制台与网络：google-web 整篇翻完与速率、刷新命中缓存、翻译中途恢复原文（译文与 `data-axt-*` 全清、不再发请求）、错 key 的 auth 排空整队。不碰用户浏览器与 key，LLM 只测错 key 不花钱。**布局断言**在 `tests/e2e/layout.mjs`（`pnpm e2e:layout`，2026-09-05 起）：side 模式在 1440 / 2000px 下不横向溢出、导航 ≥ 14rem、两栏等宽且 ≤ 40rem、右侧沟槽元素落在文章右缘与视口之间、只含公式的列表项与兄弟项标记对齐、单列 flex 图里的表格与脚注左右配对、多面板 flex 图仍并排且无镜像、正文脚注副本落在沟槽里 |
 | 手动清单 | 用户在自己的 Chrome | 走真实 key 的 LLM 路径；锚点跳转、脚注弹出、公式渲染、Ctrl+F、打印 |
 
 fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取，覆盖多领域与多结构，含一篇转换失败页；全部为 oxide 0.7.6）。规则测试用 happy-dom 解析，1.8 MB 页面约 0.6 s，可直接跑全量 fixture。

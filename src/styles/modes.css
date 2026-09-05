@@ -272,59 +272,57 @@ html[data-axt-mode="only"] [data-axt-split] {
 /* ── 宽度契约（§7.2 [决定]，2026-09-05 重做）────────────────────────────
    arXiv 的 body 是五列网格 `1fr nav article aside 1fr`（主题里 `--nav-width: minmax(14rem, 25rem)`、
    文章 52rem 居中，第 4 列没有命名区域，只给 ar5iv 挂在文章右侧的边注 / 致谢 / 出版说明留位）。
-   side 模式要把文章列拉宽成两栏，三列的分配必须一起定：早先只把导航压到 12rem、文章拿 96rem，
-   导航 176px（TOC 三行折行）、两栏各 756px（每行 95 字符，超出舒适阅读宽度）、右侧 176px（致谢块被压成窄条）。
-   现在三列各有一个**闭式** token（都是 100vw 的函数）：任何依赖列宽的规则直接引用，不需要 JS 去量轨道。
-   - 导航：arXiv 原生范围 14–25rem，按视口线性取值
-   - 文章：上限 84rem（两栏各 ≤ 40rem，每行约 75 字符），下限由视口决定，1280px 时仍有 476px/栏
-   - 右侧：ar5iv 在 96rem 以下不显示边注（折叠成 hover 弹出），只留 1rem 呼吸位；96rem 起 12–27rem
-   - 两侧 1fr 平分剩余，整体仍居中；`--axt-margin-w` 就是那个余量，给绝对定位的元素换算用
-   ar5iv 的 --main-width 与 --main-width-margin 跟着文章列走：.ltx_document / 页脚 / 绝对定位的脚注都参照它们 */
+   side 模式要把文章列拉宽成两栏，三列的分配必须一起定，原则是**主内容优先、两侧对称**：
+   - 文章列先定：clamp(58rem, 62vw, 84rem)——下限保证两栏各 ≥ 28rem，上限让两栏各 ≤ 40rem（每行约 75 字符）
+   - 剩余空间左右**均分**给目录与右侧沟槽，同一个 token，文章因此始终居中；窗口越宽两侧越展开，
+     封顶 25rem（arXiv 目录的上限），再宽的部分落到两侧 1fr 的页边距
+   - 右侧沟槽在 ar5iv 显示边注的宽度（≥ 96rem）下至少 20rem，边注、致谢、出版说明都装得下
+   早先两版都错：第一版把导航压到 12rem、文章拿 96rem（导航 176px 三行折行，两栏各 756px 每行 95 字符，右侧 176px 把致谢块压成窄条）；
+   第二版按视口给导航 14–25rem、右侧只在 ≥ 96rem 留位，结果 1333px 的窗口里导航 267、右侧 16，整篇被推到右边、没有留白（用户打回）。
+   三个 token 都是 100vw 的闭式函数：依赖列宽的规则直接引用，不需要 JS 去量轨道。
+   ar5iv 的 --main-width / --main-width-margin 跟着文章列走：.ltx_document / 页脚 / 绝对定位的脚注都参照它们 */
 html[data-axt-mode="side"] {
-  --axt-nav-w: clamp(14rem, 20vw, 25rem);
-  --axt-aside-w: 1rem;
-  --axt-article-w: min(84rem, calc(100vw - var(--axt-nav-w) - var(--axt-aside-w) - 2rem));
-  --axt-margin-w: max(0px, calc((100vw - var(--axt-nav-w) - var(--axt-article-w) - var(--axt-aside-w)) / 2));
+  --axt-article-w: clamp(58rem, 62vw, 84rem);
+  --axt-side-w: clamp(8rem, calc((100vw - var(--axt-article-w)) / 2), 25rem);
+  --axt-margin-w: max(0px, calc((100vw - var(--axt-article-w)) / 2 - var(--axt-side-w)));
   --main-width: var(--axt-article-w);
   --main-width-margin: calc(var(--axt-article-w) + 1rem);
 }
 html[data-axt-mode="side"] body {
-  grid-template-columns: 1fr var(--axt-nav-w) var(--axt-article-w) var(--axt-aside-w) 1fr;
+  grid-template-columns: 1fr var(--axt-side-w) var(--axt-article-w) var(--axt-side-w) 1fr;
 }
 
-/* 右侧沟槽（≥ 96rem，与 ar5iv 显示边注的断点一致）：ar5iv 的四组规则都用 (100vw - --main-width) / 2 当沟槽宽，
-   假设文章居中、两侧等宽；side 模式两侧不等宽（导航 14–25rem、右侧 12–27rem），这些几何改成跟 --axt-aside-w 走，
-   显隐与 hover / focus 交互原样不动。盒子一律占 [文章右缘 + 1rem, 文章右缘 + aside - 1rem]。 */
+/* 右侧沟槽（≥ 96rem，与 ar5iv 显示边注的断点一致）：ar5iv 的四组规则都用 (100vw - --main-width) / 2 当沟槽宽、
+   边注宽度按 96 / 109rem 写死 20 / 27rem——那是给 52rem 文章配的，我们的沟槽在 1600px 只有 19rem，照写会溢出视口。
+   这些几何改成跟 --axt-side-w 走，显隐与 hover / focus 交互原样不动。盒子一律占 [文章右缘 + 1rem, 文章右缘 + side - 1rem]。
+   96rem 以下 ar5iv 本来就不显示边注（折叠成 hover 弹出），沟槽只是对称的留白。 */
 @media (width >= 96rem) {
-  html[data-axt-mode="side"] {
-    --axt-aside-w: clamp(12rem, 16vw, 27rem);
-  }
   /* 边注：float: inline-end + 负的 margin-inline-end 推到文章外（ar5iv 按 96 / 109rem 写死 20 / 27rem 两档） */
   html[data-axt-mode="side"] .ltx_note_outer {
     box-sizing: border-box;
-    width: calc(var(--axt-aside-w) - 2rem);
-    margin-inline-end: calc(1rem - var(--axt-aside-w));
+    width: calc(var(--axt-side-w) - 2rem);
+    margin-inline-end: calc(1rem - var(--axt-side-w));
     padding-inline-end: 1rem;
   }
   /* 还没翻译的段落里，脚注原件从**左栏**起浮：再多推一栏加一个间距，否则它会横在右栏等译文的位置上
      （译文到达后原件被 localizeNotes 标记隐藏、副本从右栏起浮，用上面的基本偏移） */
   html[data-axt-mode="side"] [data-axt-id]:not(.axt-t) .ltx_note_outer {
     /* 栏宽 = (文章列 - 主题给 .ltx_page_content 的 1rem 左右外边距 - 栏距) / 2 */
-    margin-inline-end: calc(1rem - var(--axt-aside-w) - (var(--axt-article-w) - 2rem - var(--axt-gap)) / 2 - var(--axt-gap));
+    margin-inline-end: calc(1rem - var(--axt-side-w) - (var(--axt-article-w) - 2rem - var(--axt-gap)) / 2 - var(--axt-gap));
   }
   /* 出版说明（float）与致谢（absolute，参照文章盒子的右缘） */
   html[data-axt-mode="side"] .ltx_pubnotes.ltx_pubnotes_meta .ltx_pubnotes_content {
-    width: calc(var(--axt-aside-w) - 2rem);
-    margin-inline-end: calc(1rem - var(--axt-aside-w));
+    width: calc(var(--axt-side-w) - 2rem);
+    margin-inline-end: calc(1rem - var(--axt-side-w));
   }
   html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter.ltx_role_thanks {
-    width: calc(var(--axt-aside-w) - 2rem);
-    inset-inline-end: calc(1rem - var(--axt-aside-w));
+    width: calc(var(--axt-side-w) - 2rem);
+    inset-inline-end: calc(1rem - var(--axt-side-w));
   }
   /* 作者区末位的单位 / 地址块：ar5iv 用 absolute 把它铺到文章正下方居中（inset = (100dvw - main) / 2） */
   html[data-axt-mode="side"] .ltx_authors > :last-child:is(.ltx_role_affiliation, .ltx_role_address) {
     width: var(--axt-article-w);
-    inset-inline-start: calc(var(--axt-margin-w) + var(--axt-nav-w));
+    inset-inline-start: calc(var(--axt-margin-w) + var(--axt-side-w));
   }
 }
 
