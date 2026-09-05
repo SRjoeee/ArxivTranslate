@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createChromeBuiltinProvider, normalizeSpacing, type TranslatorApi, type TranslatorSession } from '@/providers/chrome-builtin'
+import { BUILTIN_MAX_ITEMS, createChromeBuiltinProvider, normalizeSpacing, type TranslatorApi, type TranslatorSession } from '@/providers/chrome-builtin'
 import { ProviderError, type TranslateRequest } from '@/providers/types'
 
 /** 假的 Translator 全局：happy-dom 里没有这个 API，行为照 RESEARCH §6 的实测 */
@@ -125,15 +125,38 @@ describe('createChromeBuiltinProvider', () => {
     await expect(createChromeBuiltinProvider('cmn', { translator: api }).translate(req(['x']))).rejects.toMatchObject({ kind: 'aborted' })
   })
 
-  it('signal 透传给会话与逐条翻译', async () => {
+  it('signal 只传给逐条翻译，不传给会话创建：一批超时不能把共用会话拒掉（Codex 在 #50 指出）', async () => {
     const controller = new AbortController()
     const seen: unknown[] = []
     const api: TranslatorApi = {
       availability: async () => 'available',
-      create: async (opts) => { seen.push(opts.signal); return { translate: async (_i, o) => { seen.push(o?.signal); return 'x' } } },
+      create: async (opts) => { seen.push(['create', opts.signal]); return { translate: async (_i, o) => { seen.push(['translate', o?.signal]); return 'x' } } },
     }
     await createChromeBuiltinProvider('cmn', { translator: api }).translate(req(['a'], controller.signal))
-    expect(seen).toEqual([controller.signal, controller.signal])
+    expect(seen).toEqual([['create', undefined], ['translate', controller.signal]])
+  })
+
+  it('按自己声明的上限分批：降级过来的大批次不能一口气压垮本地模型（Codex 在 #50 指出）', async () => {
+    let peak = 0
+    let running = 0
+    const api: TranslatorApi = {
+      availability: async () => 'available',
+      create: async () => ({
+        translate: async (input: string) => {
+          running++
+          peak = Math.max(peak, running)
+          await new Promise(r => setTimeout(r, 1))
+          running--
+          return `[${input}]`
+        },
+      }),
+    }
+    // 首选是 google-web 时批次可达 100 条，降级链会把同一个调用原样转过来
+    const many = Array.from({ length: 100 }, (_, i) => `s${i}`)
+    const result = await createChromeBuiltinProvider('cmn', { translator: api }).translate(req(many))
+    expect(result.segments).toHaveLength(100)
+    expect(result.segments[99]?.text).toBe('[s99]')
+    expect(peak).toBeLessThanOrEqual(BUILTIN_MAX_ITEMS)
   })
 
   it('归一化中日韩标点后的多余空格（RESEARCH §6.2 实测的「。 」）', () => {
