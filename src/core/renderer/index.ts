@@ -6,6 +6,7 @@ import { T_CLASS } from '@/core/marks'
 import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
 import modesCss from '@/styles/modes.css?inline'
 import { delocalizeNotes } from './notes'
+import { cancelSpinnersIn } from './spinner'
 
 export type Mode = 'stack' | 'side' | 'only'
 export type BlockState = 'pending' | 'translated' | 'failed'
@@ -69,7 +70,11 @@ export function clearTranslation(block: Block): void {
   const parent = block.el.parentElement
   if (!parent) return
   for (const sibling of Array.from(parent.children)) {
-    if (sibling.classList.contains(T_CLASS) && sibling.getAttribute(FOR_ATTR) === block.id) sibling.remove()
+    if (sibling.classList.contains(T_CLASS) && sibling.getAttribute(FOR_ATTR) === block.id) {
+      // pending 节点里有圆环：先取消动画再删（§7.6）
+      cancelSpinnersIn(sibling)
+      sibling.remove()
+    }
   }
 }
 
@@ -89,12 +94,13 @@ function stripCloned(root: Element, includeRoot: boolean): void {
 }
 
 /** 译文节点的 class：原块的 class 加 axt-t，沿用站点样式（§7.1） */
-function translationClass(el: Element): string {
+export function translationClass(el: Element): string {
   const own = Array.from(el.classList).filter(c => c !== T_CLASS)
   return [...own, T_CLASS].join(' ')
 }
 
-function shouldInline(block: TextBlock): boolean {
+/** 短标题与译文同行（§7.3）：pending 节点也按此放，译文到达时版式不跳 */
+export function shouldInline(block: TextBlock): boolean {
   return isInlineTitleCandidate(block.el) && visibleText(block.el).trim().length <= INLINE_TITLE_MAX_CHARS
 }
 
@@ -146,6 +152,7 @@ export function restore(doc: Document): { removedNodes: number; strippedAttrs: n
   let removedNodes = 0
   let strippedAttrs = 0
   for (const node of Array.from(doc.querySelectorAll(`.${T_CLASS}`))) {
+    cancelSpinnersIn(node)
     node.remove()
     removedNodes++
   }
@@ -169,3 +176,5 @@ export * from './pair-margins'
 export * from './notes'
 export * from './split-figures'
 export * from './responsive'
+export * from './spinner'
+export * from './pending'
