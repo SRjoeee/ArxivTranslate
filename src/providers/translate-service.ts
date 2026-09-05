@@ -172,7 +172,9 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     if (existing) return existing
     const rate = provider.rateLimit?.rate ?? deps.queue?.rate ?? DEFAULT_RATE_LIMIT.rate
     const capacity = provider.rateLimit?.capacity ?? deps.queue?.capacity ?? DEFAULT_RATE_LIMIT.capacity
-    const requestQueue = new RequestQueue({ ...DEFAULT_QUEUE_OPTIONS, ...deps.queue, rate, capacity })
+    const queueOptions = { ...DEFAULT_QUEUE_OPTIONS, ...deps.queue, rate, capacity }
+    const maxTotalMs = queueOptions.maxTotalMs
+    const requestQueue = new RequestQueue(queueOptions)
     const batchQueue = provider.kind === 'llm'
       ? new BatchQueue<QueueItem, string>({
           maxCharactersPerBatch: provider.maxBatchChars,
@@ -192,7 +194,9 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
             const chars = items.reduce((n, item) => n + item.text.length, 0)
             const hash = items.map(item => item.dedupKey ?? item.uid).join('|')
             const scheduleAt = Math.min(...items.map(item => item.scheduleAt))
-            return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars) })
+            // 期限按**整批**算：批级重试会带着同一个 meta 再来一次，不给它一份新预算
+            const deadlineAt = maxTotalMs === undefined ? undefined : meta.startedAt + maxTotalMs
+            return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt })
           },
           executeIndividual: item => requestQueue.enqueue(
             async signal => (await translateItems([item], [item.id], signal))[0]!,

@@ -45,6 +45,11 @@ export interface RequestTask {
 type QueuedRequestTask = RequestTask & {
   /** 本项目新增：入队时刻，用于 maxTotalMs 的总时限判断（issue #43） */
   enqueuedAt: number
+  /**
+   * 本项目新增（issue #43）：调用方给定的绝对截止时刻，优先于 `enqueuedAt + maxTotalMs`。
+   * 批级重试会为同一批文本反复入队，用它把整批的期限带过去，重试才不会各拿一份完整预算
+   */
+  deadlineAt?: number
   hash: string
   abortController?: AbortController
   // Cancellation scopes subscribed to this task. Dedup can attach several
@@ -80,6 +85,12 @@ export class RequestQueue {
   private waitingQueue: BinaryHeapPQ<QueuedRequestTask>
   private waitingTasks = new Map<string, QueuedRequestTask>()
   private executingTasks = new Map<string, QueuedRequestTask>()
+  /**
+   * 本项目新增（issue #43）：真正在跑的 thunk 数。不能直接数 executingTasks——`cancelWhere` 取消时
+   * 立刻把任务摘出去，而 abort 是协作式的，thunk 可能还在占着连接；照 map 的大小放行会让并发超上限
+   * （Codex 在 #56 指出）
+   */
+  private activeExecutions = 0
   private nextScheduleTimer: ReturnType<typeof setTimeout> | null = null
   private retryPolicy: RequestRetryPolicy
 
@@ -96,6 +107,12 @@ export class RequestQueue {
   private consecutiveRateLimits = 0
 
   constructor(private options: QueueOptions) {
+    // 构造时也校验：setQueueOptions 走的是同一张 schema，两条入口不能只守一边
+    const { retryPolicy: _policy, ...validated } = options
+    const parsed = requestQueueConfigSchema.safeParse(validated)
+    if (parsed.error) {
+      throw new Error(parsed.error.issues[0]!.message)
+    }
     this.retryPolicy = options.retryPolicy ?? defaultRequestRetryPolicy
     this.bucketTokens = options.capacity
     this.lastRefill = Date.now()
@@ -107,7 +124,7 @@ export class RequestQueue {
     scheduleAt: number,
     hash: string,
     scopes?: readonly string[],
-    taskOptions?: { timeoutMs?: number },
+    taskOptions?: { timeoutMs?: number; deadlineAt?: number },
   ): Promise<T> {
     const duplicateTask = this.duplicateTask(hash)
     if (duplicateTask) {
@@ -141,6 +158,7 @@ export class RequestQueue {
       rateLimitRetryCount: 0,
       drained: false,
       timeoutMs: taskOptions?.timeoutMs,
+      deadlineAt: taskOptions?.deadlineAt,
       cancelScopes: scopes?.length ? new Set(scopes) : null,
     }
 
@@ -245,7 +263,7 @@ export class RequestQueue {
 
   /** 在飞数已达 maxConcurrent：此刻不能再起新请求，且没有可算的等待时长（本项目新增，issue #43） */
   private isSaturated(): boolean {
-    return this.executingTasks.size >= (this.options.maxConcurrent ?? Number.POSITIVE_INFINITY)
+    return this.activeExecutions >= (this.options.maxConcurrent ?? Number.POSITIVE_INFINITY)
   }
 
   /**
@@ -254,6 +272,7 @@ export class RequestQueue {
    */
   private remainingBudgetMs(task: QueuedRequestTask, now: number): number {
     const budget = this.options.maxTotalMs
+    if (task.deadlineAt !== undefined) return task.deadlineAt - now
     if (budget === undefined) return Number.POSITIVE_INFINITY
     return task.enqueuedAt + budget - now
   }
@@ -299,6 +318,7 @@ export class RequestQueue {
         }
         this.executingTasks.set(task.hash, task)
         this.bucketTokens--
+        this.activeExecutions++
         void this.executeTask(task)
       } else {
         break
@@ -322,6 +342,26 @@ export class RequestQueue {
         this.armScheduleTimer(delay)
       }
     }
+  }
+
+  /**
+   * 一个限流暂停窗口的记账：暂停到点、连续窗口计数、恢复后的单探针。
+   * 抽出来是因为超预算的任务也要记（本项目新增，issue #43）
+   */
+  private applyRateLimitPause(pauseMs: number, now: number) {
+    // Count one pause per pause WINDOW, not per failing sibling — with
+    // capacity>1 several in-flight attempts can all 429 within milliseconds;
+    // only the first (arriving un-paused) increments the consecutive counter,
+    // the rest just extend the pause.
+    if (now >= this.pausedUntil) {
+      this.consecutiveRateLimits++
+    }
+    this.pausedUntil = Math.max(this.pausedUntil, now + pauseMs)
+    // Post-pause probe: resume with at most one token so recovery sends a
+    // single request first instead of bursting `capacity` requests at a
+    // provider that may still be limited.
+    this.bucketTokens = Math.min(this.bucketTokens, 1)
+    this.lastRefill = now
   }
 
   private clearScheduleTimer() {
@@ -415,6 +455,9 @@ export class RequestQueue {
           ? Math.max(decision.pauseMs, this.pausedUntil - now)
           : 0
       if (decision.action !== "fail" && remainingMs - nextDelayMs <= 0) {
+        // 这一条到点了，但队列层面的限流冷却照记：否则 finally 里的 schedule() 会立刻把余下的
+        // 积压全推向一个刚刚喊过 429 的端点（Codex 在 #56 指出）
+        if (decision.action === "pause-and-retry") this.applyRateLimitPause(decision.pauseMs, now)
         // 上报最后一次的真实错误（限流 / 网络）而不是「超预算」：降级链据此判断要不要换引擎
         task.reject(error)
       } else if (decision.action === "retry") {
@@ -435,15 +478,7 @@ export class RequestQueue {
         // failing sibling — with capacity>1 several in-flight attempts can all
         // 429 within milliseconds; only the first (arriving un-paused)
         // increments the consecutive counter, the rest just extend the pause.
-        if (now >= this.pausedUntil) {
-          this.consecutiveRateLimits++
-        }
-        this.pausedUntil = Math.max(this.pausedUntil, now + decision.pauseMs)
-        // Post-pause probe: resume with at most one token so recovery sends a
-        // single request first instead of bursting `capacity` requests at a
-        // provider that may still be limited.
-        this.bucketTokens = Math.min(this.bucketTokens, 1)
-        this.lastRefill = now
+        this.applyRateLimitPause(decision.pauseMs, now)
         task.rateLimitRetryCount++
         task.scheduleAt = this.pausedUntil
         this.waitingTasks.set(task.hash, task)
@@ -471,6 +506,7 @@ export class RequestQueue {
       if (this.executingTasks.get(task.hash) === task) {
         this.executingTasks.delete(task.hash)
       }
+      this.activeExecutions--
       this.schedule()
     }
   }

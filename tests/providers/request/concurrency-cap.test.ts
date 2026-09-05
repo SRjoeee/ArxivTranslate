@@ -143,3 +143,71 @@ describe('总时限真的兜住了时长（Codex 在 #56 指出）', () => {
     vi.useRealTimers()
   })
 })
+
+describe('期限与并发的边界（Codex 在 #56 的第二轮）', () => {
+  it('deadlineAt 覆盖「入队时刻 + 预算」：批级重试再入队也不会重新拿一份预算', async () => {
+    vi.useFakeTimers()
+    const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxRetries: 0, timeoutMs: 60_000, maxTotalMs: 60_000 }))
+    // 这批 500 毫秒前就开跑了，期限只剩 500 毫秒——不是一入队重算 60 秒
+    const task = queue.enqueue(() => new Promise<string>(() => undefined), Date.now(), 'x', undefined, { deadlineAt: Date.now() + 500 })
+    const settled = expect(task).rejects.toThrow(/timed out after 500ms/)
+    await vi.advanceTimersByTimeAsync(600)
+    await settled
+    vi.useRealTimers()
+  })
+
+  it('攒批的 meta 带着首次派发时刻，批级重试拿到的是同一个值', async () => {
+    const { BatchQueue } = await import('@/providers/request/batch-queue')
+    const seen: number[] = []
+    let attempt = 0
+    const batch = new BatchQueue<{ text: string }, string>({
+      maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 1, maxRetries: 1,
+      getBatchKey: () => 'k', getCharacters: i => i.text.length,
+      executeBatch: async (items, meta) => {
+        seen.push(meta.startedAt)
+        // 第一次少返一条，逼出批级重试
+        return attempt++ === 0 ? [] : items.map(i => `译:${i.text}`)
+      },
+    })
+    expect(await batch.enqueue({ text: 'A' })).toBe('译:A')
+    expect(seen).toHaveLength(2)
+    expect(seen[0]).toBe(seen[1])
+  })
+
+  it('超预算的 429 仍然给队列记上冷却：不能让积压立刻再撞上去', async () => {
+    vi.useFakeTimers()
+    const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxRetries: 5, maxTotalMs: 1_000 }))
+    const limited = async () => { throw attachRequestErrorMeta(new Error('429 Too Many Requests'), { statusCode: 429, retryAfterMs: 300_000 }) }
+    const expired = queue.enqueue(limited, Date.now(), 'a')
+    const settled = expect(expired).rejects.toThrow('429')
+    await vi.advanceTimersByTimeAsync(50)
+    await settled
+    // 冷却已记账：下一批的派发预估不为零
+    expect(queue.nextDispatchEtaMs()).toBeGreaterThan(0)
+    vi.useRealTimers()
+  })
+
+  it('取消后还没结束的尝试仍占并发额度：不能一边取消一边把上限冲破', async () => {
+    vi.useFakeTimers()
+    const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1 }))
+    let started = 0
+    // 无视 signal 的 thunk：取消只是把它从表里摘掉，连接还占着
+    const stubborn = () => { started++; return new Promise<string>(() => undefined) }
+    queue.enqueue(stubborn, Date.now(), 'a', ['s1']).catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(started).toBe(1)
+    queue.cancelByScope('s1')
+    queue.enqueue(stubborn, Date.now(), 'b', ['s2']).catch(() => undefined)
+    await vi.advanceTimersByTimeAsync(50)
+    expect(started).toBe(1)
+    vi.useRealTimers()
+  })
+
+  it('并发上限必须是正整数：0 / 负数 / NaN 会让队列永远派不出任务', () => {
+    expect(() => new RequestQueue(opts({ maxConcurrent: 0 }))).toThrow()
+    expect(() => new RequestQueue(opts({ maxConcurrent: -1 }))).toThrow()
+    expect(() => new RequestQueue(opts({ maxConcurrent: Number.NaN }))).toThrow()
+    expect(() => new RequestQueue(opts({ maxTotalMs: 0 }))).toThrow()
+    expect(() => new RequestQueue(opts({ maxConcurrent: 8, maxTotalMs: 1000 }))).not.toThrow()
+  })
+})

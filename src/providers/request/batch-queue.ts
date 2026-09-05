@@ -66,6 +66,12 @@ export interface BatchExecutionMeta {
    * downstream RequestQueue so cancelling the scopes aborts the whole batch.
    */
   scopes: readonly string[] | undefined
+  /**
+   * 本项目新增（issue #43）：本批次首次派发的时刻。同一个 meta 会原样传给每次批级重试，
+   * 所以调用方可以据此给整批算一个不随重试重置的截止时刻——否则 4 次重试就是 4 份完整预算
+   * （Codex 在 #56 指出）
+   */
+  startedAt: number
 }
 
 export interface BatchOptions<T, R> {
@@ -347,7 +353,7 @@ export class BatchQueue<T, R> {
       }
       scopes.push(...task.cancelScopes)
     }
-    const meta: BatchExecutionMeta = { scopes: scopes ? [...new Set(scopes)] : undefined }
+    const meta: BatchExecutionMeta = { scopes: scopes ? [...new Set(scopes)] : undefined, startedAt: Date.now() }
 
     void this.executeBatchWithRetry(tasks, batchKey, meta, 0)
   }
