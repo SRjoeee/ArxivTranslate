@@ -345,3 +345,24 @@ describe('期限从批次创建算起、退避受预算约束（Codex 在 #56 �
     vi.useRealTimers()
   })
 })
+
+describe('门闸按住的批次到期就放行（Codex 在 #56 的第六轮）', () => {
+  it('maxTotalMs 短于持批上限时，期限一到就派发，不再等 60 秒', async () => {
+    vi.useFakeTimers()
+    const { BatchQueue } = await import('@/providers/request/batch-queue')
+    let executed = 0
+    const batch = new BatchQueue<{ text: string }, string>({
+      maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 10, maxRetries: 0, maxTotalMs: 200,
+      dispatchGate: { nextDispatchEtaMs: () => 5_000 }, // 一直说没空位
+      getBatchKey: () => 'k', getCharacters: i => i.text.length,
+      executeBatch: async items => { executed++; return items.map(i => `译:${i.text}`) },
+    })
+    const result = batch.enqueue({ text: 'A' })
+    await vi.advanceTimersByTimeAsync(150)
+    expect(executed).toBe(0) // 还在预算内，继续攒
+    await vi.advanceTimersByTimeAsync(100)
+    expect(executed).toBe(1) // 到期放行（下游会按 deadlineAt 处理）
+    expect(await result).toBe('译:A')
+    vi.useRealTimers()
+  })
+})

@@ -268,21 +268,27 @@ export class BatchQueue<T, R> {
       }
 
       const ageMs = now - batch.createdAt
+      // 持批上限还要受总时限约束：期限到了就放行，让下游队列按 deadlineAt 当场拒掉，
+      // 否则 maxTotalMs 短于 MAX_BATCH_HOLD_MS 时批次会在门闸后面多挂几十秒（本项目新增，issue #43；Codex 在 #56 指出）
+      const holdCapMs = Math.min(MAX_BATCH_HOLD_MS, this.maxTotalMs ?? Number.POSITIVE_INFINITY)
       // A dispatch slot is (nearly) available downstream — flushing now costs
       // nothing. Without a gate this is always true, preserving the original
       // flush-at-batchDelay latency.
       const slotNear = etaMs <= this.batchDelay
-      if (ageMs >= this.batchDelay && (slotNear || ageMs >= MAX_BATCH_HOLD_MS)) {
+      if (ageMs >= this.batchDelay && (slotNear || ageMs >= holdCapMs)) {
         batchesToFlush.push(batchKey)
         continue
       }
 
       // Hold: wake when the min-age elapses, or poll the gate again soon —
       // whichever is later — so held batches keep absorbing arrivals while
-      // dispatch is blocked.
-      const wakeMs = Math.max(
-        this.batchDelay - ageMs,
-        Math.min(Math.max(etaMs - this.batchDelay, this.batchDelay), MAX_GATE_POLL_MS),
+      // dispatch is blocked. 但不能晚于期限
+      const wakeMs = Math.min(
+        Math.max(
+          this.batchDelay - ageMs,
+          Math.min(Math.max(etaMs - this.batchDelay, this.batchDelay), MAX_GATE_POLL_MS),
+        ),
+        Math.max(0, holdCapMs - ageMs),
       )
       nextWakeMs = Math.min(nextWakeMs, wakeMs)
     }
