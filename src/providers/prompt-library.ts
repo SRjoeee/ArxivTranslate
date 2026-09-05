@@ -1,4 +1,4 @@
-// 移植自 reference/read-frog/src/utils/constants/prompt.ts 与 src/utils/prompts/translate.ts@9b44f82（GPL-3.0），有修改：
+// 移植自 reference/read-frog/src/utils/constants/prompt.ts 与 src/utils/prompts/translate.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：
 // 模板变量换成论文语义（paperTitle / abstract / sectionTitle / glossary），网页摘要改为直接用论文 abstract，
 // 去掉字幕与文本分隔符式的批处理。批处理协议不在这里——见 prompt.ts 的协议块，它追加在任何提示词之后。
 //

@@ -1,4 +1,4 @@
-// 移植自 reference/read-frog/src/utils/request/retry-policy.ts@9b44f82（GPL-3.0），有修改：仅调整以通过本项目的严格类型检查。
+// 移植自 reference/read-frog/src/utils/request/retry-policy.ts@9b44f82（GPL-3.0），2026-09-03 移植、有修改：仅调整以通过本项目的严格类型检查。
 // 请求错误分类、Retry-After 解析与限流退避策略；由 src/providers/retry.ts 的 withRetry 驱动。
 
 export type RequestErrorKind =

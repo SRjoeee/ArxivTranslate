@@ -76,8 +76,8 @@ reference/              # 参考仓库，gitignore，只读
 `reference/` 下是 KISS Translator、Read Frog、FluentRead 的源码（GPL-3.0，与本项目同许可证），**只读**。
 
 - **默认优先移植**：它们已经迭代多年，能整段拿来用的就拿来用（provider 请求拼装、队列 / 重试 / 批处理、缓存、配置迁移、占位符校验、视口调度、样式预设、UI 组件），移植后按本项目的命名与目录改造，不引入它们的配置体系。参考文件地图见 `docs/RESEARCH.md` §4。
-- **原创的例外**只有三种：(1) arXiv 适配——`rules/latexml.ts` 与 `extractor` 的 LaTeXML 路径（Phase 1 已完成）；(2) `renderer`——三个项目都改动、包裹或替换原节点，与 DESIGN.md §7.1 的 DOM 不变量冲突；(3) 移植会与 DESIGN.md 的不变量冲突或让代码变乱时改写，并在 PR 里说明理由。
-- **来源标注（GPL §5）**：每个移植文件的文件头写 `// 移植自 reference/<repo>/<path>@<commit>（GPL-3.0），有修改`，并在 `docs/THIRD_PARTY.md` 登记；改写幅度大的也要登记。
+- **原创的例外**只有三种：(1) arXiv 适配——`rules/latexml.ts`、`extractor` 的 LaTeXML 路径与 `protector` 占位符引擎（Phase 1 / 2 已完成，DESIGN.md §6）；(2) `renderer`——三个项目都改动、包裹或替换原节点，与 DESIGN.md §7.1 的 DOM 不变量冲突；(3) 移植会与 DESIGN.md 的不变量冲突或让代码变乱时改写，并在 PR 里说明理由。
+- **来源标注（GPL §5）**：每个移植文件的文件头写 `// 移植自 reference/<repo>/<path>@<commit>（GPL-3.0），<YYYY-MM-DD> 移植、有修改`（GPL §5(a) 要求修改声明带日期），并在 `docs/THIRD_PARTY.md` 登记；改写幅度大的也要登记。
 - 面向未来：extractor 以"站点适配器"接口组织，LaTeXML 是第一个适配器；通用启发式 walker（Read Frog `dom/filter.ts`、`dom/traversal.ts`）移植后作为 v2 的第二个适配器接入其他论文站点，v1 仍只做 arXiv。
 
 ---

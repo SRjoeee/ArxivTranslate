@@ -1,4 +1,4 @@
-// 移植自 reference/read-frog/src/utils/host/translate/api/google.ts@9b44f82（GPL-3.0），有修改：
+// 移植自 reference/read-frog/src/utils/host/translate/api/google.ts@9b44f82（GPL-3.0），2026-09-04 移植、有修改：
 // 端点、API key 常量、请求体形状与响应解析照搬；改为一次请求多条（原版一次一条，端点本身支持数组，
 // 实测 150 条 556 ms，见 RESEARCH.md §6.6）；去掉 preserveLineBreaks 那套换行标记——
 // 我们送的是占位符标记文本，走 html 格式原样发送；去掉 escapeText 依赖（protector 已做转义）。
