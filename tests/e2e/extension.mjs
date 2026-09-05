@@ -1,6 +1,6 @@
 // 真实浏览器端到端检查（DESIGN §11）：用 Playwright 起一个装着 .output/chrome-mv3 的 Chromium（新 headless 支持扩展），
 // 驱动设置页与 popup、读控制台与网络，用免费的 google-web 引擎在真实 arXiv 页面上跑一遍主流程。
-// 不碰用户自己的浏览器与 API key；走 LLM 的路径只测"错 key → auth → 整队停下"，不花钱。
+// 不碰用户自己的浏览器与 API key；走 LLM 的路径只测"错 key → 降级到免费引擎 / 关掉降级后整队停下"，不花钱。
 //
 // 用法：pnpm build && pnpm e2e        （首次先 npx playwright install chromium）
 // 环境变量：AXT_PAPER / AXT_PAPER2 换论文；AXT_HEADED=1 看着跑。
@@ -213,18 +213,46 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.close()
 }
 
-// ── 错 key：openai-compat 走 OpenRouter，401 → auth → 整队排空，不重试 ──
+// ── 错 key + 降级链开启（§8.5）：LLM 报 auth 后自动切到 google-web，整页照常翻完 ──
 {
   await options.bringToFront()
   await options.selectOption('select >> nth=0', 'openai-compat')
   await options.fill('input[type="password"]', 'sk-or-v1-bogus-key-for-auth-test')
   await options.getByRole('button', { name: '保存', exact: true }).click()
   await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
+  const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
+  const done = await waitForLog(logs, IDLE, 90_000)
+  await sleep(2_000)
+  const idle = idleOf(done)
+  const demoted = logs.some(l => /降级/.test(l.text))
+  check('错 key + 降级开启：切到免费引擎，整页照常翻完、没有致命错误',
+    !!idle && idle.failed === 0 && idle.done > 0 && !/fatal:/.test(done?.text ?? '') && demoted,
+    `${done?.text ?? '(no idle line)'}；OpenRouter 请求 ${requests.length} 个；日志里有降级提示 ${demoted}`)
+
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await page.bringToFront()
+  await popup.getByText(/已降级到/).waitFor({ timeout: 10_000 }).catch(() => undefined)
+  const notice = await popup.getByText(/已降级到/).count()
+  check('popup 提示当前用的是降级引擎', notice > 0, `匹配到 ${notice} 处提示`)
+  await popup.screenshot({ path: `${SHOTS}/popup-demoted.png` })
+  await popup.close()
+  await page.close()
+}
+
+// ── 错 key + 降级链关闭：恢复"401 → auth → 整队排空"的行为 ──
+{
+  await options.bringToFront()
+  await options.getByLabel('引擎失败时自动降级').uncheck()
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
   const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
   const done = await waitForLog(logs, IDLE, 60_000)
   await sleep(2_000)
   // 首波只有首屏附近的几批（令牌桶突发 20 封顶）；第一个 401 回来就排空整队，不该再有第二波
-  check('错 key：首波 ≤ 20 个请求，auth 后整条队列停下（不重试、没有第二波）', requests.length <= 20 && /fatal: auth/.test(done?.text ?? ''), `${requests.length} 个请求；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
+  check('错 key + 降级关闭：首波 ≤ 20 个请求，auth 后整条队列停下（不重试、没有第二波）', requests.length <= 20 && /fatal: auth/.test(done?.text ?? ''), `${requests.length} 个请求；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
   const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
   const idle = idleOf(done)
   check('失败块旁有重试 / 原因小部件（§7.6）', !!idle && widgets > 0 && widgets === idle.failed, `${widgets} 个小部件，${idle?.failed ?? '?'} 个失败块`)
