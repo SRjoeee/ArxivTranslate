@@ -6,9 +6,12 @@
    同样不是译文——blur 会把镜像的公式糊掉、其他预设会给包装层再画一遍；克隆里嵌套的真译文仍然匹配。
    与 split-figures.ts 的 REAL_TRANSLATION 是同一条界线。
    与模式属性同一层写在 <html> 上，切换只改一个属性、不动 DOM。
-   整套照搬 KISS Translator 的 src/config/styles.js + src/libs/style.js@c95bd46（GPL-3.0），
+   移植自 reference/kiss-translator/src/config/styles.js + src/libs/style.js@c95bd46（GPL-3.0），
    2026-09-05 移植、有修改：改用 data 属性选择器与 --axt-* 变量、去掉它的 emotion 运行时、
-   补上 Read Frog 的绿色与淡色底（custom-translation-node.css 的 textColor / background）。
+   排除非译文节点、gradient / glow 改静态、荧光笔按行高重复；
+   green / tint 两种移植自 reference/read-frog/src/assets/styles/custom-translation-node.css@9b44f82
+   （GPL-3.0），2026-09-05 移植、有修改：只取 textColor / background 两个值，改写成本文件的选择器。
+   登记见 docs/THIRD_PARTY.md。
 
    **两条纪律**：
    1. 译文节点复制原块的 class（§7.1），字体、字号、行高、对齐、grid 位置都随站点样式走；
