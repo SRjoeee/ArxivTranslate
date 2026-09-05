@@ -156,10 +156,12 @@ export function App() {
     setPackNote('正在下载语言包，首次约需 1 分钟…')
     try {
       await api.create({ sourceLanguage: BUILTIN_SOURCE_LANGUAGE, targetLanguage: toBcp47(config.targetLanguage) })
-      setPackNote('已就绪，可以直接点"翻译"')
       await checkPack(config.targetLanguage)
       // 重查引擎可用性：不查的话"翻译"按钮会停在下载前的状态，要关掉 popup 再开一次才可点
       loadProvider()
+      // 当前页若已在翻译，它的降级链早把内置引擎永久降级了；通知它撤销，后面的块就走离线引擎
+      const reset = await sendToActiveTab({ type: 'axt:engine-ready', id: 'chrome-builtin' }).then(r => r.reset).catch(() => false)
+      setPackNote(reset ? '已就绪，接下来的段落会用离线引擎' : '已就绪，可以直接点"翻译"')
     } catch (e) {
       setPackNote(`下载失败：${e instanceof Error ? e.message : String(e)}`)
       await checkPack(config.targetLanguage)

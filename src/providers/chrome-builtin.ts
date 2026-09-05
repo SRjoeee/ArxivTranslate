@@ -43,14 +43,26 @@ export const SESSION_CREATE_TIMEOUT_MS = 60_000
 export function createSemaphore(limit: number) {
   let active = 0
   const waiting: (() => void)[] = []
+  const acquire = (): Promise<void> => {
+    if (active < limit) {
+      active++
+      return Promise.resolve()
+    }
+    // 额度由 release 直接转交，等待者醒来时不再自己加计数：
+    // 先减后唤醒会留一个微任务的空档，新来的调用看到有空位也加一次，上限就被冲破（Codex 在 #50 指出）
+    return new Promise<void>(resolve => waiting.push(resolve))
+  }
+  const release = (): void => {
+    const next = waiting.shift()
+    if (next) next()
+    else active--
+  }
   return async function withPermit<T>(fn: () => Promise<T>): Promise<T> {
-    if (active >= limit) await new Promise<void>(resolve => waiting.push(resolve))
-    active++
+    await acquire()
     try {
       return await fn()
     } finally {
-      active--
-      waiting.shift()?.()
+      release()
     }
   }
 }
@@ -107,13 +119,17 @@ export function createChromeBuiltinProvider(target: string, deps: ChromeBuiltinD
     const existing = sessions.get(key)
     if (existing) return existing
     let timer: ReturnType<typeof setTimeout> | undefined
+    // provider 自己的 AbortController：超时不只拒掉包装的 Promise，还要真的中止底层的模型加载，
+    // 否则重试会再起一次加载、挂着的那次照旧在跑，一个标签页里越积越多（Codex 在 #50 指出）。
+    // 与任何一批请求的 signal 无关
+    const creation = new AbortController()
     const created = new Promise<TranslatorSession>((resolve, reject) => {
-      // 独立于任何一批请求的超时：既不受某一批的 signal 影响，也不让一次挂死的 create() 长驻缓存
-      timer = setTimeout(
-        () => reject(new ProviderError('timeout', `内置翻译会话创建超过 ${createTimeoutMs} ms 未完成`)),
-        createTimeoutMs,
-      )
-      api!.create(pair).then(resolve, reject)
+      timer = setTimeout(() => {
+        const error = new ProviderError('timeout', `内置翻译会话创建超过 ${createTimeoutMs} ms 未完成`)
+        creation.abort(error)
+        reject(error)
+      }, createTimeoutMs)
+      api!.create({ ...pair, signal: creation.signal }).then(resolve, reject)
     }).catch((e: unknown) => {
       // 失败（含超时）就把缓存清掉，下一次重试会真的重新创建
       sessions.delete(key)

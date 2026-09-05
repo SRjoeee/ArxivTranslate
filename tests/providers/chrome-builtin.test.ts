@@ -133,7 +133,38 @@ describe('createChromeBuiltinProvider', () => {
       create: async (opts) => { seen.push(['create', opts.signal]); return { translate: async (_i, o) => { seen.push(['translate', o?.signal]); return 'x' } } },
     }
     await createChromeBuiltinProvider('cmn', { translator: api }).translate(req(['a'], controller.signal))
-    expect(seen).toEqual([['create', undefined], ['translate', controller.signal]])
+    // create 拿到的是 provider 自己的信号（给超时中止用），绝不是任何一批请求的信号
+    expect(seen[0]![0]).toBe('create')
+    expect(seen[0]![1]).toBeInstanceOf(AbortSignal)
+    expect(seen[0]![1]).not.toBe(controller.signal)
+    expect(seen[1]).toEqual(['translate', controller.signal])
+  })
+
+  it('信号量把额度直接转交给等待者：释放的瞬间新来的调用不能抢到同一个额度（Codex 在 #50 指出）', async () => {
+    const { createSemaphore } = await import('@/providers/chrome-builtin')
+    const withPermit = createSemaphore(1)
+    let active = 0
+    let peak = 0
+    const job = (release: Promise<void>) => withPermit(async () => { active++; peak = Math.max(peak, active); await release; active-- })
+    let releaseA!: () => void
+    const a = job(new Promise<void>(r => { releaseA = r }))
+    const b = job(Promise.resolve()) // 排队等待
+    releaseA()
+    // A 释放的同一轮里 C 到达：先减后唤醒的实现会让 B、C 同时进入
+    const c = job(Promise.resolve())
+    await Promise.all([a, b, c])
+    expect(peak).toBe(1)
+  })
+
+  it('会话创建超时会真的中止底层加载，不只是拒掉包装的 Promise（Codex 在 #50 指出）', async () => {
+    let seenSignal: AbortSignal | undefined
+    const api: TranslatorApi = {
+      availability: async () => 'available',
+      create: (opts) => { seenSignal = opts.signal; return new Promise<TranslatorSession>(() => undefined) },
+    }
+    const provider = createChromeBuiltinProvider('cmn', { translator: api, createTimeoutMs: 20 })
+    await expect(provider.translate(req(['x']))).rejects.toMatchObject({ kind: 'timeout' })
+    expect(seenSignal?.aborted).toBe(true)
   })
 
   it('按自己声明的上限分批：降级过来的大批次不能一口气压垮本地模型（Codex 在 #50 指出）', async () => {
