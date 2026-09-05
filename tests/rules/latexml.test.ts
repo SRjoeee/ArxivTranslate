@@ -32,7 +32,7 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.7.0')
+    expect(RULES_VERSION).toBe('0.7.1')
   })
 })
 
@@ -61,6 +61,7 @@ describe('classify：逐规则命中', () => {
     ['代码行', '<div class="ltx_listing"><div class="ltx_listingline"><span class="ltx_text ltx_font_typewriter">x = 1</span></div></div>', '.ltx_listingline', { kind: 'skip', rule: 'listing', descend: false }],
     ['作者姓名也翻（§5.2，2026-09-06）', '<div class="ltx_authors"><span class="ltx_creator"><span class="ltx_personname">A. B.</span></span></div>', '.ltx_personname', { kind: 'unit', rule: 'personname', descend: true }],
     ['姓名之间的连接词仍跳过：单独成块会打断姓名列表', '<div class="ltx_authors"><span class="ltx_author_before"> and </span></div>', '.ltx_author_before', { kind: 'skip', rule: 'author-glue', descend: false }],
+    ['联系方式标签作 void：模板生成且站点 display:none（§5.2）', '<div class="ltx_authors"><span class="ltx_contact ltx_role_email"><span class="ltx_contact_name">Email: </span></span></div>', '.ltx_contact_name', { kind: 'protect', rule: 'contact-label', descend: false }],
     ['作者的机构与联系方式', '<span class="ltx_contact ltx_role_affiliation"><span class="ltx_contact_name">Affiliation: </span>Radboud University</span>', '.ltx_contact', { kind: 'unit', rule: 'authorinfo', descend: true }],
     ['邮箱地址', '<span class="ltx_contact ltx_role_email"><a href="mailto:a@b.c">a@b.c</a></span>', 'a', { kind: 'protect', rule: 'mailto', descend: false }],
     ['作者之间的连接词', '<span class="ltx_author_before"> and </span>', undefined, { kind: 'skip', rule: 'author-glue', descend: false }],

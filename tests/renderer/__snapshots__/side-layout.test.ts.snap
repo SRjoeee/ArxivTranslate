@@ -7,7 +7,7 @@ exports[`side 模式的容器覆盖 > 2312.17141.html：配对能否连到翻译
     "ltx_inline-block": 4,
     "ltx_note": 2,
   },
-  "connected": "819/828",
+  "connected": "817/826",
 }
 `;
 
@@ -16,7 +16,7 @@ exports[`side 模式的容器覆盖 > 2312.17527.html：配对能否连到翻译
   "blockedBy": {
     "ltx_note": 4,
   },
-  "connected": "168/172",
+  "connected": "164/168",
 }
 `;
 
@@ -44,7 +44,7 @@ exports[`side 模式的容器覆盖 > 2410.00260.html：配对能否连到翻译
     "ltx_flex_figure": 2,
     "ltx_note": 2,
   },
-  "connected": "219/223",
+  "connected": "218/222",
 }
 `;
 
@@ -53,7 +53,7 @@ exports[`side 模式的容器覆盖 > 2507.00150.html：配对能否连到翻译
   "blockedBy": {
     "ltx_note": 7,
   },
-  "connected": "195/202",
+  "connected": "194/201",
 }
 `;
 
@@ -87,14 +87,14 @@ exports[`side 模式的容器覆盖 > 2609.00246.html：配对能否连到翻译
   "blockedBy": {
     "ltx_note": 9,
   },
-  "connected": "538/547",
+  "connected": "534/543",
 }
 `;
 
 exports[`side 模式的容器覆盖 > 2609.03768.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
 {
   "blockedBy": {},
-  "connected": "179/179",
+  "connected": "178/178",
 }
 `;
 

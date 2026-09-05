@@ -1,5 +1,7 @@
-// 作者姓名的提取与渲染（DESIGN §5.1 / §5.2，2026-09-06）。姓名在 `.ltx_creator` 这个 <span> 里，
-// 译文作兄弟节点插进去，不能把姓名列表挤断，也不能挡住后面的机构信息。
+// 作者区的提取与渲染（DESIGN §5.1 / §5.2，2026-09-06）。两件事：
+// 1. 姓名成块——在 `.ltx_creator` 这个 <span> 里，译文作兄弟节点插进去，不能挤断姓名列表；
+// 2. 联系方式标签 `.ltx_contact_name` 作 void——它是模板生成的、被站点 display:none 藏起来的，
+//    唯一可翻内容只有它的 `.ltx_contact` 因此不再成块，页面上不会出现两行一样的邮箱。
 import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { serialize } from '@/core/protector'
@@ -64,5 +66,33 @@ describe('作者姓名（§5.2 的 2026-09-06 决定）', () => {
     expect(doc.querySelectorAll(`.${T_CLASS}`)).toHaveLength(2)
     restore(doc)
     expect(doc.documentElement.outerHTML).toBe(before)
+  })
+})
+
+/** 三种 .ltx_contact：只有标签 + 邮箱、只有标签 + 等宽账号、标签 + 真机构名 */
+const CONTACTS = `<div class="ltx_authors"><span class="ltx_creator ltx_role_author"><span class="ltx_personname">A. B. </span><span class="ltx_author_notes"><span class="ltx_author_notes_content">
+  <span class="ltx_contact ltx_role_email"><span class="ltx_contact_name">Email: </span><a href="mailto:a@b.edu">a@b.edu</a> </span>
+  <span class="ltx_contact ltx_role_affiliation"><span class="ltx_contact_name">Affiliation:&nbsp;</span><span class="ltx_text ltx_font_typewriter">{a, b}@c.com</span></span>
+  <span class="ltx_contact ltx_role_affiliation"><span class="ltx_contact_name">Affiliation:&nbsp;</span>University of Southern California </span>
+</span></span></span></div>`
+
+describe('联系方式标签 .ltx_contact_name（§5.2 的 2026-09-06 决定）', () => {
+  it('只有隐藏标签可翻的 .ltx_contact 不成块：否则页面上会出现两行一样的邮箱', () => {
+    const doc = docOf(CONTACTS)
+    const contacts = [...doc.querySelectorAll('.ltx_contact')]
+    const blocks = new Set(extract(doc).map(b => b.el))
+    expect(contacts.map(el => blocks.has(el))).toEqual([false, false, true])
+  })
+
+  it('还有真内容的机构照常成块，隐藏标签作 void 占位符原位保留', () => {
+    const doc = docOf(CONTACTS)
+    const real = doc.querySelectorAll('.ltx_contact')[2]!
+    const block = serialize(real)
+    expect(block.text).toMatch(/^<x id="\d+"\/>University of Southern California\s*$/)
+    const fragment = rehydrate(block.text.replace('University of Southern California', '南加州大学'), block, doc)
+    const holder = doc.createElement('span')
+    holder.append(fragment)
+    // 标签原样带回来（页面上它 display:none，读者两边都看不到）
+    expect(holder.innerHTML).toBe('<span class="ltx_contact_name">Affiliation:&nbsp;</span>南加州大学 ')
   })
 })

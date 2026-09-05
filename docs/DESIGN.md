@@ -148,6 +148,14 @@ interface Block {
 
   改这条要升 `RULES_VERSION`（进缓存键），已升到 0.7.0。姓名之间的连接词 `.ltx_author_before` / `.ltx_author_after` 仍然跳过——它们单独成块会打断姓名列表。
 
+- **联系方式的标签 `.ltx_contact_name` 不翻** [决定，2026-09-06，实测撞到]：LaTeXML 给每条 `.ltx_contact` 生成一个标签元素，内容是 `Affiliation: ` / `Email: ` / `E-mail `，**arXiv 的样式表把它 `display: none`**（三篇线上页面实测，计算样式全是 `none`、盒子 0×0）。它是模板生成的，不是作者写的内容，所以作 void 占位符。
+
+  不这么做会有一个**用户看得见的**后果：邮箱那条 `.ltx_contact` 里唯一可翻的文字就是这个隐藏标签（地址本身是受保护的 `mailto`），于是整块被判定"有可翻内容"、翻出一条译文，而译文里的「电子邮件：」同样被站点藏起来——页面上就出现两行一模一样的邮箱地址（用户在 2507.00150 的作者区看到）。机构那条不会重复（它有真内容），但一直在白翻这个看不见的标签，google-web 还把 `Affiliation:` 译成"联系："。
+
+  12 篇 fixture 实测：43 个 `.ltx_contact_name` 全部位于 `.ltx_contact` 内；其中 12 个属于 `ltx_role_email`，去掉标签后**没有任何可翻文字**，这 12 个块随之消失（重复的行没了）；`ltx_role_affiliation` 29 个、`ltx_role_note` 与 `ltx_role_correspondent` 各 1 个都还有真内容，块照旧，只是少翻一个隐藏标签。
+
+  **没有做成"按计算样式跳过隐藏元素"的通用机制**：extractor 是纯 DOM 的，给每个候选元素跑 `getComputedStyle` 会在几百个块的论文上强制大量样式计算，与 §7.2 记的"只读量法"是同一类性能陷阱。已知的隐藏模板标签就这一个，按规则写进 `PROTECT_RULES` 更便宜也更可查。改这条要升 `RULES_VERSION`，已升到 0.7.1。
+
 - **带环境名的 `.ltx_tag` 要翻译** [决定，2026-09-05，用户反馈]：LaTeXML 把定理环境、图表、算法、附录的**名字**也放进 `.ltx_tag`，`Definition 1.1.` 整体被当编号保护，中文读者看到的还是英文。按细分类名区分：`ltx_tag_theorem` / `ltx_tag_figure` / `ltx_tag_table` / `ltx_tag_float` / `ltx_tag_appendix` / `ltx_tag_part` / `ltx_tag_chapter` 参与翻译，其余（equation、section、subsection、ref、item、note）仍作 void。**光看类名不够**：LaTeXML 给子图面板的标签也用 `.ltx_tag_figure`，内容是纯标识符 `(a)` `(b)` `(c)`（387 个带名 tag 里有 5 个，Codex 在 #53 指出），翻了会被模型改写、与面板的对应关系断掉。所以再加一道内容判定 `isNamedTag`：类名在清单里，**去掉只含标识符的括号段之后**仍含连续两个及以上字母才翻（括号里有非罗马数字的词就保留：`(Figure 1)` 整体带括号的标签不能连环境名一起丢掉；Codex 在 #53 指出）。只数字母不够——面板标识符可以是 `(ii)` `(iii)` 这种多字母罗马数字；而括号本来就是 LaTeXML 给标识符的形状，环境名从不带括号（`Definition 1.2 (Hall set)` 去掉括号后仍有 Definition，照样要翻）。依据是全部 12 篇 fixture 里 1241 个 `.ltx_tag` 的实测分布：theorem 的 246 个全部形如 "Definition 1"、table 的 43 个全是 "Table 1:"、figure 的 63 个里 58 个是 "Figure 1."、appendix 20 个全是 "Appendix A"、float 13 个全是 "Algorithm 1"；反过来 equation 的 344 个里只有 13 个带字母（`(let.lin)` 这类 LaTeX 标签，动不得），section / subsection / ref 的 439 个里带字母的全是罗马数字（II、III.1），note 的 54 个是脚注标记。**罗马数字编号的一律不翻**：2026-09-05 用 google-gtx 实测（Codex 在 #53 指出），`Table IV:` → `表四：`、`Table X:` → `表十：`、`Part I` → `第一部分`，而指向它的 `.ltx_ref` 是受保护的原文，一翻正文与交叉引用就对不上；阿拉伯数字（`Table 4:` → `表 4：`）、字母编号（`Appendix A` → `附录A`）、括号面板（`Figure 1(a)`）实测都原样保留。Google 自己也只把 I / V / X / L / M 当数字，单个 C、D 当字母，`ROMAN_ID` 照此判定；复合编号看首段（`Table IV.1` 实测 → 表四.1，`IV.1` / `IV-A` 都算罗马编号），大小写都算（LaTeX `\roman` 给出的 `Table iv:` 实测 → 表四：）。审计脚本 `fixtures-stats.ts` 的规则命中数同样走 `classify()`，不按选择器数，否则会把这些放行的 tag 记成 protect/tag。同一篇论文的编号风格是一致的，读者不会同时看到「表 4」与「Table IV」。fixture 上的结果：387 个带名 tag 中 368 个翻、19 个保护（5 个面板标签 + 13 张罗马编号的表 + `Part I`）。改这条要升 `RULES_VERSION`（进缓存键），已升到 0.6.2。实测 2609.04056v1：定理标题块从 34 个增加到 75 个，`Definition 1.2 (Hall set).` → `定义 1.2（大厅布置）。`
 
 ### 5.3 表格 [决定]
@@ -200,7 +208,7 @@ interface Block {
 
 | 类型 | 占位符 | 节点 |
 |---|---|---|
-| void | `<x id="n"/>` | 行内 `math`、`.ltx_ref`（含内部 `.ltx_ref_tag`）、`.ltx_cite`、`.ltx_tag`、`code`、`.ltx_font_typewriter`、整个 `.ltx_note`（脚注正文另行成块）、`.ltx_note_mark`、`.ltx_note_type`、行内图片、`svg`、`br`。**必须以 `PROTECT_RULES` 写进 `latexml.ts`**——Phase 0 审计发现仅靠 §5.2 的跳过规则时，`.ltx_ref` / `.ltx_cite` / `.ltx_note_mark` 会被当作段落正文（fixture 中合计 3,500+ 个元素，RESEARCH.md §2.5）|
+| void | `<x id="n"/>` | 行内 `math`、`.ltx_ref`（含内部 `.ltx_ref_tag`）、`.ltx_cite`、`.ltx_tag`、`code`、`.ltx_font_typewriter`、整个 `.ltx_note`（脚注正文另行成块）、`.ltx_note_mark`、`.ltx_note_type`、`.ltx_contact_name`、行内图片、`svg`、`br`。**必须以 `PROTECT_RULES` 写进 `latexml.ts`**——Phase 0 审计发现仅靠 §5.2 的跳过规则时，`.ltx_ref` / `.ltx_cite` / `.ltx_note_mark` 会被当作段落正文（fixture 中合计 3,500+ 个元素，RESEARCH.md §2.5）|
 | paired | `<t id="n">…</t>` | 带文字的 `a`、`.ltx_text.ltx_font_italic/bold/...`、`em`、`strong`、其他带可翻译文字的 `span` |
 | text | 直接出现在文本里 | 文本节点 |
 

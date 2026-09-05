@@ -7,7 +7,7 @@
  * 0.6.2：带环境名的 tag 改为可翻，纯标识符（`(a)`、`(ii)`）仍保护——分类语义变了，
  * 旧缓存不该跨过去（Codex 在 #53 指出）
  */
-export const RULES_VERSION = '0.7.0'
+export const RULES_VERSION = '0.7.1'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -123,6 +123,10 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
   { id: 'note', selector: '.ltx_note', descend: true, note: '脚注容器：对外层段落是 void，内部的 .ltx_note_content 仍要被发现为块' },
   { id: 'note-mark', selector: '.ltx_note_mark, .ltx_note_type', note: '脚注标记与类型标签（容器外层与正文内各一次）' },
   { id: 'mailto', selector: 'a[href^="mailto:"]', note: '邮箱地址原样保留' },
+  // LaTeXML 生成的联系方式标签（"Affiliation: " / "Email: "），arXiv 的样式表把它 display:none。
+  // 不挡住的话，邮箱那条 .ltx_contact 里唯一可翻的就是这个隐藏标签，译文出来是一行看不见的
+  // 「电子邮件：」加一份原样的地址——页面上就是两行一样的邮箱（§5.2 的决定）
+  { id: 'contact-label', selector: '.ltx_contact_name', note: '联系方式标签，模板生成且站点隐藏' },
   { id: 'indexrefs', selector: '.ltx_indexrefs', note: '索引词条后面的页码列表' },
   { id: 'img', selector: 'img', note: '行内图片' },
   { id: 'br', selector: 'br', note: '换行' },
