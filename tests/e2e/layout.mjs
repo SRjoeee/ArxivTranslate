@@ -43,6 +43,11 @@ await options.close()
 /** 打开论文，经 popup 选左右模式并开始翻译 */
 async function openSide(id) {
   const page = await context.newPage()
+  // 主线程长任务记下来：side prep 曾经每张公式表克隆一份去量宽度，392 张公式的 2312.17141 上一趟 45 秒、页面无响应
+  await page.addInitScript(() => {
+    window.__axtLongTasks = []
+    new PerformanceObserver(list => { for (const e of list.getEntries()) window.__axtLongTasks.push(Math.round(e.duration)) }).observe({ entryTypes: ['longtask'] })
+  })
   await page.goto(`https://arxiv.org/html/${id}`, { waitUntil: 'domcontentloaded' })
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)
@@ -207,6 +212,10 @@ async function measureFrame(page) {
     const b = (copy ?? orig).getBoundingClientRect()
     return { which: copy ? 'copy' : 'orig', origHidden: getComputedStyle(orig).display === 'none', l: Math.round(b.left), r: Math.round(b.right), artR: Math.round(art.right), vw: innerWidth }
   })
+  const tasks = await page.evaluate(() => { const t = window.__axtLongTasks.slice().sort((a, b) => b - a); return { max: t[0] ?? 0, total: t.reduce((a, b) => a + b, 0), n: t.length, eqn: document.querySelectorAll('table.ltx_eqn_table').length } })
+  // 改宽度之前的基线：最长 175ms、合计 625ms（同一篇、同样滚三屏）；预算留一倍余量
+  check('主线程没有长任务卡顿（side prep 只读量宽度）', tasks.max <= 400 && tasks.total <= 1500,
+    `最长 ${tasks.max} ms，合计 ${tasks.total} ms，${tasks.n} 次；公式表 ${tasks.eqn} 张`)
   check('正文脚注：译文副本从右栏起浮、落在右侧沟槽里，原件隐藏',
     note.which === 'copy' && note.origHidden && note.l >= note.artR - 4 && note.r <= note.vw + 1,
     `${note.which}，原件隐藏 ${note.origHidden}，${note.l}–${note.r}，文章右缘 ${note.artR}`)

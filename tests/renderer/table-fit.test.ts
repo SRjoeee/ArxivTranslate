@@ -18,20 +18,20 @@ const eqnDoc = () => docOf('<div class="ltx_para"><table class="ltx_equation ltx
 describe('fitTables', () => {
   it('行间公式与镜像同表格一样按栏缩放：只标最外层的 table.ltx_eqn_table，组里的 tr.ltx_equation 不单独算', () => {
     const doc = eqnDoc()
-    const r = fitTables(doc, { minContentWidth: () => 800, columnWidth: () => 436 })
+    const r = fitTables(doc, { naturalWidth: () => 800, columnWidth: () => 436 })
     expect(r).toEqual({ fitted: 0, scrolled: 1 }) // 436/800 = 0.545 < 0.7 → 滚动
     const [original, mirror] = Array.from(doc.querySelectorAll('table'))
     expect(fitOf(original!)).toBe(FIT_SCROLL)
     expect(fitOf(mirror!)).toBe(FIT_SCROLL)
     expect(doc.querySelector(`tr[${FIT_ATTR}]`)).toBeNull()
-    const again = fitTables(doc, { minContentWidth: () => 500, columnWidth: () => 436 })
+    const again = fitTables(doc, { naturalWidth: () => 500, columnWidth: () => 436 })
     expect(again).toEqual({ fitted: 1, scrolled: 0 })
     expect(fitOf(original!)).toBe('85') // 436/500 = 0.872
   })
 
   it('装得下就不标比例', () => {
     const doc = pairDoc()
-    const r = fitTables(doc, { minContentWidth: () => 400, columnWidth: () => 484 })
+    const r = fitTables(doc, { naturalWidth: () => 400, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 0, scrolled: 0 })
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
@@ -39,7 +39,7 @@ describe('fitTables', () => {
   it('装不下就落到能装下的那一档，原表与译文同标', () => {
     const doc = pairDoc()
     // 需要 484/551 = 0.878 → 85 档
-    const r = fitTables(doc, { minContentWidth: () => 551, columnWidth: () => 484 })
+    const r = fitTables(doc, { naturalWidth: () => 551, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 1, scrolled: 0 })
     const original = originals(doc)[0]!
     expect(fitOf(original)).toBe('85')
@@ -48,35 +48,35 @@ describe('fitTables', () => {
 
   it('档位向下取：刚好等于某档时用该档', () => {
     const doc = pairDoc()
-    fitTables(doc, { minContentWidth: () => 1000, columnWidth: () => 950 })
+    fitTables(doc, { naturalWidth: () => 1000, columnWidth: () => 950 })
     expect(fitOf(originals(doc)[0]!)).toBe('95')
   })
 
   it('缩到 0.7 还装不下就退化为栏内滚动', () => {
     const doc = pairDoc()
-    const r = fitTables(doc, { minContentWidth: () => 1200, columnWidth: () => 484 })
+    const r = fitTables(doc, { naturalWidth: () => 1200, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 0, scrolled: 1 })
     expect(fitOf(originals(doc)[0]!)).toBe(FIT_SCROLL)
   })
 
   it('没有译文的表格不处理', () => {
     const doc = docOf('<figure class="ltx_table"><table class="ltx_tabular"><tbody><tr><td class="ltx_td">a</td></tr></tbody></table></figure>')
-    const r = fitTables(doc, { minContentWidth: () => 900, columnWidth: () => 484 })
+    const r = fitTables(doc, { naturalWidth: () => 900, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 0, scrolled: 0 })
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
 
   it('拿不到布局信息时什么都不做（happy-dom、display:none）', () => {
     const doc = pairDoc()
-    expect(fitTables(doc, { minContentWidth: () => 0, columnWidth: () => 0 })).toEqual({ fitted: 0, scrolled: 0 })
+    expect(fitTables(doc, { naturalWidth: () => 0, columnWidth: () => 0 })).toEqual({ fitted: 0, scrolled: 0 })
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
 
   it('重复调用按新宽度重算，窗口变宽后标记被清掉', () => {
     const doc = pairDoc()
-    fitTables(doc, { minContentWidth: () => 551, columnWidth: () => 484 })
+    fitTables(doc, { naturalWidth: () => 551, columnWidth: () => 484 })
     expect(fitOf(originals(doc)[0]!)).toBe('85')
-    fitTables(doc, { minContentWidth: () => 551, columnWidth: () => 700 })
+    fitTables(doc, { naturalWidth: () => 551, columnWidth: () => 700 })
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
 
@@ -84,25 +84,54 @@ describe('fitTables', () => {
     const doc = pairDoc(2)
     const widths = [551, 1200]
     let i = 0
-    const r = fitTables(doc, { minContentWidth: () => widths[i++]!, columnWidth: () => 484 })
+    const r = fitTables(doc, { naturalWidth: () => widths[i++]!, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 1, scrolled: 1 })
     expect(originals(doc).map(fitOf)).toEqual(['85', FIT_SCROLL])
   })
 })
 
-describe('createFitProbe', () => {
-  it('剥掉 data-axt-*，并显式 zoom: 1——否则量到的是上一轮缩放后的宽度，窗口停在某些尺寸会不停闪', async () => {
-    const { createFitProbe } = await import('@/core/renderer/table-fit')
-    const doc = docOf('<table class="ltx_tabular" data-axt-fitOf="85" data-axt-id="T1" id="T1">'
-      + '<tbody><tr><td class="ltx_td" data-axt-state="translated">a</td></tr></tbody></table>')
-    const table = doc.querySelector('.ltx_tabular')!
-    const probe = createFitProbe(table)
-    expect(probe.hasAttribute('data-axt-fitOf')).toBe(false)
-    expect(probe.hasAttribute('data-axt-id')).toBe(false)
-    expect(probe.querySelector('[data-axt-state]')).toBeNull()
-    expect(probe.getAttribute('style')).toContain('zoom:1')
-    expect(probe.getAttribute('style')).toContain('width:min-content')
-    // 原节点不受影响
-    expect(table.getAttribute('data-axt-fitOf')).toBe('85')
+describe('只读量法的松紧规则', () => {
+  const column = 468
+  const marked = (fit: string | null) => {
+    const doc = eqnDoc()
+    if (fit) for (const t of Array.from(doc.querySelectorAll('table'))) t.setAttribute(FIT_ATTR, fit)
+    return doc
+  }
+  const original = (doc: Document) => doc.querySelector('table')!
+
+  it('精确值（溢出时的盒宽）可以收紧', () => {
+    const doc = marked('90')
+    fitTables(doc, { naturalWidth: () => 560, columnWidth: () => column }) // 468/560 = 0.836 → 80
+    expect(fitOf(original(doc))).toBe('80')
+  })
+
+  it('估算值永远不用来收紧：它量的是"装得下"的状态', () => {
+    const doc = marked('90')
+    fitTables(doc, { naturalWidth: () => ({ width: 560, exact: false }), columnWidth: () => column })
+    expect(fitOf(original(doc))).toBe('90')
+  })
+
+  it('估算值放松要留 5% 余量，否则会在两档之间来回跳', () => {
+    // 460 × 1.05 = 483 > 468：不能去掉标记
+    const stay = marked('95')
+    fitTables(stay, { naturalWidth: () => ({ width: 460, exact: false }), columnWidth: () => column })
+    expect(fitOf(original(stay))).toBe('95')
+    // 440 × 1.05 = 462 ≤ 468：可以去掉
+    const loosen = marked('95')
+    fitTables(loosen, { naturalWidth: () => ({ width: 440, exact: false }), columnWidth: () => column })
+    expect(fitOf(original(loosen))).toBeNull()
+    // 从 80 放松：加余量后 500 × 1.05 = 525 → 468/525 = 0.891 → 85，而不是不加余量的 90
+    const step = marked('80')
+    fitTables(step, { naturalWidth: () => ({ width: 500, exact: false }), columnWidth: () => column })
+    expect(fitOf(original(step))).toBe('85')
+  })
+
+  it('不再克隆去量：模块里没有探针，量宽度不往文档里插节点', async () => {
+    const mod = await import('@/core/renderer/table-fit')
+    expect('createFitProbe' in mod).toBe(false)
+    const doc = eqnDoc()
+    const before = doc.body.childElementCount
+    fitTables(doc, { naturalWidth: () => 800, columnWidth: () => column })
+    expect(doc.body.childElementCount).toBe(before)
   })
 })
