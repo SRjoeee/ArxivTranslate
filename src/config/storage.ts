@@ -16,7 +16,9 @@ export const configItem = storage.defineItem<Config>('local:config', {
     // v3 -> v4：目标语言从 BCP-47 换成 ISO 639-3（zh-CN → cmn、zh-TW → cmn-Hant、ja → jpn）
     4: (v3: Omit<Config, 'version' | 'targetLanguage' | 'fallback'> & { version: 3; targetLanguage: string }) => ({ ...v3, version: 4 as const, targetLanguage: fromBcp47(v3.targetLanguage) }),
     // v4 -> v5：加引擎降级链，默认开启（硬规则 4：失败必须可恢复，不能让扩展整体挂掉）
-    5: (v4: Omit<Config, 'version' | 'fallback'> & { version: 4 }) => ({ ...v4, version: 5 as const, fallback: { enabled: true } }),
+    5: (v4: Omit<Config, 'version' | 'fallback' | 'glossary'> & { version: 4 }) => ({ ...v4, version: 5 as const, fallback: { enabled: true } }),
+    // v5 -> v6：加术语表，默认空表（空表不进 prompt 也不进缓存键，行为与之前一致）
+    6: (v5: Omit<Config, 'version' | 'glossary'> & { version: 5 }) => ({ ...v5, version: 6 as const, glossary: [] }),
   },
 })
 
