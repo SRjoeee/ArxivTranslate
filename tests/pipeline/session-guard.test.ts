@@ -1,11 +1,11 @@
 // 会话边界的回归测试（issue #45）。原文是三个「断言缺陷存在」的诊断探针，这里改写成期望行为。
 import { describe, expect, it, vi } from 'vitest'
-import { CACHE_READ_TIMEOUT_MS, createMessageCachePort } from '@/entrypoints/content/cache-port'
 import { extract } from '@/core/extractor'
 import { startTranslation } from '@/core/pipeline'
 import { restore } from '@/core/renderer'
 import { createOpenAICompatProvider } from '@/providers/openai-compat'
 import { cacheKeyFor } from '@/cache/key'
+import type { CachePort } from '@/providers/translate-service'
 
 const docWith = (html: string) => new DOMParser().parseFromString(
   `<!doctype html><html><body><article class="ltx_document">${html}</article></body></html>`,
@@ -43,34 +43,9 @@ describe('启动期间恢复原文（issue #45 实验 1）', () => {
   })
 })
 
-describe('缓存读取的等待预算（issue #45 实验 2）', () => {
-  it('缓存消息一直不回时，超过预算就当未命中，不把翻译卡死', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const port = createMessageCachePort(() => new Promise(() => undefined) as never, 20)
-    const hits = await port.getMany(['k1', 'k2'])
-    expect(hits).toEqual([null, null])
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('读缓存'))
-    warn.mockRestore()
-  })
-
-  it('正常返回时不受预算影响，命中照常返回', async () => {
-    const port = createMessageCachePort(async () => ({ hits: ['甲', null] }) as never, 50)
-    expect(await port.getMany(['k1', 'k2'])).toEqual(['甲', null])
-  })
-
-  it('条数对不上按全未命中处理，坏响应不能错位', async () => {
-    const port = createMessageCachePort(async () => ({ hits: ['甲'] }) as never, 50)
-    expect(await port.getMany(['k1', 'k2'])).toEqual([null, null])
-  })
-
-  it('预算是常量，改动要显式：默认 1.5 秒远大于实测命中往返（36 ms 量级）', () => {
-    expect(CACHE_READ_TIMEOUT_MS).toBe(1_500)
-  })
-})
-
-describe('服务层也有读缓存预算：换任何 CachePort 都不会被拖死（issue #45 实验 2）', () => {
-  it('CachePort 永不返回时，翻译照常发出请求', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+describe('缓存读取的等待预算：换任何 CachePort 都不会被拖死（issue #45 实验 2）', () => {
+  /** 只做缓存断言的最小服务：provider 原样回声，记下每次真发出去的段落 */
+  const serviceWith = async (cache: CachePort, cacheReadBudgetMs = 20) => {
     const { createTranslateService } = await import('@/providers/translate-service')
     const calls: string[][] = []
     const service = createTranslateService({
@@ -79,16 +54,42 @@ describe('服务层也有读缓存预算：换任何 CachePort 都不会被拖�
         isAvailable: async () => true,
         translate: async r => { calls.push(r.segments.map(s => s.id)); return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' } },
       }),
-      cache: { getMany: () => new Promise(() => undefined), putMany: async () => undefined },
-      cacheReadBudgetMs: 20,
+      cache,
+      cacheReadBudgetMs,
     })
-    const res = await service.translate({
-      request: { segments: [{ id: 'a', text: 'A' }], source: 'en', target: 'cmn' },
-      cache: { paper: '0000.00000', renderPath: 'markup' },
-    })
+    return { service, calls }
+  }
+  const call = { request: { segments: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], source: 'en' as const, target: 'cmn' }, cache: { paper: '0000.00000', renderPath: 'markup' as const } }
+
+  it('正常返回时不受预算影响，命中的段落不再发给 provider', async () => {
+    const { service, calls } = await serviceWith({ getMany: async keys => keys.map((_, i) => (i === 0 ? '甲' : null)), putMany: async () => undefined })
+    const res = await service.translate(call)
+    expect(res.ok && res.cached).toBe(1)
+    expect(calls).toEqual([['b']])
+  })
+
+  it('条数对不上按全未命中处理：按索引取会张冠李戴', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { service, calls } = await serviceWith({ getMany: async () => ['甲'], putMany: async () => undefined })
+    const res = await service.translate(call)
+    expect(res.ok && res.cached).toBe(0)
+    expect(calls).toEqual([['a', 'b']])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('条数'))
+    warn.mockRestore()
+  })
+
+  it('预算是常量，改动要显式：默认 2 秒远大于实测的命中往返（36 ms 量级）', async () => {
+    const { CACHE_READ_BUDGET_MS } = await import('@/providers/translate-service')
+    expect(CACHE_READ_BUDGET_MS).toBe(2_000)
+  })
+
+  it('CachePort 永不返回时，超过预算就当未命中，照常发出请求，不把翻译卡死', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { service, calls } = await serviceWith({ getMany: () => new Promise(() => undefined), putMany: async () => undefined })
+    const res = await service.translate(call)
     expect(res.ok).toBe(true)
-    expect(calls).toEqual([['a']])
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('读缓存'))
+    expect(calls).toEqual([['a', 'b']])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('未返回'))
     warn.mockRestore()
   })
 })

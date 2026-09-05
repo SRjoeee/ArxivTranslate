@@ -11,8 +11,7 @@ import {
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
 import { createWorkPacer, pauseIfBudgetSpent } from '@/core/scheduler/pacer'
 import type { RenderPath } from '@/cache/key'
-import type { TranslateMessageResponse } from '@/entrypoints/background/translate-handler'
-import type { TranslateCall } from '@/providers/translate-service'
+import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
 import { planBatches, sectionTitles, type Batch, type Segment } from './batches'
 
 export interface Progress {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
-import type { ProviderStatus } from '@/entrypoints/background/translate-handler'
+import type { ProviderStatus } from '@/providers/transport'
 import type { Mode } from '@/core/renderer'
 import { configFallbackReason, getConfig, setConfig } from '@/config/storage'
 import type { Config } from '@/config/schema'
@@ -84,13 +84,17 @@ export function App() {
     return () => clearInterval(id)
   }, [page, refresh, loadStats])
 
-  // 翻译开着时每 500 ms 轮询进度：滚动会继续触发，没有"翻完"的终点（§10）
+  // 翻译开着时每 500 ms 轮询进度：滚动会继续触发，没有"翻完"的终点（§10）。
+  // 降级状态记在 background，跟着一起查——实测这条消息的往返在毫秒级（RESEARCH §6.7）
   const on = page?.progress.state === 'on'
   useEffect(() => {
     if (!on) return
-    const id = setInterval(refresh, 500)
+    const id = setInterval(() => {
+      refresh()
+      loadProvider()
+    }, 500)
     return () => clearInterval(id)
-  }, [on, refresh])
+  }, [on, refresh, loadProvider])
 
   async function translate() {
     setNote('')
@@ -164,7 +168,8 @@ export function App() {
       // 重查引擎可用性：不查的话"翻译"按钮会停在下载前的状态，要关掉 popup 再开一次才可点
       loadProvider()
       // 当前页若已在翻译，它的降级链早把内置引擎永久降级了；通知它撤销，后面的块就走离线引擎
-      const reset = await sendToActiveTab({ type: 'axt:engine-ready', id: 'chrome-builtin' }).then(r => r.reset).catch(() => false)
+      // 引擎链在 background（§8.0）：让它重建一条，把刚可用的内置引擎放回链上
+      const reset = await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).then(r => r.reset).catch(() => false)
       setPackNote(reset ? '已就绪，接下来的段落会用离线引擎' : '已就绪，可以直接点"翻译"')
     } catch (e) {
       setPackNote(`下载失败：${e instanceof Error ? e.message : String(e)}`)
@@ -245,9 +250,9 @@ export function App() {
                 </select>
               </p>
             )}
-            {page.engine?.demoted && (
+            {provider?.engine.demoted && (
               <p style={{ margin: '0 0 8px', padding: 6, background: '#fff4e5', borderRadius: 4, fontSize: 12, lineHeight: 1.5 }}>
-                {page.engine.demoted.displayName}不可用（{page.engine.demoted.kind}），已降级到{page.engine.displayName}。
+                {provider.engine.demoted.displayName}不可用（{provider.engine.demoted.kind}），已降级到{provider.engine.displayName}。
                 译文质量不如 LLM；修好设置后恢复原文再翻即可切回
               </p>
             )}

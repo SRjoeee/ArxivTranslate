@@ -140,8 +140,9 @@ async function readWithBudget(store: CachePort, keys: string[], budgetMs: number
     store.getMany(keys),
     new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), budgetMs) }),
   ]).finally(() => clearTimeout(timer))
-  if (hits !== null) return hits
-  console.warn(`[axt] 读缓存超过 ${budgetMs} ms 未返回，按未命中继续翻译`)
+  // 条数对不上说明这份响应与请求不配对，按索引取会张冠李戴：整批当未命中
+  if (hits !== null && hits.length === keys.length) return hits
+  console.warn(`[axt] 读缓存${hits === null ? `超过 ${budgetMs} ms 未返回` : '返回条数与请求不符'}，按未命中继续翻译`)
   return keys.map(() => null)
 }
 
