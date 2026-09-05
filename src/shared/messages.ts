@@ -44,6 +44,8 @@ export interface AxtMessages {
   'axt:cache-stats': { request: Record<never, never>; response: { entries: number; bytes: number } }
   /** popup → content：把翻失败的块再翻一遍（§7.6） */
   'axt:retry-failed': { request: Record<never, never>; response: { retried: number } }
+  /** popup → content：某个引擎刚被用户修好（语言包下载完）；撤销进行中会话的降级记录，让链回到首选（§8.5） */
+  'axt:engine-ready': { request: { id: string }; response: { reset: boolean } }
 }
 
 export type AxtMessageType = keyof AxtMessages
