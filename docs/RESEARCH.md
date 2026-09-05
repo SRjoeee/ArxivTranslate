@@ -311,7 +311,14 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 
 **§6.5 的一处错误**：那节写「Read Frog 把 provider 的 fetch 放在 content script、service worker 完全不在请求链路上」。核对参考快照：`utils/host/translate/translate-text.ts:360` 通过 `sendMessage("enqueueTranslateRequest", …)` 把请求发给 background，`entrypoints/background/translation-queues.ts:490` 在 worker 里排队并真正调用模型——Read Frog 的请求**就是在 background 执行的**，只是把等待与队列也放在那里。§6.5 关于 worker 冷启动 6.7–77 s 的测量本身仍有效，但「参考项目怎么绕开」那段的依据不成立，DESIGN §8.0 引用它作为把请求移到 content 的理由之一也随之失效。
 
-**尚未重测**：§6.5 的冷启动延迟只测了一次（2026-09-04），当时没有区分「worker 启动」「读 storage」「消息边界」三段各占多少；issue #42 要求先定位再下结论。在决定把请求移回 background 之前要补这组测量，见 §7 第 24 条。
+**冷启动延迟的重测（2026-09-05，Playwright + 当前 main 构建）**：从 popup 页面计时 `axt:ping`、`axt:provider-status`（冷 / 热）与 `chrome.storage.local.get`，四轮（启动后 + 三次闲置 36 s 后）全部落在 **0–5 ms**：
+
+| 轮次 | 测前 worker 存活 | ping | provider-status 冷 | 热 | storage |
+|---|---|---|---|---|---|
+| 启动后 | 1 | 5 ms | 1 ms | 1 ms | 0 ms |
+| 闲置 36 s ×3 | 1 / 1 / 1 | 1 ms | 1 ms | 0–1 ms | 0 ms |
+
+两点结论：(1) `getConfig()` + `getProvider()` + `isAvailable()` 这条路径的**稳态成本约 1 ms**，§6.5 看到的 6.7–77 s 不是代码本身的开销；(2) **Playwright 环境里 worker 从不被回收**（三次闲置后存活数仍为 1——被调试器附着的 service worker 不受 MV3 空闲回收），CDP 的 `ServiceWorker` 域在浏览器级会话上也不可用，所以 §6.5 那种「冷 worker」在这里**造不出来**，三段拆分无法在自动化环境完成。要定位 §6.5 的根因，得在真实 Chrome 里用 `chrome://serviceworker-internals` 手动停掉 worker 后重测，并在 handler 内部分别打 `getConfig` / `getProvider` / `isAvailable` 三个时间戳；这一步留给用户手动验证。在拿到那组数据之前，§8.0「把请求移到 content」的**延迟**理由既未被证实也未被推翻，而它的 **CORS / 混合内容**代价已经被本节实测坐实。
 
 ## 7. DESIGN.md 修订清单
 
