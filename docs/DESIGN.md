@@ -378,6 +378,8 @@ export interface TranslationTransport {
 
 - `createLocalTransport(config)`（background）：`buildChain` → 每个引擎一套 `createTranslateService`（共用本地 Dexie 缓存端口）→ `createFallbackService` 组合
 - `createMessageTransport()`（content / options，`src/shared/transport.ts`）：每个方法一条 runtime 消息。**单独一个文件**是为了包体积——`transport.ts` 会拉进三个 provider 与 AI SDK，content 只该拿到消息代理
+- **取消是尽力而为**：`axt:cancel-scope` 派给**当前**那条链。配置变更或 `axt:engine-ready` 重建过链的话，旧链上还在飞的请求撤不掉——它们回来时 content 侧按会话 id 在接收处挡掉（`run.ts` 的 `halted()`），代价只是几次白花的请求，不会往 DOM 上写。旧链不主动取消是有意的：配置改了就把在飞的批次全打成失败，用户会看到一屏重试按钮，比让它们跑完差
+- **指名引擎的调用不走降级链**：`TranslateCall.providerId` 有值时直接派给那一步的服务。设置页的「测试连接」问的是「我配的这个端点通不通」，链上有免费兜底就把它显示成成功，等于把 issue #42 抱怨的「两条路径不一致」换个方向再犯一次——用户会以为 key 没问题，实际整页都在用 Google 翻。指名一个不在链上的引擎如实报错，不悄悄换别的（`pnpm e2e` 有一条守着）
 
 ```ts
 export interface TranslationProvider {

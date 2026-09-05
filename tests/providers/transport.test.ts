@@ -88,6 +88,21 @@ describe('createLocalTransport：翻译', () => {
     expect(await boom.translate({ request: req })).toEqual({ ok: false, error: { kind: 'unknown', message: 'boom' } })
   })
 
+  it('指名引擎的调用不走降级链：设置页「测试连接」要如实报出这个端点的错', async () => {
+    const failing = { ...mockProvider(async () => { throw new ProviderError('auth', 'bad key') }), id: 'openai-compat' }
+    const free = { ...mockProvider(async r => ({ segments: r.segments, provider: 'google-web' })), id: 'google-web' }
+    const t = await withChain([failing, free])
+    // 不指名：链照常兜底，整页翻译不停死
+    expect(await t.translate({ request: req })).toMatchObject({ ok: true, result: { provider: 'google-web' } })
+    // 指名：直接报错，不能因为链上有免费兜底就显示成成功
+    expect(await t.translate({ request: req, providerId: 'openai-compat' })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+  })
+
+  it('指名一个不在链上的引擎：如实说，不悄悄换成别的', async () => {
+    const t = await withChain([mockProvider(async r => ({ segments: r.segments, provider: 'mock' }))])
+    expect(await t.translate({ request: req, providerId: 'chrome-builtin' })).toEqual({ ok: false, error: { kind: 'unknown', message: '引擎 chrome-builtin 不在当前链上' } })
+  })
+
   it('cancel 撤掉在飞的请求，撤掉的条数如实返回', async () => {
     vi.useFakeTimers()
     const t = await withChain([mockProvider(() => new Promise(() => undefined) as never)])

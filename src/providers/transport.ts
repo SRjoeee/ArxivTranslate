@@ -59,7 +59,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
   const chain = await (deps.buildChain ?? buildChain)(config)
   const primary = chain[0]!
   const model = config.provider === 'openai-compat' ? config.openaiCompat.model : undefined
-  const service = createFallbackService(chain.map(engine => ({
+  const steps = chain.map(engine => ({
     provider: engine,
     service: createTranslateService({
       getProvider: async () => engine,
@@ -70,7 +70,20 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
       ...(deps.batch ? { batch: deps.batch } : {}),
       ...(deps.cacheReadBudgetMs !== undefined ? { cacheReadBudgetMs: deps.cacheReadBudgetMs } : {}),
     }),
-  })))
+  }))
+  const service = createFallbackService(steps)
+
+  /**
+   * 指名引擎的调用**不走降级链**：设置页的「测试连接」问的是「我配的这个端点通不通」，
+   * 链上有免费兜底就把它显示成成功，等于把 issue #42 抱怨的「两条路径不一致」换个方向再犯一次——
+   * 用户会以为端点没问题，实际整页都在用 Google 翻
+   */
+  const translate = (call: TranslateCall): Promise<TranslateMessageResponse> => {
+    if (call.providerId === undefined) return service.translate(call)
+    const step = steps.find(s => s.provider.id === call.providerId)
+    if (!step) return Promise.resolve({ ok: false, error: { kind: 'unknown', message: `引擎 ${call.providerId} 不在当前链上` } })
+    return step.service.translate(call)
+  }
 
   const status = async (): Promise<ProviderStatus> => {
     const available = await primary.isAvailable()
@@ -106,7 +119,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
   }
 
   return {
-    translate: call => service.translate(call),
+    translate,
     cancel: async scope => service.cancel(scope),
     status,
   }
