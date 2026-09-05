@@ -288,7 +288,17 @@ interface ProtectedBlock {
 - `.ltx_para` 内非成对的子元素（行间公式、图表等）设 `grid-column: 1 / -1` 通栏
 - 标题、图表说明：降级为上下堆叠（它们的父级是整个 section，做不了 grid）
 - 表格：整表克隆置于下方（见 5.3）
-- **宽度** [决定，2026-09-04 重做]：body 是五列命名网格 `1fr nav article nav 1fr`，第 4 列在实测页面上始终是空的预留列。side 模式**保留左侧 TOC**（`--nav-width: minmax(8rem, 12rem)` 收窄），文章列 `--main-width: min(96rem, calc(100vw - 26rem))` 随视口伸缩且永远不超出视口，两侧 `1fr` 保持整体居中。只覆盖 `--main-width` 不够：把导航栏 `display:none` 并不会收掉它的轨道（各 14rem 下限），页面因此比视口宽而横向滚动（实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）；把轨道整个归零则会让 TOC 消失，两者都不可取。实测 1440px 视口：溢出 0、TOC 保留 176px、每栏 484px。arXiv 页面的文章列宽（≥1280px 时 body 是 `grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr` 的网格）与 `.ltx_document` 的 `max-width` 都只由这个变量决定，`.ltx_page_main` 本身是 `width:100%`（RESEARCH.md §3.2）。同时隐藏 `.ltx_page_navbar`（用我们自己的属性选择器，不要写 arXiv 的 `data-reading-mode`，那会被它持久化）。注意 `--main-width` 还控制图片、代码块、单元格的 max-width；side 模式下它们要装进的是**一栏**，所以约束成 `max-width: 100%`（2026-09-04 实测：钉成 52rem 会让 832px 的插图塞进 484px 的栏里撑出栏外）。**表格按比例缩进栏内**（2026-09-04 修订）：论文里的数值表 min-content 普遍超过半栏（实测同一页三张表 509 / 551 / 613px，栏宽 484px），塞进一栏会溢出到隔壁与译文表重叠；表格又压不到 min-content 以下。因此 `fitTables`（`src/core/renderer/table-fit.ts`）在进入 side 与容器尺寸变化时量出所需比例，落到 95/90/85/80/75/70 六档之一，写成 `data-axt-fit` 属性（原节点只允许追加 `data-axt-*`，§7.1），CSS 用 `zoom` 应用。实测那三张只需 0.85 / 0.95 / 0.75，六列齐全、字仍清楚，**左右对照得以保留**。缩到 0.7 还装不下的极端表格退化为栏内横向滚动（`data-axt-fit="scroll"`）。**量尺寸的克隆必须先剥掉 `data-axt-*` 并写死 `zoom: 1`**：带着上一轮的 `data-axt-fit` 会命中缩放规则，量到的是已经缩过的宽度，于是判定装得下、去掉缩放，下一轮又量到原始宽度再缩，窗口停在某些尺寸时表格会不停闪（实测 551→85→468→none→551 的循环）。ResizeObserver 也要比较宽度、只在真的变化时重算，否则我们自己的缩放会再次触发它。放弃过的两个方案：通栏上下堆叠（失去对照）、一律栏内滚动（裁列、两边各滚一次）
+- **宽度契约** [决定，2026-09-05 重做；2026-09-04 版作废]：arXiv 的 body 是五列网格 `1fr nav article aside 1fr`（主题 `--nav-width: minmax(14rem, 25rem)`、文章 52rem 居中；第 4 列没有命名区域，只给 ar5iv 挂在文章右侧的边注 / 致谢 / 出版说明留位）。side 模式把三列的分配**一起**定，各列一个闭式 token（都是 `100vw` 的函数，依赖列宽的规则直接引用，不需要 JS 量轨道）：`--axt-nav-w: clamp(14rem, 20vw, 25rem)`（arXiv 原生范围）、`--axt-aside-w`（< 96rem 为 1rem——ar5iv 在那以下不显示边注，只折叠成 hover 弹出；≥ 96rem 为 `clamp(12rem, 16vw, 27rem)`）、`--axt-article-w: min(84rem, 100vw - nav - aside - 2rem)`（**两栏各 ≤ 40rem**，每行约 75 字符；旧版 96rem 让两栏各 756px、每行 95 字符，超出舒适阅读宽度）、`--axt-margin-w` 是两侧 `1fr` 平分的余量。ar5iv 的 `--main-width` / `--main-width-margin` 跟着文章列走。实测（Playwright，两篇论文一致）：
+
+  | 视口 | 导航 | 文章（每栏） | 右侧 | 旧版 导航 / 每栏 / 右侧 |
+  |---|---|---|---|---|
+  | 1280 | 256 | 976（460） | 16 | 176 / 420 / 176 |
+  | 1440 | 288 | 1104（524） | 16 | 176 / 500 / 176 |
+  | 1600 | 320 | 992（468） | 256 | 176 / 580 / 176 |
+  | 2000 | 400 | 1248（596） | 320 | 176 / 756 / 176 |
+  | 2560 | 400 | 1344（644） | 410 | 176 / 756 / 176 |
+
+  旧版只把导航压到 `minmax(8rem, 12rem)`、文章拿 96rem：导航 176px（TOC 条目三行折行）、右侧 176px（致谢块被压成窄条）。**右侧沟槽的几何必须跟 token 走**：ar5iv 的四组规则（`.ltx_note_outer` 按 96 / 109rem 写死 20 / 27rem 两档并用负 `margin-inline-end` 推出文章、`.ltx_pubnotes_content` 与 `.ltx_role_thanks` 的 `min(27rem, (100vw - main) / 2 - 2rem)`、作者区末位单位块的 `inset = (100dvw - main) / 2`）都假设文章居中、两侧沟槽等宽；side 模式两侧不等宽，只放宽导航不管右侧会把它们推出视口。这些规则在 `@media (width >= 96rem)` 里按 `--axt-aside-w` / `--axt-margin-w` 重写，盒子一律占 `[文章右缘 + 1rem, 文章右缘 + aside - 1rem]`，显隐与 hover / focus 交互原样不动。还没翻译的段落里脚注原件从**左栏**起浮，要再多推一栏加一个栏距（栏宽 = (文章列 − 主题给 `.ltx_page_content` 的 1rem 左右外边距 − 栏距) / 2；`--axt-gap` 因此改用 rem，em 会在脚注的 .85rem 字号里被重新解释），译文到达后副本从右栏起浮、原件隐藏，两种状态实测同落在沟槽里（2312.17141，2000px：1680–1968 / 1664–1952）。只覆盖 `--main-width` 不动轨道会横向溢出（隐藏导航栏不会收掉它的轨道，实测 1500px 视口溢出 388px），把轨道归零又会让 TOC 消失，两者都不可取
 - 用 `matchMedia('(max-width: 1279px)')` 监听（与 arXiv 主题折叠导航栏的 1280px 断点对齐）：变窄自动切到 stack，变宽切回 side；用户手动选的模式记为偏好，自动降级不覆盖偏好。实现见 `src/core/renderer/responsive.ts` 的 `createModeController`，popup 显示偏好、状态里同时带实际生效的模式
 
 ### 7.3 stack（上下对照）
