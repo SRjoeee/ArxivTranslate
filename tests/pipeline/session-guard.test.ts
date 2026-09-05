@@ -109,16 +109,22 @@ describe('缓存身份包含端点（issue #45 实验 3）', () => {
     expect(await keyOf(a)).not.toBe(await keyOf(b))
   })
 
-  it('同一端点的不同路径仍是同一身份：只取 origin，路径不改变模型行为', async () => {
+  it('同一域名下的不同路径是不同身份：网关路由可能指向不同后端（Codex 在 #54 指出）', async () => {
     const a = createOpenAICompatProvider({ baseURL: 'https://one.example/v1', apiKey: 'dummy', model: 'same-model' })
-    const b = createOpenAICompatProvider({ baseURL: 'https://one.example/v1/openai', apiKey: 'dummy', model: 'same-model' })
+    const b = createOpenAICompatProvider({ baseURL: 'https://one.example/tenant-b/v1', apiKey: 'dummy', model: 'same-model' })
+    expect(await keyOf(a)).not.toBe(await keyOf(b))
+  })
+
+  it('只有末尾斜杠之差仍是同一身份', async () => {
+    const a = createOpenAICompatProvider({ baseURL: 'https://one.example/v1', apiKey: 'dummy', model: 'same-model' })
+    const b = createOpenAICompatProvider({ baseURL: 'https://one.example/v1/', apiKey: 'dummy', model: 'same-model' })
     expect(await keyOf(a)).toBe(await keyOf(b))
   })
 
   it('缓存身份里不含 API key（硬规则 7）', () => {
     const provider = createOpenAICompatProvider({ baseURL: 'https://one.example/v1', apiKey: 'sk-secret-value', model: 'm' })
     expect(provider.cacheId).not.toContain('sk-secret-value')
-    expect(provider.cacheId).toBe('openai-compat:https://one.example')
+    expect(provider.cacheId).toBe('openai-compat:https://one.example/v1')
   })
 
   it('没声明 cacheId 的 provider 仍用 id：免费引擎不受影响', async () => {
