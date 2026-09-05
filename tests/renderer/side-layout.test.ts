@@ -106,8 +106,9 @@ describe('side 模式的容器覆盖', () => {
 
   it('没有配对的列表项及其镜像也用同一个标记槽：不是网格的项保留 ar5iv 的悬挂标记会伸出栏外', () => {
     // 实测 2609.04056v1 Definition 1.2：只有公式的第一项标记 x=208、兄弟项 248，压到导航栏上
-    expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) > \.ltx_item:not\(:has\(\.axt-t, \[data-axt-id\]\)\) \{[^}]*padding-inline-start: 2\.5rem/)
-    expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) > \.ltx_item:not\(:has\(\.axt-t, \[data-axt-id\]\)\) \{[\s\S]*?& > \.ltx_tag \{[^}]*position: absolute/)
+    // 槽宽要跟着标记走：写死 2.5rem 时 \item[(Assumption 1)] 这类宽标记会盖住正文（Codex 在 #40 指出）
+    expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) > \.ltx_item:not\(:has\(\.axt-t, \[data-axt-id\]\)\) \{[^}]*grid-template-columns: minmax\(2\.5rem, max-content\)/)
+    expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) > \.ltx_item:not\(:has\(\.axt-t, \[data-axt-id\]\)\) \{[\s\S]*?& > \.ltx_tag \{[^}]*grid-column: 1/)
   })
 
   it('堆叠区清单：样式表与 side-layout.ts 保持一致（TS 是事实来源）', () => {

@@ -56,12 +56,19 @@ async function openSide(id) {
   return page
 }
 
-/** 等视口附近的块都翻完（没有 pending 节点且连续两次不变） */
-async function quiesce(page) {
-  for (let i = 0; i < 60; i++) {
+/**
+ * 等视口附近的块都翻完再量：要求**连续三次**观察到没有 pending 节点。
+ * 单次为零可能只是两批之间的空档，或者块还没标记完（startTranslation 是先异步标记全部块再建观察器），
+ * 那时量到的几何会被随后到达的译文改掉，断言与截图都会飘（Codex 在 #40 指出）。超时不静默通过。
+ */
+async function quiesce(page, label = '') {
+  let stable = 0
+  for (let i = 0; i < 80; i++) {
     await sleep(500)
-    if (i > 2 && (await page.evaluate(() => document.querySelectorAll('.axt-pending').length)) === 0) return
+    stable = (await page.evaluate(() => document.querySelectorAll('.axt-pending').length)) === 0 ? stable + 1 : 0
+    if (stable >= 3 && i >= 5) return
   }
+  check(`等待翻译静止${label ? `（${label}）` : ''}`, false, '40 s 内没有连续三次观察到零 pending')
 }
 
 const rectOf = el => { const r = el.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), w: Math.round(r.width), t: Math.round(r.top) } }
@@ -90,10 +97,11 @@ async function measureFrame(page) {
     await page.setViewportSize({ width: vw, height: 900 })
     await sleep(400)
     const m = await measureFrame(page)
-    // 主内容优先、两侧对称（§7.2）：文章居中，目录列与右侧沟槽等宽，两栏等宽且在 28–40rem 之间
+    // 正文优先、两侧对称（§7.2）：文章居中且吃到 96rem 封顶，两侧同宽且不小于 arXiv 原生下限的可用宽度
     const centered = Math.abs((m.art.l - 0) - (m.vw - m.art.r)) <= 2
-    check(`${vw}px：不横向溢出、文章居中、两侧对称、两栏等宽且 ≤ 40rem`,
-      m.scrollW <= m.vw && centered && m.nav.w >= 8 * REM && m.col !== null && Math.abs(m.col[0] - m.col[1]) <= 2 && m.col[0] >= 27 * REM && m.col[0] <= 40 * REM,
+    check(`${vw}px：不横向溢出、文章居中、两侧对称、正文吃满（≤ 96rem）、两栏等宽`,
+      m.scrollW <= m.vw && centered && m.nav.w >= 13 * REM && m.art.w <= 96 * REM + 2 && m.art.w >= Math.min(96 * REM, m.vw - 2 * 25 * REM)
+      && m.col !== null && Math.abs(m.col[0] - m.col[1]) <= 2,
       `scrollW ${m.scrollW}/${m.vw}，左 ${m.art.l} / 右 ${m.vw - m.art.r}，导航 ${m.nav.w}，文章 ${m.art.w}，两栏 ${m.col?.join(' / ')}`)
     if (vw >= 96 * REM) {
       check(`${vw}px：右侧沟槽元素落在 [文章右缘, 视口] 内`, m.asides.length > 0 && m.asides.every(a => a.inGutter),
@@ -131,6 +139,23 @@ async function measureFrame(page) {
   check('Definition 1.2：只含公式的第一项与兄弟项标记对齐、正文对齐、右栏标记对齐',
     same(list.tags) && same(list.texts) && same(list.mirrors),
     `标记 ${list.tags.join('/')}，正文 ${list.texts.join('/')}，右栏标记 ${list.mirrors.join('/')}`)
+  // 宽标记不能盖住正文：把第一项的标记临时换成 \item[(Assumption 1)] 那种长标签再量（Codex 在 #40 指出）
+  const wide = await page.evaluate(() => {
+    const li = document.getElementById('S1.I1.i1')
+    const tag = li.querySelector(':scope > .ltx_tag')
+    const before = tag.textContent
+    tag.textContent = '(Assumption 1)'
+    const rect = el => el.getBoundingClientRect()
+    const range = document.createRange(); range.selectNodeContents(li.querySelector('.ltx_p'))
+    const text = range.getClientRects()[0]
+    const item = rect(li)
+    const t = rect(tag)
+    const out = { tagL: Math.round(t.left), tagR: Math.round(t.right), textL: Math.round(text.left), itemL: Math.round(item.left), itemR: Math.round(item.right) }
+    tag.textContent = before
+    return out
+  })
+  check('宽标记（(Assumption 1)）不盖正文、不伸出块外', wide.tagR <= wide.textL + 1 && wide.tagL >= wide.itemL - 1 && wide.textL <= wide.itemR,
+    `标记 ${wide.tagL}–${wide.tagR}，正文起点 ${wide.textL}，块 ${wide.itemL}–${wide.itemR}`)
   await page.screenshot({ path: `${SHOTS}/layout-definition.png` })
   await page.close()
 }

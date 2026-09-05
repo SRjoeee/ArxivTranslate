@@ -9,7 +9,7 @@ stats-*.json
 
 # 测试
 coverage/
-tests/e2e/.profile/
+tests/e2e/.profile*/
 tests/e2e/.shots/
 
 # 参考仓库（GPL 源码，只读，不入库）

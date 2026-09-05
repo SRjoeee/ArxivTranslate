@@ -171,16 +171,20 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
      （实测 2609.04056v1 Definition 1.2：标记 x=208、兄弟项 248；镜像同样悬挂进栏间距）。
      display: block 是为了脱离 ar5iv 给 enumerate 项的自带网格 */
   &:is(.ltx_itemize, .ltx_enumerate, .ltx_description) > .ltx_item:not(:has(.axt-t, [data-axt-id])) {
-    display: block;
-    position: relative;
+    display: grid;
+    /* 标记列**至少** 2.5rem（与配对项的槽同宽，窄标记两边对齐），需要时长到标记的实际宽度：
+       写死 2.5rem 的话 \item[(Assumption 1)] 这类宽标记会盖住正文（Codex 在 #40 指出）。
+       这里不能像配对项那样用绝对定位——绝对定位不占位，槽宽就没法跟着标记走 */
+    grid-template-columns: minmax(2.5rem, max-content) minmax(0, 1fr);
     margin-inline-start: 0;
-    padding-inline-start: 2.5rem;
+    padding-inline-start: 0;
+
+    & > * {
+      grid-column: 2;
+    }
 
     & > .ltx_tag {
-      position: absolute;
-      inset-inline-start: 0;
-      box-sizing: border-box;
-      width: 2.5rem;
+      grid-column: 1;
       margin: 0;
       padding-inline-end: 0.5rem;
       text-align: end;
@@ -269,27 +273,41 @@ html[data-axt-mode="only"] [data-axt-split] {
   display: none;
 }
 
-/* ── 宽度契约（§7.2 [决定]，2026-09-05 重做）────────────────────────────
-   arXiv 的 body 是五列网格 `1fr nav article aside 1fr`（主题里 `--nav-width: minmax(14rem, 25rem)`、
-   文章 52rem 居中，第 4 列没有命名区域，只给 ar5iv 挂在文章右侧的边注 / 致谢 / 出版说明留位）。
-   side 模式要把文章列拉宽成两栏，三列的分配必须一起定，原则是**主内容优先、两侧对称**：
-   - 文章列先定：clamp(58rem, 62vw, 84rem)——下限保证两栏各 ≥ 28rem，上限让两栏各 ≤ 40rem（每行约 75 字符）
-   - 剩余空间左右**均分**给目录与右侧沟槽，同一个 token，文章因此始终居中；窗口越宽两侧越展开，
-     封顶 25rem（arXiv 目录的上限），再宽的部分落到两侧 1fr 的页边距
-   - 右侧沟槽在 ar5iv 显示边注的宽度（≥ 96rem）下至少 20rem，边注、致谢、出版说明都装得下
-   早先两版都错：第一版把导航压到 12rem、文章拿 96rem（导航 176px 三行折行，两栏各 756px 每行 95 字符，右侧 176px 把致谢块压成窄条）；
-   第二版按视口给导航 14–25rem、右侧只在 ≥ 96rem 留位，结果 1333px 的窗口里导航 267、右侧 16，整篇被推到右边、没有留白（用户打回）。
+/* ── 宽度契约（§7.2 [决定]，2026-09-05 定稿）──────────────────────────────
+   arXiv 的 body 是五列网格 `1fr nav article aside 1fr`（主题 `--nav-width: minmax(14rem, 25rem)`、
+   文章 52rem 居中；第 4 列没有命名区域，只给 ar5iv 挂在文章右侧的边注 / 致谢 / 出版说明留位）。
+   side 模式要把文章列拉宽成两栏，三列一起定，次序是**正文优先**：
+   - 两侧先按"正文吃满 96rem 之后还剩多少"取，下限 14rem、上限 25rem——两个数都是 arXiv 主题 --nav-width 的原生范围
+   - 正文吃掉其余的，封顶 96rem（arXiv 自己的上限）：宽窗口下每栏 740px，与改动之前逐像素相同
+   - 两侧对称，所以文章始终居中；封顶之后多出来的宽度落到两侧的 1fr 页边距（--axt-margin-w）
    三个 token 都是 100vw 的闭式函数：依赖列宽的规则直接引用，不需要 JS 去量轨道。
-   ar5iv 的 --main-width / --main-width-margin 跟着文章列走：.ltx_document / 页脚 / 绝对定位的脚注都参照它们 */
+   ar5iv 的 --main-width / --main-width-margin 跟着文章列走。
+
+   **旧版把两侧写死在 minmax(8rem, 12rem)**：导航永远 176px（目录条目最多折 4 行），2560px 视口下
+   两侧各有 512px 的纯空白却不分给导航——用户反馈的就是这个。现在导航从空出来的页边距里拿，
+   1440–2000px 得到 208–216px（折行降到 3 行）、2560px 得到 384px，**正文一个像素都没让**。
+   中途走错的两版：(1) 把导航压到 12rem、正文拿 96rem —— 就是旧版，导航过窄；
+   (2) 按视口给导航 14–25rem、右侧只在 ≥ 96rem 留位 —— 1333px 窗口里导航 267、右侧 16，整篇被推到右边（用户打回）；
+   (3) 正文 clamp(58rem, 62vw, 84rem)、剩余空间两侧均分 —— 居中对称了，但 2000px 下正文从 1536 缩到 1240，
+   每栏 740 → 592，这篇论文 145 张行间公式里 25 张放不下（用户反馈"公式出界"）。按 62vw 分是**让两侧去分正文的宽度**，
+   方向反了：两侧只该拿正文用不掉的那部分。 */
 html[data-axt-mode="side"] {
-  --axt-article-w: clamp(58rem, 62vw, 84rem);
-  --axt-side-w: clamp(8rem, calc((100vw - var(--axt-article-w)) / 2), 25rem);
-  --axt-margin-w: max(0px, calc((100vw - var(--axt-article-w)) / 2 - var(--axt-side-w)));
+  --axt-side-w: clamp(14rem, calc((100vw - 96rem) / 2), 25rem);
+  --axt-article-w: min(96rem, calc(100vw - 2 * var(--axt-side-w)));
+  --axt-margin-w: max(0px, calc((100vw - var(--axt-article-w) - 2 * var(--axt-side-w)) / 2));
   --main-width: var(--axt-article-w);
   --main-width-margin: calc(var(--axt-article-w) + 1rem);
 }
+/* 正文轨道再套一层"容器宽度减两侧"的上限：token 是按 100vw 算的，而 body 是 width: 100%，
+   非覆盖式滚动条（Windows / Linux 默认）下 100vw 比容器宽出一条滚动条，三条固定轨道的和就会超出容器、
+   横向溢出（Codex 在 #40 指出）。这里的 100% 在 grid-template-columns 里就是网格容器的宽度，正好扣掉滚动条。
+   **不能把三条都写成 minmax(0, …)**：两侧的 1fr 增长上限是无穷，会在"最大化轨道"那一步跟正文一起分空间，
+   实测 1280px 下正文从 832 掉到 704、两侧各多出 64px 空白 */
 html[data-axt-mode="side"] body {
-  grid-template-columns: 1fr var(--axt-side-w) var(--axt-article-w) var(--axt-side-w) 1fr;
+  grid-template-columns:
+    1fr var(--axt-side-w)
+    min(var(--axt-article-w), calc(100% - 2 * var(--axt-side-w)))
+    var(--axt-side-w) 1fr;
 }
 
 /* 右侧沟槽（≥ 96rem，与 ar5iv 显示边注的断点一致）：ar5iv 的四组规则都用 (100vw - --main-width) / 2 当沟槽宽、
