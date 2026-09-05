@@ -13,6 +13,7 @@ const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3
 const PROVIDERS: [Config['provider'], string, string][] = [
   ['openai-compat', 'LLM（OpenAI 兼容端点）', '译文质量最好，需要 API key'],
   ['google-web', 'Google 网页翻译（免费）', '不需要 key，整篇几秒翻完，术语准确度不如 LLM'],
+  ['chrome-builtin', 'Chrome 内置翻译（离线）', '不需要 key、不联网，单句十几毫秒；术语准确度不如 LLM，首次使用要在 popup 里下载语言包'],
 ]
 
 // Phase 2：provider 配置 + 连接测试。样式预设、术语表、缓存管理在 Phase 3。
