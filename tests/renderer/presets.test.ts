@@ -26,7 +26,7 @@ describe('样式预设（§7.5）', () => {
 
   it('下划线类必须显式画到 math / inline-block 上：text-decoration 不传播到原子行内盒', () => {
     // 用户反馈的漏线就是这个：公式与行内盒处虚线断掉（2026-09-05 实测 text-decoration-line 计算值为 none）
-    const shared = /html:is\(([^)]*)\) :is\(\.axt-t, \.axt-t :is\(math, \.ltx_inline-block, svg, img\)\)/.exec(RULES)
+    const shared = /html:is\(([^)]*)\) :is\(\.axt-t[\s\S]*?:is\(math, \.ltx_inline-block, svg, img\)\)/.exec(RULES)
     expect(shared).not.toBeNull()
     for (const preset of DECORATION_PRESETS) {
       expect(shared![1]).toContain(`[data-axt-style="${preset}"]`)
@@ -58,12 +58,20 @@ describe('样式预设（§7.5）', () => {
   })
 
   it('荧光笔按行高重复：渐变默认只铺一次，多行段落就只有最后一行有色（Codex 在 #52 指出）', () => {
-    expect(RULES).toMatch(/html\[data-axt-style="marker"\] \.axt-t,\s*html\[data-axt-style="marker-gradient"\] \.axt-t \{[^}]*background-size: 100% 1lh/)
+    expect(RULES).toMatch(/html\[data-axt-style="marker"\] \.axt-t[\s\S]*?html\[data-axt-style="marker-gradient"\] \.axt-t[^{]*\{[^}]*background-size: 100% 1lh/)
     expect(RULES).toMatch(/background-repeat: repeat-y/)
   })
 
   it('quote 不加在行内标题译文上：会把「Abstract 摘要」这类同行标题挤歪', () => {
-    expect(RULES).toMatch(/html\[data-axt-style="quote"\] \.axt-t:not\(\[data-axt-inline\]\)/)
+    expect(RULES).toMatch(/html\[data-axt-style="quote"\] \.axt-t:not\(\[data-axt-inline\]/)
+  })
+
+  it('装饰一律不落到加载圆环与失败控件上：它们也带 .axt-t 但不是译文（Codex 在 #52 指出）', () => {
+    // gradient 的 color: transparent 会把「重试」按钮的字变透明，正好是最需要点它的时候
+    for (const line of RULES.split('\n')) {
+      if (!line.includes('.axt-t')) continue
+      expect([line, line.includes('.axt-pending') && line.includes('.axt-error')]).toEqual([line, true])
+    }
   })
 
   it('enable 把预设写到 <html>，与模式属性同层', () => {

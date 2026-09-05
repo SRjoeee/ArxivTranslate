@@ -7,6 +7,33 @@ import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
 export const CONFIG_VERSION = 7
 
+/** 术语表的限额。迁移与 schema 共用，改一处两边同时生效 */
+export const GLOSSARY_LIMITS = { term: 120, translation: 200, entries: 200, totalChars: 6000 } as const
+
+const glossaryChars = (entries: readonly { term: string; translation: string }[]) =>
+  entries.reduce((n, e) => n + e.term.length + e.translation.length, 0)
+
+/**
+ * 把来历不明的术语表规整成合法值：非法条目丢掉，超额部分截断。
+ * 迁移时必须过一遍——旧版本没有这些限额，直接抄过来的话 `getConfig()` 会因为一条超长术语
+ * 判定整份配置不合法而回退默认值，用户看到的是 API key、引擎、提示词全没了（Codex 在 #52 指出）
+ */
+export function normalizeGlossary(value: unknown): { term: string; translation: string }[] {
+  if (!Array.isArray(value)) return []
+  const kept: { term: string; translation: string }[] = []
+  for (const raw of value) {
+    if (typeof raw !== 'object' || raw === null) continue
+    const { term, translation } = raw as { term?: unknown; translation?: unknown }
+    if (typeof term !== 'string' || typeof translation !== 'string') continue
+    if (term.length === 0 || term.length > GLOSSARY_LIMITS.term) continue
+    if (translation.length === 0 || translation.length > GLOSSARY_LIMITS.translation) continue
+    if (kept.length >= GLOSSARY_LIMITS.entries) break
+    if (glossaryChars([...kept, { term, translation }]) > GLOSSARY_LIMITS.totalChars) break
+    kept.push({ term, translation })
+  }
+  return kept
+}
+
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
   provider: z.enum(['openai-compat', 'google-web']),
@@ -33,11 +60,11 @@ export const configSchema = z.object({
   glossary: z.array(z.object({
     // 单条也要限长：只限条数的话，一整篇文档被当成一条粘进来照样收下，
     // 然后进每一批 prompt 与每个分段的缓存键（Codex 在 #52 指出）
-    term: z.string().min(1).max(120),
-    translation: z.string().min(1).max(200),
-  })).max(200).refine(
-    entries => entries.reduce((n, e) => n + e.term.length + e.translation.length, 0) <= 6000,
-    { message: '术语表总长超过 6000 字，会显著增加每一批的 token' },
+    term: z.string().min(1).max(GLOSSARY_LIMITS.term),
+    translation: z.string().min(1).max(GLOSSARY_LIMITS.translation),
+  })).max(GLOSSARY_LIMITS.entries).refine(
+    entries => glossaryChars(entries) <= GLOSSARY_LIMITS.totalChars,
+    { message: `术语表总长超过 ${GLOSSARY_LIMITS.totalChars} 字，会显著增加每一批的 token` },
   ).default([]),
   /** 译文样式（§7.5）：预设只做叠加装饰，custom 只填声明块、选择器由扩展补 */
   style: z.object({

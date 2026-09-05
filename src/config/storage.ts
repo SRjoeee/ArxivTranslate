@@ -3,7 +3,7 @@ import { storage } from 'wxt/utils/storage'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
 import { fromBcp47 } from './languages'
-import { CONFIG_VERSION, DEFAULT_CONFIG, configSchema, type Config } from './schema'
+import { CONFIG_VERSION, DEFAULT_CONFIG, configSchema, normalizeGlossary, type Config } from './schema'
 
 export const configItem = storage.defineItem<Config>('local:config', {
   fallback: DEFAULT_CONFIG,
@@ -19,8 +19,14 @@ export const configItem = storage.defineItem<Config>('local:config', {
     5: (v4: Omit<Config, 'version' | 'fallback' | 'glossary'> & { version: 4 }) => ({ ...v4, version: 5 as const, fallback: { enabled: true } }),
     // v5 -> v6：加术语表，默认空表（空表不进 prompt 也不进缓存键，行为与之前一致）
     6: (v5: Omit<Config, 'version' | 'glossary' | 'style'> & { version: 5 }) => ({ ...v5, version: 6 as const, glossary: [] }),
-    // v6 -> v7：加译文样式，默认 none（与实现之前的外观一致）
-    7: (v6: Omit<Config, 'version' | 'style'> & { version: 6 }) => ({ ...v6, version: 7 as const, style: { preset: 'none' as const, customCss: '' } }),
+    // v6 -> v7：加译文样式（默认 none，与实现之前的外观一致），并把旧术语表规整到 v7 新加的限额内——
+    // 不规整的话一条超长术语就会让整份配置校验失败、回退默认值（Codex 在 #52 指出）
+    7: (v6: Omit<Config, 'version' | 'style'> & { version: 6 }) => ({
+      ...v6,
+      version: 7 as const,
+      glossary: normalizeGlossary(v6.glossary),
+      style: { preset: 'none' as const, customCss: '' },
+    }),
   },
 })
 

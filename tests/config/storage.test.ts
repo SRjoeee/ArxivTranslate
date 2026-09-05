@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
-import { CONFIG_VERSION, DEFAULT_CONFIG } from '@/config/schema'
+import { CONFIG_VERSION, DEFAULT_CONFIG, GLOSSARY_LIMITS, normalizeGlossary } from '@/config/schema'
 import { configItem, getConfig, setConfig } from '@/config/storage'
 
 describe('config storage', () => {
@@ -160,6 +160,39 @@ describe('provider 选择', () => {
     expect(c.version).toBe(CONFIG_VERSION)
     expect(c.style).toEqual({ preset: 'none', customCss: '' })
     expect(c.glossary).toEqual([{ term: 'weights', translation: '权重' }])
+  })
+
+  it('v6 里超限的术语表在迁移时被规整，配置的其余部分（含 API key）不受牵连（Codex 在 #52 指出）', async () => {
+    // v6 没有单条与总长限额，这些值当时是合法的；照抄进 v7 会让整份配置校验失败、回退默认值
+    const v6 = {
+      version: 6, provider: 'openai-compat',
+      openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-keep', model: 'x/y', thinking: 'disabled' },
+      targetLanguage: 'cmn', mode: 'stack', prompts: { promptId: 'default', patterns: [] },
+      preload: { margin: 1000, threshold: 0 }, fallback: { enabled: true },
+      glossary: [
+        { term: 'weights', translation: '权重' },
+        { term: 'x'.repeat(500), translation: '整篇文档被当成一条粘了进来' },
+        { term: 'bias', translation: '偏'.repeat(500) },
+      ],
+    }
+    await fakeBrowser.storage.local.set({ config: v6, config$: { v: 6 } })
+    vi.resetModules()
+    const c = await (await import('@/config/storage')).getConfig()
+    expect(c.openaiCompat.apiKey).toBe('sk-keep')
+    expect(c.glossary).toEqual([{ term: 'weights', translation: '权重' }])
+  })
+
+  it('规整只丢不合法的条目，合法的一条不少', () => {
+    const ok = Array.from({ length: 200 }, (_, i) => ({ term: `t${i}`, translation: `译${i}` }))
+    expect(normalizeGlossary(ok)).toHaveLength(200)
+    // 超出条数上限的截断，不是整表作废
+    expect(normalizeGlossary([...ok, { term: 'extra', translation: '多的' }])).toHaveLength(200)
+    expect(normalizeGlossary('不是数组')).toEqual([])
+    expect(normalizeGlossary([{ term: 1, translation: '译' }, null, { term: 'a', translation: '甲' }])).toEqual([{ term: 'a', translation: '甲' }])
+    // 总长上限：单条都合法但加起来超了，从超出的那条起截断
+    const long = Array.from({ length: 30 }, (_, i) => ({ term: `${i}`.padEnd(120, 'x'), translation: '译'.repeat(200) }))
+    expect(normalizeGlossary(long).length).toBeLessThan(30)
+    expect(normalizeGlossary(long).reduce((n, e) => n + e.term.length + e.translation.length, 0)).toBeLessThanOrEqual(GLOSSARY_LIMITS.totalChars)
   })
 
   it('样式预设只认清单里的 id，自定义 CSS 有长度上限', async () => {

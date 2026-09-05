@@ -53,5 +53,9 @@ export function buildPrompts(request: TranslateRequest, prompts: PromptsConfig =
   // 漏写了 {{targetLanguage}} 模型就不知道译成哪种语言——协议块只讲收发，不点名语言（Codex 在 #39 指出）
   const mentionsTarget = `${template.systemPrompt}\n${template.prompt}`.includes(getTokenCellText('targetLanguage'))
   if (!mentionsTarget) prompt = `Target language: ${values.targetLanguage}\n\n${prompt}`
+  // 同理漏写了 {{glossary}}：设置页承诺「术语表随每一批发出」，而「新建」出来的模板默认不含这个变量，
+  // 于是用户配了术语表却完全没生效（Codex 在 #52 指出）
+  const mentionsGlossary = `${template.systemPrompt}\n${template.prompt}`.includes(getTokenCellText('glossary'))
+  if (!mentionsGlossary && context?.glossary?.length) prompt = `Glossary:\n${values.glossary}\n\n${prompt}`
   return { system, prompt }
 }

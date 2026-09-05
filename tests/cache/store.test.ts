@@ -59,6 +59,16 @@ describe('TranslationCache', () => {
     expect(s.bytes).toBeGreaterThan(0)
   })
 
+  it('过期条目会被 cleanup 清掉，统计随之变准（Codex 在 #52 指出）', async () => {
+    // get() 只是把过期条目当未命中，从不删除；统计若照数索引，设置页会一直显示一堆用不了的条数与体积
+    const c = make()
+    await c.set('old', 'v', 'p')
+    const later = Date.now() + 31 * 24 * 60 * 60 * 1000
+    expect((await c.stats()).entries).toBe(1)
+    await c.cleanup(later)
+    expect((await c.stats()).entries).toBe(0)
+  })
+
   it('超大单条与空译文不入库', async () => {
     const c = make({ maxEntryBytes: 10 })
     expect(await c.set('k', 'x'.repeat(100), 'p')).toBe(false)

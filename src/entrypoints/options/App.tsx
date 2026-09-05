@@ -48,13 +48,18 @@ export function App() {
   // 术语表在页面里是文本，保存时才解析成结构（成批粘贴比逐行编辑快）
   const [glossaryText, setGlossaryText] = useState('')
   const [cache, setCache] = useState<{ entries: number; bytes: number } | null>(null)
+  const [cacheError, setCacheError] = useState('')
   const [cacheNote, setCacheNote] = useState('')
 
   const loadCacheStats = useCallback(async () => {
     try {
-      setCache(await sendMessage({ type: 'axt:cache-stats' }))
-    } catch {
+      const res = await sendMessage({ type: 'axt:cache-stats' })
+      // 读不到就说读不到：把失败显示成「已缓存 0 条」会让用户以为缓存是空的（Codex 在 #52 指出）
+      if (res.ok) { setCache({ entries: res.entries, bytes: res.bytes }); setCacheError('') }
+      else { setCache(null); setCacheError(res.message) }
+    } catch (e) {
       setCache(null)
+      setCacheError(e instanceof Error ? e.message : String(e))
     }
   }, [])
 
@@ -286,7 +291,9 @@ export function App() {
 
       <h2 style={{ fontSize: 15, marginTop: 24 }}>译文缓存</h2>
       <p style={{ margin: '0 0 4px', fontSize: 13 }}>
-        {cache === null ? '读取中…' : `已缓存 ${cache.entries} 条 · ${(cache.bytes / 1024 / 1024).toFixed(2)} MB`}
+        {cache !== null
+          ? `已缓存 ${cache.entries} 条 · ${(cache.bytes / 1024 / 1024).toFixed(2)} MB`
+          : cacheError === '' ? '读取中…' : `读取缓存失败：${cacheError}`}
       </p>
       <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>
         缓存按引擎、模型、提示词、术语表分开存；换了其中任何一样都不会命中旧译文，通常不需要手动清
