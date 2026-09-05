@@ -51,6 +51,9 @@ export const UNIT_RULES: readonly Rule[] = [
 /** §5.3 表格：最外层 .ltx_tabular 作为一个单元（遍历不下钻即取到最外层），单元格是块内的段，th 也带 ltx_td */
 export const TABLE_RULES = { root: '.ltx_tabular', cell: '.ltx_td' } as const
 
+/** side 模式要装进一栏的宽内容（renderer/table-fit.ts）：表格，以及行间公式的表（单式与 align 组都是 table.ltx_eqn_table；组里的行是 tr.ltx_equation，不单独算） */
+export const FIT_TARGETS = `${TABLE_RULES.root}, table.ltx_eqn_table`
+
 /** 表格块的全部单元格，按文档序、任意深度：嵌套 tabular 的格也是外层块的格（§5.3） */
 export function tableCells(table: Element): Element[] {
   return Array.from(table.querySelectorAll(TABLE_RULES.cell))

@@ -11,7 +11,24 @@ const pairDoc = (count = 1) => {
 const originals = (doc: Document) => Array.from(doc.querySelectorAll(`.ltx_tabular:not(.${T_CLASS})`))
 const fitOf = (el: Element) => el.getAttribute(FIT_ATTR)
 
+/** 一对行间公式：原式 + 镜像（createMirrors 的结果形状） */
+const eqnDoc = () => docOf('<div class="ltx_para"><table class="ltx_equation ltx_eqn_table"><tbody><tr class="ltx_equation ltx_eqn_row"><td class="ltx_eqn_cell">x</td><td class="ltx_eqn_cell ltx_eqn_eqno">(1)</td></tr></tbody></table>'
+  + `<table class="ltx_equation ltx_eqn_table ${T_CLASS} axt-mirror" data-axt-for="mirror:0"><tbody><tr class="ltx_equation ltx_eqn_row"><td class="ltx_eqn_cell">x</td><td class="ltx_eqn_cell ltx_eqn_eqno">(1)</td></tr></tbody></table></div>`)
+
 describe('fitTables', () => {
+  it('行间公式与镜像同表格一样按栏缩放：只标最外层的 table.ltx_eqn_table，组里的 tr.ltx_equation 不单独算', () => {
+    const doc = eqnDoc()
+    const r = fitTables(doc, { minContentWidth: () => 800, columnWidth: () => 436 })
+    expect(r).toEqual({ fitted: 0, scrolled: 1 }) // 436/800 = 0.545 < 0.7 → 滚动
+    const [original, mirror] = Array.from(doc.querySelectorAll('table'))
+    expect(fitOf(original!)).toBe(FIT_SCROLL)
+    expect(fitOf(mirror!)).toBe(FIT_SCROLL)
+    expect(doc.querySelector(`tr[${FIT_ATTR}]`)).toBeNull()
+    const again = fitTables(doc, { minContentWidth: () => 500, columnWidth: () => 436 })
+    expect(again).toEqual({ fitted: 1, scrolled: 0 })
+    expect(fitOf(original!)).toBe('85') // 436/500 = 0.872
+  })
+
   it('装得下就不标比例', () => {
     const doc = pairDoc()
     const r = fitTables(doc, { minContentWidth: () => 400, columnWidth: () => 484 })

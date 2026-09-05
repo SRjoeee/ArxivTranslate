@@ -99,6 +99,19 @@ async function measureFrame(page) {
       check(`${vw}px：右侧沟槽元素落在 [文章右缘, 视口] 内`, m.asides.length > 0 && m.asides.every(a => a.inGutter),
         `${m.asides.length} 个：${m.asides.slice(0, 3).map(a => `${a.l}–${a.r}`).join('，')}；文章右缘 ${m.art.r}`)
     }
+    // 行间公式不能换行，宽过一栏的要按档缩放或栏内滚动（§7.2）：量所有配对了镜像的公式表，没有一张比栏宽
+    await page.evaluate(() => document.querySelector('#S1.SS4')?.scrollIntoView({ block: 'start' }))
+    await quiesce(page)
+    await sleep(1500) // side prep 的合并器最长等 1s
+    const eqn = await page.evaluate(() => {
+      const root = document.querySelector('.ltx_document')
+      const column = Number.parseFloat(getComputedStyle(root).gridTemplateColumns.split(' ')[0])
+      const tables = [...root.querySelectorAll('table.ltx_eqn_table')].filter(t => t.nextElementSibling?.classList.contains('axt-mirror') || t.classList.contains('axt-mirror'))
+      const wide = tables.map(t => ({ w: Math.round(t.getBoundingClientRect().width), fit: t.dataset.axtFit ?? null })).filter(x => x.w > column + 1)
+      return { column: Math.round(column), total: tables.length, fitted: tables.filter(t => t.dataset.axtFit).length, wide }
+    })
+    check(`${vw}px：行间公式装进一栏（配对的公式表没有一张宽过栏宽）`, eqn.total > 0 && eqn.wide.length === 0,
+      `栏宽 ${eqn.column}，公式表 ${eqn.total} 张、缩放 / 滚动 ${eqn.fitted} 张，超宽 ${JSON.stringify(eqn.wide.slice(0, 3))}`)
     await page.screenshot({ path: `${SHOTS}/layout-2609.04056-${vw}.png` })
   }
 

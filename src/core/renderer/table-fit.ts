@@ -1,9 +1,10 @@
-// side 模式下让表格装进自己那一栏（DESIGN §7.2）。
+// side 模式下让表格与行间公式装进自己那一栏（DESIGN §7.2）。
 // 论文里的数值表最小内容宽度普遍超过半栏（实测同一页三张表 509 / 551 / 613px，栏宽 484px），
-// 塞进一栏会溢出到隔壁与译文表重叠。表格无法被压到 min-content 以下，所以按比例缩小：
+// 行间公式同样不能换行（实测 2609.04056v1：栏宽 436px 时 (1.8) 宽 800px、(1.15) 宽 900px，
+// 左栏的式子横到右栏、公式编号跑到镜像的开头上）。两者都压不到 min-content 以下，所以按比例缩小：
 // 量出需要的比例，落到一档离散的 zoom 上（写成 data-axt-fit，样式在 modes.css）。
-// 缩到 MIN_FIT 还装不下的极端表格退化为栏内横向滚动。
-import { DOCUMENT_ROOT, TABLE_RULES } from '@/core/rules/latexml'
+// 缩到 MIN_FIT 还装不下的极端内容退化为栏内横向滚动（ar5iv 自己在 .ltx_td / .ltx_inline-block 里也这么处理公式表）。
+import { DOCUMENT_ROOT, FIT_TARGETS } from '@/core/rules/latexml'
 import { FOR_ATTR, T_CLASS } from './index'
 
 /** 原节点只允许追加 data-axt-*（§7.1），所以比例用属性而不是内联样式表达 */
@@ -68,7 +69,8 @@ const paired = (table: Element): boolean =>
   && table.nextElementSibling?.getAttribute(FOR_ATTR) !== null
 
 /**
- * 给每对表格标上合适的缩放档；重复调用会重新量（窗口变化后要重算）。
+ * 给每对表格 / 行间公式标上合适的缩放档；重复调用会重新量（窗口变化后要重算）。
+ * 配对 = 后面紧跟译文克隆或镜像（都是带 data-axt-for 的 .axt-t）。
  * 没有布局信息的环境（测试、display:none）直接跳过。
  */
 export function fitTables(root: Document | Element, deps: FitDeps = {}): { fitted: number; scrolled: number } {
@@ -77,7 +79,7 @@ export function fitTables(root: Document | Element, deps: FitDeps = {}): { fitte
   let fitted = 0
   let scrolled = 0
 
-  for (const table of Array.from(root.querySelectorAll(TABLE_RULES.root))) {
+  for (const table of Array.from(root.querySelectorAll(FIT_TARGETS))) {
     if (table.classList.contains(T_CLASS)) continue
     const translation = paired(table) ? table.nextElementSibling : null
     const mark = (value: string | null) => {
