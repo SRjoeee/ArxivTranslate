@@ -127,7 +127,7 @@ describe('createChromeBuiltinProvider', () => {
 
   it('signal 只传给逐条翻译，不传给会话创建：一批超时不能把共用会话拒掉（Codex 在 #50 指出）', async () => {
     const controller = new AbortController()
-    const seen: unknown[] = []
+    const seen: [string, unknown][] = []
     const api: TranslatorApi = {
       availability: async () => 'available',
       create: async (opts) => { seen.push(['create', opts.signal]); return { translate: async (_i, o) => { seen.push(['translate', o?.signal]); return 'x' } } },
