@@ -18,6 +18,9 @@ const ADAPTERS: Record<string, Adapter> = {
   'api.siliconflow.cn': booleanFlag,
 }
 
+/** 登记过的端点域名，设置页提示用 */
+export const THINKING_HOSTS: readonly string[] = Object.keys(ADAPTERS)
+
 /** 未登记的端点（OpenAI、Ollama、本地）不发任何字段，避免未知参数被拒绝 */
 export function thinkingBodyFields(baseURL: string, mode: ThinkingMode): Record<string, unknown> {
   let host: string
