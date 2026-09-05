@@ -161,6 +161,10 @@ html[data-axt-style="blink"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .
   html[data-axt-style="blink"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
     animation: none;
   }
+  /* blur 悬停清晰的 150 ms 过渡也是动效（Codex 在 #52 指出） */
+  html[data-axt-style="blur"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+    transition: none;
+  }
 }
 
 @keyframes axt-blink {

@@ -38,8 +38,11 @@ describe('样式预设（§7.5）', () => {
     expect(RULES).not.toMatch(/html\[data-axt-style\][^{]*\{[^}]*text-decoration/)
   })
 
-  it('动效尊重系统的「减少动态效果」', () => {
-    expect(RULES).toMatch(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?animation: none/)
+  it('动效尊重系统的「减少动态效果」：blink 停掉动画，blur 停掉悬停过渡', () => {
+    const reduced = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(RULES)
+    expect(reduced).not.toBeNull()
+    expect(reduced![1]).toMatch(/blink[^{]*\{[^}]*animation: none/)
+    expect(reduced![1]).toMatch(/blur[^{]*\{[^}]*transition: none/)
   })
 
   it('只有走合成器的动画可以留：改样式的持续动画在长论文上要烧 CPU（Codex 在 #52 指出）', () => {

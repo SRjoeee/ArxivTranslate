@@ -154,16 +154,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 
   const page = await context.newPage()
   await page.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  await page.waitForFunction(() => document.querySelector('.axt-t:not([data-axt-inline])') !== null, null, { timeout: 60_000 }).catch(() => undefined)
-  const styled = await page.evaluate(() => {
-    const el = document.querySelector('.axt-t:not([data-axt-inline])')
+  // 只认真正的译文：加载圆环 / 失败控件 / 镜像与拆分克隆也带 .axt-t，但预设刻意不装饰它们，
+  // 轮询撞上 pending 节点会把「竖线为 0」误报成预设坏了（Codex 在 #52 指出）
+  const REAL = ':not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
+  await page.waitForFunction(sel => document.querySelector(sel) !== null, `.axt-t:not([data-axt-inline])${REAL}`, { timeout: 60_000 }).catch(() => undefined)
+  await page.waitForFunction(sel => document.querySelector(sel) !== null, `.axt-t[data-axt-inline]${REAL}`, { timeout: 30_000 }).catch(() => undefined)
+  const styled = await page.evaluate(real => {
+    const el = document.querySelector(`.axt-t:not([data-axt-inline])${real}`)
+    const inline = document.querySelector(`.axt-t[data-axt-inline]${real}`)
     return {
       attr: document.documentElement.dataset.axtStyle ?? null,
       border: el ? Math.round(Number.parseFloat(getComputedStyle(el).borderInlineStartWidth)) : -1,
-      // 行内标题译文不该加线（会把「Abstract 摘要」挤歪）
-      inline: (() => { const t = document.querySelector('.axt-t[data-axt-inline]'); return t ? Math.round(Number.parseFloat(getComputedStyle(t).borderInlineStartWidth)) : 0 })(),
+      // 行内标题译文不该加线（会把「Abstract 摘要」挤歪）；没等到行内译文就如实报 null，不当作通过
+      inline: inline ? Math.round(Number.parseFloat(getComputedStyle(inline).borderInlineStartWidth)) : null,
     }
-  })
+  }, REAL)
   check('样式预设 quote：<html> 带属性、块级译文有竖线、同行标题译文没有', styled.attr === 'quote' && styled.border > 0 && styled.inline === 0, JSON.stringify(styled))
   await page.screenshot({ path: `${SHOTS}/style-quote.png` })
   await page.close()
