@@ -1,6 +1,8 @@
 import { getConfig, setConfig } from '@/config/storage'
-import { getProvider } from '@/providers'
-import { createTranslateService, type TranslateService } from '@/providers/translate-service'
+import { buildChain } from '@/providers'
+import type { TranslationProvider } from '@/providers/types'
+import { createTranslateService } from '@/providers/translate-service'
+import { createFallbackService, type FallbackService } from '@/providers/fallback'
 import { extract, paperContext, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
@@ -12,7 +14,7 @@ import {
 import { decodeText, escapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { beginSession, createCoalescer, endSession, getSessionId, translateTitle, type TitleTranslator } from '@/core/scheduler'
-import { isAxtMessage } from '@/shared/messages'
+import { isAxtMessage, type PageStatus } from '@/shared/messages'
 import { createMessageCachePort } from './cache-port'
 import { enableDebug } from './debug'
 
@@ -35,11 +37,28 @@ export default defineContentScript({
     let savedMode: Mode = 'stack'
     void getConfig().then(config => { savedMode = config.mode })
     // 一次会话 = 一个翻译服务 + 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
-    let service: TranslateService | null = null
+    let service: FallbackService | null = null
+    let activeChain: TranslationProvider[] | null = null
     let run: TranslationRun | null = null
     let title: TitleTranslator | null = null
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
     let progress: Progress = idle()
+
+    /** 实际在用的引擎与降级原因（§8.5），给 popup 显示 */
+    function engineStatus(): { engine: NonNullable<PageStatus['engine']> } | null {
+      if (!service || !activeChain) return null
+      const status = service.status()
+      const active = activeChain.find(engine => engine.id === status.activeId) ?? activeChain[0]!
+      return {
+        engine: {
+          id: active.id,
+          displayName: active.displayName,
+          ...(status.activeId !== status.configuredId && status.demoted
+            ? { demoted: { displayName: status.demoted.displayName, kind: status.demoted.kind, message: status.demoted.message } }
+            : {}),
+        },
+      }
+    }
 
     /** 结束当前会话：断开观察器、删 pending、撤掉排队与在飞的请求；页面上的译文留着 */
     function endRun(): void {
@@ -51,6 +70,7 @@ export default defineContentScript({
       // 先撤请求再丢服务：排队的批次不再发出，在飞的 fetch 被 abort，结果回来也不渲染不写缓存
       if (service && session) service.cancel(session)
       service = null
+      activeChain = null
     }
 
     async function start(requested?: Mode): Promise<{ started: boolean; reason?: string }> {
@@ -61,8 +81,11 @@ export default defineContentScript({
       // 冷启动时一条无 I/O 的消息也要等几十秒。现在只有缓存读写走消息，翻译本身不经过 background。
       const tStart = performance.now()
       const config = await getConfig()
-      const provider = getProvider(config)
-      if (!(await provider.isAvailable())) return { started: false, reason: '未配置 API key，请先到设置页填写' }
+      // 降级链（§8.5）：首选引擎失败时自动切到免费引擎，别让整页翻译停死
+      const chain = await buildChain(config)
+      const provider = chain[0]!
+      // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上
+      if (!(await provider.isAvailable()) && chain.length === 1) return { started: false, reason: '未配置 API key，请先到设置页填写' }
       console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
       modes?.stop()
@@ -71,13 +94,19 @@ export default defineContentScript({
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
       enterSide(modes.effective())
-      const translate = createTranslateService({
-        getProvider: async () => provider,
-        // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
-        getModel: async () => (config.provider === 'openai-compat' ? config.openaiCompat.model : undefined),
-        cache: createMessageCachePort(),
-      })
+      // 链上每个引擎一套队列与缓存键，共用同一个缓存端口
+      const cachePort = createMessageCachePort()
+      const translate = createFallbackService(chain.map(engine => ({
+        provider: engine,
+        service: createTranslateService({
+          getProvider: async () => engine,
+          // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
+          getModel: async () => (engine.id === 'openai-compat' ? config.openaiCompat.model : undefined),
+          cache: cachePort,
+        }),
+      })))
       service = translate
+      activeChain = chain
       const t1 = performance.now()
       let wasBusy = false
       run = startTranslation({
@@ -217,7 +246,7 @@ export default defineContentScript({
           return true
         }
         case 'axt:page-status':
-          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress })
+          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, ...(engineStatus() ?? {}) })
           return true
       }
     })
