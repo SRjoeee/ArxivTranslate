@@ -173,8 +173,10 @@ html[data-axt-mode="side"] [data-axt-fit="scroll"] {
    表格单元格与 inline-block 是段内嵌套的容器；多面板插图的分格只有半栏宽、本身又是 flex 项，
    硬分两列会溢出，而且它们够不到文档的轨道（父级是 flex），不降级就会各自长出隐式两列。
    内层用 :is(...) 而不是 :where(...)：要压过上面 (0,2,1) 的容器规则。
-   脚注子树要排除：改它的 display 会把 ar5iv 折叠起来的脚注掀开 */
-html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block, .ltx_flex_cell) :is(.ltx_para, .ltx_abstract, :has(.axt-t)):not(:is(.ltx_note, .ltx_note *)) {
+   脚注子树要排除：改它的 display 会把 ar5iv 折叠起来的脚注掀开。
+   嵌套的 .ltx_flex_figure 也要排除：它本身是 flex（面板并排），含译文时会命中 :has(.axt-t) 被压成 block，
+   内层面板就竖着摞起来（2312.17141 有这种嵌套；Codex 在 #25 指出） */
+html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block, .ltx_flex_cell) :is(.ltx_para, .ltx_abstract, :has(.axt-t)):not(:is(.ltx_note, .ltx_note *, .ltx_flex_figure)) {
   display: block;
 }
 
@@ -266,11 +268,9 @@ html[data-axt-mode="only"] [data-axt-state="translated"] {
   display: none;
 }
 
-/* 未翻译成功的块保持原文可见 */
-html[data-axt-mode="only"] [data-axt-state="pending"],
-html[data-axt-mode="only"] [data-axt-state="failed"] {
-  display: revert;
-}
+/* 未翻译成功的块保持原文可见：上面的隐藏规则只匹配 translated，pending / failed 不被匹配即可。
+   不要给它们写 display: revert——revert 会把站点的 display 一并撤销（.ltx_bibblock 从 block 变回 inline），
+   曾经这么写过（Codex 在 #19 指出） */
 
 /* 参考文献不再豁免（2026-09-04 修订）：条目改为按 .ltx_bibblock 分段翻译后，
    作者段本来就不翻、没有 data-axt-state，只译文模式下它自然保留，条目仍然完整可读，

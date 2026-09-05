@@ -95,6 +95,14 @@ describe('side 模式的容器覆盖', () => {
     expect(normalize(stack?.[1] ?? '')).toBe(normalize(SIDE_STACK))
   })
 
+  it('堆叠区规则不碰嵌套的 .ltx_flex_figure：它本身是 flex，压成 block 会把面板竖着摞起来（Codex 在 #25 指出）', () => {
+    expect(RULES).toMatch(/:not\(:is\(\.ltx_note, \.ltx_note \*, \.ltx_flex_figure\)\)\s*\{\s*display: block/)
+  })
+
+  it('only 模式不用 display: revert 让 pending / failed 露出来：revert 会撤销站点的 display（Codex 在 #19 指出）', () => {
+    expect(RULES).not.toMatch(/display:\s*revert/)
+  })
+
   it('行内收缩包裹里的图形要豁免 max-width：否则宽度会解成病态的窄值', () => {
     expect(RULES).toMatch(/\.ltx_inline-block :is\(img, svg\) \{\s*max-width: none/)
   })
