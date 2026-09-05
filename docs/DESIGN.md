@@ -140,6 +140,8 @@ interface Block {
 | `.ltx_ERROR` | LaTeXML 转换错误块（也会出现在转换失败页 "Untitled Document" 上，扩展须安静处理）|
 | `.ltx_page_navbar`, `.ltx_TOC` | 导航栏与目录。位于翻译根之外，列出仅供渲染层隐藏用 |
 
+- **带环境名的 `.ltx_tag` 要翻译** [决定，2026-09-05，用户反馈]：LaTeXML 把定理环境、图表、算法、附录的**名字**也放进 `.ltx_tag`，`Definition 1.1.` 整体被当编号保护，中文读者看到的还是英文。按细分类名区分：`ltx_tag_theorem` / `ltx_tag_figure` / `ltx_tag_table` / `ltx_tag_float` / `ltx_tag_appendix` / `ltx_tag_part` / `ltx_tag_chapter` 参与翻译，其余（equation、section、subsection、ref、item、note）仍作 void。依据是全部 12 篇 fixture 里 1241 个 `.ltx_tag` 的实测分布：theorem 的 246 个全部形如 "Definition 1"、table 的 43 个全是 "Table 1:"、figure 的 63 个里 58 个是 "Figure 1."、appendix 20 个全是 "Appendix A"、float 13 个全是 "Algorithm 1"；反过来 equation 的 344 个里只有 13 个带字母（`(let.lin)` 这类 LaTeX 标签，动不得），section / subsection / ref 的 439 个里带字母的全是罗马数字（II、III.1），note 的 54 个是脚注标记。改这条要升 `RULES_VERSION`（进缓存键），已升到 0.6.0。实测 2609.04056v1：定理标题块从 34 个增加到 75 个，`Definition 1.2 (Hall set).` → `定义 1.2（大厅布置）。`
+
 ### 5.3 表格 [决定]
 
 整张**最外层** `.ltx_tabular` 作为一个单元处理（fixture 中 58 个 tabular 有 15 个不在 `.ltx_table` 内，所以根不能用 `.ltx_table`；3 个嵌套在另一个 tabular 内，内层归外层单元格；`th` 全部带 `ltx_td`，单元格选择器 `.ltx_td` 即可；239 个 `.ltx_td` 属于公式对齐表，已由 `.ltx_equation` 跳过）：
