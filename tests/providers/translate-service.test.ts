@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { attachRequestErrorMeta } from '@/providers/retry-policy'
 import { createTranslateService, type CacheEntry, type CachePort } from '@/providers/translate-service'
 import { ProviderError, type TranslationProvider } from '@/providers/types'
 
@@ -105,5 +106,53 @@ describe('createTranslateService', () => {
     expect(res.ok).toBe(false)
     expect(calls).toBe(2) // 首次 + 重试一次
     if (!res.ok) expect(res.error.kind).toBe('timeout')
+  })
+
+  it('cache.bypass：只写不读，重发不会拿回缓存里那份坏译文（Codex 在 #9 指出）', async () => {
+    const { port, reads, writes } = fakePort()
+    let calls = 0
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => { calls++; return { segments: r.segments.map(s => ({ ...s, text: `译${calls}:${s.text}` })), provider: 'mock' } }),
+      getModel: async () => 'm/1',
+      cache: port,
+    })
+    await service(req(['a']))
+    const again = await service({ ...req(['a']), cache: { paper: '2410.00260', renderPath: 'markup', bypass: true } })
+    expect(calls).toBe(2)
+    expect(reads).toHaveLength(1)
+    expect(writes).toHaveLength(2)
+    expect(again.ok && again.result.segments[0]?.text).toBe('译2:text-a')
+    // 覆盖后普通请求命中的是新译文
+    const third = await service(req(['a']))
+    expect(calls).toBe(2)
+    expect(third.ok && third.result.segments[0]?.text).toBe('译2:text-a')
+  })
+
+  it('429 暂停整条队列：排在后面的请求等暂停结束再发，不会一起撞限流（Codex 在 #6 / #10 指出）', async () => {
+    const order: string[] = []
+    const resolvers: (() => void)[] = []
+    let first = true
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => {
+        order.push(`call:${r.segments[0]?.id}`)
+        if (first) {
+          first = false
+          throw attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
+        }
+        return { segments: r.segments, provider: 'mock' }
+      }, 'mock'),
+      // 睡眠由测试放行：暂停期间队列是不是真的停了才看得出来
+      retry: { sleep: () => new Promise<void>(resolve => { resolvers.push(resolve); order.push('sleep') }) },
+    })
+    const a = service(req(['a']))
+    await vi.waitFor(() => expect(order).toContain('sleep'))
+    // 队列并发 2：不暂停的话 b 会立刻发出去
+    const b = service(req(['b']))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(order).not.toContain('call:b')
+    resolvers.splice(0).forEach(resolve => resolve())
+    const [ra, rb] = await Promise.all([a, b])
+    expect(ra.ok && rb.ok).toBe(true)
+    expect(order.indexOf('call:b')).toBeGreaterThan(order.indexOf('sleep'))
   })
 })

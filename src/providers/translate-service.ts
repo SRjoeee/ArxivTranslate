@@ -22,7 +22,12 @@ export type TranslateMessageRequest = {
   request: Omit<TranslateRequest, 'signal'>
   providerId?: string
   /** 不带即不缓存（如设置页的连接测试） */
-  cache?: { paper: string; renderPath: RenderPath }
+  cache?: {
+    paper: string
+    renderPath: RenderPath
+    /** 只写不读：占位符校验失败后的重发，不能再拿回那份坏译文（§6.3） */
+    bypass?: boolean
+  }
 }
 
 export type TranslateMessageResponse =
@@ -75,6 +80,26 @@ export function createTranslateService(deps: TranslateServiceDeps) {
     return queue
   }
 
+  /**
+   * 429 时暂停整条队列：concurrency 只是并发上限，撞上限流的那个任务自己睡着时，
+   * 其余 worker 还会继续往同一个端点打（Codex 在 #6 / #10 指出）。
+   * 已在飞的任务各自按策略等待；队列到时自动恢复。多次暂停取最晚的那个截止时间
+   */
+  const pausedUntil = new Map<string, number>()
+  const pauseQueue = (provider: TranslationProvider, ms: number) => {
+    const queue = queueFor(provider)
+    const until = Date.now() + ms
+    if ((pausedUntil.get(provider.id) ?? 0) >= until) return
+    pausedUntil.set(provider.id, until)
+    queue.pause()
+    const sleep = deps.retry?.sleep ?? (wait => new Promise<void>(resolve => setTimeout(resolve, wait)))
+    void sleep(ms).then(() => {
+      if (pausedUntil.get(provider.id) !== until) return
+      pausedUntil.delete(provider.id)
+      queue.start()
+    })
+  }
+
   return async ({ request, providerId, cache }: TranslateMessageRequest): Promise<TranslateMessageResponse> => {
     try {
       const provider = await deps.getProvider(providerId)
@@ -89,11 +114,14 @@ export function createTranslateService(deps: TranslateServiceDeps) {
           cacheKeyFor({ providerId: provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text }),
         ))
         request.segments.forEach((segment, i) => keys.set(segment.id, computed[i]!))
-        const hits = await store.getMany(computed)
-        request.segments.forEach((segment, i) => {
-          const hit = hits[i]
-          if (hit !== null && hit !== undefined) translated.set(segment.id, hit)
-        })
+        // 重发只写不读：坏译文已经在库里，读回来只会再坏一次
+        if (!cache.bypass) {
+          const hits = await store.getMany(computed)
+          request.segments.forEach((segment, i) => {
+            const hit = hits[i]
+            if (hit !== null && hit !== undefined) translated.set(segment.id, hit)
+          })
+        }
       }
       const cached = translated.size
 
@@ -103,8 +131,15 @@ export function createTranslateService(deps: TranslateServiceDeps) {
       let resultModel: string | undefined = model || undefined
       if (misses.length > 0) {
         const timeoutMs = deps.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
+        const retry: RetryOptions = {
+          ...deps.retry,
+          onPause: ms => {
+            deps.retry?.onPause?.(ms)
+            pauseQueue(provider, ms)
+          },
+        }
         const result = (await queueFor(provider).add(() =>
-          withRetry(() => withTimeout(signal => provider.translate({ ...request, segments: misses, signal }), timeoutMs), deps.retry),
+          withRetry(() => withTimeout(signal => provider.translate({ ...request, segments: misses, signal }), timeoutMs), retry),
         )) as TranslateResult
         resultProvider = result.provider
         resultModel = result.model

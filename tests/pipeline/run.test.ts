@@ -59,7 +59,10 @@ describe('runTranslation', () => {
     const progress = await run(doc, transport)
     expect(progress.failed).toBe(0)
     expect(progress.done).toBe(4)
-    expect(requests.some(r => r.request.segments.length === 1 && r.request.segments[0]?.id === 'p2')).toBe(true)
+    const retry = requests.find(r => r.request.segments.length === 1 && r.request.segments[0]?.id === 'p2')
+    // 重发只写不读：坏译文已经进了缓存，照常读只会原样拿回来（Codex 在 #9 指出）
+    expect(retry?.cache).toEqual({ paper: 'test', renderPath: 'markup', bypass: true })
+    expect(requests[0]?.cache).toEqual({ paper: 'test', renderPath: 'markup' })
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)?.querySelector('math')).not.toBeNull()
   })
 
@@ -135,5 +138,31 @@ describe('runTranslation', () => {
       expect(r.request.context?.paperTitle).toBe('P')
       expect(r.request.context?.abstract).toBe('A')
     }
+  })
+
+  it('表格翻了一半：已翻出的格照常显示，但块标失败、计入 failed（Codex 在 #9 指出）', async () => {
+    const doc = new DOMParser().parseFromString(
+      '<!doctype html><html><head></head><body><article class="ltx_document">'
+      + '<table class="ltx_tabular" id="T2"><tbody><tr><td class="ltx_td">Alpha</td><td class="ltx_td">Beta</td></tr></tbody></table>'
+      + '</article></body></html>', 'text/html',
+    )
+    const { transport } = makeTransport((_req, seg) => (seg.id === 'T2#c1' ? { error: 'unknown' } : undefined as unknown as string))
+    const progress = await run(doc, transport)
+    expect(progress).toMatchObject({ done: 0, failed: 1 })
+    expect(doc.getElementById('T2')?.getAttribute(STATE_ATTR)).toBe('failed')
+    const clone = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="T2"]`)
+    expect(Array.from(clone?.querySelectorAll(TABLE_RULES.cell) ?? []).map(td => td.textContent)).toEqual(['Alpha', 'Beta'])
+  })
+
+  it('再翻失败的块要删掉上一轮的译文，不能挂着旧译文冒充这一轮（Codex 在 #9 指出）', async () => {
+    const doc = docOf()
+    await run(doc, makeTransport().transport)
+    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)).not.toBeNull()
+    const { transport } = makeTransport((_req, seg) => (seg.id === 'p1' ? { error: 'unknown' } : undefined as unknown as string))
+    const progress = await run(doc, transport)
+    expect(progress.failed).toBe(1)
+    expect(doc.getElementById('p1')?.getAttribute(STATE_ATTR)).toBe('failed')
+    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)).toBeNull()
+    expect(doc.querySelectorAll(`.${T_CLASS}[${FOR_ATTR}="p3"]`)).toHaveLength(1)
   })
 })

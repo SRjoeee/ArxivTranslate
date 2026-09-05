@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { withRetry } from '@/providers/retry'
 import { attachRequestErrorMeta } from '@/providers/retry-policy'
+import { ProviderError } from '@/providers/types'
 
 const failing = (errors: unknown[], result = 'done') => {
   let calls = 0
@@ -58,5 +59,25 @@ describe('withRetry + 移植的 retry policy', () => {
     const { fn, calls } = failing([])
     await expect(withRetry(fn, { signal: AbortSignal.abort() })).rejects.toThrow(/abort/i)
     expect(calls()).toBe(0)
+  })
+
+  it('no-key / auth / aborted 不重试：曾被当未知错误重试 4 次、白等 7 s（Codex 在 #6 指出）', async () => {
+    for (const kind of ['no-key', 'auth', 'aborted'] as const) {
+      const err = new ProviderError(kind, kind)
+      const { fn, calls } = failing([err, err])
+      const r = recorder()
+      await expect(withRetry(fn, { sleep: r.sleep })).rejects.toBe(err)
+      expect(calls(), kind).toBe(1)
+      expect(r.sleeps).toEqual([])
+    }
+  })
+
+  it('429 暂停时通知 onPause，时长与自己睡的一致', async () => {
+    const err = attachRequestErrorMeta(new Error('429'), { statusCode: 429, responseHeaders: { 'retry-after': '2' }, isRetryable: true })
+    const { fn } = failing([err])
+    const r = recorder()
+    const pauses: number[] = []
+    await withRetry(fn, { sleep: r.sleep, onPause: ms => pauses.push(ms) })
+    expect(pauses).toEqual(r.sleeps)
   })
 })

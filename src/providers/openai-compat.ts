@@ -13,11 +13,21 @@ const outputSchema = z.object({
   segments: z.array(z.object({ id: z.string(), text: z.string() })),
 })
 
+/** 本机端点（Ollama、LM Studio）不要求 key，SDK 在 key 为空时也不会发 Authorization 头；其余端点没 key 就别发请求（Codex 在 #6 指出） */
+function isLoopback(baseURL: string): boolean {
+  try {
+    const { hostname } = new URL(baseURL)
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+  } catch {
+    return false
+  }
+}
+
 export function createOpenAICompatProvider(
   config: OpenAICompatConfig,
   deps: { model?: LanguageModel; prompts?: PromptsConfig } = {},
 ): TranslationProvider {
-  const hasKey = () => config.apiKey.trim().length > 0
+  const hasKey = () => config.apiKey.trim().length > 0 || isLoopback(config.baseURL)
   return {
     id: 'openai-compat',
     displayName: 'OpenAI 兼容端点',

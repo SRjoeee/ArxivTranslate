@@ -2,7 +2,7 @@
 import { markBlocks, type TextBlock } from '@/core/extractor'
 import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate } from '@/core/protector'
-import { enable, renderTable, renderText, setState, type Mode } from '@/core/renderer'
+import { clearTranslation, enable, renderTable, renderText, setState, type Mode } from '@/core/renderer'
 import type { RenderPath } from '@/cache/key'
 import type { TranslateMessageRequest, TranslateMessageResponse } from '@/entrypoints/background/translate-handler'
 import { planBatches, type Batch, type Segment } from './batches'
@@ -53,11 +53,11 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
   markBlocks(blocks)
   for (const block of blocks) setState(block, 'pending')
 
-  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string) => {
+  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string, bypassCache = false) => {
     const context: TranslateContext = { ...options.context, ...(sectionTitle ? { sectionTitle } : {}) }
     return transport({
       request: { segments: items, source: 'en', target: options.target, context: Object.keys(context).length ? context : undefined },
-      cache: { paper: options.paper, renderPath },
+      cache: { paper: options.paper, renderPath, ...(bypassCache ? { bypass: true } : {}) },
     })
   }
 
@@ -86,10 +86,13 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
     }
   }
 
-  /** 占位符校验失败：单块重发一次，再失败走 runs（§6.3） */
+  /**
+   * 占位符校验失败：单块重发一次，再失败走 runs（§6.3）。
+   * 重发不读缓存：那份坏译文在校验之前就已经写进缓存，照常读只会原样拿回来（Codex 在 #9 指出）
+   */
   async function retrySingle(segment: Segment, sectionTitle?: string): Promise<DocumentFragment | null> {
     if (stopped()) return null
-    const res = await send([{ id: segment.id, text: segment.text }], 'markup', sectionTitle)
+    const res = await send([{ id: segment.id, text: segment.text }], 'markup', sectionTitle, true)
     if (res.ok) {
       progress.cached += res.cached
       const text = res.result.segments[0]?.text
@@ -138,8 +141,11 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
     if (batch.kind === 'table' && batch.block) {
       const cells = new Map<Element, DocumentFragment>()
       for (const [segment, fragment] of out) if (fragment && segment.cell) cells.set(segment.cell.el, fragment)
-      if (cells.size > 0) {
-        renderTable(batch.block!, cells)
+      if (cells.size > 0) renderTable(batch.block, cells)
+      else clearTranslation(batch.block)
+      // 有一格没翻出来就算失败：已翻出的格照常显示，但块标失败、计入失败数，
+      // 用户能分辨"翻了一半"与"翻完了"（Codex 在 #9 指出）
+      if (cells.size === batch.segments.length) {
         progress.done++
       } else {
         setState(batch.block, 'failed')
@@ -152,6 +158,7 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
           renderText(segment.block as TextBlock, fragment)
           progress.done++
         } else {
+          clearTranslation(segment.block)
           setState(segment.block, 'failed')
           progress.failed++
         }
