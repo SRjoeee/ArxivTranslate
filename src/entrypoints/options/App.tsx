@@ -4,6 +4,7 @@ import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/lang
 import { DEFAULT_CONFIG, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { THINKING_HOSTS } from '@/providers/thinking'
+import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 import { sendMessage } from '@/shared/messages'
 import { PromptManager } from './PromptManager'
 
@@ -24,11 +25,14 @@ export function App() {
   const [notice, setNotice] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState('')
+  // 术语表在页面里是文本，保存时才解析成结构（成批粘贴比逐行编辑快）
+  const [glossaryText, setGlossaryText] = useState('')
 
   useEffect(() => {
     getConfig().then(c => {
       setLocal(c)
       setHasStoredKey(c.openaiCompat.apiKey.length > 0)
+      setGlossaryText(formatGlossaryText(c.glossary))
     })
   }, [])
 
@@ -38,8 +42,13 @@ export function App() {
   async function save() {
     setNotice('')
     try {
+      // 写错的术语行要报行号，不能静默丢掉——用户会以为术语已经生效
+      const glossary = parseGlossary(glossaryText)
+      if (glossary.issues.length > 0) {
+        throw new Error(`术语表：${glossary.issues.map(i => `第 ${i.line} 行${i.reason}`).join('；')}`)
+      }
       // 先校验再申请权限：字段有错时不该先把 host 权限拿到手（Codex 在 #6 指出）
-      const parsed = configSchema.safeParse({ ...config, openaiCompat: { ...config.openaiCompat, apiKey: keyInput || config.openaiCompat.apiKey } })
+      const parsed = configSchema.safeParse({ ...config, glossary: glossary.entries, openaiCompat: { ...config.openaiCompat, apiKey: keyInput || config.openaiCompat.apiKey } })
       if (!parsed.success) throw new Error(parsed.error.issues.map(i => `${i.path.join('.')}：${i.message}`).join('；'))
       const next = parsed.data
       const previous = await getConfig()
@@ -50,6 +59,7 @@ export function App() {
       setLocal(next)
       setHasStoredKey(next.openaiCompat.apiKey.length > 0)
       setKeyInput('')
+      setGlossaryText(formatGlossaryText(next.glossary))
       setNotice('已保存')
     } catch (e) {
       setNotice(`保存失败：${e instanceof Error ? e.message : String(e)}`)
@@ -152,6 +162,19 @@ export function App() {
           key 失效、额度用尽或网络异常时自动切到免费引擎，整页翻译不会停死；免费引擎的术语准确度不如 LLM（会把 weights 译成"重量"），popup 会提示当前用的是哪个引擎。关掉则失败时停下并报错
         </small>
       </label>
+
+      <h2 style={{ fontSize: 15, marginTop: 24, opacity: config.provider === 'openai-compat' ? 1 : 0.5 }}>术语表</h2>
+      <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>
+        每行一条「原文, 译文」，逗号或制表符分隔，<code>#</code> 开头是注释。随每批一起发给模型，让同一篇里的术语译法统一。
+        只对 LLM 引擎有效，免费引擎不看术语表；改动会让已缓存的译文失效。当前 {parseGlossary(glossaryText).entries.length} 条（上限 200）
+      </small>
+      <textarea
+        style={{ ...field, minHeight: 120, fontFamily: 'ui-monospace, monospace', fontSize: 12, marginTop: 0 }}
+        value={glossaryText}
+        onChange={e => setGlossaryText(e.target.value)}
+        placeholder={'weights, 权重\nattention head, 注意力头\n# 以 # 开头的行是注释'}
+        disabled={config.provider !== 'openai-compat'}
+      />
 
       <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译范围</h2>
       <label style={label}>

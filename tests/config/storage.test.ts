@@ -129,6 +129,30 @@ describe('provider 选择', () => {
     expect(c.targetLanguage).toBe('jpn')
   })
 
+  it('v5 配置升级到 v6：补上空术语表，其余原样', async () => {
+    const v5 = {
+      version: 5, provider: 'openai-compat',
+      openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-keep', model: 'x/y', thinking: 'disabled' },
+      targetLanguage: 'jpn', mode: 'side', prompts: { promptId: 'default', patterns: [] },
+      preload: { margin: 1000, threshold: 0 }, fallback: { enabled: false },
+    }
+    await fakeBrowser.storage.local.set({ config: v5, config$: { v: 5 } })
+    vi.resetModules()
+    const fresh = await import('@/config/storage')
+    const c = await fresh.getConfig()
+    expect(c.version).toBe(CONFIG_VERSION)
+    expect(c.glossary).toEqual([])
+    expect(c.fallback).toEqual({ enabled: false })
+    expect(c.openaiCompat.apiKey).toBe('sk-keep')
+  })
+
+  it('术语表超过 200 条被 schema 拒绝，条目缺字段也拒绝', async () => {
+    const many = Array.from({ length: 201 }, (_, i) => ({ term: `t${i}`, translation: `译${i}` }))
+    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: many })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: [{ term: '', translation: '空' }] })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: [{ term: 'x', translation: '' }] })).rejects.toThrow()
+  })
+
   it('降级链：配置引擎在前，免费引擎兜底；关掉开关时只剩配置的那个', async () => {
     const { buildChain } = await import('@/providers')
     const withKey = { ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-x' } }
