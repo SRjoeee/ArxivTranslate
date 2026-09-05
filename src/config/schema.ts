@@ -8,7 +8,7 @@ export const CONFIG_VERSION = 5
 
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
-  provider: z.enum(['openai-compat', 'google-web']),
+  provider: z.enum(['openai-compat', 'google-web', 'chrome-builtin']),
   openaiCompat: z.object({
     baseURL: z.url(),
     /** 只存本地，永不进日志、缓存键或 fixture */
