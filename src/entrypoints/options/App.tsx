@@ -141,6 +141,8 @@ export function App() {
     try {
       const res = await sendMessage({
         type: 'axt:translate',
+        // 指名当前配置的引擎：测试连接问的是「这个端点通不通」，走降级链的话端点坏了也会显示成功
+        providerId: config.provider,
         request: { segments: [{ id: 'sample', text: SAMPLE }], source: 'en', target: config.targetLanguage, context: { sectionTitle: '连接测试' } },
       })
       const ms = Math.round(performance.now() - t0)

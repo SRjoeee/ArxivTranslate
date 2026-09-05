@@ -4,6 +4,8 @@
 // 派发闸让它在限流期间多攒少发。组装方式照 Read Frog 的 background/translation-queues.ts，只是跑在 content 侧（§8.0）。
 // 与运行上下文无关：缓存通过 CachePort 注入，background 用本地 Dexie，content 用消息代理。
 import { cacheKeyFor, type RenderPath } from '@/cache/key'
+// 深引 validate 而不是 protector 的桶：serialize / rehydrate 要碰 DOM，那两个不该进 background 的包
+import { expectationsFromText, validate } from '@/core/protector/validate'
 import { getRandomUUID } from '@/shared/uuid'
 import { BatchCountMismatchError, BatchQueue, type BatchOptions } from './request/batch-queue'
 import { CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
@@ -35,12 +37,8 @@ export type TranslateMessageRequest = {
   }
 }
 
-/**
- * 进程内调用可以多带两样：校验回调（只把它放行的译文写进缓存——坏译文根本不该入库，Codex 在 #30 指出）
- * 与取消范围（一次运行一个 id，恢复原文时整体撤掉）。两者都过不了消息边界，background 路径上没有
- */
+/** 取消范围：一次运行一个 id，恢复原文时整体撤掉。可以过消息边界，所以两条路径上都有 */
 export type TranslateCall = TranslateMessageRequest & {
-  accept?: (id: string, text: string) => boolean
   scope?: string
 }
 
@@ -128,6 +126,13 @@ function uniqueIds(items: QueueItem[]): string[] {
   })
 }
 
+/**
+ * 只有占位符校验通过的译文才写缓存：坏译文入了库，之后每次都要先读到它、再花一次请求重来
+ *（Codex 在 #30 指出）。期望从**请求文本**反推——`serialize` 转义过原文里字面的 `<` `>`，
+ * 请求文本里的标签必然是占位符，所以不需要把校验回调传过消息边界（issue #42）
+ */
+const admits = (source: string, translated: string): boolean => validate(translated, expectationsFromText(source)).ok
+
 /** 超预算就当全部未命中：多花一次请求，好过整页停在这里 */
 async function readWithBudget(store: CachePort, keys: string[], budgetMs: number): Promise<(string | null)[]> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -135,8 +140,9 @@ async function readWithBudget(store: CachePort, keys: string[], budgetMs: number
     store.getMany(keys),
     new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), budgetMs) }),
   ]).finally(() => clearTimeout(timer))
-  if (hits !== null) return hits
-  console.warn(`[axt] 读缓存超过 ${budgetMs} ms 未返回，按未命中继续翻译`)
+  // 条数对不上说明这份响应与请求不配对，按索引取会张冠李戴：整批当未命中
+  if (hits !== null && hits.length === keys.length) return hits
+  console.warn(`[axt] 读缓存${hits === null ? `超过 ${budgetMs} ms 未返回` : '返回条数与请求不符'}，按未命中继续翻译`)
   return keys.map(() => null)
 }
 
@@ -234,7 +240,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     return items.map((_, i) => all.then(texts => texts[i]!))
   }
 
-  const translate = async ({ request, providerId, cache, accept, scope }: TranslateCall): Promise<TranslateMessageResponse> => {
+  const translate = async ({ request, providerId, cache, scope }: TranslateCall): Promise<TranslateMessageResponse> => {
     try {
       const provider = await deps.getProvider(providerId)
       const model = (await deps.getModel?.()) ?? ''
@@ -295,7 +301,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           }
           translated.set(item.id, outcome.value)
           const key = keys.get(item.id)
-          if (store && cache && key && (!accept || accept(item.id, outcome.value))) writes.push({ key, translation: outcome.value, paper: cache.paper })
+          if (store && cache && key && admits(item.text, outcome.value)) writes.push({ key, translation: outcome.value, paper: cache.paper })
         })
         if (store && writes.length > 0) await store.putMany(writes)
         if (failures.length > 0) return { ok: false, error: toErrorInfo(pickError(failures)) }

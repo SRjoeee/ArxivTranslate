@@ -3,7 +3,8 @@ import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
 import type { Progress } from '@/core/pipeline/run'
 import type { Mode } from '@/core/renderer'
-import type { ProviderStatus, TranslateMessageRequest, TranslateMessageResponse } from '@/entrypoints/background/translate-handler'
+import type { ProviderStatus } from '@/providers/transport'
+import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
 
 export interface PageStatus {
   /** 当前页面的 arXiv id；不是 arXiv HTML 页面时为 null */
@@ -13,8 +14,6 @@ export interface PageStatus {
   /** 用户选定的模式，自动降级不改它 */
   preference: Mode
   progress: Progress
-  /** 实际在用的引擎（§8.5）：与配置的不同就说明降级了，popup 据此提示 */
-  engine?: { id: string; displayName: string; demoted?: { displayName: string; kind: string; message: string } }
 }
 
 /** 消息表：type → { request, response } */
@@ -31,20 +30,18 @@ export interface AxtMessages {
   'axt:ping': { request: Record<never, never>; response: { ok: true; version: string } }
   /** popup → content script：内存中 Block[] 的统计 */
   'axt:stats': { request: Record<never, never>; response: BlockStats }
-  /** content / options → background：翻译一批 segment */
-  'axt:translate': { request: TranslateMessageRequest; response: TranslateMessageResponse }
-  /** popup / options → background：当前 provider 是否可用 */
+  /** content / options → background：翻译一批 segment（§8.0：建链、排队、发请求都在 background） */
+  'axt:translate': { request: TranslateCall; response: TranslateMessageResponse }
+  /** content → background：撤掉一次会话排队与在飞的请求（恢复原文、重开） */
+  'axt:cancel-scope': { request: { scope: string }; response: { cancelled: number } }
+  /** popup / options / content → background：引擎链的能力与实时状态 */
   'axt:provider-status': { request: Record<never, never>; response: ProviderStatus }
   /** 清空缓存，或只清某篇论文 */
-  /** content → background：批量查缓存（§8.0，provider 请求不经过 background，只有缓存走消息） */
-  'axt:cache-get': { request: { keys: string[] }; response: { hits: (string | null)[] } }
-  /** content → background：批量写缓存；调用方不等结果 */
-  'axt:cache-put': { request: { entries: { key: string; translation: string; paper: string }[] }; response: { written: number } }
   'axt:cache-clear': { request: { paper?: string }; response: { ok: true; removed: number } | { ok: false; message: string } }
   'axt:cache-stats': { request: Record<never, never>; response: { ok: true; entries: number; bytes: number } | { ok: false; message: string } }
   /** popup → content：把翻失败的块再翻一遍（§7.6） */
   'axt:retry-failed': { request: Record<never, never>; response: { retried: number } }
-  /** popup → content：某个引擎刚被用户修好（语言包下载完）；撤销进行中会话的降级记录，让链回到首选（§8.5） */
+  /** popup → background：某个引擎刚被用户修好（语言包下载完）；重建引擎链，让它重新参与降级（§8.5） */
   'axt:engine-ready': { request: { id: string }; response: { reset: boolean } }
 }
 

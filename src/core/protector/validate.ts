@@ -1,6 +1,30 @@
 // 占位符完整性校验（DESIGN §6.3）。DOM-free，可在 background 里跑。
-import type { ProtectedBlock } from './serialize'
 import { tokenize } from './tokens'
+
+/**
+ * 校验只需要知道「原文有哪些槽位、其中哪些是成对的」，不需要 DOM 节点。
+ * `ProtectedBlock` 天然满足这个形状；跨消息边界的调用方用 `expectationsFromText` 从请求文本反推。
+ */
+export interface PlaceholderExpectations {
+  slots: ReadonlyMap<number, unknown>
+  paired: ReadonlySet<number>
+}
+
+/**
+ * 从请求文本反推期望。`serialize` 已经把原文里字面的 `<` `>` 转义掉（§6.1），
+ * 所以请求文本里出现的每个 `<x>` / `<t>` 都必然是真占位符，扫一遍就能还原两个集合。
+ * 有了它，background 不必跨消息接收 `accept` 回调也能把坏译文挡在缓存之外（issue #42）。
+ */
+export function expectationsFromText(text: string): PlaceholderExpectations {
+  const slots = new Map<number, null>()
+  const paired = new Set<number>()
+  for (const t of tokenize(text)) {
+    if (t.kind === 'text' || t.kind === 'close') continue
+    slots.set(t.id, null)
+    if (t.kind === 'open') paired.add(t.id)
+  }
+  return { slots, paired }
+}
 
 export type IntegrityReason = 'missing' | 'duplicate' | 'unknown' | 'unbalanced' | 'kind-mismatch'
 
@@ -17,7 +41,7 @@ export class PlaceholderIntegrityError extends Error {
  * 通过条件：void id 集合与原文一致且各出现一次；paired 成对、嵌套合法、各出现一次；
  * 没有原文里不存在的 id；void / paired 种类不能互换。占位符顺序可以与原文不同。
  */
-export function validate(translated: string, block: ProtectedBlock): ValidationResult {
+export function validate(translated: string, block: PlaceholderExpectations): ValidationResult {
   const fail = (reason: IntegrityReason, detail: string): ValidationResult => ({ ok: false, reason, detail })
   const seen = new Set<number>()
   const stack: number[] = []

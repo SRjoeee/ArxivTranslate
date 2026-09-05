@@ -1,9 +1,5 @@
 import type { Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
-import { buildChain } from '@/providers'
-import type { TranslationProvider } from '@/providers/types'
-import { createTranslateService } from '@/providers/translate-service'
-import { createFallbackService, type FallbackService } from '@/providers/fallback'
 import { extract, paperContext, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
@@ -15,8 +11,8 @@ import {
 import { decodeText, escapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { beginSession, createCoalescer, endSession, getSessionId, translateTitle, type TitleTranslator } from '@/core/scheduler'
-import { isAxtMessage, type PageStatus } from '@/shared/messages'
-import { createMessageCachePort } from './cache-port'
+import { isAxtMessage } from '@/shared/messages'
+import { createMessageTransport } from '@/shared/transport'
 import { enableDebug } from './debug'
 
 // 注入 arxiv.org/html/*。页面加载只 extract（不写 DOM），Block[] 留在内存里；
@@ -34,34 +30,19 @@ export default defineContentScript({
     const paper = paperIdFromUrl(location.href)
     // 模式：偏好存配置，实际生效的由 ModeController 按视口决定（§7.2）。
     // 翻译开始前不建控制器，免得往没翻译过的页面写 data-axt-mode；popup 这时看到的是配置里的偏好。
+    // 引擎链、队列与请求都在 background（DESIGN §8.0）：content 的 fetch 带页面 origin、要走 CORS 预检，
+    // 而且 https 页面够不着 http 端点（本地 Ollama），实测见 RESEARCH §6.7。这里只留一条消息代理
+    const backend = createMessageTransport()
     let modes: ModeController | null = null
     let savedMode: Mode = 'stack'
     /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性；开始翻译时从配置读一次 */
     let style: Config['style'] = { preset: 'none', customCss: '' }
     void getConfig().then(config => { savedMode = config.mode; style = config.style })
-    // 一次会话 = 一个翻译服务 + 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
-    let service: FallbackService | null = null
-    let activeChain: TranslationProvider[] | null = null
+    // 一次会话 = 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
     let run: TranslationRun | null = null
     let title: TitleTranslator | null = null
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
     let progress: Progress = idle()
-
-    /** 实际在用的引擎与降级原因（§8.5），给 popup 显示 */
-    function engineStatus(): { engine: NonNullable<PageStatus['engine']> } | null {
-      if (!service || !activeChain) return null
-      const status = service.status()
-      const active = activeChain.find(engine => engine.id === status.activeId) ?? activeChain[0]!
-      return {
-        engine: {
-          id: active.id,
-          displayName: active.displayName,
-          ...(status.activeId !== status.configuredId && status.demoted
-            ? { demoted: { displayName: status.demoted.displayName, kind: status.demoted.kind, message: status.demoted.message } }
-            : {}),
-        },
-      }
-    }
 
     /** 结束当前会话：断开观察器、删 pending、撤掉排队与在飞的请求；页面上的译文留着 */
     function endRun(): void {
@@ -70,27 +51,27 @@ export default defineContentScript({
       run?.stop()
       run = null
       const session = endSession()
-      // 先撤请求再丢服务：排队的批次不再发出，在飞的 fetch 被 abort，结果回来也不渲染不写缓存
-      if (service && session) service.cancel(session)
-      service = null
-      activeChain = null
+      // 撤请求是尽力而为：排队的批次不再发出、在飞的 fetch 被 abort，撤不掉的由下面的会话 id 比对挡住
+      if (session) void backend.cancel(session)
     }
 
     async function start(requested?: Mode): Promise<{ started: boolean; reason?: string }> {
       if (progress.state === 'on') return { started: false, reason: '翻译已开启，滚动会继续翻' }
       if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
       if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
-      // provider 直接在 content 侧构造与调用（DESIGN §8.0）：MV3 的 service worker 会在等待中被挂起，
-      // 冷启动时一条无 I/O 的消息也要等几十秒。现在只有缓存读写走消息，翻译本身不经过 background。
       const tStart = performance.now()
       const config = await getConfig()
       // 术语表随每批发出（§8.2）。**空表不带这个字段**：带上会让所有既有缓存键变一遍，一次性全失效
       const context = config.glossary.length > 0 ? { ...paperContextValue, glossary: config.glossary } : paperContextValue
-      // 降级链（§8.5）：首选引擎失败时自动切到免费引擎，别让整页翻译停死
-      const chain = await buildChain(config)
-      const provider = chain[0]!
-      // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上
-      if (!(await provider.isAvailable()) && chain.length === 1) return { started: false, reason: '未配置 API key，请先到设置页填写' }
+      // 引擎链在 background；这里只取规划批次与选择渲染路径要用的能力（§2 第 3 条）
+      let status: Awaited<ReturnType<typeof backend.status>>
+      try {
+        status = await backend.status()
+      } catch (e) {
+        return { started: false, reason: `扩展后台未响应：${e instanceof Error ? e.message : String(e)}` }
+      }
+      // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上（§8.5）
+      if (!status.available && !status.fallback) return { started: false, reason: '未配置 API key，请先到设置页填写' }
       console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
       modes?.stop()
@@ -100,19 +81,6 @@ export default defineContentScript({
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
       enterSide(modes.effective())
-      // 链上每个引擎一套队列与缓存键，共用同一个缓存端口
-      const cachePort = createMessageCachePort()
-      const translate = createFallbackService(chain.map(engine => ({
-        provider: engine,
-        service: createTranslateService({
-          getProvider: async () => engine,
-          // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
-          getModel: async () => (engine.id === 'openai-compat' ? config.openaiCompat.model : undefined),
-          cache: cachePort,
-        }),
-      })))
-      service = translate
-      activeChain = chain
       const t1 = performance.now()
       let wasBusy = false
       run = startTranslation({
@@ -124,8 +92,8 @@ export default defineContentScript({
         paper,
         // 标题 + 摘要每批都带（DESIGN §8.2）
         context,
-        capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
-        transport: request => translate.translate(request),
+        capabilities: { maxBatchChars: status.maxBatchChars, maxBatchItems: status.maxBatchItems, preservesMarkup: status.preservesMarkup },
+        transport: request => backend.translate(request),
         scope: session,
         preload: config.preload,
         onProgress: p => {
@@ -146,7 +114,7 @@ export default defineContentScript({
       title = translateTitle(document, {
         isCurrent: () => getSessionId() === session,
         translate: async text => {
-          const res = await translate.translate({
+          const res = await backend.translate({
             request: { segments: [{ id: 'document.title', text: escapeText(text) }], source: 'en', target: config.targetLanguage, context },
             cache: { paper, renderPath: 'markup' },
             scope: session,
@@ -252,16 +220,8 @@ export default defineContentScript({
           sendResponse({ retried: failed.length })
           return true
         }
-        case 'axt:engine-ready': {
-          // 语言包下载完之前就开始翻译的会话已经把 chrome-builtin 永久降级；不撤销的话
-          // 这一页会一直走在线兜底，直到用户恢复原文再重开（Codex 在 #50 指出）
-          const reset = service !== null && activeChain?.some(engine => engine.id === message.id) === true
-          if (reset) service!.reset()
-          sendResponse({ reset })
-          return true
-        }
         case 'axt:page-status':
-          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, ...(engineStatus() ?? {}) })
+          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress })
           return true
       }
     })

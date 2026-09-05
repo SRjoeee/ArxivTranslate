@@ -11,6 +11,8 @@ stats-*.json
 coverage/
 tests/e2e/.profile*/
 tests/e2e/.shots/
+# no-CORS e2e 用的打过补丁的扩展副本（只多一条本机 host 权限）
+tests/e2e/.ext-local/
 
 # 参考仓库（GPL 源码，只读，不入库）
 reference/

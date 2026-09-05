@@ -36,26 +36,39 @@ if (!worker) worker = await context.waitForEvent('serviceworker')
 const extId = worker.url().split('/')[2]
 console.log(`extension ${extId} loaded from ${EXT}`)
 
-/** 打开一篇论文并自动开始翻译（#axt-translate），收集 [axt] 日志与发往 host 的请求 */
+/**
+ * 打开一篇论文并自动开始翻译（#axt-translate），收集 [axt] 日志与发往 host 的请求。
+ *
+ * 请求听在 **context** 上而不是 page 上：2026-09-06 起翻译的 fetch 由 background service worker 发出
+ *（DESIGN §8.0），page 级事件一个都看不到。圆环同理不能靠轮询——首屏全命中缓存时 38 ms 就结束了，
+ * 200 ms 的轮询必然扑空；改成页面里挂一个 MutationObserver 记录峰值。
+ */
 async function openPaper(id, host) {
   const page = await context.newPage()
   const logs = []
   const requests = []
-  let spinnersSeen = 0
-  const watchSpinners = setInterval(() => {
-    page.evaluate(() => document.querySelectorAll('.axt-spinner').length).then(n => { spinnersSeen = Math.max(spinnersSeen, n) }).catch(() => undefined)
-  }, 200)
-  page.once('close', () => clearInterval(watchSpinners))
+  const onRequest = request => {
+    if (request.url().includes(host)) requests.push({ t: Date.now(), url: request.url() })
+  }
+  context.on('request', onRequest)
+  page.once('close', () => context.off('request', onRequest))
   page.on('console', message => {
     const text = message.text()
     if (text.includes('[axt]')) logs.push({ t: Date.now(), text })
   })
-  page.on('request', request => {
-    if (request.url().includes(host)) requests.push({ t: Date.now(), url: request.url() })
+  await page.addInitScript(() => {
+    window.__axtSpinnerPeak = 0
+    const bump = () => {
+      const n = document.querySelectorAll('.axt-spinner').length
+      if (n > window.__axtSpinnerPeak) window.__axtSpinnerPeak = n
+    }
+    const start = () => new MutationObserver(bump).observe(document.documentElement, { childList: true, subtree: true })
+    if (document.documentElement) start()
+    else document.addEventListener('readystatechange', start, { once: true })
   })
   await page.goto(`https://arxiv.org/html/${id}#axt-translate`, { waitUntil: 'domcontentloaded' })
   const originalTitle = await page.title()
-  return { page, logs, requests, originalTitle, spinnersSeen: () => spinnersSeen }
+  return { page, logs, requests, originalTitle, spinnersSeen: () => page.evaluate(() => window.__axtSpinnerPeak ?? 0).catch(() => 0) }
 }
 
 async function waitForLog(logs, pattern, timeoutMs) {
@@ -201,7 +214,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const { page, logs, requests, originalTitle, spinnersSeen } = await openPaper(PAPER, GOOGLE)
   const first = idleOf(await waitForLog(logs, IDLE, 120_000))
   check(`论文 ${PAPER}：不滚动只翻首屏附近（google-web）`, !!first && first.requested > 0 && first.requested < first.total && first.done === first.requested && first.failed === 0, first?.text ?? '(no idle line)')
-  check('请求期间出现过加载圆环（§7.6）', spinnersSeen() > 0, `最多同时 ${spinnersSeen()} 个圆环`)
+  const spinnerPeak = await spinnersSeen()
+  check('请求期间出现过加载圆环（§7.6）', spinnerPeak > 0, `最多同时 ${spinnerPeak} 个圆环`)
   const translated = await page.title()
   check('标签页标题被翻译', translated !== originalTitle && /[\u4e00-\u9fff]/.test(translated), `${originalTitle} → ${translated}`)
   await page.screenshot({ path: `${SHOTS}/paper-first-screen.png` })
@@ -290,14 +304,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await options.getByRole('button', { name: '保存', exact: true }).click()
   await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 
+  // 「测试连接」问的是配置的那个端点通不通，必须如实报 auth：走降级链的话免费引擎会把它显示成成功，
+  // 用户以为 key 没问题、整页却都在用 Google 翻（issue #42 的同一类不一致，方向相反）
+  await options.getByRole('button', { name: /测试连接/ }).click()
+  const bogusTest = await (await options.waitForSelector('main p[style*="background"]', { timeout: 30_000 })).textContent()
+  check('错 key 时设置页测试连接如实报失败，不被降级链掩盖', /失败/.test(bogusTest ?? '') && /auth/.test(bogusTest ?? ''), bogusTest)
+
   const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
   const done = await waitForLog(logs, IDLE, 90_000)
   await sleep(2_000)
   const idle = idleOf(done)
-  const demoted = logs.some(l => /降级/.test(l.text))
+  // 降级那条 console.warn 现在打在 background 的控制台里，页面上看不到（§8.0）；
+  // 「确实试过首选引擎」改由 OpenRouter 的请求数作证，「用户看得见」由下面的 popup 检查作证
   check('错 key + 降级开启：切到免费引擎，整页照常翻完、没有致命错误',
-    !!idle && idle.failed === 0 && idle.done > 0 && !/fatal:/.test(done?.text ?? '') && demoted,
-    `${done?.text ?? '(no idle line)'}；OpenRouter 请求 ${requests.length} 个；日志里有降级提示 ${demoted}`)
+    !!idle && idle.failed === 0 && idle.done > 0 && !/fatal:/.test(done?.text ?? '') && requests.length > 0,
+    `${done?.text ?? '(no idle line)'}；OpenRouter 请求 ${requests.length} 个`)
 
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)

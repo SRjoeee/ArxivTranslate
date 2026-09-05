@@ -342,15 +342,44 @@ interface ProtectedBlock {
 
 位置：`src/providers/`。每个引擎一个文件，禁止跨文件共享未公开接口的细节。
 
-### 8.0 请求跑在 content script [决定，2026-09-04 修订]
+### 8.0 请求跑在 background [决定，2026-09-06 修订；2026-09-04 的「跑在 content script」作废]
 
-provider 的 `fetch` 在 **content script** 里发，background 只保留缓存、配置与跨页面协调。
+provider 的 `fetch`、引擎链、队列与缓存**全部在 background**。content script 只发三种消息：`axt:translate` / `axt:cancel-scope` / `axt:provider-status`。设置页的连接测试与页面翻译因此共用同一条 `TranslationTransport`，不可能再出现「测试通过、翻译失败」（issue #42）。
 
-理由是实测：MV3 的 service worker 会在等待期间被挂起，一条没有任何 I/O 的 `axt:provider-status` 在冷 worker 上要 6.7–77 s（同一 worker 上紧邻的 ping 只要 50 ms），翻译中途还会出现 `A listener indicated an asynchronous response by returning true, but the message channel closed`（RESEARCH.md §6.5）。把请求留在 background 就是在跟 MV3 的生命周期较劲；Read Frog 的 provider 适配层本来就跑在 content（`utils/host/translate/api/*`），FluentRead 用 `platform/http/runtime.ts` 抽象 transport，两家都不把等待放在 worker 里。
+2026-09-04 把请求移到 content 的两条理由，2026-09-05 / 06 的实测把两条都推翻了：
 
-- 跨源请求可行性已实测：`translate-pa.googleapis.com` 在页面上下文返回 CORS 响应（RESEARCH.md §6.6）。自定义 LLM 端点由 `optional_host_permissions` + 运行时授权覆盖，与现在设置页的做法一致
-- 代价：LLM 的 API key 会进入 content script 的隔离世界内存。页面脚本读不到，但比只留在 background 弱一层，因此 key 仍然**只存 WXT storage、只在发请求时读取、不写日志不写缓存键**（§0 硬规则不变）
-- background 仍持有缓存（IndexedDB 按扩展 origin 隔离，跨论文共享）与配置；content 侧只发两类消息：查缓存 / 写缓存。这两类消息即使被 worker 挂起拖慢，也只影响缓存命中，不阻塞翻译
+- **「worker 会在等待中被挂起，冷启动一条消息要几十秒」不成立**。RESEARCH §6.7：真实 Chrome 里三轮闲置 40 s（超过 MV3 的 30 s 空闲回收）后重载，content → background 的往返 77–81 ms，1.5 s 的读缓存预算一次没触发，popup 的「翻译」按钮冷启动后立刻可点；§6.5 记录的 6.7–77 s 在当前代码上重现不出来（那次测量发生在缓存写入还会扫全库的版本）。RESEARCH §6.8 另测了「等待期间的存活」——这是 §6.5 真正担心的失效模式：一条经 background 转发、延迟 90 s 才应答的请求照常返回，**不需要任何保活**（Port、心跳都不需要）
+- **「content 侧能发跨源请求」只在对方肯给 CORS 头时成立**。RESEARCH §6.7：content script 的 fetch 带**页面 origin**、要走预检，端点不返 CORS 头就直接 `TypeError: Failed to fetch`；background 的 fetch 带扩展 origin、不走预检，两种端点都通。`host_permissions` 不解除这条约束（Chrome 85 起的行为）。更硬的一条是混合内容：`https://arxiv.org` 的页面**根本够不着 `http://` 端点**，请求没离开浏览器——CLAUDE.md 明确支持的本地 Ollama（`http://localhost:11434`）在 content 侧完全不可达
+- 顺带纠正 §6.5 引用参考项目时的一处错误：Read Frog 的请求**也在 background 执行**（`entrypoints/background/translation-queues.ts` 排队并调用模型），当时写的「它把 fetch 放在 content」核对参考快照后不成立
+
+搬回来之后：
+
+- API key 不再进入 content script 的隔离世界内存，比之前强一层（硬规则 7 的其余部分不变）
+- content script 不再打包三个 provider 与 AI SDK：产物从 428.95 kB 降到 152.47 kB，每打开一篇 arXiv HTML 页面都少解析这么多
+- 每批少两次消息往返：缓存不再经 `axt:cache-get` / `axt:cache-put`，background 直接读写 Dexie
+- **直接证据**：`pnpm e2e:local-endpoint` 起一个**不返任何 CORS 头、预检一律 405** 的 `http://127.0.0.1` OpenAI 兼容端点，用它翻一篇真实 arXiv 页面。同一条 e2e 在改前改后各跑一遍（`AXT_EXT_DIR` 指向两个构建）：
+
+  | | 设置页测试连接 | 页面译文来自本机端点 | 端点收到页面翻译的请求 | 页面自己发出的请求 |
+  |---|---|---|---|---|
+  | 搬迁前（main） | 通过 | **0 / 12 段** | **0 个** | **21 个**（全被混合内容拦掉）|
+  | 搬迁后 | 通过 | 12 / 12 段 | 7 个 | 0 个 |
+
+  搬迁前那一栏正是 issue #42 的标题诉求：**同一个端点测试通过、翻译失败**，而且失败是**静默**的——链降级到 google-web，页面上照样出现通顺的中文译文，用户看不出自己配的端点根本没被用到。所以这条 e2e 断言的是「译文带本机端点的前缀」，不是「翻出了中文」
+
+```ts
+/** 翻译请求的执行位置抽象（src/providers/transport.ts）。两种实现，同一个接口 */
+export interface TranslationTransport {
+  translate(call: TranslateCall): Promise<TranslateMessageResponse>
+  /** 撤掉该 scope 排队与在飞的请求，返回撤掉的条数 */
+  cancel(scope: string): Promise<number>
+  status(): Promise<ProviderStatus>
+}
+```
+
+- `createLocalTransport(config)`（background）：`buildChain` → 每个引擎一套 `createTranslateService`（共用本地 Dexie 缓存端口）→ `createFallbackService` 组合
+- `createMessageTransport()`（content / options，`src/shared/transport.ts`）：每个方法一条 runtime 消息。**单独一个文件**是为了包体积——`transport.ts` 会拉进三个 provider 与 AI SDK，content 只该拿到消息代理
+- **取消是尽力而为**：`axt:cancel-scope` 派给**当前**那条链。配置变更或 `axt:engine-ready` 重建过链的话，旧链上还在飞的请求撤不掉——它们回来时 content 侧按会话 id 在接收处挡掉（`run.ts` 的 `halted()`），代价只是几次白花的请求，不会往 DOM 上写。旧链不主动取消是有意的：配置改了就把在飞的批次全打成失败，用户会看到一屏重试按钮，比让它们跑完差
+- **指名引擎的调用不走降级链**：`TranslateCall.providerId` 有值时直接派给那一步的服务。设置页的「测试连接」问的是「我配的这个端点通不通」，链上有免费兜底就把它显示成成功，等于把 issue #42 抱怨的「两条路径不一致」换个方向再犯一次——用户会以为 key 没问题，实际整页都在用 Google 翻。指名一个不在链上的引擎如实报错，不悄悄换别的（`pnpm e2e` 有一条守着）
 
 ```ts
 export interface TranslationProvider {
@@ -409,6 +438,7 @@ export interface TranslateResult {
 - prompt 带版本号 `PROMPT_VERSION`（提示词库接入升到 2；`{{targetLanguage}}` 改填英文语言名升到 3），写入缓存键；**提示词身份 `promptKey`**（内置用 id，自定义带两段分别编码的全文）与**上下文原文**（标题 / 摘要 / 章节 / 术语表，结构化序列化；免费引擎不看上下文，不带）也进缓存键的 SHA-256 载荷——换了提示词、或同一段文字出现在另一篇论文里，都不能命中旧译文。**不先压成 32 位 hash**：DJB2 撞了外层 SHA-256 也分不开（Codex 在 #28 给出实例 `19k04n01vcr73f` / `1efm0uaep90s9`）；配置 v1→v2 迁移补 `prompts` 字段、保留 API key
 - **`{{targetLanguage}}` 填英文语言名，不填语言码** [决定，2026-09-05，照 Read Frog `translate-text.ts`]："professional zh-CN native translator" 不如 "Simplified Mandarin Chinese"；名字来自 `config/languages.ts`（移植 `@read-frog/definitions` 的表，ISO 639-3 码），不认识的码原样填
 - **提示词与思考模式的入口**（清理期第 3 项，2026-09-05）：设置页有提示词管理（内置只读可"复制并自定义"、自定义可新建 / 编辑 / 删除、变量按钮插到光标处、JSON 导入 / 导出且文件形状与 Read Frog 一致，可互相导入）与思考模式开关（未登记的端点提示不发字段）；popup 有提示词下拉（即时落盘，下次开始翻译生效）。Read Frog 的对应组件依赖 base-ui、jotai、Tailwind 与它的 i18n，为一页十来个字段引整套 UI 栈不值，逻辑按文件搬（`prompt-file.ts`）、UI 用设置页现有的朴素 React 重写。Read Frog 现已把思考开关改成 AI SDK 的 `reasoning` 档位（none…xhigh），我们仍是 KISS 式按端点发开关字段，档位模型待 AI SDK 侧验证后另议
+- **全浏览器共用一条链、一套队列** [决定，2026-09-06，issue #43]：限流是按 API key 算的，不是按标签页。每个标签页各起一套队列的话，对同一端点的实际并发就是「标签页数 × 8」，正是招 429 的配方。链常驻 background，只有**会换掉链的配置字段**（`provider` / `openaiCompat` / `prompts` / `targetLanguage` / `fallback`）变化时才重建——content 每切一次显示模式就写一次配置，而那时页面往往正在翻，无差别重建会把令牌桶与降级记录连根拔起（归类表在 `CHAIN_CONFIG_FIELDS` / `VOLATILE_CONFIG_FIELDS`，有测试守着「每个配置字段都被显式归类」）。代价是同时翻两篇论文时吞吐减半，这是有意的取舍
 - 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`（默认照 Read Frog：1000 字 / 4 段；速率同样照它的令牌桶默认值 8 请求/秒、突发 20，服务内再按批次键攒 100ms——小批高并发，首屏快）；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
 - 批次失败：对半拆分重试 → 单块 → 标记失败
 
@@ -444,18 +474,19 @@ export interface TranslateResult {
 - **降级期限分两档**：`no-key` / `auth` 是配置问题、不会自己好，本会话内永久降级；`network` / `timeout` / `rate-limit` / `invalid-response` / `unknown` 是瞬时的，降级 60s 冷却后自动恢复，该引擎一旦成功立即清空记录。队列自己的重试（retry-policy）跑完才会走到链上，所以链不叠加重试；冷却是为了避免持续故障时每次调用都白等一遍最长 120s 的批次超时。`aborted` 永不降级也永不记账——会话取消不是引擎的错，换个引擎重来只会再被取消一次
 - **全部降级后退回最后一步**：宁可再失败一次并把错误如实报给 `run.ts`（它据此停下并画失败小部件），也不能出现"无引擎可用"的状态
 - **能力不变量**：`preservesMarkup` 决定渲染路径，而 `run.ts` 只在开始时取一次 `capabilities`；中途换路径会让先后渲染的块两套形状。因此链要求所有步骤的 `preservesMarkup` 一致，不一致的在组装时剔除并告警。v1 三个 provider 都是 `true`，这条是给将来的护栏
-- **可见性**：`PageStatus.engine` 带实际引擎与降级原因，popup 在降级时显示一条提示，写明免费引擎术语准确度不如 LLM（§8.1 的"weights → 重量"）以及"修好设置后恢复原文再翻即可切回"。降级同时打一条 `console.warn`，e2e 与用户排查都靠它
+- **可见性**：`axt:provider-status` 的 `engine` 带实际引擎与降级原因（2026-09-06 起链在 background，不再挂在 `PageStatus` 上），popup 在翻译进行时随进度一起轮询、降级时显示一条提示，写明免费引擎术语准确度不如 LLM（§8.1 的"weights → 重量"）以及"修好设置后恢复原文再翻即可切回"。降级同时打一条 `console.warn`，e2e 与用户排查都靠它
+- **用户修好配置后链要回到首选**：popup 下载完语言包时发 `axt:engine-ready`，background **重建整条链**。这比"撤销降级记录"更彻底——建链时 `isAvailable()` 为假、根本没进链的引擎，撤记录是救不回来的，而链常驻之后这种情况反而更常见（链可能在用户下载语言包之前很久就建好了）。因此 `FallbackService` 没有 `reset()`
 - **开关**：配置 v5 的 `fallback.enabled`，默认开启；关掉后链只有配置的那个引擎，行为与实现之前完全一致。e2e 两条分别守住这两种行为
 
 ## 9. 缓存与配置
 
 - 译文缓存：IndexedDB，**Dexie**，移植 FluentRead `services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层），crypto-js 换成 Web Crypto SHA-256（v0.4 修订，原定 idb-keyval）
 - 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；**`providerId` 取 `provider.cacheId ?? provider.id`** [决定，2026-09-05，issue #45]：`openai-compat` 这个 id 对所有 OpenAI 兼容端点都一样，只用 id + 模型名的话，OpenRouter 上的同名模型与本机 Ollama 上的共用缓存条目、译文互相污染。provider 自己声明身份（`openai-compat:<origin><path>`，**路径要带上**：同一域名下不同路径可能是不同网关路由、指向不同后端，只取 origin 会让两条路由共用条目；末尾斜杠归一化），**绝不放 API key**（硬规则 7）；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
-- 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有（IndexedDB 按扩展 origin 隔离，跨论文共享），content 侧通过 `axt:cache-get` / `axt:cache-put` 读写；provider 请求本身不经过 background（§8.0）
+- 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有并直接读写（IndexedDB 按扩展 origin 隔离，跨论文共享）；翻译请求本身也在 background，所以 content 完全不碰缓存，每批少两次消息往返（§8.0，2026-09-06）
 - **缓存管理只在设置页做全局清空** [决定，2026-09-05]：`axt:cache-stats` 显示条数与体积，`axt:cache-clear`（不带 paper）清空整库，切回设置页时重读统计（翻译发生在别的标签页，不重读就永远显示打开那一刻的数字）。两条消息的响应都是 `{ ok: true, … } | { ok: false, message }`：**失败不能显示成「缓存是空的」或「已删除 0 条」**，IndexedDB 用不了时那是最不该骗人的地方（Codex 在 #52 指出）。统计前先跑一次 `cleanup()` 清掉过期条目——`get()` 只是把它们当未命中、从不删除，不清的话页面上会一直显示一堆用不了的条数与体积；这也是 `cleanup()` 在运行时唯一的调用点，所以它失败要抛出去而不是吞掉，否则统计会把清不掉的过期条目当成功结果报出去。**不做「只清本篇」**：设置页是独立扩展页面，没有当前论文的概念，为它绕一圈问 content script 不值当；真正需要按篇清的场景（这篇译得不好想重来）在 popup 上更顺手，留作后续。缓存键本来就带引擎、模型、提示词、术语表，换任何一样都不会命中旧译文，手动清是兜底而不是常规操作
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
-- **缓存读取有等待预算，读不到就继续翻** [决定，2026-09-05，issue #45]：服务是"先等缓存再发请求"的，读一旦挂住整页翻译就停在那里——MV3 的 service worker 冷启动、被挂起或消息丢失都会造成这种情况。两道闸：content 侧的消息端口 1.5s（`CACHE_READ_TIMEOUT_MS`），服务层 2s（`CACHE_READ_BUDGET_MS`，换任何 `CachePort` 实现都兜得住）。超时按全部未命中处理，代价只是多花一次请求；两个数都远大于实测的命中往返（36 ms 量级）
-- **坏译文不入库、重发不读库** [决定，2026-09-05]：markup 路径的请求带 `accept` 回调（进程内调用才有，过不了消息边界），translate-service 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）；占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
+- **缓存读取有等待预算，读不到就继续翻** [决定，2026-09-05，issue #45]：服务是"先等缓存再发请求"的，读一旦挂住整页翻译就停在那里——MV3 的 service worker 冷启动、被挂起或消息丢失都会造成这种情况。闸设在服务层：2s 的 `CACHE_READ_BUDGET_MS`，换任何 `CachePort` 实现都兜得住。超时**或返回条数与请求不符**都按全部未命中处理，代价只是多花一次请求；2s 远大于实测的命中往返（36 ms 量级）。（2026-09-06 起缓存与翻译同在 background，content 侧那道 1.5s 的消息端口闸随 `cache-port.ts` 一起删掉）
+- **坏译文不入库、重发不读库** [决定，2026-09-05；2026-09-06 改由请求文本反推]：`translate-service` 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）。原来靠调用方传 `accept` 回调，那是函数、过不了消息边界；现在校验期望由 `expectationsFromText(请求文本)` 反推——`serialize` 已经把原文里字面的 `<` `>` 转义掉（§6.1），所以请求文本里出现的每个 `<x>` / `<t>` 都必然是真占位符，扫一遍就能还原 `slots` 与 `paired`。零协议增长，而且这条不变量挪到了缓存写入的旁边，runs 路径也一并受保护（以前它不带 `accept`，什么都写）。占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
 - 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、v5 加 `fallback: { enabled }`（默认开，§8.5）、v6 加 `glossary`（默认空表，§8.2）、v7 加 `style`（默认 `none`，§7.5）、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
 - **配置回退必须让用户看见** [决定，2026-09-06，实测撞到]：`getConfig()` 校验失败时回退 `DEFAULT_CONFIG` 是对的（不能让扩展挂掉），但原来只打一行 `console.warn`——用户的 key 明明存着却不生效、翻译悄悄降级到免费引擎，界面上没有任何线索。实测触发过一次：Chrome 里存着 v7 配置，加载的却是 v6 的构建，WXT 按设计拒绝降级迁移（`Version downgrade detected`），整份配置连同 API key 被静默忽略。现在 `getConfig()` 记下回退原因（版本比扩展新 / 具体是哪个字段不合法），`configFallbackReason()` 供 UI 查询，popup 顶部挂一条红色警告说明「key 与引擎选择都没有生效」。回退原因按执行上下文各存一份——popup 本来就自己调 `getConfig()`，读到的正是它自己那次的结论。与 §8.2 术语表限额在迁移里规整是同一条原则的两面：能规整的在迁移里规整，规整不了的必须说出来
@@ -504,7 +535,7 @@ export interface TranslateResult {
 | 占位符 | Vitest | 序列化 → 假译文 → 回填，往返后受保护节点等价；校验器对各类破坏（丢 id、多 id、嵌套错）都能识别 |
 | 渲染 | Vitest + happy-dom | 翻译 → 切换三模式 → 恢复，恢复后 DOM 与原始逐节点相等 |
 | provider | Vitest（mock fetch）| 请求拼装与响应解析；免费接口另有可选的 live 测试，默认跳过 |
-| 端到端 | Playwright（`pnpm e2e`，`tests/e2e/extension.mjs`，2026-09-05 起） | 起一个装着 `.output/chrome-mv3` 的 Chromium（`channel: 'chromium'` 的新 headless 支持扩展），驱动设置页与 popup、读控制台与网络：google-web 整篇翻完与速率、刷新命中缓存、翻译中途恢复原文（译文与 `data-axt-*` 全清、不再发请求）、错 key 时降级链把整页翻完（popup 显示降级提示）、关掉降级后恢复 auth 排空整队、设置页的语言与自定义提示词保存后重载仍在。不碰用户浏览器与 key，LLM 只测错 key 不花钱。**布局断言**在 `tests/e2e/layout.mjs`（`pnpm e2e:layout`，2026-09-05 起）：side 模式在 1440 / 2000px 下不横向溢出、文章居中且两侧对称、正文吃满（≤ 96rem）、两栏等宽、行间公式装进一栏、右侧沟槽元素落在文章右缘与视口之间、只含公式的列表项与兄弟项标记对齐（含 `(Assumption 1)` 这类宽标记不盖正文）、单列 flex 图里的表格与脚注左右配对、多面板 flex 图仍并排且无镜像、正文脚注副本落在沟槽里，以及 2312.17141 上的**主线程长任务预算**（最长 ≤ 400ms、合计 ≤ 1.5s，守 side prep 的量法不退回克隆） |
+| 端到端 | Playwright（`pnpm e2e`，`tests/e2e/extension.mjs`，2026-09-05 起） | 起一个装着 `.output/chrome-mv3` 的 Chromium（`channel: 'chromium'` 的新 headless 支持扩展），驱动设置页与 popup、读控制台与网络：google-web 整篇翻完与速率、刷新命中缓存、翻译中途恢复原文（译文与 `data-axt-*` 全清、不再发请求）、错 key 时降级链把整页翻完（popup 显示降级提示）、关掉降级后恢复 auth 排空整队、设置页的语言与自定义提示词保存后重载仍在。不碰用户浏览器与 key，LLM 只测错 key 不花钱。**不返 CORS 头的本机端点**在 `tests/e2e/local-endpoint.mjs`（`pnpm e2e:local-endpoint`，2026-09-06 起）：起一个不发任何 CORS 头、预检一律 405 的 `http://127.0.0.1` OpenAI 兼容端点，断言设置页连接测试与整页翻译都打到它、服务端只见 `chrome-extension://` 的 Origin、零次预检、页面自己零请求（§8.0 的对照表）。它复制一份构建产物、只给副本的 manifest 加本机 host 权限，因为原生授权弹窗 Playwright 点不到（RESEARCH §6.9）。**布局断言**在 `tests/e2e/layout.mjs`（`pnpm e2e:layout`，2026-09-05 起）：side 模式在 1440 / 2000px 下不横向溢出、文章居中且两侧对称、正文吃满（≤ 96rem）、两栏等宽、行间公式装进一栏、右侧沟槽元素落在文章右缘与视口之间、只含公式的列表项与兄弟项标记对齐（含 `(Assumption 1)` 这类宽标记不盖正文）、单列 flex 图里的表格与脚注左右配对、多面板 flex 图仍并排且无镜像、正文脚注副本落在沟槽里，以及 2312.17141 上的**主线程长任务预算**（最长 ≤ 400ms、合计 ≤ 1.5s，守 side prep 的量法不退回克隆） |
 | 手动清单 | 用户在自己的 Chrome | 走真实 key 的 LLM 路径；锚点跳转、脚注弹出、公式渲染、Ctrl+F、打印 |
 
 fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取，覆盖多领域与多结构，含一篇转换失败页；全部为 oxide 0.7.6）。规则测试用 happy-dom 解析，1.8 MB 页面约 0.6 s，可直接跑全量 fixture。
