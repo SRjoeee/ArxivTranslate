@@ -54,6 +54,8 @@ export interface TranslateServiceDeps {
   cache?: CachePort
   /** 队列参数覆盖（测试用）：timeoutMs 是批次超时公式的基数；rate / capacity 以 provider.rateLimit 优先，其次这里，最后 8 / 20 */
   queue?: Partial<QueueOptions>
+  /** 读缓存的等待上限（测试用）；默认 CACHE_READ_BUDGET_MS */
+  cacheReadBudgetMs?: number
   /** 攒批参数覆盖（测试用） */
   batch?: Partial<Pick<BatchOptions<QueueItem, string>, 'batchDelay' | 'maxRetries' | 'enableFallbackToIndividual'>>
 }
@@ -66,6 +68,14 @@ export interface TranslateService {
 
 /** Read Frog 的默认队列参数（DEFAULT_CONFIG.pageTranslation.requestQueueConfig 与 translation-queues.ts 里的常量） */
 export const DEFAULT_RATE_LIMIT = { rate: 8, capacity: 20 } as const
+
+/**
+ * 读缓存的等待上限。缓存是优化不是依赖：服务是**先等缓存再发请求**的，读一旦挂住整页翻译就停在那里
+ *（issue #45 的实验 2）。content 侧的消息端口自己也有 1.5s 预算，这里是最后一道闸——
+ * 换任何 CachePort 实现（background 直连 Dexie、测试替身）都保证翻译不会被缓存拖死
+ */
+export const CACHE_READ_BUDGET_MS = 2_000
+
 /**
  * 同时在飞的上限与单批总时限（issue #43）。令牌桶只管速率，响应一慢在飞数就没有上限——
  * 一篇 220 块的论文能攒出 50 多个批次，全部同时打向一个端点会招致 429、撞浏览器连接上限。
@@ -116,6 +126,18 @@ function uniqueIds(items: QueueItem[]): string[] {
     seen.add(id)
     return id
   })
+}
+
+/** 超预算就当全部未命中：多花一次请求，好过整页停在这里 */
+async function readWithBudget(store: CachePort, keys: string[], budgetMs: number): Promise<(string | null)[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const hits = await Promise.race([
+    store.getMany(keys),
+    new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), budgetMs) }),
+  ]).finally(() => clearTimeout(timer))
+  if (hits !== null) return hits
+  console.warn(`[axt] 读缓存超过 ${budgetMs} ms 未返回，按未命中继续翻译`)
+  return keys.map(() => null)
 }
 
 export function createTranslateService(deps: TranslateServiceDeps): TranslateService {
@@ -214,14 +236,14 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       const translated = new Map<string, string>()
       if (store && cache) {
         const computed = await Promise.all(request.segments.map(segment =>
-          cacheKeyFor({ providerId: provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text }),
+          cacheKeyFor({ providerId: provider.cacheId ?? provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text }),
         ))
         request.segments.forEach((segment, i) => {
           keys.set(segment.id, computed[i]!)
         })
         // 重发只写不读：坏译文已经在库里，读回来只会再坏一次
         if (!cache.bypass) {
-          const hits = await store.getMany(computed)
+          const hits = await readWithBudget(store, computed, deps.cacheReadBudgetMs ?? CACHE_READ_BUDGET_MS)
           request.segments.forEach((segment, i) => {
             const hit = hits[i]
             if (hit !== null && hit !== undefined) translated.set(segment.id, hit)
