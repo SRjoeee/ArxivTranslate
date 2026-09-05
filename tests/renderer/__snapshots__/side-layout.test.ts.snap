@@ -3,7 +3,7 @@
 exports[`side 模式的容器覆盖 > 2312.17141.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
 {
   "blockedBy": {
-    "ltx_flex_cell": 3,
+    "ltx_flex_figure": 3,
     "ltx_inline-block": 4,
     "ltx_note": 2,
   },
@@ -41,7 +41,7 @@ exports[`side 模式的容器覆盖 > 2401.00596.html：配对能否连到翻译
 exports[`side 模式的容器覆盖 > 2410.00260.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
 {
   "blockedBy": {
-    "ltx_flex_cell": 2,
+    "ltx_flex_figure": 2,
     "ltx_note": 2,
   },
   "connected": "216/220",

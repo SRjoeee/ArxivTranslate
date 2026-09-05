@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { SIDE_DENY, SIDE_DENY_SUBTREE, SIDE_STACK, T_CLASS, isSideContainer } from '@/core/renderer'
+import { MULTI_PANEL_FLEX, SIDE_DENY, SIDE_DENY_SUBTREE, SIDE_STACK, T_CLASS, isSideContainer } from '@/core/renderer'
 import { docOf } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
@@ -58,19 +58,31 @@ describe('side 模式的容器覆盖', () => {
     }
   })
 
-  it('多面板插图不接管：flex 容器与分格都不算配对容器', () => {
-    // ar5iv 用 flex 让面板并排，接管成网格后每个面板各占一行、撑满文章列（实测 2410.00260）
-    let checked = 0
+  it('多面板插图不接管，单列 flex 图照常接管：只看格子是不是整栏（ltx_flex_size_1）', () => {
+    // ar5iv 用 flex 让面板并排，接管成网格后每个面板各占一行、撑满文章列（实测 2410.00260）；
+    // 但所有格子都是 size_1 的单列 flex 图格子整栏宽，排除它只会把表格与脚注堆成上下排（实测 2609.03768v1 的 Table 1）
+    let multi = 0
+    let single = 0
     for (const file of files) {
       const doc = new DOMParser().parseFromString(readFileSync(join(FIXTURE_DIR, file), 'utf8'), 'text/html')
       const root = doc.querySelector(DOCUMENT_ROOT)
       if (!root) continue
       fakeTranslate(doc)
-      const flex = Array.from(root.querySelectorAll('.ltx_flex_figure, .ltx_flex_cell'))
-      checked += flex.length
-      expect(flex.filter(el => el.matches(container)).map(el => el.className)).toEqual([])
+      for (const figure of Array.from(root.querySelectorAll('.ltx_flex_figure'))) {
+        const cells = Array.from(figure.querySelectorAll(':scope > .ltx_flex_cell'))
+        const isMulti = cells.some(cell => !cell.classList.contains('ltx_flex_size_1'))
+        expect(figure.matches(MULTI_PANEL_FLEX)).toBe(isMulti)
+        for (const el of [figure, ...cells]) {
+          // 多面板：整棵子树都不接管；单列：含译文的就是普通容器。
+          // 用 isSideContainer 而不是原始选择器：happy-dom 对 :not(:is(带 :has 的复杂选择器)) 判定有误，线上 Chrome 没问题
+          expect(isSideContainer(el)).toBe(!isMulti && el.querySelector(`.${T_CLASS}`) !== null)
+        }
+        if (isMulti) multi++
+        else single++
+      }
     }
-    expect(checked).toBeGreaterThan(0) // fixture 里确实有多面板插图，这条测试不是空跑
+    expect(multi).toBeGreaterThan(0) // fixture 里两种都有，这条测试不是空跑
+    expect(single).toBeGreaterThan(0)
   })
 
   it('列表标记要脱离网格流，并且两栏各挂一份', () => {
