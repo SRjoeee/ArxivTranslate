@@ -159,6 +159,59 @@ describe('createChromeBuiltinProvider', () => {
     expect(peak).toBeLessThanOrEqual(BUILTIN_MAX_ITEMS)
   })
 
+  it('并发闸是 provider 级的：多个批次同时进来，总在飞数仍不超过上限（Codex 在 #50 指出）', async () => {
+    let running = 0
+    let peak = 0
+    const api: TranslatorApi = {
+      availability: async () => 'available',
+      create: async () => ({
+        translate: async (input: string) => {
+          running++
+          peak = Math.max(peak, running)
+          await new Promise(r => setTimeout(r, 1))
+          running--
+          return `[${input}]`
+        },
+      }),
+    }
+    // 队列可以同时派发多个批次；在一次调用内分批只管得住那一次
+    const provider = createChromeBuiltinProvider('cmn', { translator: api })
+    const calls = Array.from({ length: 5 }, (_, b) =>
+      provider.translate(req(Array.from({ length: 20 }, (_, i) => `b${b}s${i}`))))
+    const results = await Promise.all(calls)
+    expect(results.flatMap(r => r.segments)).toHaveLength(100)
+    expect(results[4]?.segments[19]?.text).toBe('[b4s19]')
+    expect(peak).toBeLessThanOrEqual(BUILTIN_MAX_ITEMS)
+  })
+
+  it('会话创建挂死时按独立超时失败，并把缓存清掉让下次真的重建（Codex 在 #50 指出）', async () => {
+    let creates = 0
+    const api: TranslatorApi = {
+      availability: async () => 'available',
+      // 第一次永不返回，第二次正常
+      create: async () => {
+        creates++
+        if (creates === 1) return new Promise<TranslatorSession>(() => undefined)
+        return { translate: async (input: string) => `[${input}]` }
+      },
+    }
+    const provider = createChromeBuiltinProvider('cmn', { translator: api, createTimeoutMs: 20 })
+    await expect(provider.translate(req(['x']))).rejects.toMatchObject({ kind: 'timeout' })
+    // 没清缓存的话这里会再等同一个死 Promise
+    const again = await provider.translate(req(['y']))
+    expect(again.segments[0]?.text).toBe('[y]')
+    expect(creates).toBe(2)
+  })
+
+  it('会话创建成功后不受超时影响：定时器要清掉', async () => {
+    const { api, state } = fakeApi()
+    const provider = createChromeBuiltinProvider('cmn', { translator: api, createTimeoutMs: 20 })
+    expect((await provider.translate(req(['a']))).segments[0]?.text).toBe('[a]')
+    await new Promise(r => setTimeout(r, 40))
+    expect((await provider.translate(req(['b']))).segments[0]?.text).toBe('[b]')
+    expect(state.creates).toBe(1)
+  })
+
   it('归一化中日韩标点后的多余空格（RESEARCH §6.2 实测的「。 」）', () => {
     expect(normalizeSpacing('图连通时，定理 1 显然。 证明从略。')).toBe('图连通时，定理 1 显然。证明从略。')
     expect(normalizeSpacing('甲、 乙； 丙： 丁？ 戊！ 己')).toBe('甲、乙；丙：丁？戊！己')

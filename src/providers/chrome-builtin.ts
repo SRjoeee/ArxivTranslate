@@ -18,12 +18,42 @@ export interface TranslatorSession {
 export interface ChromeBuiltinDeps {
   /** 默认取全局 `Translator`；拿不到就是这个浏览器不支持 */
   translator?: TranslatorApi | null
+  /** 会话创建的独立超时；注入以便测试 */
+  createTimeoutMs?: number
 }
 
 export const BUILTIN_SOURCE_LANGUAGE = 'en'
 
-/** 单批最多同时推理多少条；也是 provider 声明的 maxBatchItems */
+/** 同时最多推理多少条；也是 provider 声明的 maxBatchItems */
 export const BUILTIN_MAX_ITEMS = 20
+
+/**
+ * 会话创建的独立超时。实测模型就绪后 `create()` 仍要约 8.6 s 本地加载（RESEARCH §6.1），
+ * 60 s 留足余量。有这道闸是因为共用的会话 Promise **不接任何一批的 signal**：
+ * 没有它，一次永不返回的 `create()` 会永远留在缓存里，之后每次重试都在等同一个死 Promise
+ *（Codex 在 #50 指出）
+ */
+export const SESSION_CREATE_TIMEOUT_MS = 60_000
+
+/**
+ * 极简信号量。本地推理的并发闸要**跨调用**：provider 声明 `maxBatchItems: 20`，
+ * 而队列可以同时派发好几个批次，每个批次各自 20 条就是上百个并发推理压在同一个本地模型上。
+ * 在调用内部分批只管得住一次调用，管不住整体（Codex 在 #50 指出）
+ */
+export function createSemaphore(limit: number) {
+  let active = 0
+  const waiting: (() => void)[] = []
+  return async function withPermit<T>(fn: () => Promise<T>): Promise<T> {
+    if (active >= limit) await new Promise<void>(resolve => waiting.push(resolve))
+    active++
+    try {
+      return await fn()
+    } finally {
+      active--
+      waiting.shift()?.()
+    }
+  }
+}
 
 function globalTranslator(): TranslatorApi | null {
   const api = (globalThis as { Translator?: TranslatorApi }).Translator
@@ -54,6 +84,9 @@ function toProviderError(e: unknown): ProviderError {
  */
 export function createChromeBuiltinProvider(target: string, deps: ChromeBuiltinDeps = {}): TranslationProvider {
   const api = deps.translator === undefined ? globalTranslator() : deps.translator
+  const createTimeoutMs = deps.createTimeoutMs ?? SESSION_CREATE_TIMEOUT_MS
+  // 一个 provider 实例一把闸，所有调用共用
+  const withPermit = createSemaphore(BUILTIN_MAX_ITEMS)
   const targetLanguage = toBcp47(target)
   const pair = { sourceLanguage: BUILTIN_SOURCE_LANGUAGE, targetLanguage }
   /**
@@ -73,10 +106,19 @@ export function createChromeBuiltinProvider(target: string, deps: ChromeBuiltinD
     const key = `${pair.sourceLanguage}_${pair.targetLanguage}`
     const existing = sessions.get(key)
     if (existing) return existing
-    const created = api!.create(pair).catch((e: unknown) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const created = new Promise<TranslatorSession>((resolve, reject) => {
+      // 独立于任何一批请求的超时：既不受某一批的 signal 影响，也不让一次挂死的 create() 长驻缓存
+      timer = setTimeout(
+        () => reject(new ProviderError('timeout', `内置翻译会话创建超过 ${createTimeoutMs} ms 未完成`)),
+        createTimeoutMs,
+      )
+      api!.create(pair).then(resolve, reject)
+    }).catch((e: unknown) => {
+      // 失败（含超时）就把缓存清掉，下一次重试会真的重新创建
       sessions.delete(key)
       throw toProviderError(e)
-    })
+    }).finally(() => clearTimeout(timer))
     sessions.set(key, created)
     return created
   }
@@ -107,16 +149,13 @@ export function createChromeBuiltinProvider(target: string, deps: ChromeBuiltinD
       if (!api) throw new ProviderError('no-key', '这个浏览器没有内置翻译 API')
       const session = await sessionFor()
       try {
-        // **按自己声明的上限分批**：批次是 pipeline 按**首选**引擎的上限规划的，
-        // 降级链把同一个调用原样转过来——首选是 google-web（8000 字 / 100 条）时，
-        // 这里会一口气对本地模型发起 100 个并发推理，正好在需要兜底的时候把它压垮（Codex 在 #50 指出）
-        const texts: string[] = []
-        for (let i = 0; i < request.segments.length; i += BUILTIN_MAX_ITEMS) {
-          const chunk = request.segments.slice(i, i + BUILTIN_MAX_ITEMS)
-          texts.push(...await Promise.all(chunk.map(segment =>
-            session.translate(segment.text, request.signal ? { signal: request.signal } : undefined),
-          )))
-        }
+        // **守住自己声明的上限**：批次是 pipeline 按**首选**引擎的上限规划的，降级链把同一个调用
+        // 原样转过来——首选是 google-web（8000 字 / 100 条）时，这里会一口气对本地模型发起 100 个
+        // 并发推理，正好在需要兜底的时候把它压垮。闸门是 provider 级的：队列可以同时派发多个批次，
+        // 只在一次调用内分批管不住整体（Codex 在 #50 指出）
+        const texts = await Promise.all(request.segments.map(segment => withPermit(() =>
+          session.translate(segment.text, request.signal ? { signal: request.signal } : undefined),
+        )))
         return {
           segments: request.segments.map((segment, i) => ({ id: segment.id, text: normalizeSpacing(texts[i]!) })),
           provider: 'chrome-builtin',
