@@ -4,6 +4,7 @@ import { getConfig, watchConfig } from '@/config/storage'
 import { chainConfigChanged, createLocalTransport, type TranslationTransport } from '@/providers/transport'
 import { toErrorInfo } from '@/providers/translate-service'
 import { isAxtMessage } from '@/shared/messages'
+import { createSessionRouter } from './sessions'
 import { handlePing } from '@/shared/ping'
 
 // background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
@@ -38,7 +39,21 @@ export default defineBackground(() => {
     )
   })
 
-  browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  /**
+   * 会话与链的绑定（见 ./sessions.ts）：一次会话认准它开始时的那条链，标签页关掉就撤掉它的请求。
+   * 代价是配置恰好在翻译中途变更时新旧两条链短暂并存、跨标签页的并发预算翻倍，直到旧会话结束；
+   * 这是有意的取舍——宁可短暂多一套队列，也不能让一轮译文中途换引擎或换语言（Codex 在 #59 指出）
+   */
+  const router = createSessionRouter(transportOf)
+
+  // tabs.onRemoved 只给 tabId，不需要 "tabs" 权限
+  browser.tabs.onRemoved.addListener(tabId => {
+    void router.dropTab(tabId).then(n => {
+      if (n > 0) console.debug(`[axt] 标签页 ${tabId} 关闭，撤掉 ${n} 个排队 / 在飞的请求`)
+    })
+  })
+
+  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!isAxtMessage(message)) return
     switch (message.type) {
       case 'axt:ping':
@@ -46,14 +61,13 @@ export default defineBackground(() => {
         return true
       case 'axt:translate':
         // 建链失败（provider 构造抛错）也要如实回话：不回的话调用方等到的是"message channel closed"
-        transportOf()
+        router.forCall(message.scope, sender.tab?.id)
           .then(t => t.translate(message))
           .catch((e: unknown) => ({ ok: false as const, error: toErrorInfo(e) }))
           .then(sendResponse)
         return true
       case 'axt:cancel-scope':
-        transportOf()
-          .then(t => t.cancel(message.scope))
+        router.drop([message.scope])
           .catch(() => 0)
           .then(cancelled => sendResponse({ cancelled }))
         return true

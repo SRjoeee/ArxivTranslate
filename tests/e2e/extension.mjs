@@ -278,6 +278,36 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.close()
 }
 
+// ── 关掉标签页：background 的队列跟着撤（Codex 在 #59 指出）──────────────
+// 请求搬回 background 之后，销毁 content script 不再销毁这些工作。不撤的话，关掉的标签页还会
+// 继续发付费请求，直到批次耗尽预算（单批最长 180 秒）。
+{
+  const seen = []
+  // 监听器挂在 context 上且**不随页面关闭移除**：要观察的正是页面消失之后还有没有请求
+  const onRequest = request => { if (request.url().includes(GOOGLE)) seen.push(Date.now()) }
+  context.on('request', onRequest)
+  const page = await context.newPage()
+  await page.goto(`https://arxiv.org/html/${PAPER2}#axt-translate`, { waitUntil: 'domcontentloaded' })
+  // 先把整篇滚一遍：不这么做队列里没积压，关掉之后本来就不会有请求，断言等于空转
+  // （首次写这条时首屏正好全命中缓存，只发出 2 个请求，测不出任何东西）
+  const height = await page.evaluate(() => document.documentElement.scrollHeight)
+  for (let y = 0; y < height; y += 700) {
+    await page.evaluate(top => window.scrollTo(0, top), y)
+    await sleep(40)
+  }
+  const t0 = Date.now()
+  while (Date.now() - t0 < 40_000 && seen.length < 5) await sleep(200)
+  const before = seen.length
+  const pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
+  const tClose = Date.now()
+  await page.close()
+  await sleep(8_000)
+  const late = seen.filter(t => t > tClose + 500).length
+  context.off('request', onRequest)
+  check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）', before >= 5 && pending > 0 && late === 0,
+    `关闭前 ${before} 个请求、${pending} 个块还在等；关闭 0.5 s 后新增 ${late} 个`)
+}
+
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
 {
   await options.bringToFront()
