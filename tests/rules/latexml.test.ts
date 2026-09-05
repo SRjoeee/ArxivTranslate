@@ -32,7 +32,7 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.5.1')
+    expect(RULES_VERSION).toBe('0.6.1')
   })
 })
 
@@ -92,6 +92,40 @@ describe('classify：逐规则命中', () => {
     expect(classify(el('<section class="ltx_section"></section>'))).toBeNull()
   })
 })
+
+describe('带环境名的 tag 要翻译，纯编号的不翻（§5.2，用户反馈 Definition 1.1 没被翻）', () => {
+    // LaTeXML 把定理环境、图表、算法、附录的名字也放进 .ltx_tag：整体当编号保护的话，
+    // 中文读者看到的还是「Definition 1.1.」。依据是 12 篇 fixture 里 1241 个 tag 的实测分布
+    const tagOf = (html: string) => classify(el(html, '.ltx_tag'))
+    const named: [string, string][] = [
+      ['定理', '<h6 class="ltx_title ltx_title_theorem"><span class="ltx_tag ltx_tag_theorem">Definition 1.1</span>.</h6>'],
+      ['插图', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">Figure 1.</span> Cap.</figcaption>'],
+      ['表格', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table 1:</span> Cap.</figcaption>'],
+      ['算法', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_float">Algorithm 1</span> Cap.</figcaption>'],
+      ['附录', '<h2 class="ltx_title ltx_title_appendix"><span class="ltx_tag ltx_tag_appendix">Appendix A</span> More</h2>'],
+      ['部分', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part I</span> X</h1>'],
+      ['章', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_chapter">Chapter 1</span> X</h1>'],
+    ]
+    for (const [name, html] of named) {
+      it(`${name}的 tag 不再是 void：里面有环境名`, () => {
+        expect(tagOf(html)).toBeNull()
+      })
+    }
+
+    const numbered: [string, string][] = [
+      ['章节号', '<h2 class="ltx_title"><span class="ltx_tag ltx_tag_section">II</span> Intro</h2>'],
+      ['小节号', '<h3 class="ltx_title"><span class="ltx_tag ltx_tag_subsection">II.1</span> Sub</h3>'],
+      ['公式号', '<td class="ltx_eqn_cell"><span class="ltx_tag ltx_tag_equation">(1.1)</span></td>'],
+      ['列表符号', '<li class="ltx_item"><span class="ltx_tag ltx_tag_item">•</span><div class="ltx_para"><p class="ltx_p">x</p></div></li>'],
+      ['脚注标记', '<span class="ltx_note"><span class="ltx_tag ltx_tag_note">1</span></span>'],
+      ['无细分的 tag', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span></li>'],
+    ]
+    for (const [name, html] of numbered) {
+      it(`${name}仍作 void：纯编号翻了只会坏事`, () => {
+        expect(tagOf(html)).toMatchObject({ kind: 'protect', rule: 'tag' })
+      })
+    }
+  })
 
 describe('classify：优先级 skip > table > unit > protect', () => {
   it('skip 胜 unit', () => {

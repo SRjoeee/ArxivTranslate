@@ -26,6 +26,21 @@ function isLoopback(baseURL: string): boolean {
   }
 }
 
+/**
+ * 端点身份：origin + 路径。**路径不能省**——同一域名下不同路径可能是不同的网关路由、指向不同后端
+ *（Codex 在 #54 指出），只取 origin 会让两条路由共用缓存条目。
+ * 归一化掉末尾斜杠，`/v1` 与 `/v1/` 仍是同一身份；查询串与 hash 丢掉（它们不选后端）。
+ * 解析不了就用原串，总比把不同端点混成一个好。**不含 API key**（硬规则 7）
+ */
+function endpointIdentity(baseURL: string): string {
+  try {
+    const url = new URL(baseURL)
+    return url.origin + url.pathname.replace(/\/+$/, '')
+  } catch {
+    return baseURL
+  }
+}
+
 export function createOpenAICompatProvider(
   config: OpenAICompatConfig,
   deps: { model?: LanguageModel; prompts?: PromptsConfig } = {},
@@ -42,6 +57,8 @@ export function createOpenAICompatProvider(
     // 本机端点压低速率：Ollama 默认只并行 4 个，多出来的在服务端排队，会撞我们的超时再重试，空转
     ...(isLoopback(config.baseURL) ? { rateLimit: LOOPBACK_RATE_LIMIT } : {}),
     promptKey: promptKey(deps.prompts),
+    // 端点进缓存身份：同名模型在不同端点上是不同的东西（issue #45）。只取 origin，不带路径也不带 key
+    cacheId: `openai-compat:${endpointIdentity(config.baseURL)}`,
     async isAvailable() {
       return hasKey()
     },

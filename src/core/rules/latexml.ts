@@ -3,7 +3,7 @@
 // 本文件只放数据表与纯函数，不含遍历；遍历在 src/core/extractor。
 
 /** 任何表或函数的行为变化都要递增；进缓存键。0.5.0：单元格取任意深度、格内单元走进去序列化（§5.3） */
-export const RULES_VERSION = '0.5.1'
+export const RULES_VERSION = '0.6.1'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -82,12 +82,33 @@ export const SKIP_RULES: readonly Rule[] = [
   { id: 'nav', selector: '.ltx_page_navbar, .ltx_TOC', note: '导航栏与目录；位于翻译根之外，供渲染层隐藏用' },
 ]
 
+/**
+ * **带环境名的 tag**：LaTeXML 把定理环境、图表、算法、附录的**名字**也放进 .ltx_tag，
+ * 于是「Definition 1.1.」整体被当编号保护，中文读者看到的还是英文（用户反馈，2026-09-05）。
+ * 这几类要翻，其余的 tag 是纯编号与符号，必须保持原样。
+ *
+ * 依据是全部 12 篇 fixture 的实测（`.ltx_tag` 共 1241 个）：
+ * theorem 246 个全部形如 "Definition 1" / "Example 1"；figure 63 个里 58 个是 "Figure 1."；
+ * table 43 个全是 "Table 1:"；appendix 20 个全是 "Appendix A"；float 13 个全是 "Algorithm 1"；
+ * part / chapter 各 1 个。反过来 equation 的 344 个里只有 13 个带字母（"(let.lin)" 这类 LaTeX 标签，不能动），
+ * section / subsection / ref 的 439 个里带字母的都是罗马数字（II、III.1），note 的 54 个是脚注标记。
+ */
+export const NAMED_TAGS = [
+  '.ltx_tag_theorem', // Definition 1.1 / Theorem 2 / Lemma 3
+  '.ltx_tag_figure', // Figure 1.
+  '.ltx_tag_table', // Table 1:
+  '.ltx_tag_float', // Algorithm 1
+  '.ltx_tag_appendix', // Appendix A
+  '.ltx_tag_part', // Part I
+  '.ltx_tag_chapter', // Chapter 1
+].join(', ')
+
 /** §6.1 受保护的行内节点：作 void 占位符，不产出；默认不下钻 */
 export const PROTECT_RULES: readonly ProtectRule[] = [
   { id: 'math', selector: 'math, .ltx_Math', note: '行内公式；行间公式已被 equation 整块跳过' },
   { id: 'ref', selector: '.ltx_ref', note: '交叉引用，含内部 .ltx_ref_tag' },
   { id: 'cite', selector: '.ltx_cite', note: '引用标记' },
-  { id: 'tag', selector: '.ltx_tag', note: '章节号、图表号、公式编号、列表符号、代码行号' },
+  { id: 'tag', selector: `.ltx_tag:not(:is(${NAMED_TAGS}))`, note: '编号与符号：章节号、公式编号、列表符号、脚注标记、代码行号' },
   { id: 'tt', selector: '.ltx_text.ltx_font_typewriter', note: '等宽文本，视为代码' },
   { id: 'note', selector: '.ltx_note', descend: true, note: '脚注容器：对外层段落是 void，内部的 .ltx_note_content 仍要被发现为块' },
   { id: 'note-mark', selector: '.ltx_note_mark, .ltx_note_type', note: '脚注标记与类型标签（容器外层与正文内各一次）' },

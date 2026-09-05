@@ -11,6 +11,15 @@ const request: TranslateRequest = {
 }
 
 describe('prompt', () => {
+  it('术语表进用户消息的元数据块，一行一条', () => {
+    const withGlossary = { ...request, context: { ...request.context, glossary: [{ term: 'weights', translation: '权重' }, { term: 'bias', translation: '偏置' }] } }
+    const { prompt } = buildPrompts(withGlossary)
+    expect(prompt).toContain('weights -> 权重')
+    expect(prompt).toContain('bias -> 偏置')
+    // 没有术语表时是 None，不留空
+    expect(buildPrompts(request).prompt).toContain('Glossary: None')
+  })
+
   it('自定义提示词两段都没写 {{targetLanguage}} 时，用户消息前面补一行目标语言', () => {
     const prompts = { promptId: 'mine', patterns: [{ id: 'mine', name: 'mine', systemPrompt: 'Be terse.', prompt: '{{input}}' }] }
     const { prompt } = buildPrompts(request, prompts)

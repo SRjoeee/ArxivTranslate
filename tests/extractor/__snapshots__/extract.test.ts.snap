@@ -34,11 +34,11 @@ exports[`fixture > 2312.17527.html 1`] = `
   "byUnit": {
     "authorinfo": 8,
     "bibblock": 42,
-    "caption": 3,
+    "caption": 6,
     "footnote": 4,
     "p": 78,
     "table": 2,
-    "title": 16,
+    "title": 28,
   },
   "cells": 84,
   "firstIds": [
@@ -47,14 +47,14 @@ exports[`fixture > 2312.17527.html 1`] = `
     "axt-b3",
   ],
   "lastIds": [
-    "axt-b151",
-    "axt-b152",
-    "axt-b153",
+    "axt-b166",
+    "axt-b167",
+    "axt-b168",
   ],
   "numericCells": 55,
   "table": 2,
-  "text": 151,
-  "total": 153,
+  "text": 166,
+  "total": 168,
 }
 `;
 
@@ -66,7 +66,7 @@ exports[`fixture > 2401.00418.html 1`] = `
     "caption": 3,
     "footnote": 2,
     "p": 140,
-    "title": 34,
+    "title": 75,
   },
   "cells": 0,
   "firstIds": [
@@ -75,14 +75,14 @@ exports[`fixture > 2401.00418.html 1`] = `
     "axt-b3",
   ],
   "lastIds": [
-    "axt-b250",
-    "axt-b251",
-    "axt-b252",
+    "axt-b291",
+    "axt-b292",
+    "axt-b293",
   ],
   "numericCells": 0,
   "table": 0,
-  "text": 252,
-  "total": 252,
+  "text": 293,
+  "total": 293,
 }
 `;
 
@@ -230,7 +230,7 @@ exports[`fixture > 2609.00245.html 1`] = `
     "footnote": 11,
     "p": 491,
     "table": 1,
-    "title": 60,
+    "title": 133,
   },
   "cells": 15,
   "firstIds": [
@@ -245,8 +245,8 @@ exports[`fixture > 2609.00245.html 1`] = `
   ],
   "numericCells": 0,
   "table": 1,
-  "text": 602,
-  "total": 603,
+  "text": 675,
+  "total": 676,
 }
 `;
 
@@ -260,7 +260,7 @@ exports[`fixture > 2609.00246.html 1`] = `
     "keywords": 1,
     "p": 256,
     "table": 8,
-    "title": 41,
+    "title": 71,
   },
   "cells": 1603,
   "firstIds": [
@@ -270,13 +270,13 @@ exports[`fixture > 2609.00246.html 1`] = `
   ],
   "lastIds": [
     "Pt0.A7.T6.13",
-    "axt-b512",
+    "axt-b542",
     "Pt0.A7.SS6.SSSx2.p1.1",
   ],
   "numericCells": 1010,
   "table": 8,
-  "text": 505,
-  "total": 513,
+  "text": 535,
+  "total": 543,
 }
 `;
 
@@ -315,7 +315,7 @@ exports[`fixture > 2609.04056.html 1`] = `
     "bibblock": 89,
     "footnote": 2,
     "p": 457,
-    "title": 153,
+    "title": 197,
   },
   "cells": 0,
   "firstIds": [
@@ -324,14 +324,14 @@ exports[`fixture > 2609.04056.html 1`] = `
     "axt-b3",
   ],
   "lastIds": [
-    "axt-b699",
-    "axt-b700",
-    "axt-b701",
+    "axt-b743",
+    "axt-b744",
+    "axt-b745",
   ],
   "numericCells": 0,
   "table": 0,
-  "text": 701,
-  "total": 701,
+  "text": 745,
+  "total": 745,
 }
 `;
 

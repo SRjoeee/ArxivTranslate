@@ -104,6 +104,10 @@ export function startTranslation(options: RunOptions): TranslationRun {
   const ready = (async () => {
     const pacer = createWorkPacer()
     for (const block of blocks) {
+      // 每写一个块之前都要看会话还在不在：让出主线程期间用户可能已经"恢复原文"，
+      // 循环外才检查的话，restore 清干净之后这里会继续往 DOM 上写标记，
+      // 页面留下孤儿 data-axt-*（§7.1 的不变量被破坏，issue #45 的实验 1）
+      if (halted()) return
       block.el.setAttribute(ID_ATTR, block.id)
       setState(block, 'pending')
       await pauseIfBudgetSpent(pacer)
