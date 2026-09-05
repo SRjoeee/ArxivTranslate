@@ -140,6 +140,8 @@ interface Block {
 | `.ltx_ERROR` | LaTeXML 转换错误块（也会出现在转换失败页 "Untitled Document" 上，扩展须安静处理）|
 | `.ltx_page_navbar`, `.ltx_TOC` | 导航栏与目录。位于翻译根之外，列出仅供渲染层隐藏用 |
 
+- **带环境名的 `.ltx_tag` 要翻译** [决定，2026-09-05，用户反馈]：LaTeXML 把定理环境、图表、算法、附录的**名字**也放进 `.ltx_tag`，`Definition 1.1.` 整体被当编号保护，中文读者看到的还是英文。按细分类名区分：`ltx_tag_theorem` / `ltx_tag_figure` / `ltx_tag_table` / `ltx_tag_float` / `ltx_tag_appendix` / `ltx_tag_part` / `ltx_tag_chapter` 参与翻译，其余（equation、section、subsection、ref、item、note）仍作 void。依据是全部 12 篇 fixture 里 1241 个 `.ltx_tag` 的实测分布：theorem 的 246 个全部形如 "Definition 1"、table 的 43 个全是 "Table 1:"、figure 的 63 个里 58 个是 "Figure 1."、appendix 20 个全是 "Appendix A"、float 13 个全是 "Algorithm 1"；反过来 equation 的 344 个里只有 13 个带字母（`(let.lin)` 这类 LaTeX 标签，动不得），section / subsection / ref 的 439 个里带字母的全是罗马数字（II、III.1），note 的 54 个是脚注标记。改这条要升 `RULES_VERSION`（进缓存键），已升到 0.6.0。实测 2609.04056v1：定理标题块从 34 个增加到 75 个，`Definition 1.2 (Hall set).` → `定义 1.2（大厅布置）。`
+
 ### 5.3 表格 [决定]
 
 整张**最外层** `.ltx_tabular` 作为一个单元处理（fixture 中 58 个 tabular 有 15 个不在 `.ltx_table` 内，所以根不能用 `.ltx_table`；3 个嵌套在另一个 tabular 内，内层归外层单元格；`th` 全部带 `ltx_td`，单元格选择器 `.ltx_td` 即可；239 个 `.ltx_td` 属于公式对齐表，已由 `.ltx_equation` 跳过）：
@@ -439,9 +441,10 @@ export interface TranslateResult {
 ## 9. 缓存与配置
 
 - 译文缓存：IndexedDB，**Dexie**，移植 FluentRead `services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层），crypto-js 换成 Web Crypto SHA-256（v0.4 修订，原定 idb-keyval）
-- 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
+- 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；**`providerId` 取 `provider.cacheId ?? provider.id`** [决定，2026-09-05，issue #45]：`openai-compat` 这个 id 对所有 OpenAI 兼容端点都一样，只用 id + 模型名的话，OpenRouter 上的同名模型与本机 Ollama 上的共用缓存条目、译文互相污染。provider 自己声明身份（`openai-compat:<origin><path>`，**路径要带上**：同一域名下不同路径可能是不同网关路由、指向不同后端，只取 origin 会让两条路由共用条目；末尾斜杠归一化），**绝不放 API key**（硬规则 7）；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
 - 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有（IndexedDB 按扩展 origin 隔离，跨论文共享），content 侧通过 `axt:cache-get` / `axt:cache-put` 读写；provider 请求本身不经过 background（§8.0）
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
+- **缓存读取有等待预算，读不到就继续翻** [决定，2026-09-05，issue #45]：服务是"先等缓存再发请求"的，读一旦挂住整页翻译就停在那里——MV3 的 service worker 冷启动、被挂起或消息丢失都会造成这种情况。两道闸：content 侧的消息端口 1.5s（`CACHE_READ_TIMEOUT_MS`），服务层 2s（`CACHE_READ_BUDGET_MS`，换任何 `CachePort` 实现都兜得住）。超时按全部未命中处理，代价只是多花一次请求；两个数都远大于实测的命中往返（36 ms 量级）
 - **坏译文不入库、重发不读库** [决定，2026-09-05]：markup 路径的请求带 `accept` 回调（进程内调用才有，过不了消息边界），translate-service 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）；占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
 - 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、v5 加 `fallback: { enabled }`（默认开，§8.5）、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
@@ -451,7 +454,7 @@ export interface TranslateResult {
 
 **看到哪翻到哪**：只翻视口内与其下方一段距离内的块，没滚到的块不发请求、不占资源。这是 Read Frog 页面翻译**唯一**的模式（`PageTranslationManager`，没有"整篇翻"的开关），做法照搬；它的模块解耦、效果经过验证，能整段搬的整段搬（见 §12 的 `feat/lazy-loading`）。
 
-- 开始翻译时只给所有块打标记（`data-axt-id`、`pending`）并逐块交给一个 `IntersectionObserver`，**不发任何请求**。参数照 Read Frog 的 `pageTranslation.page.preload` 默认值：`rootMargin` **1000px**、`threshold` **0**；设置页暴露为"预翻译距离"（0–10000px，步进 100）与"可见阈值"（0–1），与 Read Frog 同名同义。原先照 FluentRead 的 600px / 0.01 作废
+- 开始翻译时只给所有块打标记（`data-axt-id`、`pending`）并逐块交给一个 `IntersectionObserver`，**不发任何请求**。标记是切片进行的（几百个块一口气写会冻住页面），**每写一个块之前都要检查会话是否还在**：让出主线程期间用户可能已经「恢复原文」，只在循环外检查的话，`restore` 清干净之后循环会继续往 DOM 上写标记，页面留下孤儿 `data-axt-*`，§7.1 的不变量被破坏（issue #45 的实验 1）。参数照 Read Frog 的 `pageTranslation.page.preload` 默认值：`rootMargin` **1000px**、`threshold` **0**；设置页暴露为"预翻译距离"（0–10000px，步进 100）与"可见阈值"（0–1），与 Read Frog 同名同义。原先照 FluentRead 的 600px / 0.01 作废
 - 块**第一次**进入视口加边距时才发请求，同时 `unobserve`——一次性；视口外的块永远不会被请求。没有"整篇翻完"的后台队列，想整篇就把预翻译距离调大（Read Frog 也是这么做的）
 - 同一次 IO 回调里进入的块**攒成一批**：一次滚动会让几十个块同时进入，按 §8.2 的 1000 字 / 4 条切批发出，表格整表一批不变；`planBatches` 只对"这一批进入视口的块"运行，不再预先规划整篇。IO 首次回调是异步的，创建时仍按 `getBoundingClientRect` 同步播种一次，首屏不等回调
 - 请求期间原块旁边先插带加载圆环的 pending 节点（§7.6），译文到达后填入；失败换错误提示与"重试"；取消则删除

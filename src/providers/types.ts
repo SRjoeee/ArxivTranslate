@@ -51,6 +51,13 @@ export interface TranslationProvider {
   translate(request: TranslateRequest): Promise<TranslateResult>
   /** 提示词指纹，进缓存键（只有 LLM provider 有）：换了提示词不能再命中旧译文 */
   promptKey?: string
+  /**
+   * 缓存身份，进缓存键；不声明就用 id。
+   * 同一个 id 下**输出会变的非秘密配置**要写进来：openai-compat 的 id 对所有 OpenAI 兼容端点都一样，
+   * 只用 id + 模型名的话，OpenRouter 上的同名模型与本机 Ollama 上的共用缓存条目、译文互相污染
+   *（issue #45 的实验 3）。**绝不能放 API key**（硬规则 7）
+   */
+  cacheId?: string
 }
 
 export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'invalid-response' | 'timeout' | 'aborted' | 'unknown'
