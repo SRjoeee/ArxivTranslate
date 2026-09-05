@@ -73,7 +73,13 @@ export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationPr
     // 端点一次能吃很多条；批次给大、速率给小——免费端点经不起 8/s 的默认速率（DESIGN §8.3）
     maxBatchChars: 8000,
     maxBatchItems: 100,
-    rateLimit: { rate: 2, capacity: 2 },
+    // 原本是 p-queue 的 concurrency: 2（同时 2 个在飞，不限速率）。2026-09-05 移植 RequestQueue 时
+    // 误写成 rate: 2（每秒 2 个）——Google 响应中位只有 63 ms，却被令牌桶按 500 ms 一个卡着，
+    // 整篇 216 块要 29.6 秒（实测，§8.3）。并发上限回到 2，速率只作突发的安全闸：
+    // 速率闸只兜病态情况，**不该成为常态约束**：响应 63 ms、并发 2，自然吞吐约 30/s，
+    // 20/s 基本碰不到；先设 4/s 时它又变成了新瓶颈（24 个请求跑满 5.3 秒），正是同一个错误
+    rateLimit: { rate: 20, capacity: 8 },
+    maxConcurrent: 2,
     async isAvailable() {
       // 免费端点不需要凭据；是否可达留给实际请求，失败走 fallback 链
       return true

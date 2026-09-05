@@ -168,6 +168,90 @@ describe('createTranslateService', () => {
   })
 })
 
+describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06）', () => {
+  /** 记录 provider 每次真的收到哪些段 */
+  const recorder = (extra: Partial<TranslationProvider> = {}) => {
+    const calls: string[][] = []
+    return {
+      calls,
+      provider: provider(async r => {
+        calls.push(r.segments.map(s => s.id))
+        return { segments: r.segments, provider: 'mock' }
+      }, 'mock', extra),
+    }
+  }
+  const withContext = (ids: string[], sectionTitle: string) => ({
+    request: { segments: ids.map(id => ({ id, text: `text-${id}` })), source: 'en' as const, target: 'zh-CN', context: { paperTitle: 'P', sectionTitle } },
+  })
+
+  it('免费引擎（kind: mt）的多次调用攒进同一个请求：以前只有 LLM 攒批，它一次调用一个请求', async () => {
+    vi.useFakeTimers()
+    const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 100, maxBatchChars: 8000 })
+    const service = createTranslateService({ getProvider: async () => mt })
+    const all = Promise.all([service.translate(req(['a'])), service.translate(req(['b'])), service.translate(req(['c']))])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(calls).toEqual([['a', 'b', 'c']])
+    expect((await all).every(r => r.ok)).toBe(true)
+  })
+
+  it('装得下多少就攒多少：超过 maxBatchItems 的部分另起一批', async () => {
+    vi.useFakeTimers()
+    const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 2, maxBatchChars: 8000 })
+    const service = createTranslateService({ getProvider: async () => mt })
+    const all = Promise.all(['a', 'b', 'c'].map(id => service.translate(req([id]))))
+    await vi.advanceTimersByTimeAsync(200)
+    expect(calls).toEqual([['a', 'b'], ['c']])
+    expect((await all).every(r => r.ok)).toBe(true)
+  })
+
+  it('不看上下文的引擎，章节标题不进批次键：否则每换一节就换一次键，跨不了章节攒批', async () => {
+    vi.useFakeTimers()
+    const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 100, maxBatchChars: 8000 })
+    const service = createTranslateService({ getProvider: async () => mt })
+    const all = Promise.all([service.translate(withContext(['a'], '第一节')), service.translate(withContext(['b'], '第二节'))])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(calls).toEqual([['a', 'b']])
+    expect((await all).every(r => r.ok)).toBe(true)
+  })
+
+  it('有提示词的引擎照旧按上下文分批：章节标题会进 prompt，混批会串味', async () => {
+    vi.useFakeTimers()
+    const { calls, provider: llm } = recorder({ kind: 'llm', maxBatchItems: 100, maxBatchChars: 8000, promptKey: 'default' })
+    const service = createTranslateService({ getProvider: async () => llm })
+    const all = Promise.all([service.translate(withContext(['a'], '第一节')), service.translate(withContext(['b'], '第二节'))])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(calls.map(c => c.join()).sort()).toEqual(['a', 'b'])
+    expect((await all).every(r => r.ok)).toBe(true)
+  })
+
+  it('provider 声明的 maxConcurrent 生效：并发闸与令牌桶是两种闸', async () => {
+    vi.useFakeTimers()
+    let inFlight = 0
+    let peak = 0
+    const release: (() => void)[] = []
+    // 速率放开（20/s、突发 20），只靠并发闸卡住：同时在飞不能超过 2
+    const mt = provider(async r => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise<void>(resolve => release.push(resolve))
+      inFlight--
+      return { segments: r.segments, provider: 'mock' }
+    }, 'mock', { kind: 'mt', maxBatchItems: 1, rateLimit: { rate: 20, capacity: 20 }, maxConcurrent: 2 })
+    const service = createTranslateService({ getProvider: async () => mt })
+    const all = Promise.all(['a', 'b', 'c', 'd'].map(id => service.translate(req([id]))))
+    await vi.advanceTimersByTimeAsync(500)
+    expect(peak).toBe(2)
+    expect(release).toHaveLength(2)
+    for (const fn of [...release]) fn()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(release.length).toBeGreaterThan(2)
+    for (const fn of [...release]) fn()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(peak).toBe(2)
+    expect((await all).every(r => r.ok)).toBe(true)
+  })
+})
+
 describe('createTranslateService：限流、超时、取消（fake timers）', () => {
   const log = () => {
     const calls: { id: string; t: number }[] = []

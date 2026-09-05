@@ -41,21 +41,45 @@ async function openPaper(id, host) {
   const page = await context.newPage()
   const logs = []
   const requests = []
-  let spinnersSeen = 0
-  const watchSpinners = setInterval(() => {
-    page.evaluate(() => document.querySelectorAll('.axt-spinner').length).then(n => { spinnersSeen = Math.max(spinnersSeen, n) }).catch(() => undefined)
-  }, 200)
-  page.once('close', () => clearInterval(watchSpinners))
   page.on('console', message => {
     const text = message.text()
     if (text.includes('[axt]')) logs.push({ t: Date.now(), text })
   })
+  const inFlight = new Map()
   page.on('request', request => {
-    if (request.url().includes(host)) requests.push({ t: Date.now(), url: request.url() })
+    if (!request.url().includes(host)) return
+    // translateHtml 的请求体是 [[items, from, to], client]：数出这一发装了多少段（攒批的直接证据）
+    let items = 0
+    try {
+      const body = JSON.parse(request.postData() ?? 'null')
+      if (Array.isArray(body?.[0]?.[0])) items = body[0][0].length
+    } catch {
+      // 不是 JSON（或 LLM 端点，段落在 prompt 里数不出来）就记 0
+    }
+    const entry = { t: Date.now(), url: request.url(), items, end: Number.POSITIVE_INFINITY }
+    inFlight.set(request, entry)
+    requests.push(entry)
+  })
+  for (const event of ['requestfinished', 'requestfailed']) {
+    page.on(event, request => {
+      const entry = inFlight.get(request)
+      if (entry) { entry.end = Date.now(); inFlight.delete(request) }
+    })
+  }
+  // 圆环不能靠轮询：首屏全命中缓存时 36 ms 就结束了，200 ms 的轮询必然扑空。挂个 MutationObserver 记峰值
+  await page.addInitScript(() => {
+    window.__axtSpinnerPeak = 0
+    const bump = () => {
+      const n = document.querySelectorAll('.axt-spinner').length
+      if (n > window.__axtSpinnerPeak) window.__axtSpinnerPeak = n
+    }
+    const start = () => new MutationObserver(bump).observe(document.documentElement, { childList: true, subtree: true })
+    if (document.documentElement) start()
+    else document.addEventListener('readystatechange', start, { once: true })
   })
   await page.goto(`https://arxiv.org/html/${id}#axt-translate`, { waitUntil: 'domcontentloaded' })
   const originalTitle = await page.title()
-  return { page, logs, requests, originalTitle, spinnersSeen: () => spinnersSeen }
+  return { page, logs, requests, originalTitle, spinnersSeen: () => page.evaluate(() => window.__axtSpinnerPeak ?? 0).catch(() => 0) }
 }
 
 async function waitForLog(logs, pattern, timeoutMs) {
@@ -201,7 +225,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const { page, logs, requests, originalTitle, spinnersSeen } = await openPaper(PAPER, GOOGLE)
   const first = idleOf(await waitForLog(logs, IDLE, 120_000))
   check(`论文 ${PAPER}：不滚动只翻首屏附近（google-web）`, !!first && first.requested > 0 && first.requested < first.total && first.done === first.requested && first.failed === 0, first?.text ?? '(no idle line)')
-  check('请求期间出现过加载圆环（§7.6）', spinnersSeen() > 0, `最多同时 ${spinnersSeen()} 个圆环`)
+  const spinnerPeak = await spinnersSeen()
+  check('请求期间出现过加载圆环（§7.6）', spinnerPeak > 0, `最多同时 ${spinnerPeak} 个圆环`)
   const translated = await page.title()
   check('标签页标题被翻译', translated !== originalTitle && /[\u4e00-\u9fff]/.test(translated), `${originalTitle} → ${translated}`)
   await page.screenshot({ path: `${SHOTS}/paper-first-screen.png` })
@@ -221,7 +246,14 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const dom = await countDom(page)
   check('逐屏滚到底：进入视口的块都翻了，没滚到的不请求', !!last && last.requested > first.requested && last.done === last.requested && last.failed === 0 && dom.pendingNodes === 0, `${last?.text ?? '(no idle after scroll)'}; DOM ${JSON.stringify(dom)}`)
   const peak = peakPerSecond(requests)
-  check('google-web 速率：任一 1 秒窗口 ≤ 4 个请求（突发 2 + 每秒补 2）', requests.length > 0 && peak <= 4, `${requests.length} 个请求，峰值 ${peak}/s`)
+  // 攒批（§8.3）：整篇的段落要攒成大请求。2026-09-06 之前只有 LLM 攒批，google-web 一次调用一个请求，
+  // 实测 213 块发了 65 个请求、平均 4.2 段/请求；修好后 190 块只用 21 个、平均 11.2 段
+  const items = requests.reduce((n, r) => n + r.items, 0)
+  const perRequest = requests.length ? items / requests.length : 0
+  check('google-web 攒批：整篇的段落攒成大请求，不是一段一个', requests.length > 0 && perRequest >= 5, `${requests.length} 个请求带 ${items} 段，平均 ${perRequest.toFixed(1)} 段/请求`)
+  // 并发闸（§8.3）：google-web 声明 maxConcurrent 2，同时在飞不能超过它。速率 20/s、突发 8 只兜病态情况
+  const concurrent = requests.reduce((p, a) => Math.max(p, requests.filter(b => b.t <= a.t && b.end > a.t).length), 0)
+  check('google-web 并发：同时在飞 ≤ 2（provider 声明的 maxConcurrent）', requests.length > 0 && concurrent <= 2, `同时在飞峰值 ${concurrent}，1 秒窗口峰值 ${peak}`)
   await page.screenshot({ path: `${SHOTS}/paper.png` })
 
   // ── 刷新再翻：首屏附近全部命中缓存，不再请求端点 ────────────────────

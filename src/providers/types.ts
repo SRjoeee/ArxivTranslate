@@ -46,6 +46,11 @@ export interface TranslationProvider {
   maxBatchItems: number
   /** 请求速率（令牌桶：每秒 rate 个、最多攒 capacity 个）；不声明则用服务默认的 8 / 20，即 Read Frog 的默认值（§8.2） */
   rateLimit?: { rate: number; capacity: number }
+  /**
+   * 同时在飞的请求数上限；不声明则用服务默认的 8。与 rateLimit 是两种闸：令牌桶管「每秒发几个」，
+   * 这个管「同时挂着几个」。响应快的端点靠它就够，用速率去限反而会让快响应白等令牌（§8.3）
+   */
+  maxConcurrent?: number
   /** 健康检查：key 是否配置、端点是否可达、内置模型是否可用 */
   isAvailable(): Promise<boolean>
   translate(request: TranslateRequest): Promise<TranslateResult>
