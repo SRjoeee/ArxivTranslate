@@ -14,7 +14,9 @@ export const configItem = storage.defineItem<Config>('local:config', {
     // v2 -> v3：加按视口翻译的范围（§10）
     3: (v2: Omit<Config, 'version' | 'preload' | 'targetLanguage'> & { version: 2; targetLanguage: string }) => ({ ...v2, version: 3 as const, preload: { ...DEFAULT_PRELOAD } }),
     // v3 -> v4：目标语言从 BCP-47 换成 ISO 639-3（zh-CN → cmn、zh-TW → cmn-Hant、ja → jpn）
-    4: (v3: Omit<Config, 'version' | 'targetLanguage'> & { version: 3; targetLanguage: string }) => ({ ...v3, version: 4 as const, targetLanguage: fromBcp47(v3.targetLanguage) }),
+    4: (v3: Omit<Config, 'version' | 'targetLanguage' | 'fallback'> & { version: 3; targetLanguage: string }) => ({ ...v3, version: 4 as const, targetLanguage: fromBcp47(v3.targetLanguage) }),
+    // v4 -> v5：加引擎降级链，默认开启（硬规则 4：失败必须可恢复，不能让扩展整体挂掉）
+    5: (v4: Omit<Config, 'version' | 'fallback'> & { version: 4 }) => ({ ...v4, version: 5 as const, fallback: { enabled: true } }),
   },
 })
 
