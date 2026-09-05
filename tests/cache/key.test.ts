@@ -52,6 +52,14 @@ describe('buildCacheKey', () => {
     expect(await buildCacheKey({ ...base, context: undefined })).toBe(await buildCacheKey({ ...base, context: undefined }))
   })
 
+  it('改一条术语的译法，键就变；空表与不带术语表同键（否则加表那一刻全部缓存失效）', async () => {
+    const withA = await buildCacheKey({ ...base, context: { glossary: [{ term: 'weights', translation: '权重' }] } })
+    const withB = await buildCacheKey({ ...base, context: { glossary: [{ term: 'weights', translation: '重量' }] } })
+    expect(withA).not.toBe(withB)
+    const empty = await buildCacheKey({ ...base, context: { glossary: [] } })
+    expect(empty).toBe(await buildCacheKey({ ...base, context: {} }))
+  })
+
   it('上下文以原文进 SHA-256 载荷，不先压成 32 位 hash：DJB2 相撞的两个标题也不同键（Codex 给的实例）', async () => {
     const a = await buildCacheKey({ ...base, context: { paperTitle: '19k04n01vcr73f' } })
     const b = await buildCacheKey({ ...base, context: { paperTitle: '1efm0uaep90s9' } })

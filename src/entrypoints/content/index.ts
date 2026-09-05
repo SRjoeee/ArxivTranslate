@@ -27,7 +27,7 @@ export default defineContentScript({
     const t0 = performance.now()
     const blocks: Block[] = extract(document)
     // 标题 + 摘要在这里抽一次：此时 DOM 里还没有译文，翻译过再抽会把上一轮的译文也算进摘要
-    const context = paperContext(document)
+    const paperContextValue = paperContext(document)
     console.debug(`[axt] extracted ${blocks.length} blocks in ${Math.round(performance.now() - t0)} ms`)
 
     const paper = paperIdFromUrl(location.href)
@@ -81,6 +81,8 @@ export default defineContentScript({
       // 冷启动时一条无 I/O 的消息也要等几十秒。现在只有缓存读写走消息，翻译本身不经过 background。
       const tStart = performance.now()
       const config = await getConfig()
+      // 术语表随每批发出（§8.2）。**空表不带这个字段**：带上会让所有既有缓存键变一遍，一次性全失效
+      const context = config.glossary.length > 0 ? { ...paperContextValue, glossary: config.glossary } : paperContextValue
       // 降级链（§8.5）：首选引擎失败时自动切到免费引擎，别让整页翻译停死
       const chain = await buildChain(config)
       const provider = chain[0]!
