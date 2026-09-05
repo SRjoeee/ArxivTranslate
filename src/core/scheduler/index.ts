@@ -4,5 +4,6 @@
 // side 模式下每次 130–150ms，是翻译期间主线程被占满的主因。
 export { DEFAULT_PRELOAD, createLazyScheduler, type LazyScheduler, type PreloadOptions } from './lazy'
 export { beginSession, endSession, getSessionId } from './session'
+export { translateTitle, type TitleTranslator } from './title'
 export { createWorkPacer, pauseIfBudgetSpent, yieldToMain } from './pacer'
 export { createCoalescer, type Coalescer, type CoalesceOptions } from './coalesce'

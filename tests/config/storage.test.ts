@@ -54,7 +54,7 @@ describe('provider 选择', () => {
     await expect(setConfig({ ...DEFAULT_CONFIG, provider: 'nope' } as never)).rejects.toThrow()
   })
 
-  it('v1 配置升级到 v2：补上提示词库，API key 与其他字段原样保留', async () => {
+  it('v1 配置一路升到 v3：补上提示词库与预翻译范围，API key 与其他字段原样保留', async () => {
     // WXT 在 defineItem 时就跑迁移，所以要先写入 v1 数据再重新加载模块
     const v1 = {
       version: 1, provider: 'openai-compat',
@@ -65,9 +65,32 @@ describe('provider 选择', () => {
     vi.resetModules()
     const fresh = await import('@/config/storage')
     const c = await fresh.getConfig()
-    expect(c.version).toBe(2)
+    expect(c.version).toBe(3)
     expect(c.openaiCompat.apiKey).toBe('sk-keep')
     expect(c.targetLanguage).toBe('ja')
     expect(c.prompts).toEqual({ promptId: 'default', patterns: [] })
+    expect(c.preload).toEqual({ margin: 1000, threshold: 0 })
+  })
+
+  it('v2 配置升级到 v3：补上预翻译范围（Read Frog 默认 1000px / 0），其余原样', async () => {
+    const v2 = {
+      version: 2, provider: 'google-web',
+      openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: '', model: 'x/y', thinking: 'enabled' },
+      targetLanguage: 'zh-TW', mode: 'only', prompts: { promptId: 'precision-rewrite', patterns: [] },
+    }
+    await fakeBrowser.storage.local.set({ config: v2, config$: { v: 2 } })
+    vi.resetModules()
+    const fresh = await import('@/config/storage')
+    const c = await fresh.getConfig()
+    expect(c.version).toBe(3)
+    expect(c.preload).toEqual({ margin: 1000, threshold: 0 })
+    expect(c.prompts.promptId).toBe('precision-rewrite')
+    expect(c.mode).toBe('only')
+    expect(c.openaiCompat.thinking).toBe('enabled')
+  })
+
+  it('预翻译范围越界被 schema 拒绝', async () => {
+    await expect(setConfig({ ...DEFAULT_CONFIG, preload: { margin: -1, threshold: 0 } })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, preload: { margin: 1000, threshold: 1.5 } })).rejects.toThrow()
   })
 })

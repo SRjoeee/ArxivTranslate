@@ -9,8 +9,9 @@ import {
   splitFigures,
   type Mode, type ModeController,
 } from '@/core/renderer'
+import { decodeText, escapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { DEFAULT_PRELOAD, beginSession, createCoalescer, endSession, getSessionId } from '@/core/scheduler'
+import { beginSession, createCoalescer, endSession, getSessionId, translateTitle, type TitleTranslator } from '@/core/scheduler'
 import { isAxtMessage } from '@/shared/messages'
 import { createMessageCachePort } from './cache-port'
 import { enableDebug } from './debug'
@@ -36,11 +37,14 @@ export default defineContentScript({
     // 一次会话 = 一个翻译服务 + 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
     let service: TranslateService | null = null
     let run: TranslationRun | null = null
+    let title: TitleTranslator | null = null
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
     let progress: Progress = idle()
 
     /** 结束当前会话：断开观察器、删 pending、撤掉排队与在飞的请求；页面上的译文留着 */
     function endRun(): void {
+      title?.stop()
+      title = null
       run?.stop()
       run = null
       const session = endSession()
@@ -87,7 +91,7 @@ export default defineContentScript({
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
         transport: request => translate.translate(request),
         scope: session,
-        preload: DEFAULT_PRELOAD,
+        preload: config.preload,
         onProgress: p => {
           // 会话已结束（恢复原文 / 重开）：旧运行的回调一律忽略
           if (getSessionId() !== session) return
@@ -102,6 +106,18 @@ export default defineContentScript({
         },
       })
       run.ready.catch(e => console.error('[axt] translation crashed', e))
+      // 标签页标题也翻（§10）：走同一个服务、同一份缓存；标题是纯文本，按占位符协议转义再解码
+      title = translateTitle(document, {
+        isCurrent: () => getSessionId() === session,
+        translate: async text => {
+          const res = await translate.translate({
+            request: { segments: [{ id: 'document.title', text: escapeText(text) }], source: 'en', target: config.targetLanguage, context },
+            cache: { paper, renderPath: 'markup' },
+            scope: session,
+          })
+          return res.ok ? decodeText(res.result.segments[0]?.text ?? '') || null : null
+        },
+      })
       return { started: true }
     }
 

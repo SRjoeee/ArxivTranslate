@@ -1,8 +1,9 @@
 // 配置形状（DESIGN §9）。改形状就升 version 并在 storage.ts 的 migrations 里写迁移。
 import { z } from 'zod'
+import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
 
-export const CONFIG_VERSION = 2
+export const CONFIG_VERSION = 3
 
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
@@ -22,6 +23,11 @@ export const configSchema = z.object({
     promptId: z.string().min(1),
     patterns: z.array(z.object({ id: z.string().min(1), name: z.string(), systemPrompt: z.string(), prompt: z.string() })),
   }).default(DEFAULT_PROMPTS_CONFIG),
+  /** 按视口翻译的范围（§10，Read Frog 的 preload）：视口下方多少像素算临近（0–10000）、露出多少比例算进入（0–1） */
+  preload: z.object({
+    margin: z.number().min(0).max(10_000),
+    threshold: z.number().min(0).max(1),
+  }).default({ ...DEFAULT_PRELOAD }),
 })
 
 export type Config = z.infer<typeof configSchema>
@@ -39,4 +45,5 @@ export const DEFAULT_CONFIG: Config = {
   targetLanguage: 'zh-CN',
   mode: 'stack',
   prompts: DEFAULT_PROMPTS_CONFIG,
+  preload: { ...DEFAULT_PRELOAD },
 }

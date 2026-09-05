@@ -1,5 +1,6 @@
 // 配置存储：WXT 自带的带版本迁移的存储项 + 读写时 zod 校验（做法借鉴 Read Frog config/storage.ts）。
 import { storage } from 'wxt/utils/storage'
+import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
 import { CONFIG_VERSION, DEFAULT_CONFIG, configSchema, type Config } from './schema'
 
@@ -8,7 +9,9 @@ export const configItem = storage.defineItem<Config>('local:config', {
   version: CONFIG_VERSION,
   migrations: {
     // v1 -> v2：加提示词库；已存的 API key 与其他字段原样保留
-    2: (v1: Omit<Config, 'version' | 'prompts'>) => ({ ...v1, version: 2 as const, prompts: DEFAULT_PROMPTS_CONFIG }),
+    2: (v1: Omit<Config, 'version' | 'prompts' | 'preload'>) => ({ ...v1, version: 2 as const, prompts: DEFAULT_PROMPTS_CONFIG }),
+    // v2 -> v3：加按视口翻译的范围（§10）
+    3: (v2: Omit<Config, 'version' | 'preload'> & { version: 2 }) => ({ ...v2, version: 3 as const, preload: { ...DEFAULT_PRELOAD } }),
   },
 })
 
