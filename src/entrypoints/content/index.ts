@@ -1,6 +1,7 @@
 import { getConfig, setConfig } from '@/config/storage'
 import { getProvider } from '@/providers'
-import { createTranslateService } from '@/providers/translate-service'
+import { createTranslateService, type TranslateService } from '@/providers/translate-service'
+import { getRandomUUID } from '@/shared/uuid'
 import { extract, paperContext, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, runTranslation, type Progress } from '@/core/pipeline'
@@ -34,6 +35,9 @@ export default defineContentScript({
     let savedMode: Mode = 'stack'
     void getConfig().then(config => { savedMode = config.mode })
     let controller: AbortController | null = null
+    // 本轮运行的翻译服务与取消范围：恢复原文时按 scope 把排队与在飞的请求一起撤掉（DESIGN §10）
+    let service: TranslateService | null = null
+    let scope: string | null = null
     let tracker: ViewportTracker | null = null
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, done: 0, failed: 0, cached: 0 })
     let progress: Progress = idle()
@@ -67,6 +71,9 @@ export default defineContentScript({
         getModel: async () => (config.provider === 'openai-compat' ? config.openaiCompat.model : undefined),
         cache: createMessageCachePort(),
       })
+      const runScope = getRandomUUID()
+      service = translate
+      scope = runScope
       const t1 = performance.now()
       void runTranslation({
         doc: document,
@@ -77,7 +84,8 @@ export default defineContentScript({
         // 标题 + 摘要每批都带（DESIGN §8.2）
         context,
         capabilities: { maxBatchChars: provider.maxBatchChars, maxBatchItems: provider.maxBatchItems, preservesMarkup: provider.preservesMarkup },
-        transport: request => translate(request),
+        transport: request => translate.translate(request),
+        scope: runScope,
         onProgress: p => {
           if (controller !== run) return
           progress = p
@@ -163,6 +171,10 @@ export default defineContentScript({
     }
 
     function restorePage(): { removedNodes: number } {
+      // 先撤请求再中止运行：排队的批次不再发出，在飞的 fetch 被 abort，结果回来也不渲染不写缓存
+      if (service && scope) service.cancel(scope)
+      service = null
+      scope = null
       controller?.abort()
       controller = null
       tracker?.disconnect()

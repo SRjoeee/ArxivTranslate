@@ -1,12 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
-import { attachRequestErrorMeta } from '@/providers/retry-policy'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
 import { createTranslateService, type CacheEntry, type CachePort } from '@/providers/translate-service'
 import { ProviderError, type TranslationProvider } from '@/providers/types'
 
-const provider = (translate: TranslationProvider['translate'], id = 'mock'): TranslationProvider => ({
+const provider = (translate: TranslationProvider['translate'], id = 'mock', extra: Partial<TranslationProvider> = {}): TranslationProvider => ({
   id, displayName: id, kind: 'llm', preservesMarkup: true,
-  maxBatchChars: 1000, maxBatchItems: 4, concurrency: 2,
+  maxBatchChars: 1000, maxBatchItems: 4,
   isAvailable: async () => true, translate,
+  ...extra,
 })
 
 /** 记录调用的假缓存端口 */
@@ -26,20 +27,29 @@ const req = (ids: string[]) => ({
   cache: { paper: '2410.00260', renderPath: 'markup' as const },
 })
 
+const rateLimited = () => attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
+
 describe('createTranslateService', () => {
-  it('缓存读写各一次批量调用，不是每段一次', async () => {
+  it('缓存读写各一次批量调用，不是每段一次；同一次调用的段落攒成一批发给 provider', async () => {
     const { port, reads, writes } = fakePort()
+    const calls: string[][] = []
     const service = createTranslateService({
-      getProvider: async () => provider(async r => ({ segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' })),
+      getProvider: async () => provider(async r => { calls.push(r.segments.map(s => s.id)); return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' } }),
       getModel: async () => 'm/1',
       cache: port,
     })
-    const res = await service(req(['a', 'b', 'c']))
+    const res = await service.translate(req(['a', 'b', 'c']))
     expect(res.ok).toBe(true)
     expect(reads).toHaveLength(1)
     expect(reads[0]).toHaveLength(3)
     expect(writes).toHaveLength(1)
     expect(writes[0]).toHaveLength(3)
+    expect(calls).toEqual([['a', 'b', 'c']])
   })
 
   it('命中的段落不再发给 provider，返回按原顺序合并', async () => {
@@ -50,12 +60,13 @@ describe('createTranslateService', () => {
       getModel: async () => 'm/1',
       cache: port,
     })
-    await service(req(['a', 'b']))
-    const second = await service(req(['a', 'b', 'c']))
+    await service.translate(req(['a', 'b']))
+    const second = await service.translate(req(['a', 'b', 'c']))
     expect(calls).toEqual([['a', 'b'], ['c']])
     expect(second.ok && second.cached).toBe(2)
     expect(second.ok && second.result.segments.map(s => s.id)).toEqual(['a', 'b', 'c'])
     expect(second.ok && second.result.segments[2]?.text).toBe('译:text-c')
+    expect(second.ok && second.result.model).toBe('m/1')
   })
 
   it('不带 cache 字段时完全不碰缓存（设置页的连接测试）', async () => {
@@ -64,18 +75,19 @@ describe('createTranslateService', () => {
       getProvider: async () => provider(async r => ({ segments: r.segments, provider: 'mock' })),
       cache: port,
     })
-    const res = await service({ request: { segments: [{ id: 'x', text: 'hi' }], source: 'en', target: 'zh-CN' } })
+    const res = await service.translate({ request: { segments: [{ id: 'x', text: 'hi' }], source: 'en', target: 'zh-CN' } })
     expect(res.ok).toBe(true)
     expect(reads).toHaveLength(0)
     expect(writes).toHaveLength(0)
   })
 
-  it('provider 抛错转成错误响应，不抛出', async () => {
+  it('provider 抛错转成错误响应，不抛出；auth 不重试', async () => {
+    let calls = 0
     const service = createTranslateService({
-      getProvider: async () => provider(async () => { throw new ProviderError('auth', 'bad key') }),
-      retry: { maxRetries: 0 },
+      getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }),
     })
-    expect(await service(req(['a']))).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+    expect(await service.translate(req(['a']))).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+    expect(calls).toBe(1)
   })
 
   it('缓存读失败不影响翻译（端口自行降级为未命中）', async () => {
@@ -84,28 +96,9 @@ describe('createTranslateService', () => {
       getProvider: async () => provider(async r => ({ segments: r.segments.map(s => ({ ...s, text: '译' })), provider: 'mock' })),
       cache: port,
     })
-    const res = await service(req(['a']))
+    const res = await service.translate(req(['a']))
     expect(res.ok && res.cached).toBe(0)
     expect(port.putMany).toHaveBeenCalled()
-  })
-
-  it('provider 挂住不返回时按超时重试，重试用尽转成错误响应，而不是永远等待', async () => {
-    // 实测 2312.17527：最后一块等了 220s 还没回，整篇停在"进行中"
-    let calls = 0
-    const provider = {
-      id: 'stuck', preservesMarkup: true, maxBatchChars: 1000, maxBatchItems: 10, concurrency: 1,
-      isAvailable: async () => true,
-      translate: () => { calls++; return new Promise<never>(() => {}) }, // 不配合 signal 也不返回
-    }
-    const translate = createTranslateService({
-      getProvider: async () => provider as never,
-      requestTimeoutMs: 20,
-      retry: { maxRetries: 1, baseRetryDelayMs: 0, sleep: async () => {} },
-    })
-    const res = await translate({ request: { segments: [{ id: 'a', text: 'x' }], source: 'en', target: 'zh' } })
-    expect(res.ok).toBe(false)
-    expect(calls).toBe(2) // 首次 + 重试一次
-    if (!res.ok) expect(res.error.kind).toBe('timeout')
   })
 
   it('cache.bypass：只写不读，重发不会拿回缓存里那份坏译文（Codex 在 #9 指出）', async () => {
@@ -116,44 +109,16 @@ describe('createTranslateService', () => {
       getModel: async () => 'm/1',
       cache: port,
     })
-    await service(req(['a']))
-    const again = await service({ ...req(['a']), cache: { paper: '2410.00260', renderPath: 'markup', bypass: true } })
+    await service.translate(req(['a']))
+    const again = await service.translate({ ...req(['a']), cache: { paper: '2410.00260', renderPath: 'markup', bypass: true } })
     expect(calls).toBe(2)
     expect(reads).toHaveLength(1)
     expect(writes).toHaveLength(2)
     expect(again.ok && again.result.segments[0]?.text).toBe('译2:text-a')
     // 覆盖后普通请求命中的是新译文
-    const third = await service(req(['a']))
+    const third = await service.translate(req(['a']))
     expect(calls).toBe(2)
     expect(third.ok && third.result.segments[0]?.text).toBe('译2:text-a')
-  })
-
-  it('429 暂停整条队列：排在后面的请求等暂停结束再发，不会一起撞限流（Codex 在 #6 / #10 指出）', async () => {
-    const order: string[] = []
-    const resolvers: (() => void)[] = []
-    let first = true
-    const service = createTranslateService({
-      getProvider: async () => provider(async r => {
-        order.push(`call:${r.segments[0]?.id}`)
-        if (first) {
-          first = false
-          throw attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
-        }
-        return { segments: r.segments, provider: 'mock' }
-      }, 'mock'),
-      // 睡眠由测试放行：暂停期间队列是不是真的停了才看得出来
-      retry: { sleep: () => new Promise<void>(resolve => { resolvers.push(resolve); order.push('sleep') }) },
-    })
-    const a = service(req(['a']))
-    await vi.waitFor(() => expect(order).toContain('sleep'))
-    // 队列并发 2：不暂停的话 b 会立刻发出去
-    const b = service(req(['b']))
-    await new Promise(resolve => setTimeout(resolve, 10))
-    expect(order).not.toContain('call:b')
-    resolvers.splice(0).forEach(resolve => resolve())
-    const [ra, rb] = await Promise.all([a, b])
-    expect(ra.ok && rb.ok).toBe(true)
-    expect(order.indexOf('call:b')).toBeGreaterThan(order.indexOf('sleep'))
   })
 
   it('accept 回调：没放行的译文照常返回，但不写缓存（Codex 在 #30 指出）', async () => {
@@ -162,61 +127,152 @@ describe('createTranslateService', () => {
       getProvider: async () => provider(async r => ({ segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' })),
       cache: port,
     })
-    const res = await service({ ...req(['a', 'b']), accept: (id: string) => id !== 'a' })
+    const res = await service.translate({ ...req(['a', 'b']), accept: (id: string) => id !== 'a' })
     expect(res.ok && res.result.segments.map(s => s.text)).toEqual(['译:text-a', '译:text-b'])
     expect(writes).toHaveLength(1)
     expect(writes[0]!.map(w => w.translation)).toEqual(['译:text-b'])
   })
 
-  it('暂停结束只放一个探针：其余等它成功再走，不会在同一刻一起撞端点（Codex 在 #30 指出）', async () => {
+  it('一次调用横跨两批、一批失败：成功的那批照样写缓存，调用整体报失败', async () => {
+    const { port, writes } = fakePort()
+    const service = createTranslateService({
+      // 每批最多 2 条：a、b 一批，c 一批；含 c 的批报错
+      getProvider: async () => provider(async r => {
+        if (r.segments.some(s => s.id === 'c')) throw new ProviderError('invalid-response', 'bad')
+        return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' }
+      }, 'mock', { maxBatchItems: 2 }),
+      cache: port,
+      batch: { maxRetries: 0, enableFallbackToIndividual: false },
+    })
+    const res = await service.translate(req(['a', 'b', 'c']))
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error.kind).toBe('invalid-response')
+    expect(writes.flat().map(w => w.translation)).toEqual(['译:text-a', '译:text-b'])
+  })
+
+  it('id 对不上：BatchQueue 整批重试后逐条兜底，RequestQueue 自己不重试（否则兜底前要打 12 次）', async () => {
+    const seen: string[][] = []
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => {
+        seen.push(r.segments.map(s => s.id))
+        if (r.segments.length > 1) throw new ProviderError('invalid-response', 'id 对不上')
+        return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' }
+      }),
+      batch: { maxRetries: 1 },
+      queue: { baseRetryDelayMs: 0 },
+    })
+    const res = await service.translate(req(['a', 'b']))
+    expect(res.ok).toBe(true)
+    // 整批 1 次 + 重试 1 次 + 逐条 2 次
+    expect(seen).toEqual([['a', 'b'], ['a', 'b'], ['a'], ['b']])
+  })
+})
+
+describe('createTranslateService：限流、超时、取消（fake timers）', () => {
+  const log = () => {
+    const calls: { id: string; t: number }[] = []
+    return { calls, note: (ids: string[]) => calls.push({ id: ids.join('+'), t: Date.now() }) }
+  }
+
+  it('429：暂停窗口内后来的请求不发；窗口过后只剩一个令牌、按 scheduleAt 先来先发，其余按速率放行（Codex 在 #6 / #10 / #30 指出）', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const { calls, note } = log()
+    let first = true
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => {
+        note(r.segments.map(s => s.id))
+        if (first) { first = false; throw rateLimited() }
+        return { segments: r.segments, provider: 'mock' }
+      }, 'mock', { rateLimit: { rate: 1, capacity: 1 } }),
+    })
+    const a = service.translate(req(['a']))
+    await vi.advanceTimersByTimeAsync(100)
+    expect(calls.map(c => c.id)).toEqual(['a'])
+    const b = service.translate(req(['b']))
+    // 基础暂停 5s：4.9s 内 b 不能发
+    await vi.advanceTimersByTimeAsync(4_900)
+    expect(calls).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(300)
+    // 暂停结束（基础 5s，Math.random 钉 0 没有抖动）：暂停期间桶按速率补满（容量 1）。
+    // b 的批一直被派发闸扣着（暂停期间没有空位就继续攒），所以队列里只有 a 的重试，它先用掉那个令牌
+    expect(calls.map(c => c.id)).toEqual(['a', 'a'])
+    // 闸每秒探一次，b 刷出后再等下一个令牌：与 a 的重试至少隔一个令牌周期
+    for (let i = 0; i < 50 && calls.length < 3; i++) await vi.advanceTimersByTimeAsync(100)
+    expect(calls.map(c => c.id)).toEqual(['a', 'a', 'b'])
+    expect(calls[2]!.t - calls[1]!.t).toBeGreaterThanOrEqual(1_000)
+    const [ra, rb] = await Promise.all([a, b])
+    expect(ra.ok && rb.ok).toBe(true)
+  })
+
+  it('两个同时撞 429：算一个暂停窗口，窗口内谁都不发，窗口过后都重发成功', async () => {
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const { calls, note } = log()
+    let hits = 0
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => {
+        note(r.segments.map(s => s.id))
+        if (hits++ < 2) throw rateLimited()
+        return { segments: r.segments, provider: 'mock' }
+      }, 'mock', { maxBatchItems: 1, rateLimit: { rate: 1, capacity: 2 } }),
+    })
+    const a = service.translate(req(['a']))
+    const b = service.translate(req(['b']))
+    await vi.advanceTimersByTimeAsync(100)
+    expect(calls).toHaveLength(2)
+    // 基础窗口 5s 内一个都不重发
+    await vi.advanceTimersByTimeAsync(4_900)
+    expect(calls).toHaveLength(2)
+    // 窗口过后（第二个 429 可能把窗口延长）两个都重发：暂停期间桶按速率补回容量 2，一起放行
+    for (let i = 0; i < 120 && calls.length < 4; i++) await vi.advanceTimersByTimeAsync(100)
+    expect(calls).toHaveLength(4)
+    expect(calls[2]!.t - calls[0]!.t).toBeGreaterThanOrEqual(5_000)
+    const [ra, rb] = await Promise.all([a, b])
+    expect(ra.ok && rb.ok).toBe(true)
+  })
+
+  it('provider 挂住不返回：按字数算的超时到了就重试，重试用尽转成 timeout 错误响应，不会永远等', async () => {
+    // 实测 2312.17527：最后一块等了 220s 还没回，整篇停在"进行中"
+    vi.useFakeTimers()
     let calls = 0
-    const resolvers: (() => void)[] = []
-    let releaseProbe: (() => void) | undefined
+    const service = createTranslateService({
+      getProvider: async () => provider(() => { calls++; return new Promise(() => {}) }), // 不配合 signal 也不返回
+      queue: { timeoutMs: 20, maxRetries: 1, baseRetryDelayMs: 0 },
+    })
+    const pending = service.translate({ request: { segments: [{ id: 'a', text: 'x' }], source: 'en', target: 'zh' } })
+    await vi.advanceTimersByTimeAsync(10_000)
+    const res = await pending
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error.kind).toBe('timeout')
+    expect(calls).toBe(2) // 首次 + 重试一次
+  })
+
+  it('cancel(scope)：排队与在飞的请求一起撤，signal 被 abort，不写缓存；同 scope 的后续调用直接 aborted', async () => {
+    // 真计时器：算缓存键要走 crypto.subtle，fake timers 下不会返回
+    const { port, writes } = fakePort()
+    let signal: AbortSignal | undefined
+    let calls = 0
     const service = createTranslateService({
       getProvider: async () => provider(async r => {
         calls++
-        if (calls <= 2) throw attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
-        if (calls === 3) await new Promise<void>(resolve => { releaseProbe = resolve })
+        signal = r.signal
+        await new Promise(() => {}) // 挂住，等被取消
         return { segments: r.segments, provider: 'mock' }
-      }, 'probed'),
-      retry: { sleep: () => new Promise<void>(resolve => { resolvers.push(resolve) }) },
+      }, 'mock', { maxBatchItems: 1 }),
+      cache: port,
     })
-    // 并发 2：a、b 同时发出、同时撞 429
-    const a = service(req(['a']))
-    const b = service(req(['b']))
-    await vi.waitFor(() => expect(calls).toBe(2))
-    await vi.waitFor(() => expect(resolvers.length).toBeGreaterThanOrEqual(3))
-    resolvers.splice(0).forEach(resolve => resolve())
-    // 两个都睡醒了，但只有探针在飞
-    await vi.waitFor(() => expect(calls).toBe(3))
-    await new Promise(resolve => setTimeout(resolve, 20))
-    expect(calls).toBe(3)
-    releaseProbe!()
-    const [ra, rb] = await Promise.all([a, b])
-    expect(ra.ok && rb.ok).toBe(true)
-    expect(calls).toBe(4)
-  })
-
-  it('在飞的任务每次尝试前也要过共享暂停这道闸：自己睡醒了、暂停还没结束就接着等（Codex 在 #30 指出）', async () => {
-    let calls = 0
-    const resolvers: (() => void)[] = []
-    const service = createTranslateService({
-      getProvider: async () => provider(async r => {
-        if (calls++ === 0) throw attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
-        return { segments: r.segments, provider: 'mock' }
-      }, 'gated'),
-      retry: { sleep: () => new Promise<void>(resolve => { resolvers.push(resolve) }) },
-    })
-    const a = service(req(['a']))
-    // 429 后有两次 sleep：withRetry 自己的，与队列暂停的
-    await vi.waitFor(() => expect(resolvers).toHaveLength(2))
-    // 只放行任务自己的那次：它醒了，但共享暂停还在，不能再打端点
-    resolvers[0]!()
-    await new Promise(resolve => setTimeout(resolve, 10))
-    expect(calls).toBe(1)
-    resolvers[1]!()
+    const a = service.translate({ ...req(['a']), scope: 'run-1' })
+    await vi.waitFor(() => expect(calls).toBe(1))
+    expect(service.cancel('run-1')).toBeGreaterThan(0)
+    expect(signal?.aborted).toBe(true)
     const ra = await a
-    expect(ra.ok).toBe(true)
-    expect(calls).toBe(2)
+    expect(ra.ok).toBe(false)
+    if (!ra.ok) expect(ra.error.kind).toBe('aborted')
+    expect(writes).toHaveLength(0)
+    const later = await service.translate({ ...req(['b']), scope: 'run-1' })
+    expect(later.ok).toBe(false)
+    if (!later.ok) expect(later.error.kind).toBe('aborted')
+    expect(calls).toBe(1)
   })
 })

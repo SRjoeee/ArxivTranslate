@@ -134,6 +134,17 @@ describe('runTranslation', () => {
     expect(seen.filter(p => p.state === 'running')).toHaveLength(2)
   })
 
+  it('取消范围 scope 透传给每一次调用；没给就不带', async () => {
+    const doc = docOf()
+    const { transport, requests } = makeTransport()
+    await run(doc, transport, { scope: 'run-1' })
+    expect(requests.length).toBeGreaterThan(0)
+    for (const r of requests) expect(r.scope).toBe('run-1')
+    const bare = makeTransport()
+    await run(docOf(), bare.transport)
+    for (const r of bare.requests) expect(r.scope).toBeUndefined()
+  })
+
   it('论文级上下文（标题、摘要）带到每一批，并与批次的章节标题合并', async () => {
     const doc = docOf()
     const { transport, requests } = makeTransport()

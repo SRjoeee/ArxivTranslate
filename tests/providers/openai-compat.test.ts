@@ -2,7 +2,7 @@ import { APICallError } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
 import { describe, expect, it } from 'vitest'
 import { createOpenAICompatProvider } from '@/providers/openai-compat'
-import { getRequestErrorMeta } from '@/providers/retry-policy'
+import { getRequestErrorMeta } from '@/providers/request/retry-policy'
 import { ProviderError, type TranslateRequest } from '@/providers/types'
 
 const cfg = { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'k', model: 'test/model' }
@@ -42,7 +42,7 @@ describe('openai-compat provider', () => {
     expect(p.kind).toBe('llm')
     expect(p.preservesMarkup).toBe(true)
     expect(p.maxBatchChars).toBeGreaterThan(0)
-    expect(p.concurrency).toBeGreaterThan(0)
+    expect(p.maxBatchItems).toBeGreaterThan(0)
   })
 
   it('结构化输出：segments 按 id 一一对应，带 provider 与 model', async () => {
@@ -105,11 +105,22 @@ describe('openai-compat provider：思考开关与批次能力', () => {
     expect((captured as { providerOptions?: unknown }).providerOptions).toEqual({ 'openai-compat': { reasoning: { effort: 'none' } } })
   })
 
-  it('批次能力照参考项目的默认值：1000 字 / 4 段，并发 8', () => {
+  it('批次能力照参考项目的默认值：1000 字 / 4 段；速率不声明（用服务默认的 8/s、突发 20）', () => {
     const p = createOpenAICompatProvider(cfg)
     expect(p.maxBatchChars).toBe(1000)
     expect(p.maxBatchItems).toBe(4)
-    expect(p.concurrency).toBe(8)
+    expect(p.rateLimit).toBeUndefined()
+  })
+
+  it('本机端点压低速率：Ollama 默认只并行 4 个，多出来的在服务端排队会撞超时', () => {
+    expect(createOpenAICompatProvider({ ...cfg, baseURL: 'http://localhost:11434/v1' }).rateLimit).toEqual({ rate: 2, capacity: 4 })
+    expect(createOpenAICompatProvider({ ...cfg, baseURL: 'http://127.0.0.1:1234/v1' }).rateLimit).toEqual({ rate: 2, capacity: 4 })
+  })
+
+  it('no-key 直接 throw 也带着"不可重试、排空整队"的元数据（移植的策略认不出这个 kind）', async () => {
+    const err = await createOpenAICompatProvider({ ...cfg, apiKey: '' }).translate(req).catch((e: unknown) => e)
+    expect((err as ProviderError).kind).toBe('no-key')
+    expect(getRequestErrorMeta(err)).toMatchObject({ kind: 'access-denied', isRetryable: false })
   })
 
   it('暴露提示词指纹给缓存键：默认是 default，自定义随文本变', () => {

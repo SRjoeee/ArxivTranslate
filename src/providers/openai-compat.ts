@@ -5,13 +5,16 @@ import { z } from 'zod'
 import { createModel, type OpenAICompatConfig } from './model'
 import { buildPrompts } from './prompt'
 import { promptKey, type PromptsConfig } from './prompt-library'
-import { attachRequestErrorMeta } from './retry-policy'
+import { attachRequestErrorMeta } from './request/retry-policy'
 import { thinkingBodyFields } from './thinking'
 import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 
 const outputSchema = z.object({
   segments: z.array(z.object({ id: z.string(), text: z.string() })),
 })
+
+/** 本机端点的速率：每秒 2 个、最多攒 4 个（Ollama 默认 OLLAMA_NUM_PARALLEL=4） */
+export const LOOPBACK_RATE_LIMIT = { rate: 2, capacity: 4 } as const
 
 /** 本机端点（Ollama、LM Studio）不要求 key，SDK 在 key 为空时也不会发 Authorization 头；其余端点没 key 就别发请求（Codex 在 #6 指出） */
 function isLoopback(baseURL: string): boolean {
@@ -33,10 +36,11 @@ export function createOpenAICompatProvider(
     displayName: 'OpenAI 兼容端点',
     kind: 'llm',
     preservesMarkup: true,
-    // 批次与并发照 Read Frog 的默认值（1000 字 / 4 段 / 速率 8）：小批高并发，首屏快、吞吐高
+    // 批次照 Read Frog 的默认值（1000 字 / 4 段）：小批高并发，首屏快、吞吐高；速率用服务默认的 8/s、突发 20（同样是它的默认值）
     maxBatchChars: 1000,
     maxBatchItems: 4,
-    concurrency: 8,
+    // 本机端点压低速率：Ollama 默认只并行 4 个，多出来的在服务端排队，会撞我们的超时再重试，空转
+    ...(isLoopback(config.baseURL) ? { rateLimit: LOOPBACK_RATE_LIMIT } : {}),
     promptKey: promptKey(deps.prompts),
     async isAvailable() {
       return hasKey()
