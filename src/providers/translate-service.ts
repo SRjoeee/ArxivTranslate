@@ -200,7 +200,9 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         const computed = await Promise.all(request.segments.map(segment =>
           cacheKeyFor({ providerId: provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text }),
         ))
-        request.segments.forEach((segment, i) => keys.set(segment.id, computed[i]!))
+        request.segments.forEach((segment, i) => {
+          keys.set(segment.id, computed[i]!)
+        })
         // 重发只写不读：坏译文已经在库里，读回来只会再坏一次
         if (!cache.bypass) {
           const hits = await store.getMany(computed)

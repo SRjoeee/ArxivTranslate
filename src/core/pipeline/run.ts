@@ -5,9 +5,8 @@ import { ID_ATTR, type Block, type TextBlock } from '@/core/extractor'
 import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate } from '@/core/protector'
 import {
-  clearAllPending, clearTranslation, enable, markPartial, renderFailed, renderPending, renderTable, renderText, type Mode,
+  clearAllPending, enable, markPartial, renderFailed, renderPending, renderTable, renderText, setState, type Mode,
 } from '@/core/renderer'
-import { setState } from '@/core/renderer'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
 import { createWorkPacer, pauseIfBudgetSpent } from '@/core/scheduler/pacer'
 import type { RenderPath } from '@/cache/key'

@@ -118,7 +118,7 @@ export class TranslationCache {
       }
       if (evict.length === 0) return
       await this.db.entries.bulkDelete(evict)
-      evict.forEach(key => this.forget(key))
+      for (const key of evict) this.forget(key)
     }
   }
 
@@ -200,7 +200,7 @@ export class TranslationCache {
     }
     const keys = await this.db.entries.where('paper').equals(paper).primaryKeys()
     await this.db.entries.bulkDelete(keys)
-    keys.forEach(k => this.forget(k))
+    for (const key of keys) this.forget(key)
     return keys.length
   }
 

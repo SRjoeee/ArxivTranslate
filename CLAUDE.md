@@ -21,6 +21,7 @@
 | hash | Web Crypto SHA-256 |
 | Chrome 内置翻译类型 | `@types/dom-chromium-ai` |
 | 测试 | Vitest + happy-dom |
+| Lint | Biome（只开 linter；formatter 关着，长行与移植文件不重排；`src/providers/request/**` 等整目录移植的代码用 biome.json 的 override 放宽规则，不为 lint 改移植原文） |
 
 不从零实现：请求队列、重试退避、hash、存储封装、JSON 解析容错。一律用上表的库，或移植参考仓库里已经成熟的实现（如 Read Frog 的 `utils/request/*`、FluentRead 的 `services/translation/cache.ts`，后者带 Dexie，允许）。
 
@@ -86,7 +87,7 @@ reference/              # 参考仓库，gitignore，只读
 
 - 任何超过 100 行的模块，先用 plan mode 给出方案再写代码；方案要引用 DESIGN.md 的对应章节。
 - 一个模块一个分支 / PR。`rules`、`protector`、`renderer` 的改动必须附带测试。
-- 结束前必须通过：`pnpm test && pnpm build`。
+- 结束前必须通过：`pnpm lint && pnpm test && pnpm build`。
 - **PR 开出或 push 后，等 Codex 审完再合并**：它先打 👀 反应表示审查中，结束时留 👍 反应（无建议）、一条 review + 行内评论（有建议）或限额提示，三种终态信号之一出现前不要合。评论逐条核实（fixture / 实测 / 读代码）再采纳，没采纳的写明理由。See `docs/agents/codex-review.md`。
 - 遇到 DESIGN.md 里标 **[待验证]** 的内容，先用 fixture 或 curl 实测，把结论写进 `docs/RESEARCH.md`，再实现。
 - 发现 DESIGN.md 与实测不符：停下，在 RESEARCH.md 记录差异并提出修改建议，不要默默改设计。
@@ -123,6 +124,7 @@ pnpm dev            # WXT 开发模式，自动加载到 Chrome
 pnpm build
 pnpm test
 pnpm test:watch
+pnpm lint           # Biome linter；pnpm lint:fix 应用安全修复
 pnpm e2e            # 真实浏览器端到端（Playwright 起带扩展的 Chromium，先 pnpm build；首次 npx playwright install chromium）
 pnpm fixtures:stats # Phase 0 的类名直方图脚本（待创建）
 ```

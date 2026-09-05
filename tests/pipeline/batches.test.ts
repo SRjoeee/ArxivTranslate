@@ -16,7 +16,7 @@ describe('planBatches', () => {
   })
 
   it('标题块更新后续批次的 sectionTitle', () => {
-    const doc = docOf(para('a', 'Abstract text.') + '<h2 class="ltx_title" id="s1">1 Introduction</h2>' + para('b', 'Body one.') + para('c', 'Body two.'))
+    const doc = docOf(`${para('a', 'Abstract text.')}<h2 class="ltx_title" id="s1">1 Introduction</h2>${para('b', 'Body one.')}${para('c', 'Body two.')}`)
     const batches = planBatches(extract(doc), { maxBatchChars: 30, maxBatchItems: 10 })
     const titles = batches.map(b => [b.segments.map(s => s.id).join(','), b.sectionTitle])
     // 标题块开启新批次（§8.2 按章节切）；30 字预算下 s1 + b 同批，c 另起
@@ -24,7 +24,7 @@ describe('planBatches', () => {
   })
 
   it('公式密集块单独成批', () => {
-    const dense = '<p class="ltx_p" id="d">' + 'x <math class="ltx_Math"><mi>y</mi></math> '.repeat(45) + 'end</p>'
+    const dense = `<p class="ltx_p" id="d">${'x <math class="ltx_Math"><mi>y</mi></math> '.repeat(45)}end</p>`
     const doc = docOf(para('a', 'Short.') + dense + para('b', 'Short.'))
     const batches = planBatches(extract(doc), { maxBatchChars: 100_000, maxBatchItems: 10 })
     expect(batches.map(b => b.segments.map(s => s.id))).toEqual([['a'], ['d'], ['b']])

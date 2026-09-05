@@ -38,7 +38,7 @@ const inc = (c: Counter, k: string, n = 1) => { c[k] = (c[k] ?? 0) + n }
 const ltxClasses = (el: Element) => Array.from(el.classList).filter(c => c.startsWith(LTX_CLASS_PREFIX)).sort()
 const label = (el: Element) => {
   const cls = ltxClasses(el)
-  return el.tagName.toLowerCase() + (cls.length ? '.' + cls.join('.') : '')
+  return `${el.tagName.toLowerCase()}${cls.length ? `.${cls.join('.')}` : ''}`
 }
 const hasText = (t: Text) => /\S/.test(t.data)
 
@@ -90,7 +90,7 @@ function auditFixture(file: string): FixtureStats {
   }
 
   for (const r of [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES]) s.ruleElements[r.id] = doc.querySelectorAll(r.selector).length
-  s.ruleElements['table'] = doc.querySelectorAll(TABLE_RULES.root).length
+  s.ruleElements.table = doc.querySelectorAll(TABLE_RULES.root).length
 
   const classSet = new Set<string>()
   for (const el of Array.from(root.querySelectorAll('*'))) {
@@ -128,7 +128,8 @@ function auditFixture(file: string): FixtureStats {
       const chain: string[] = []
       for (let el = t.parentElement; el && el !== root; el = el.parentElement) chain.push(label(el))
       const sig = chain.slice(0, CHAIN_DEPTH).join(' < ') + (chain.length > CHAIN_DEPTH ? ' < …' : '')
-      const entry = (s.uncovered[sig] ??= { count: 0, sample: t.data.trim().slice(0, SAMPLE_LEN) })
+      s.uncovered[sig] ??= { count: 0, sample: t.data.trim().slice(0, SAMPLE_LEN) }
+      const entry = s.uncovered[sig]!
       entry.count++
     }
     s.byKind[kind]++
@@ -140,7 +141,7 @@ function auditFixture(file: string): FixtureStats {
     let key = '(无可识别祖先)'
     for (let el = t.parentElement; el; el = el.parentElement) {
       if (ltxClasses(el).length) { key = label(el); break }
-      if (el.id || el.classList.length) { key = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '.' + el.classList[0]); break }
+      if (el.id || el.classList.length) { key = `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : `.${el.classList[0]}`}`; break }
     }
     inc(s.outside, key)
   }
@@ -156,8 +157,8 @@ function auditFixture(file: string): FixtureStats {
 }
 
 // ---------- 报表 ----------
-const pct = (n: number, d: number) => (d ? ((100 * n) / d).toFixed(1) + '%' : '-')
-const row = (...cells: (string | number)[]) => '| ' + cells.join(' | ') + ' |'
+const pct = (n: number, d: number) => (d ? `${((100 * n) / d).toFixed(1)}%` : '-')
+const row = (...cells: (string | number)[]) => `| ${cells.join(' | ')} |`
 const table = (head: string[], rows: (string | number)[][]) =>
   [row(...head), row(...head.map(() => '---')), ...rows.map(r => row(...r))].join('\n')
 
@@ -182,7 +183,7 @@ function report(all: FixtureStats[]): string {
   out.push('### 规则命中（文本节点数 / 匹配元素数）', '', table(
     ['类型', 'id', 'selector', '文本节点', '元素数'],
     [...UNIT_RULES.map(r => ['unit', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0]),
-     ['table', 'table', `\`${TABLE_RULES.root}\``, byRule['table'] ?? 0, ruleElements['table'] ?? 0],
+     ['table', 'table', `\`${TABLE_RULES.root}\``, byRule.table ?? 0, ruleElements.table ?? 0],
      ...SKIP_RULES.map(r => ['skip', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0]),
      ...PROTECT_RULES.map(r => ['protect', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0])],
   ), '')
@@ -193,7 +194,8 @@ function report(all: FixtureStats[]): string {
 
   const unc: Record<string, { count: number; sample: string; fixtures: Set<string> }> = {}
   for (const s of all) for (const [sig, e] of Object.entries(s.uncovered)) {
-    const u = (unc[sig] ??= { count: 0, sample: e.sample, fixtures: new Set() })
+    unc[sig] ??= { count: 0, sample: e.sample, fixtures: new Set() }
+    const u = unc[sig]!
     u.count += e.count; u.fixtures.add(s.id)
   }
   const uncRows = Object.entries(unc).sort((a, b) => b[1].count - a[1].count)
@@ -208,7 +210,10 @@ function report(all: FixtureStats[]): string {
     : '（无）', '')
 
   const presence: Record<string, string[]> = {}
-  for (const s of all) for (const c of s.classes) (presence[c] ??= []).push(s.id)
+  for (const s of all) for (const c of s.classes) {
+    presence[c] ??= []
+    presence[c]!.push(s.id)
+  }
   const partial = Object.entries(presence).filter(([, f]) => f.length < n).sort((a, b) => a[1].length - b[1].length)
   out.push(`### (c) 只在部分 fixture 出现的 ltx_* 类名（共 ${Object.keys(presence).length} 个类名，${partial.length} 个未全覆盖；全部 fixture 同为 oxide 0.7.6，此处反映的是内容分布而非版本差异）`, '', table(
     ['类名', '出现篇数', 'fixture'],
@@ -244,7 +249,7 @@ for (const f of files) {
   process.stderr.write(`${s.parseMs} ms，${s.textNodes} 文本节点，uncovered ${s.byKind.uncovered}\n`)
   results.push(s)
 }
-process.stdout.write(report(results) + '\n')
+process.stdout.write(`${report(results)}\n`)
 if (jsonPath) {
   writeFileSync(jsonPath, JSON.stringify(results, null, 2))
   process.stderr.write(`全量数据已写入 ${jsonPath}\n`)

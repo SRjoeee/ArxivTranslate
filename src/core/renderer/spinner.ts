@@ -31,7 +31,7 @@ export function cancelSpinnerAnimation(spinner: HTMLElement): void {
     return
   }
   // 兜底：注册表里没有的（happy-dom / jsdom 没有 getAnimations，所以 ?.）
-  spinner.getAnimations?.().forEach(live => live.cancel())
+  for (const live of spinner.getAnimations?.() ?? []) live.cancel()
 }
 
 /**

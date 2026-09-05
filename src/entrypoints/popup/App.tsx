@@ -117,7 +117,7 @@ export function App() {
     <main style={{ minWidth: 280, padding: 12, font: '13px system-ui, sans-serif' }}>
       <h1 style={{ fontSize: 14, margin: '0 0 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         arXiv HTML Translator
-        <button style={{ font: 'inherit', fontSize: 12 }} onClick={() => browser.runtime.openOptionsPage()}>设置</button>
+        <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={() => browser.runtime.openOptionsPage()}>设置</button>
       </h1>
       <p style={{ margin: '0 0 4px', color: '#666' }}>{ping}</p>
       <p style={{ margin: '0 0 8px', color: '#666' }}>
@@ -129,14 +129,15 @@ export function App() {
         : (
           <section>
             <p style={{ margin: '0 0 8px' }}>
-              <button onClick={translate} disabled={!canTranslate}>{on ? '已开启' : '翻译'}</button>
+              <button type="button" onClick={translate} disabled={!canTranslate}>{on ? '已开启' : '翻译'}</button>
               {' '}
-              <button onClick={restorePage} disabled={!canRestore}>恢复原文</button>
+              <button type="button" onClick={restorePage} disabled={!canRestore}>恢复原文</button>
             </p>
             <p style={{ margin: '0 0 8px', display: 'flex', gap: 4, alignItems: 'center' }}>
               <span style={{ color: '#666' }}>对照</span>
               {MODES.map(([m, label, title]) => (
                 <button
+                  type="button"
                   key={m}
                   title={title}
                   onClick={() => chooseMode(m)}
@@ -150,7 +151,7 @@ export function App() {
             <ProgressLine page={page} />
             {page.progress.failed > 0 && page.progress.state !== 'idle' && (
               <p style={{ margin: '6px 0 0' }}>
-                <button style={{ font: 'inherit', fontSize: 12 }} onClick={retryFailed}>重试失败的 {page.progress.failed} 块</button>
+                <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={retryFailed}>重试失败的 {page.progress.failed} 块</button>
               </p>
             )}
           </section>
