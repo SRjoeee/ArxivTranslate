@@ -472,6 +472,18 @@ export interface TranslateResult {
 - **插入译文时不做滚动锚定，也不做任何布局读取** [决定，2026-09-05]：视口不跳交给 Chrome 原生 scroll anchoring（`overflow-anchor: auto` 是默认值；实测在视口上方插入 600px，浏览器自动补偿 575px 滚动、锚点位移 0）。早期移植 FluentRead 的 JS 锚定（`elementFromPoint` + `getBoundingClientRect`）每批强制两次全页布局，side 模式下每次 130–150ms、stack 90–100ms（15644 个节点、~700 个 subgrid 容器）；8 个 worker 一百多批下来，全命中缓存的 826 块也要 16.5s，主线程长任务 52 条、每条 ~90ms 首尾相接。去掉后翻译只受网络 / 缓存往返约束
 - **进度事件用带最长等待的合并器，不用纯去抖** [决定，2026-09-05]：翻译中每秒几十次进度回调，150ms 去抖计时器一直被重置，side prep 直到整篇翻完才跑（实测 413 个镜像在最后一刻同时出现，之前公式一直居中横跨两栏）。`createCoalescer(fn, { delay: 150, maxWait: 1000 })`：事件再密也至少每秒整理一次
 - **镜像不等译文** [决定，2026-09-05]：公式与插图本来就没有译文，等它们所在段落的译文到达才镜像是白等。块标记（`data-axt-id`）在翻译开始的第一刻就写好，镜像的容器判定改为 `:has(.axt-t, [data-axt-id])`，第一趟 prep 就把它们全部镜像；闸 2（带块标记或内部含块的不镜像）不变，整块复制的事故不会重演
+- **并发上限与总时限** [决定，2026-09-05，issue #43]：令牌桶只管**速率**不管并发——响应一慢，令牌照常按 rate 补充并派发，在飞数只受排队任务数限制（实测 `rate=1 / capacity=1` 下三个不完成的请求全部同时在飞）。一篇 220 块的论文能攒出 50 多个批次，全部同时打向一个端点会招致 429、撞浏览器连接上限。给移植来的队列加两个可选项：`maxConcurrent`（服务默认 **8**，与 rate 相同，响应快于 1 秒时这道闸根本不触发）与 `maxTotalMs`（单个任务从入队到最终失败的总时限，服务默认 **180 秒**）。两者默认值都在 `translate-service`，队列自身不设默认，移植原行为不变。
+
+  实测四类失败下 `provider.translate` 的实际调用次数（队列重试 2 次、批次重试 3 次）：
+
+  | 失败类型 | 调用次数 | 耗时 | 结局 |
+  |---|---|---|---|
+  | network | 3 | 9 ms | 失败 |
+  | auth | 2 | 3 ms | 失败（整队排空） |
+  | invalid-response | 6 | 7.0 s | 失败 |
+  | rate-limit | 4 | **> 60 s 未结束** | 未结束 |
+
+  尝试次数本来就有限（`MAX_CONSECUTIVE_RATE_LIMIT_PAUSES = 5` 兜着 429），缺的是**总时限**：每次限流暂停都可能很长，调用方需要一个「多久之后可以认为这批翻不出来」的确定答案。到点就让这批失败、由用户重试，好过无限期悬着
 - 每个 provider 一对队列（`translate-service`，2026-09-05 已换成整目录移植的 Read Frog `utils/request/`）：`request-queue`（令牌桶，默认 8 请求/秒、突发 20；provider 用 `rateLimit` 覆盖）+ `batch-queue`（1000 字 / 4 条 / 攒 100ms，派发闸让限流期间多攒少发；只有 LLM 攒批）+ `priority-queue` + `cancellation`，测试一起搬；`p-queue` 与 #30 里手写的暂停 / 探针已删。批次键 = provider、模型、提示词、目标语言、渲染路径、上下文（含章节标题，所以不跨章节混批）；provider 报"id 对不上"时按批次错误处理：整批重试 3 次再逐条兜底，request-queue 自己不重试。取消按 scope：每次运行一个 id，恢复原文时先撤 batch-queue 再撤 request-queue（顺序照它的 translation-queues.ts），在飞的 fetch 被 abort，结果回来也不渲染不写缓存
 - 失败块的"重试"按钮在错误提示里（§7.6），popup 不再单独列失败块
 
