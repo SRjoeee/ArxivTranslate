@@ -395,7 +395,9 @@ export interface TranslateResult {
 - **提示词分两层** [决定，2026-09-05]：`prompt-library.ts` 移植自 Read Frog（模板变量 `{{targetLanguage}}` `{{input}}` `{{paperTitle}}` `{{abstract}}` `{{sectionTitle}}` `{{glossary}}`、内置提示词 `default` / `precision-rewrite`、用户自定义 `patterns`、按 `promptId` 选择、找不到回退 default），负责"怎么翻"；`prompt.ts` 的**协议块**（JSON segments + 占位符规则 + 输出形状）追加在任何 system prompt 之后，负责"怎么收发"，用户自定义提示词也改不掉它。协议是我们的（AI SDK 结构化输出 + zod），比 Read Frog 的文本分隔符批处理稳，不换；Read Frog 的网页摘要要多调一次 LLM，论文自带 abstract 直接用
 - **元数据放在用户消息里、带 `<document_metadata>` 定界符并声明为不可信参考**：Read Frog 把它放 system prompt；标题 / 摘要是作者写的，讨论 prompt injection 的论文里可能带着指令样文字，进 system 会被当成同级指令（Codex 在 #28 指出）。协议块同时声明 segment 与元数据都是数据不是指令
 - **论文级上下文每批都带**：页面加载时 `paperContext()` 抽一次标题与摘要（摘要去掉 "Abstract" 标题、跳过 MathML `<annotation>` 里的 TeX 源码、截到 1200 字符；必须在翻译前抽，翻译过再抽会把上一轮译文也算进去），经 `RunOptions.context` 进每批 `request.context`，与批次的 `sectionTitle` 合并；代价每批约 300 token 输入
-- prompt 带版本号 `PROMPT_VERSION`（提示词库接入升到 2），写入缓存键；**提示词身份 `promptKey`**（内置用 id，自定义带两段分别编码的全文）与**上下文原文**（标题 / 摘要 / 章节 / 术语表，结构化序列化；免费引擎不看上下文，不带）也进缓存键的 SHA-256 载荷——换了提示词、或同一段文字出现在另一篇论文里，都不能命中旧译文。**不先压成 32 位 hash**：DJB2 撞了外层 SHA-256 也分不开（Codex 在 #28 给出实例 `19k04n01vcr73f` / `1efm0uaep90s9`）；配置 v1→v2 迁移补 `prompts` 字段、保留 API key
+- prompt 带版本号 `PROMPT_VERSION`（提示词库接入升到 2；`{{targetLanguage}}` 改填英文语言名升到 3），写入缓存键；**提示词身份 `promptKey`**（内置用 id，自定义带两段分别编码的全文）与**上下文原文**（标题 / 摘要 / 章节 / 术语表，结构化序列化；免费引擎不看上下文，不带）也进缓存键的 SHA-256 载荷——换了提示词、或同一段文字出现在另一篇论文里，都不能命中旧译文。**不先压成 32 位 hash**：DJB2 撞了外层 SHA-256 也分不开（Codex 在 #28 给出实例 `19k04n01vcr73f` / `1efm0uaep90s9`）；配置 v1→v2 迁移补 `prompts` 字段、保留 API key
+- **`{{targetLanguage}}` 填英文语言名，不填语言码** [决定，2026-09-05，照 Read Frog `translate-text.ts`]："professional zh-CN native translator" 不如 "Simplified Mandarin Chinese"；名字来自 `config/languages.ts`（移植 `@read-frog/definitions` 的表，ISO 639-3 码），不认识的码原样填
+- **提示词与思考模式的入口**（清理期第 3 项，2026-09-05）：设置页有提示词管理（内置只读可"复制并自定义"、自定义可新建 / 编辑 / 删除、变量按钮插到光标处、JSON 导入 / 导出且文件形状与 Read Frog 一致，可互相导入）与思考模式开关（未登记的端点提示不发字段）；popup 有提示词下拉（即时落盘，下次开始翻译生效）。Read Frog 的对应组件依赖 base-ui、jotai、Tailwind 与它的 i18n，为一页十来个字段引整套 UI 栈不值，逻辑按文件搬（`prompt-file.ts`）、UI 用设置页现有的朴素 React 重写。Read Frog 现已把思考开关改成 AI SDK 的 `reasoning` 档位（none…xhigh），我们仍是 KISS 式按端点发开关字段，档位模型待 AI SDK 侧验证后另议
 - 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`（默认照 Read Frog：1000 字 / 4 段；速率同样照它的令牌桶默认值 8 请求/秒、突发 20，服务内再按批次键攒 100ms——小批高并发，首屏快）；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
 - 批次失败：对半拆分重试 → 单块 → 标记失败
 
@@ -427,7 +429,7 @@ export interface TranslateResult {
 - 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有（IndexedDB 按扩展 origin 隔离，跨论文共享），content 侧通过 `axt:cache-get` / `axt:cache-put` 读写；provider 请求本身不经过 background（§8.0）
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
 - **坏译文不入库、重发不读库** [决定，2026-09-05]：markup 路径的请求带 `accept` 回调（进程内调用才有，过不了消息边界），translate-service 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）；占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
-- 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
+- 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
 ---
 
@@ -461,7 +463,7 @@ export interface TranslateResult {
 | 占位符 | Vitest | 序列化 → 假译文 → 回填，往返后受保护节点等价；校验器对各类破坏（丢 id、多 id、嵌套错）都能识别 |
 | 渲染 | Vitest + happy-dom | 翻译 → 切换三模式 → 恢复，恢复后 DOM 与原始逐节点相等 |
 | provider | Vitest（mock fetch）| 请求拼装与响应解析；免费接口另有可选的 live 测试，默认跳过 |
-| 端到端 | Playwright（`pnpm e2e`，`tests/e2e/extension.mjs`，2026-09-05 起） | 起一个装着 `.output/chrome-mv3` 的 Chromium（`channel: 'chromium'` 的新 headless 支持扩展），驱动设置页与 popup、读控制台与网络：google-web 整篇翻完与速率、刷新命中缓存、翻译中途恢复原文（译文与 `data-axt-*` 全清、不再发请求）、错 key 的 auth 排空整队。不碰用户浏览器与 key，LLM 只测错 key 不花钱。**布局断言**在 `tests/e2e/layout.mjs`（`pnpm e2e:layout`，2026-09-05 起）：side 模式在 1440 / 2000px 下不横向溢出、导航 ≥ 14rem、两栏等宽且 ≤ 40rem、右侧沟槽元素落在文章右缘与视口之间、只含公式的列表项与兄弟项标记对齐、单列 flex 图里的表格与脚注左右配对、多面板 flex 图仍并排且无镜像、正文脚注副本落在沟槽里 |
+| 端到端 | Playwright（`pnpm e2e`，`tests/e2e/extension.mjs`，2026-09-05 起） | 起一个装着 `.output/chrome-mv3` 的 Chromium（`channel: 'chromium'` 的新 headless 支持扩展），驱动设置页与 popup、读控制台与网络：google-web 整篇翻完与速率、刷新命中缓存、翻译中途恢复原文（译文与 `data-axt-*` 全清、不再发请求）、错 key 的 auth 排空整队、设置页的语言与自定义提示词保存后重载仍在。不碰用户浏览器与 key，LLM 只测错 key 不花钱。**布局断言**在 `tests/e2e/layout.mjs`（`pnpm e2e:layout`，2026-09-05 起）：side 模式在 1440 / 2000px 下不横向溢出、文章居中且两侧对称、正文吃满（≤ 96rem）、两栏等宽、行间公式装进一栏、右侧沟槽元素落在文章右缘与视口之间、只含公式的列表项与兄弟项标记对齐（含 `(Assumption 1)` 这类宽标记不盖正文）、单列 flex 图里的表格与脚注左右配对、多面板 flex 图仍并排且无镜像、正文脚注副本落在沟槽里，以及 2312.17141 上的**主线程长任务预算**（最长 ≤ 400ms、合计 ≤ 1.5s，守 side prep 的量法不退回克隆） |
 | 手动清单 | 用户在自己的 Chrome | 走真实 key 的 LLM 路径；锚点跳转、脚注弹出、公式渲染、Ctrl+F、打印 |
 
 fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取，覆盖多领域与多结构，含一篇转换失败页；全部为 oxide 0.7.6）。规则测试用 happy-dom 解析，1.8 MB 页面约 0.6 s，可直接跑全量 fixture。
@@ -518,7 +520,7 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 | 项目 | 借鉴什么 | 不借鉴什么 |
 |---|---|---|
 | KISS Translator | 译文样式预设与自定义 CSS；富文本翻译的占位符思路；免费引擎适配器的请求拼装方式 | 站点规则订阅系统；油猴脚本双构建（v1 不需要）|
-| Read Frog | WXT 工程配置；AI SDK provider 抽象；Shadow DOM UI 隔离；批处理与重试流程；仅译文模式的标记处理 | 语言学习、字幕、TTS、生词本 |
+| Read Frog | WXT 工程配置；AI SDK provider 抽象；Shadow DOM UI 隔离；批处理与重试流程；仅译文模式的标记处理；语言表与提示词库、提示词管理与 popup 提示词选择的功能形状 | 语言学习、字幕、TTS、生词本 |
 | FluentRead | 渐进式翻译与缓存策略；悬浮球交互 | Vue 技术栈 |
 
 **边界 [决定，v0.3 修订]**：默认优先移植三个参考项目的成熟实现——它们已迭代多年，能整段拿来用的就拿来用，移植后按本项目命名与目录改造。原创的例外只有三种：(1) arXiv 适配（`rules/latexml.ts`、`extractor` 的 LaTeXML 路径，Phase 1 已完成）；(2) `renderer`——三个项目的译文渲染都改动、包裹或替换原节点（Read Frog 把译文追加进原元素、仅译文模式直接改文本节点；FluentRead 用 host 包裹原节点；KISS `replaceWith` 替换），与 §7.1 的 DOM 不变量冲突；(3) 移植会与不变量冲突或让代码变乱时改写并说明理由。各模块的移植来源见 RESEARCH.md §4。

@@ -6,7 +6,7 @@ import { getRequestErrorMeta } from '@/providers/request/retry-policy'
 const req = (texts: string[]): TranslateRequest => ({
   segments: texts.map((text, i) => ({ id: `s${i}`, text })),
   source: 'en',
-  target: 'zh-CN',
+  target: 'cmn',
 })
 
 const okResponse = (items: string[]) =>
@@ -20,7 +20,7 @@ describe('createGoogleWebProvider', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('https://translate-pa.googleapis.com/v1/translateHtml')
-    expect(JSON.parse(String(init.body))).toEqual([[['one', 'two', 'three'], 'en', 'zh-CN'], 'wt_lib'])
+    expect(JSON.parse(String(init.body))).toEqual([[['one', 'two', 'three'], 'en', 'zh'], 'wt_lib'])
     expect(result.segments).toEqual([{ id: 's0', text: '一' }, { id: 's1', text: '二' }, { id: 's2', text: '三' }])
     expect(result.provider).toBe('google-web')
   })

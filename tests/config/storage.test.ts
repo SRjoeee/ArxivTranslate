@@ -15,11 +15,11 @@ describe('config storage', () => {
   })
 
   it('写入后读回', async () => {
-    await setConfig({ ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-test', model: 'x/y' }, targetLanguage: 'ja' })
+    await setConfig({ ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-test', model: 'x/y' }, targetLanguage: 'jpn' })
     const c = await getConfig()
     expect(c.openaiCompat.apiKey).toBe('sk-test')
     expect(c.openaiCompat.model).toBe('x/y')
-    expect(c.targetLanguage).toBe('ja')
+    expect(c.targetLanguage).toBe('jpn')
   })
 
   it('存储里是坏数据时回退默认', async () => {
@@ -54,7 +54,7 @@ describe('provider 选择', () => {
     await expect(setConfig({ ...DEFAULT_CONFIG, provider: 'nope' } as never)).rejects.toThrow()
   })
 
-  it('v1 配置一路升到 v3：补上提示词库与预翻译范围，API key 与其他字段原样保留', async () => {
+  it('v1 配置一路升到 v4：补上提示词库与预翻译范围、语言码换成 ISO 639-3，API key 与其他字段原样保留', async () => {
     // WXT 在 defineItem 时就跑迁移，所以要先写入 v1 数据再重新加载模块
     const v1 = {
       version: 1, provider: 'openai-compat',
@@ -65,14 +65,14 @@ describe('provider 选择', () => {
     vi.resetModules()
     const fresh = await import('@/config/storage')
     const c = await fresh.getConfig()
-    expect(c.version).toBe(3)
+    expect(c.version).toBe(4)
     expect(c.openaiCompat.apiKey).toBe('sk-keep')
-    expect(c.targetLanguage).toBe('ja')
+    expect(c.targetLanguage).toBe('jpn')
     expect(c.prompts).toEqual({ promptId: 'default', patterns: [] })
     expect(c.preload).toEqual({ margin: 1000, threshold: 0 })
   })
 
-  it('v2 配置升级到 v3：补上预翻译范围（Read Frog 默认 1000px / 0），其余原样', async () => {
+  it('v2 配置升级到 v4：补上预翻译范围（Read Frog 默认 1000px / 0）、zh-TW 变 cmn-Hant，其余原样', async () => {
     const v2 = {
       version: 2, provider: 'google-web',
       openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: '', model: 'x/y', thinking: 'enabled' },
@@ -82,11 +82,35 @@ describe('provider 选择', () => {
     vi.resetModules()
     const fresh = await import('@/config/storage')
     const c = await fresh.getConfig()
-    expect(c.version).toBe(3)
+    expect(c.version).toBe(4)
+    expect(c.targetLanguage).toBe('cmn-Hant')
     expect(c.preload).toEqual({ margin: 1000, threshold: 0 })
     expect(c.prompts.promptId).toBe('precision-rewrite')
     expect(c.mode).toBe('only')
     expect(c.openaiCompat.thinking).toBe('enabled')
+  })
+
+  it('v3 配置升级到 v4：zh-CN 变 cmn，认不出的语言码回退 cmn', async () => {
+    const base = {
+      version: 3, provider: 'openai-compat',
+      openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-keep', model: 'x/y', thinking: 'disabled' },
+      mode: 'stack', prompts: { promptId: 'default', patterns: [] }, preload: { margin: 300, threshold: 0.5 },
+    }
+    for (const [stored, expected] of [['zh-CN', 'cmn'], ['en', 'eng'], ['xx-YY', 'cmn']]) {
+      fakeBrowser.reset()
+      await fakeBrowser.storage.local.set({ config: { ...base, targetLanguage: stored }, config$: { v: 3 } })
+      vi.resetModules()
+      const fresh = await import('@/config/storage')
+      const c = await fresh.getConfig()
+      expect(c.version).toBe(4)
+      expect(c.targetLanguage).toBe(expected)
+      expect(c.openaiCompat.apiKey).toBe('sk-keep')
+      expect(c.preload).toEqual({ margin: 300, threshold: 0.5 })
+    }
+  })
+
+  it('目标语言必须是语言表里的 ISO 639-3 码', async () => {
+    await expect(setConfig({ ...DEFAULT_CONFIG, targetLanguage: 'zh-CN' as never })).rejects.toThrow()
   })
 
   it('预翻译范围越界被 schema 拒绝', async () => {
