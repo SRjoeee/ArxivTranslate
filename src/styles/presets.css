@@ -1,0 +1,178 @@
+/* 译文样式预设（DESIGN §7.5）。选择器一律 html[data-axt-style="<id>"] .axt-t，
+   并且一律排除 .axt-pending 与 .axt-error——它们也带 .axt-t（长在译文的位置上、side 模式靠它配对），
+   但一个是加载圆环、一个是带「重试」按钮的控件，不是译文。gradient 的 color: transparent 会把
+   按钮文字变透明，正好是用户最需要点它的时候（Codex 在 #52 指出）。
+   side 模式的结构性克隆 .axt-mirror（镜像的公式 / 插图）与 .axt-split（拆到右栏的整张图）也带 .axt-t，
+   同样不是译文——blur 会把镜像的公式糊掉、其他预设会给包装层再画一遍；克隆里嵌套的真译文仍然匹配。
+   与 split-figures.ts 的 REAL_TRANSLATION 是同一条界线。
+   与模式属性同一层写在 <html> 上，切换只改一个属性、不动 DOM。
+   移植自 reference/kiss-translator/src/config/styles.js + src/libs/style.js@c95bd46（GPL-3.0），
+   2026-09-05 移植、有修改：改用 data 属性选择器与 --axt-* 变量、去掉它的 emotion 运行时、
+   排除非译文节点、gradient / glow 改静态、荧光笔按行高重复；
+   green / tint 两种移植自 reference/read-frog/src/assets/styles/custom-translation-node.css@9b44f82
+   （GPL-3.0），2026-09-05 移植、有修改：只取 textColor / background 两个值，改写成本文件的选择器。
+   登记见 docs/THIRD_PARTY.md。
+
+   **两条纪律**：
+   1. 译文节点复制原块的 class（§7.1），字体、字号、行高、对齐、grid 位置都随站点样式走；
+      预设只加装饰性属性，绝不写 font / font-size / line-height / display / margin / width
+      （§7.5 记着 font: inherit 把摘要标题的 1.4rem 覆盖成父级默认值的实测教训，presets.test.ts 用正则守着）。
+   2. **下划线类必须显式画到原子行内元素上**：CSS 规范里 text-decoration 不会传播到
+      inline-block、inline-table 与 MathML 这类原子行内盒，于是公式、行内盒处的线会断掉
+      （用户反馈，2026-09-05 实测：math 与 .ltx_inline-block 上 text-decoration-line 计算值是 none）。
+      `text-decoration: inherit` 也不行——text-decoration-line 不是继承属性，中间隔一层普通 span 就断了；
+      只能把同一条声明显式写到那些元素上，见下面的 --axt-deco 机制。 */
+
+html[data-axt-on] {
+  /* 装饰色默认跟随正文色，深色模式下自动成立；用户可用自定义样式覆盖 */
+  --axt-accent: color-mix(in oklab, currentColor 40%, transparent);
+  /* Read Frog 译文默认的绿（custom-translation-node.css 的 textColor） */
+  --axt-green: oklch(0.693 0.17 162.48);
+}
+
+/* ── 下划线类：只设变量，由下面那条共享规则同时作用到译文与其中的原子行内元素 ────────── */
+html[data-axt-style="underline"] { --axt-deco: underline solid var(--axt-accent); }
+html[data-axt-style="dotted"] { --axt-deco: underline dotted var(--axt-accent); }
+html[data-axt-style="dashed"] { --axt-deco: underline dashed var(--axt-accent); }
+html[data-axt-style="dashed-bold"] { --axt-deco: underline dashed var(--axt-accent); --axt-deco-thickness: 2px; }
+html[data-axt-style="wavy"] { --axt-deco: underline wavy var(--axt-accent); }
+html[data-axt-style="wavy-bold"] { --axt-deco: underline wavy var(--axt-accent); --axt-deco-thickness: 2px; }
+
+/* 共享规则**只列出下划线类**，不能写成 html[data-axt-style] 通配：
+   那样会给其他预设写上 text-decoration: none，把站点自己给链接、引用标记画的线抹掉 */
+html:is(
+  [data-axt-style="underline"], [data-axt-style="dotted"], [data-axt-style="dashed"],
+  [data-axt-style="dashed-bold"], [data-axt-style="wavy"], [data-axt-style="wavy-bold"]
+) :is(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split), .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) :is(math, .ltx_inline-block, svg, img)) {
+  text-decoration: var(--axt-deco);
+  text-underline-offset: 0.25em;
+  text-decoration-thickness: var(--axt-deco-thickness, 1px);
+}
+
+/* ── 边框类 ────────────────────────────────────────────────────────────────── */
+html[data-axt-style="box"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  border: 1px solid var(--axt-accent);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+html[data-axt-style="box-dashed"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  border: 1px dashed var(--axt-accent);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+/* 左侧竖线：只加在块级译文上——行内标题译文（§7.3 的「Abstract 摘要」同行）加线会把标题挤歪 */
+html[data-axt-style="quote"] .axt-t:not([data-axt-inline], .axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  border-inline-start: 2px solid var(--axt-accent);
+  padding-inline-start: 0.6em;
+}
+
+/* ── 底色类：背景画在译文盒子上，公式与行内盒一并覆盖，没有下划线那种断线问题 ──────── */
+/* 荧光笔要**逐行**画：渐变默认按整个盒子的高度铺一次，多行段落就只有最后一行有色
+   （Codex 在 #52 指出，实测三行段落只涂到第三行）。用 1lh 作重复单位，
+   它就是元素的实际行高，字号变了也跟着变（实测 16px/1.8 与 22px/2.2 都逐行对齐） */
+html[data-axt-style="marker"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split),
+html[data-axt-style="marker-gradient"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  background-size: 100% 1lh;
+  background-repeat: repeat-y;
+}
+
+html[data-axt-style="marker"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  background-image: linear-gradient(transparent 55%, color-mix(in oklab, var(--axt-green) 45%, transparent) 55%);
+}
+
+html[data-axt-style="marker-gradient"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  background-image: linear-gradient(
+    transparent 55%,
+    color-mix(in oklab, var(--axt-green) 45%, transparent) 55%,
+    color-mix(in oklab, oklch(0.72 0.15 250) 45%, transparent) 100%
+  );
+}
+
+html[data-axt-style="highlight"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  background-color: color-mix(in oklab, var(--axt-green) 22%, transparent);
+  border-radius: 3px;
+}
+
+/* Read Frog 的淡色底（custom-translation-node.css 的 background） */
+html[data-axt-style="tint"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  background-color: color-mix(in oklab, currentColor 8%, transparent);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+/* ── 文字类 ────────────────────────────────────────────────────────────────── */
+/* 淡一档：用 color-mix 兑透明而不是写死灰色，深色模式下也成立 */
+html[data-axt-style="muted"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  --axt-color: color-mix(in oklab, currentColor 75%, transparent);
+}
+
+/* Read Frog 译文默认的绿：对照阅读时最容易区分，又不像高饱和底色那样刺眼 */
+html[data-axt-style="green"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  --axt-color: var(--axt-green);
+}
+
+/* 渐变文字。实测公式跟着渐变一起显示，不会因为 color: transparent 变不可见。
+   **静态，不做流动动画**：KISS 原版让 background-position 循环流动，实测 600 个译文块时
+   4 秒内主线程任务 573 ms、样式重算 257 ms（静止时是 2 ms），持续烧掉七分之一个核；
+   一篇论文要读几十分钟，这种装饰不值这个代价（Codex 在 #52 指出，本项目实测后改为静态） */
+html[data-axt-style="gradient"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  background-image: linear-gradient(90deg, oklch(0.65 0.2 264), oklch(0.6 0.24 310), oklch(0.68 0.21 8));
+  color: transparent;
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+html[data-axt-style="colorful"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  background-image: linear-gradient(
+    45deg,
+    color-mix(in oklab, oklch(0.85 0.13 145) 55%, transparent) 20%,
+    color-mix(in oklab, oklch(0.85 0.09 20) 55%, transparent) 20% 40%,
+    color-mix(in oklab, oklch(0.85 0.1 60) 55%, transparent) 40% 60%,
+    color-mix(in oklab, oklch(0.82 0.1 190) 55%, transparent) 60% 80%,
+    color-mix(in oklab, oklch(0.85 0.09 240) 55%, transparent) 80%
+  );
+  border-radius: 3px;
+}
+
+/* ── 动效与其他 ────────────────────────────────────────────────────────────── */
+/* 模糊，悬停才清晰：背诵与自测用（Read Frog 的 blur、KISS 的 fuzzy） */
+html[data-axt-style="blur"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  filter: blur(4px);
+  opacity: 0.75;
+  transition: filter 0.15s ease-out, opacity 0.15s ease-out;
+}
+html[data-axt-style="blur"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split):hover {
+  filter: blur(0);
+  opacity: 1;
+}
+
+/* 发光同样静态：呼吸动画改的是 text-shadow，每帧都要重算样式并重绘，
+   实测 600 块时 4 秒内主线程任务 1028 ms、样式重算 549 ms、布局 144 ms——四种预设里最贵的一个 */
+html[data-axt-style="glow"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  text-shadow: 0 0 6px color-mix(in oklab, var(--axt-green) 55%, transparent);
+}
+
+html[data-axt-style="blink"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+  animation: axt-blink 1.6s ease-in-out infinite;
+}
+
+/* 只剩 blink 还在动。它改的是 opacity，走合成器、不触发样式重算与重绘，
+   实测 600 块时 4 秒内主线程任务 3 ms，与静止无异；仍然尊重系统的「减少动态效果」 */
+@media (prefers-reduced-motion: reduce) {
+  html[data-axt-style="blink"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+    animation: none;
+  }
+  /* blur 悬停清晰的 150 ms 过渡也是动效（Codex 在 #52 指出） */
+  html[data-axt-style="blur"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+    transition: none;
+  }
+}
+
+@keyframes axt-blink {
+  50% { opacity: 0.45; }
+}
+
+/* custom 的规则不在这里：用户写的声明块由 style-preset.ts 包进
+   html[data-axt-style="custom"] .axt-t { … } 后与本文件一起注入 */

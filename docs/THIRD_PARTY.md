@@ -27,6 +27,7 @@
 | `src/core/renderer/spinner.ts` | `reference/read-frog/src/utils/host/translate/ui/spinner.ts@9b44f82` | 2026-09-05 | 圆环与动画注册表原样；class / 颜色变量改本项目前缀；去掉它的请求胶水 `getTranslatedTextAndRemoveSpinner`（含 React 错误组件），加 `cancelSpinnersIn` |
 | `src/core/scheduler/pacer.ts` | `reference/read-frog/src/utils/scheduler.ts@9b44f82` | 2026-09-05 | 原样移植，仅加文件头 |
 | `src/config/languages.ts` | `@read-frog/definitions@0.4.4`（Read Frog 的依赖包，`LANG_CODE_ISO6393_OPTIONS`、`LANG_CODE_TO_EN_NAME`、`LANG_CODE_TO_ZH_NAME`、`LANG_CODE_TO_LOCALE_NAME`、`ISO6393_TO_6391`） | 2026-09-05 | 只搬五张语言表（整包 98% 是它的 SRS / 电子书 schema，不装依赖）；辅助函数（英文名、标签、BCP-47 双向转换）是本项目的 |
+| `src/styles/presets.css` | `reference/kiss-translator/src/config/styles.js` + `src/libs/style.js@c95bd46`；`green` / `tint` 取自 `reference/read-frog/src/assets/styles/custom-translation-node.css@9b44f82` | 2026-09-05 | 整套预设照搬 KISS：改用 `data-axt-style` 属性选择器与 `--axt-*` 变量、去掉 emotion 运行时；排除 pending / error / mirror / split 节点；gradient 与 glow 改静态、荧光笔按 `1lh` 重复；Read Frog 只取译文默认绿与淡色底两个值 |
 | `src/providers/prompt-file.ts` | `reference/read-frog/src/components/prompt-configurator/utils/prompt-file.ts@9b44f82` | 2026-09-05 | 功能重写：文件形状相同（可互相导入），校验换 zod，去掉 file-saver |
 | `src/core/scheduler/session.ts` | `reference/read-frog/src/utils/host/translate/translation-session.ts@9b44f82` | 2026-09-05 | 去掉 providerRef 的两个函数；函数改名 begin / end / getSessionId |
 

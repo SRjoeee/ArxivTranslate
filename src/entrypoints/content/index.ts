@@ -1,3 +1,4 @@
+import type { Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { buildChain } from '@/providers'
 import type { TranslationProvider } from '@/providers/types'
@@ -35,7 +36,9 @@ export default defineContentScript({
     // 翻译开始前不建控制器，免得往没翻译过的页面写 data-axt-mode；popup 这时看到的是配置里的偏好。
     let modes: ModeController | null = null
     let savedMode: Mode = 'stack'
-    void getConfig().then(config => { savedMode = config.mode })
+    /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性；开始翻译时从配置读一次 */
+    let style: Config['style'] = { preset: 'none', customCss: '' }
+    void getConfig().then(config => { savedMode = config.mode; style = config.style })
     // 一次会话 = 一个翻译服务 + 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
     let service: FallbackService | null = null
     let activeChain: TranslationProvider[] | null = null
@@ -92,6 +95,7 @@ export default defineContentScript({
 
       modes?.stop()
       modes = createModeController(document, requested ?? config.mode, { onChange: enterSide })
+      style = config.style
       endRun() // 上一轮停下但没恢复原文的会话（致命错误后重试）
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
@@ -116,6 +120,7 @@ export default defineContentScript({
         blocks,
         target: config.targetLanguage,
         mode: modes.effective(),
+        style,
         paper,
         // 标题 + 摘要每批都带（DESIGN §8.2）
         context,

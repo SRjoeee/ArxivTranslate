@@ -31,36 +31,35 @@ export function parseGlossary(text: string): ParsedGlossary {
   const issues: GlossaryIssue[] = []
   const index = new Map<string, number>()
 
-  // 分号也当换行：KISS 允许 `a, 甲; b, 乙` 写在一行
+  // 一行一条。**分号不作分隔符**：译文里出现分号是正常的（`kernel, 核; 统计学中称核函数`），
+  // 当成记录分隔会把它悄悄拆成两条不相干的映射（Codex 在 #52 指出）。DESIGN §8.2 写的也是按行分隔
   const lines = text.split('\n')
   let lineNumber = 0
   for (const rawLine of lines) {
     lineNumber++
-    for (const part of rawLine.split(';')) {
-      const line = part.trim()
-      if (line === '' || line.startsWith('#')) continue
-      const match = SEPARATOR.exec(line)
-      if (!match) {
-        issues.push({ line: lineNumber, text: line, reason: '缺少分隔符，应写成「原文, 译文」' })
-        continue
-      }
-      const term = line.slice(0, match.index).trim()
-      const translation = line.slice(match.index + 1).trim()
-      if (term === '') {
-        issues.push({ line: lineNumber, text: line, reason: '原文为空' })
-        continue
-      }
-      if (translation === '') {
-        issues.push({ line: lineNumber, text: line, reason: '译文为空' })
-        continue
-      }
-      const existing = index.get(term)
-      if (existing === undefined) {
-        index.set(term, entries.length)
-        entries.push({ term, translation })
-      } else {
-        entries[existing] = { term, translation }
-      }
+    const line = rawLine.trim()
+    if (line === '' || line.startsWith('#')) continue
+    const match = SEPARATOR.exec(line)
+    if (!match) {
+      issues.push({ line: lineNumber, text: line, reason: '缺少分隔符，应写成「原文, 译文」' })
+      continue
+    }
+    const term = line.slice(0, match.index).trim()
+    const translation = line.slice(match.index + 1).trim()
+    if (term === '') {
+      issues.push({ line: lineNumber, text: line, reason: '原文为空' })
+      continue
+    }
+    if (translation === '') {
+      issues.push({ line: lineNumber, text: line, reason: '译文为空' })
+      continue
+    }
+    const existing = index.get(term)
+    if (existing === undefined) {
+      index.set(term, entries.length)
+      entries.push({ term, translation })
+    } else {
+      entries[existing] = { term, translation }
     }
   }
   return { entries, issues }
