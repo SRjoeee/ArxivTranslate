@@ -564,11 +564,14 @@ export class RequestQueue {
    * 宁可短暂超一点上限，也不能让队列被几个挂死的请求锁死（本项目新增，issue #43）
    */
   private releaseWhenSettled(thunk: Promise<unknown> | null) {
+    // thunk 同步抛出时没有 Promise 可等，立刻还额度。定时器要先声明：
+    // 在 const 初始化之前调用 release() 会撞暂时性死区，额度就永远还不回来（Codex 在 #56 指出）
+    let graceTimer: ReturnType<typeof setTimeout> | undefined
     let released = false
     const release = () => {
       if (released) return
       released = true
-      clearTimeout(graceTimer)
+      if (graceTimer !== undefined) clearTimeout(graceTimer)
       this.activeExecutions--
       this.schedule()
     }
@@ -576,7 +579,7 @@ export class RequestQueue {
       release()
       return
     }
-    const graceTimer = setTimeout(release, ABORT_GRACE_MS)
+    graceTimer = setTimeout(release, ABORT_GRACE_MS)
     thunk.then(release, release)
   }
 

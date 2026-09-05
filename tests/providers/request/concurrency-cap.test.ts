@@ -275,3 +275,14 @@ describe('期限是时间事件，暂停与满载都拦不住（Codex 在 #56 �
     expect(seen[0]).toBe(seen[1])
   })
 })
+
+describe('同步抛出的 thunk（Codex 在 #56 的第四轮）', () => {
+  it('thunk 同步抛出时额度立刻归还，后面的任务照常派发', async () => {
+    const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, maxRetries: 0 }))
+    // 不返回 Promise、直接抛：executeTask 的 catch 里 thunkPromise 还是 null
+    const boom = (() => { throw Object.assign(new Error('sync boom'), { name: 'TypeError' }) }) as unknown as () => Promise<string>
+    await expect(queue.enqueue(boom, Date.now(), 'a')).rejects.toThrow('sync boom')
+    // 修复前这里会因为 ReferenceError 把额度记死，第二个任务永远排不上
+    expect(await queue.enqueue(async () => 'b', Date.now(), 'b')).toBe('b')
+  })
+})
