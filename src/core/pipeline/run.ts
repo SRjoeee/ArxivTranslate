@@ -37,6 +37,8 @@ export interface RunOptions {
   isPriority?: (block: Block) => boolean
   /** 论文级上下文（标题、摘要、术语表），每批都带；章节标题由批次自己补 */
   context?: TranslateContext
+  /** 取消范围：每次运行一个 id，恢复原文时 translate-service 按它撤掉排队与在飞的请求（§10） */
+  scope?: string
 }
 
 const FATAL_KINDS = new Set(['no-key', 'auth'])
@@ -61,6 +63,7 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
       request: { segments: items, source: 'en', target: options.target, context: Object.keys(context).length ? context : undefined },
       cache: { paper: options.paper, renderPath, ...(opts.bypassCache ? { bypass: true } : {}) },
       ...(opts.accept ? { accept: opts.accept } : {}),
+      ...(options.scope ? { scope: options.scope } : {}),
     })
   }
 
