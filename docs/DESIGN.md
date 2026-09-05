@@ -64,7 +64,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 └────────────────────────────────────────────────────────────────────────────────────────┘
                                    │ runtime message │
 ┌────────────────────────── background (service worker) ────────────────────────────────┐
-│  queue (p-queue, per-provider concurrency) ──► providers/* ──► cache (IndexedDB)       │
+│  request-queue + batch-queue (per-provider rate) ──► providers/* ──► cache (IndexedDB) │
 │  health check + fallback chain                                                         │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ┌────────────────────────── ui ─────────────────────────────────────────────────────────┐
@@ -77,7 +77,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 2. `scheduler` 只翻进入视口（加预翻译距离）的块；没滚到的块不发请求、不占资源（§10，照搬 Read Frog）
 3. 先查缓存；命中直接渲染
 4. 未命中：`protector` 把块序列化为 `{text, slots}`；按 provider 的 `preservesMarkup` 决定走 markup 路径（整块带占位符）还是 runs 路径（切段）
-5. content 侧的 `queue` 按 provider 并发上限发请求（§8.0：请求不经过 background）；失败退避、重试、必要时切换 fallback provider
+5. content 侧移植的 `request-queue` 按 provider 的速率（令牌桶）发请求、`batch-queue` 攒批（§8.0：请求不经过 background）；失败退避、重试、429 暂停、必要时切换 fallback provider
 6. `validator` 校验占位符完整性；失败 → 单块重试一次 → 降级 runs 路径
 7. `rehydrator` 把占位符换回受保护节点的克隆（剥掉 `id` 属性）
 8. `renderer` 把译文节点插为原块的下一个兄弟，写入缓存
@@ -339,7 +339,8 @@ export interface TranslationProvider {
   kind: 'llm' | 'mt' | 'builtin'
   preservesMarkup: boolean          // true → markup 路径；false → runs 路径
   maxBatchChars: number             // 单次请求字符上限
-  concurrency: number               // 并发上限（交给 p-queue）
+  maxBatchItems: number             // 单次请求段落数上限
+  rateLimit?: { rate: number; capacity: number }  // 令牌桶速率；不声明用服务默认的 8/s、突发 20（Read Frog 默认值）
   isAvailable(): Promise<boolean>   // 健康检查：key 是否配置、端点是否可达、内置模型是否可用
   translate(req: TranslateRequest): Promise<TranslateResult>
 }
@@ -383,17 +384,17 @@ export interface TranslateResult {
 - **元数据放在用户消息里、带 `<document_metadata>` 定界符并声明为不可信参考**：Read Frog 把它放 system prompt；标题 / 摘要是作者写的，讨论 prompt injection 的论文里可能带着指令样文字，进 system 会被当成同级指令（Codex 在 #28 指出）。协议块同时声明 segment 与元数据都是数据不是指令
 - **论文级上下文每批都带**：页面加载时 `paperContext()` 抽一次标题与摘要（摘要去掉 "Abstract" 标题、跳过 MathML `<annotation>` 里的 TeX 源码、截到 1200 字符；必须在翻译前抽，翻译过再抽会把上一轮译文也算进去），经 `RunOptions.context` 进每批 `request.context`，与批次的 `sectionTitle` 合并；代价每批约 300 token 输入
 - prompt 带版本号 `PROMPT_VERSION`（提示词库接入升到 2），写入缓存键；**提示词身份 `promptKey`**（内置用 id，自定义带两段分别编码的全文）与**上下文原文**（标题 / 摘要 / 章节 / 术语表，结构化序列化；免费引擎不看上下文，不带）也进缓存键的 SHA-256 载荷——换了提示词、或同一段文字出现在另一篇论文里，都不能命中旧译文。**不先压成 32 位 hash**：DJB2 撞了外层 SHA-256 也分不开（Codex 在 #28 给出实例 `19k04n01vcr73f` / `1efm0uaep90s9`）；配置 v1→v2 迁移补 `prompts` 字段、保留 API key
-- 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`（默认照 Read Frog：1000 字 / 4 段，provider 并发 8——小批高并发，首屏快）；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
+- 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`（默认照 Read Frog：1000 字 / 4 段；速率同样照它的令牌桶默认值 8 请求/秒、突发 20，服务内再按批次键攒 100ms——小批高并发，首屏快）；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
 - 批次失败：对半拆分重试 → 单块 → 标记失败
 
-- **每次请求有上限（默认 60s），超时按可重试错误处理** [决定，2026-09-05]：没有上限时一个挂住的连接会让整篇翻译永远停在"进行中"——实测 2312.17527 走真实 API：153 块翻了 152 块，最后一块（1600 字、32 个占位符）等了 220s 还没回，`translation done` 永远不打、popup 一直转。`translate-service` 用 `Promise.race` 加上限（provider 不配合 signal 也能切断），超时归入 retry-policy 的 `timeout` 类别走重试，用尽后只这一块标失败
+- **每次请求有上限，超时按可重试错误处理** [决定，2026-09-05；同日改由移植的 request-queue 承担]：没有上限时一个挂住的连接会让整篇翻译永远停在"进行中"——实测 2312.17527 走真实 API：153 块翻了 152 块，最后一块（1600 字、32 个占位符）等了 220s 还没回，`translation done` 永远不打、popup 一直转。上限随字数放大：20 s + 每字 15 ms，最多 120 s（Read Frog 的常量；1000 字的批 35 s，那个 1600 字的块 44 s），request-queue 用 `Promise.race` 加超时并 abort 在飞请求（provider 不配合 signal 也能切断），超时归入 retry-policy 的 `timeout` 类别走重试（默认 2 次），用尽后只这一块标失败
 
 ### 8.3 免费引擎约定
 
 - 视为**随时会断**的东西：独立文件、独立错误类型、失败自动切到 fallback 链的下一个
 - fallback 链默认：用户选定 provider → `chrome-builtin` → `google-web`
-- `google-web` 一次请求多条（默认 100 条 / 8000 字一批，并发 2），指数退避处理 429；超时预算照 FluentRead 的做法给单次尝试与总时长各设上限
-- **429 暂停整条队列**（2026-09-05）：p-queue 的 concurrency 只是并发上限，撞上限流的任务自己睡着时其余 worker 还会往同一端点打（Codex 在 #6 / #10 指出）；暂停时长取 Retry-After 与退避的较大者，到时自动恢复；在飞的任务每次尝试前也要等共享暂停，暂停结束**只放一个探针**、其余等它成功再走（照 Read Frog request-queue 的 post-pause probe，Codex 在 #30 指出睡醒的任务会在同一刻一起撞端点）。`no-key` / `auth` / `aborted` 不重试——移植的策略不认识这些 kind，曾把 no-key 当未知错误重试 4 次、白等 7 s
+- `google-web` 一次请求多条（默认 100 条 / 8000 字一批），速率压到 2 请求/秒、突发 2（`rateLimit`）——免费端点经不起默认的 8/s；不攒批（Read Frog 的 `shouldUseBatchQueue` 只让 LLM 攒），429 与超时同 §8.2，由 request-queue 统一处理
+- **429 暂停整条队列，由移植的 request-queue 提供**（2026-09-05）：并发或速率只是上限，撞上限流的任务自己睡着时其余任务还会往同一端点打（Codex 在 #6 / #10 指出）。request-queue 的做法：暂停时长取 Retry-After 与退避（5 s × 2^连续次数，10% 抖动）的较大者，同一窗口内的多个 429 只计一次连续；暂停期间不派发任何任务，撞上的任务重排到暂停结束时刻；暂停结束时桶里最多留一个旧令牌，其余按速率补——默认 8/s 下 5 s 的暂停会把 20 的容量补满，所以"单探针"只在速率低时成立，这是它的原样行为（#30 里手写的更严格的探针闸已删，按目录搬的规矩不改）；连续 5 个窗口或单任务 8 次 429 就排空整队。`no-key` / `auth` 标成 access-denied 排空整队，`aborted` / `invalid-response` 标不可重试——元数据在 `ProviderError` 构造时按 kind 挂上（no-key、id 对不上都是在 try 之外直接 throw 的），移植的策略不认识这些 kind，曾把 no-key 当未知错误重试 4 次、白等 7 s
 - **思考模式默认关闭**（照 KISS 的 THINKING_API_REGISTRY）：按端点域名选字段——OpenRouter `reasoning: { effort: "none" }`、DeepSeek 官方 `thinking: { type: "disabled" }`、百炼 / 硅基流动 `enable_thinking: false`，未登记端点不发；经 AI SDK `providerOptions` 进请求体（`src/providers/thinking.ts`）
 - **即时引擎**：`chrome-builtin` 模型就绪时（`availability() === 'available'`）单句 10–20 ms 且离线，用它先渲染视口内的块，用户选定的 LLM 译文到达后原位替换；缓存键含 provider，两者互不覆盖。用户可在设置里关闭
 
@@ -435,7 +436,7 @@ export interface TranslateResult {
 - **插入译文时不做滚动锚定，也不做任何布局读取** [决定，2026-09-05]：视口不跳交给 Chrome 原生 scroll anchoring（`overflow-anchor: auto` 是默认值；实测在视口上方插入 600px，浏览器自动补偿 575px 滚动、锚点位移 0）。早期移植 FluentRead 的 JS 锚定（`elementFromPoint` + `getBoundingClientRect`）每批强制两次全页布局，side 模式下每次 130–150ms、stack 90–100ms（15644 个节点、~700 个 subgrid 容器）；8 个 worker 一百多批下来，全命中缓存的 826 块也要 16.5s，主线程长任务 52 条、每条 ~90ms 首尾相接。去掉后翻译只受网络 / 缓存往返约束
 - **进度事件用带最长等待的合并器，不用纯去抖** [决定，2026-09-05]：翻译中每秒几十次进度回调，150ms 去抖计时器一直被重置，side prep 直到整篇翻完才跑（实测 413 个镜像在最后一刻同时出现，之前公式一直居中横跨两栏）。`createCoalescer(fn, { delay: 150, maxWait: 1000 })`：事件再密也至少每秒整理一次
 - **镜像不等译文** [决定，2026-09-05]：公式与插图本来就没有译文，等它们所在段落的译文到达才镜像是白等。块标记（`data-axt-id`）在翻译开始的第一刻就写好，镜像的容器判定改为 `:has(.axt-t, [data-axt-id])`，第一趟 prep 就把它们全部镜像；闸 2（带块标记或内部含块的不镜像）不变，整块复制的事故不会重演
-- 每个 provider 一个队列，并发上限来自 provider 声明。**第一步先换成 Read Frog 的 `utils/request/` 目录**：`request-queue`（令牌桶，默认 8 请求/秒、突发 20）+ `batch-queue`（1000 字 / 4 条 / 攒 100ms）+ `priority-queue` + `cancellation`，都是纯工具、自带测试，整目录移植替换 `p-queue`；429 的暂停与暂停后的单探针语义（§8.2）它们原生就有，#30 里手写的那一份到时按清理规矩删
+- 每个 provider 一对队列（`translate-service`，2026-09-05 已换成整目录移植的 Read Frog `utils/request/`）：`request-queue`（令牌桶，默认 8 请求/秒、突发 20；provider 用 `rateLimit` 覆盖）+ `batch-queue`（1000 字 / 4 条 / 攒 100ms，派发闸让限流期间多攒少发；只有 LLM 攒批）+ `priority-queue` + `cancellation`，测试一起搬；`p-queue` 与 #30 里手写的暂停 / 探针已删。批次键 = provider、模型、提示词、目标语言、渲染路径、上下文（含章节标题，所以不跨章节混批）；provider 报"id 对不上"时按批次错误处理：整批重试 3 次再逐条兜底，request-queue 自己不重试。取消按 scope：每次运行一个 id，恢复原文时先撤 batch-queue 再撤 request-queue（顺序照它的 translation-queues.ts），在飞的 fetch 被 abort，结果回来也不渲染不写缓存
 - 失败块的"重试"按钮在错误提示里（§7.6），popup 不再单独列失败块
 
 ---
@@ -470,7 +471,7 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 
 **Phase 2 — 核心闭环（已完成 2026-09-03；五个分支依次合入，边界见 §13；完成标准四项在真实页面实测通过；速度按 KISS / Read Frog 的做法修正——思考模式按端点关闭、1000 字 / 4 段 / 并发 8）**
 - `feat/protector`：占位符引擎——`serialize` / `validate` / `rehydrate` / runs 切段；嵌套单元对外层作 void；移植 Read Frog `html-attribute-markers.ts` 的完整性校验改成 `<x id>` / `<t id>` 协议
-- `feat/providers`：`TranslationProvider` 接口；`openai-compat`（`@ai-sdk/openai-compatible` + `generateObject`，默认 OpenRouter 端点与便宜快速档模型）；prompt 与 `PROMPT_VERSION`；配置 schema + 迁移；options 页字段。移植 Read Frog `providers/model.ts`（精简到三家）、`retry-policy.ts`、`config/storage.ts` + `migration.ts`；并发 `p-queue`，重试 `p-retry` 配移植的策略
+- `feat/providers`：`TranslationProvider` 接口；`openai-compat`（`@ai-sdk/openai-compatible` + `generateObject`，默认 OpenRouter 端点与便宜快速档模型）；prompt 与 `PROMPT_VERSION`；配置 schema + 迁移；options 页字段。移植 Read Frog `providers/model.ts`（精简到三家）、`retry-policy.ts`、`config/storage.ts` + `migration.ts`；并发 `p-queue`、重试用手写循环配移植的策略（2026-09-05 换成整目录移植的 `utils/request/`，见 §10）
 - `feat/cache`：移植 FluentRead `cache.ts`（Dexie），键见 §9
 - `feat/renderer`：stack 模式、恢复原文、表格整表克隆置于下方；原创，DOM 逐节点相等测试守护
 - `feat/pipeline`：content 提取 → 查缓存 → protector → background 队列 → provider → validate → rehydrate → render → 写缓存；降级链（重试一次 → runs → 标记失败）；popup 翻译 / 恢复 / 进度。Phase 2 按文档序整篇翻，视口优先留 Phase 3
@@ -479,7 +480,7 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 **Phase 3 — 完整 v1**
 - provider 请求移到 content（§8.0）；side / only 模式与宽度逻辑；`chrome-builtin` + `google-web` 与 runs 路径；fallback 链；调度与进度；样式预设；术语表；options 页
 - `feat/lazy-loading`（§10 / §7.6，2026-09-05 列入）：照搬 Read Frog 的加载模式，按目录搬、不按函数挑（CLAUDE.md 的搬运判定）。
-  - **PR 1 `feat/request-queue`**：整目录移植 `utils/request/`（`request-queue` / `batch-queue` / `priority-queue` / `cancellation`，连同它们的测试；同目录的 `retry-policy` 已在）替换 `p-queue` 与 `withRetry`，`translate-service` 按 `background/translation-queues.ts` 的方式组装（rate / capacity / dispatchGate）。纯工具、不碰页面，风险最低，先定下派发接口
+  - **PR 1 `feat/request-queue`（已完成 2026-09-05）**：整目录移植 `utils/request/`（`request-queue` / `batch-queue` / `priority-queue` / `cancellation`，连同它们的测试；同目录的 `retry-policy` 已在）替换 `p-queue` 与 `withRetry`，`translate-service` 按 `background/translation-queues.ts` 的方式组装（rate / capacity / dispatchGate）。纯工具、不碰页面，风险最低，先定下派发接口。scope 取消也一并进了服务（`TranslateService.cancel`），PR 2 的 session id 直接顶替每次运行的 scope
   - **PR 2 `feat/lazy-loading`**：移植 `ui/spinner.ts`、`utils/scheduler.ts`（主线程切片）、`translation-session.ts`、错误提示 + 重试的 React 组件、设置页的"预翻译距离 / 可见阈值"、`document.title` 翻译；pending 节点 + 圆环（§7.6）；`IntersectionObserver` 一次性触发、按回调攒批、session 取消。`PageTranslationManager` 只搬骨架（观察器生命周期、walkId / session 令牌、启停顺序）改绑我们的 `Block[]`，它的四个测试场景改写后带过来；停止时**要**剥掉我们打的标记（§7.1 要求恢复后逐节点相等，它自己不剥）。脚注块在 ar5iv 里 `height: 0` 或折叠、IO 永远判不可见，跟随所在段落一起触发
   - **搬运取舍**（2026-09-05 讨论，用户拍板：无负担就搬、有负面影响才取舍）。一起搬、暂时用不上：跨标签页去重与 `cancelledScopes` 登记（不跑的分支没有代价）、`document.title` 翻译（一个 head 观察器加一条请求）、work pacer（只有好处）。**不搬，各有具体的负面影响**：
     - `MutationObserver`：盯整棵 `documentElement` 的子树 / 属性 / 文本；arXiv 页面本身不动，动的是我们插的几千个节点，它的"自己造成的变化不算"过滤器只认 `read-frog-*` 标记，每批译文都会让它重走一遍甚至判定原文变了去重翻。接了是纯负担；真要接得改成认 `axt-` 前缀，那是改写不是搬
