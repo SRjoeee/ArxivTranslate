@@ -143,6 +143,12 @@ export function classify(el: Element): Classification | null {
   return null
 }
 
+/**
+ * **带功能的行内元素**：丢了它内容还在，但行为没了。runs 降级路径要整块保留这类节点（§6.5，issue #44）。
+ * arXiv 正文里的链接几乎全是 .ltx_ref 或 mailto，已被 PROTECT_RULES 挡住；这条是给普通 <a> 与 v2 的其他站点兜底
+ */
+export const FUNCTIONAL_INLINE = 'a[href]'
+
 /** 插图与图形（Phase 0 统计脚本用） */
 export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics' } as const
 
