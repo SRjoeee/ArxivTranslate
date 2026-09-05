@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   PROTECT_RULES, RULES_VERSION, SKIP_RULES, TABLE_RULES, UNIT_RULES,
-  classify, documentRoot, hasTranslatableText, isNumericCell, visibleText,
+  classify, documentRoot, hasTranslatableText, isNamedTag, isNumericCell, visibleText,
 } from '@/core/rules/latexml'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
@@ -32,7 +32,7 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.6.1')
+    expect(RULES_VERSION).toBe('0.6.2')
   })
 })
 
@@ -103,12 +103,23 @@ describe('带环境名的 tag 要翻译，纯编号的不翻（§5.2，用户反
       ['表格', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table 1:</span> Cap.</figcaption>'],
       ['算法', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_float">Algorithm 1</span> Cap.</figcaption>'],
       ['附录', '<h2 class="ltx_title ltx_title_appendix"><span class="ltx_tag ltx_tag_appendix">Appendix A</span> More</h2>'],
-      ['部分', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part I</span> X</h1>'],
+      ['部分', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part 1</span> X</h1>'],
       ['章', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_chapter">Chapter 1</span> X</h1>'],
     ]
     for (const [name, html] of named) {
       it(`${name}的 tag 不再是 void：里面有环境名`, () => {
         expect(tagOf(html)).toBeNull()
+      })
+    }
+
+    // 罗马数字编号的照旧作 void：实测机器翻译会把 IV 译成「四」，与受保护的 .ltx_ref 对不上
+    const roman: [string, string][] = [
+      ['罗马编号的表', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table IV:</span> Cap.</figcaption>'],
+      ['罗马编号的部分', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part I</span> X</h1>'],
+    ]
+    for (const [name, html] of roman) {
+      it(`${name}仍是 void`, () => {
+        expect(tagOf(html)).toMatchObject({ kind: 'protect', rule: 'tag' })
       })
     }
 
@@ -125,6 +136,46 @@ describe('带环境名的 tag 要翻译，纯编号的不翻（§5.2，用户反
         expect(tagOf(html)).toMatchObject({ kind: 'protect', rule: 'tag' })
       })
     }
+
+    // 光看类名不够：子图面板的标签也是 .ltx_tag_figure，内容却是纯标识符（Codex 在 #53 指出）
+    const panels: [string, string][] = [
+      ['子图面板 (a)', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">(a)</span></figcaption>'],
+      ['子图面板 (b)', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">(b)</span></figcaption>'],
+      ['纯编号的定理 tag', '<h6 class="ltx_title"><span class="ltx_tag ltx_tag_theorem">1.1</span></h6>'],
+    ]
+    for (const [name, html] of panels) {
+      it(`${name}仍作 void：翻了会与面板的对应关系断掉`, () => {
+        expect(tagOf(html)).toMatchObject({ kind: 'protect', rule: 'tag' })
+      })
+    }
+
+    it('括号里的整段标识符不算词：面板标签可以是多字母罗马数字（Codex 在 #53 指出）', () => {
+      for (const label of ['(a)', '(ii)', '(iii)', '(iv)', '（乙）', '(A.1)']) {
+        expect([label, isNamedTag(el(`<span class="ltx_tag ltx_tag_figure">${label}</span>`))]).toEqual([label, false])
+      }
+      // 环境名从不带括号：去掉括号后仍有词的照样要翻
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_theorem">Definition 1.2 (Hall set)</span>'))).toBe(true)
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">Figure 3 (a)</span>'))).toBe(true)
+    })
+
+    it('罗马数字编号的 tag 不翻：机器翻译会把它本地化，与受保护的 .ltx_ref 对不上', () => {
+      // 2026-09-05 用 google-gtx 实测：Table IV: → 表四：，Table X: → 表十：，Part I → 第一部分
+      for (const text of ['Table I:', 'Table IV:', 'Table X:', 'Table XIII:', 'Part I', 'Appendix V', 'Table IV.1:', 'Theorem IV-A', 'Lemma II.3.', 'Table iv:', 'Theorem ii.3', 'Part i', 'Table IV :', 'Theorem II .', '(Table IV)']) {
+        expect([text, isNamedTag(el(`<span class="ltx_tag ltx_tag_table">${text}</span>`))]).toEqual([text, false])
+      }
+      // 阿拉伯数字与字母编号实测都原样保留，照翻
+      for (const text of ['Table 4:', 'Appendix A', 'Appendix C', 'Appendix D', 'Definition 1.1.', 'Corollary A.3.', 'Appendix A.1', 'Lemma D.2', '(Figure 1)', '(Theorem 2)', 'Definition 1 (Hall set)']) {
+        expect([text, isNamedTag(el(`<span class="ltx_tag ltx_tag_table">${text}</span>`))]).toEqual([text, true])
+      }
+    })
+
+    it('判定要含连续两个字母：单字母标识符不算词', () => {
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">Figure 1.</span>'))).toBe(true)
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">(a)</span>'))).toBe(false)
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">(1)</span>'))).toBe(false)
+      // 类名不在清单里的，含词也不翻
+      expect(isNamedTag(el('<span class="ltx_tag ltx_tag_section">Appendix</span>'))).toBe(false)
+    })
   })
 
 describe('classify：优先级 skip > table > unit > protect', () => {
