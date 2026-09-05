@@ -39,11 +39,12 @@ export default defineBackground(() => {
           return written
         })().then(written => sendResponse({ written })).catch(() => sendResponse({ written: 0 }))
         return true
+      // IndexedDB 不可用时也要回话，否则调用方等到的是"message channel closed"（Codex 在 #7 指出）
       case 'axt:cache-clear':
-        translationCache.clear(message.paper).then(removed => sendResponse({ removed }))
+        translationCache.clear(message.paper).then(removed => sendResponse({ removed })).catch(() => sendResponse({ removed: 0 }))
         return true
       case 'axt:cache-stats':
-        translationCache.stats().then(sendResponse)
+        translationCache.stats().then(sendResponse).catch(() => sendResponse({ entries: 0, bytes: 0 }))
         return true
     }
   })

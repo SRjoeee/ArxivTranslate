@@ -12,6 +12,8 @@ export default defineConfig({
     permissions: ['storage'],
     // background 向 LLM 端点 fetch 需要 host 权限；默认只给 OpenRouter，自定义 baseURL 在设置页保存时按 origin 申请
     host_permissions: ['https://openrouter.ai/*'],
-    optional_host_permissions: ['https://*/*', 'http://localhost/*'],
+    // 自定义端点可能是 http 的 127.0.0.1 / 局域网（Ollama、LM Studio）；只写 localhost 字面量时申请会直接失败（Codex 在 #6 指出）。
+    // 这里只是"允许申请"的范围，真正授权仍在设置页按 origin 逐个请求
+    optional_host_permissions: ['https://*/*', 'http://*/*'],
   },
 })

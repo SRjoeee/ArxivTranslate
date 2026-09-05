@@ -18,6 +18,9 @@ export function App() {
   const refresh = useCallback(() => {
     sendToActiveTab({ type: 'axt:page-status' }).then(setPage).catch(() => setPage(null))
   }, [])
+  const loadStats = useCallback(() => {
+    sendToActiveTab({ type: 'axt:stats' }).then(setStats).catch(() => setStats(null))
+  }, [])
 
   useEffect(() => {
     console.debug(`[axt] popup mounted ${Math.round(performance.now() - scriptStart)} ms after script start`)
@@ -29,9 +32,25 @@ export function App() {
       })
       .catch(e => setPing(`后台未响应：${String(e)}`))
     sendMessage({ type: 'axt:provider-status' }).then(setProvider).catch(() => setProvider(null))
-    sendToActiveTab({ type: 'axt:stats' }).then(setStats).catch(() => setStats(null))
+    loadStats()
     refresh()
-  }, [refresh])
+  }, [refresh, loadStats])
+
+  // 页面还在加载时 content script 尚未注入（document_idle），首问会"没有接收方"；
+  // 隔 500 ms 再问几次，别一开就判定"不是 arXiv 页面"（Codex 在 #3 指出）
+  useEffect(() => {
+    if (page !== null) return
+    let attempts = 0
+    const id = setInterval(() => {
+      if (++attempts > 6) {
+        clearInterval(id)
+        return
+      }
+      refresh()
+      loadStats()
+    }, 500)
+    return () => clearInterval(id)
+  }, [page, refresh, loadStats])
 
   // 翻译进行中每 500 ms 轮询进度
   const running = page?.progress.state === 'running'
