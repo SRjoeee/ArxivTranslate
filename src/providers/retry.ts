@@ -1,5 +1,5 @@
 // 用移植的 retry policy 驱动重试。p-retry 无法按错误自定义延迟（Retry-After），所以这里是十几行循环。
-import { defaultRequestRetryPolicy, type RequestRetryPolicy } from './retry-policy'
+import { defaultRequestRetryPolicy, type RequestRetryPolicy } from './request/retry-policy'
 import { ProviderError } from './types'
 
 export interface RetryOptions {

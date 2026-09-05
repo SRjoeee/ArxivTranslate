@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createGoogleWebProvider } from '@/providers/google-web'
 import { ProviderError, type TranslateRequest } from '@/providers/types'
-import { getRequestErrorMeta } from '@/providers/retry-policy'
+import { getRequestErrorMeta } from '@/providers/request/retry-policy'
 
 const req = (texts: string[]): TranslateRequest => ({
   segments: texts.map((text, i) => ({ id: `s${i}`, text })),

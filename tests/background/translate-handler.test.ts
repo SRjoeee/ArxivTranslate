@@ -2,7 +2,7 @@ import { IDBKeyRange, indexedDB } from 'fake-indexeddb'
 import { describe, expect, it } from 'vitest'
 import { TranslationCache, createCacheDb } from '@/cache/store'
 import { createStatusHandler, createTranslateHandler } from '@/entrypoints/background/translate-handler'
-import { attachRequestErrorMeta } from '@/providers/retry-policy'
+import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
 import { ProviderError, type TranslateRequest, type TranslationProvider } from '@/providers/types'
 
 const req: TranslateRequest = { segments: [{ id: 'a', text: 'x' }], source: 'en', target: 'zh-CN' }

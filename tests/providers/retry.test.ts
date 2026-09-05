@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { withRetry } from '@/providers/retry'
-import { attachRequestErrorMeta } from '@/providers/retry-policy'
+import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
 import { ProviderError } from '@/providers/types'
 
 const failing = (errors: unknown[], result = 'done') => {

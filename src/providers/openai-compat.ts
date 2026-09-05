@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { createModel, type OpenAICompatConfig } from './model'
 import { buildPrompts } from './prompt'
 import { promptKey, type PromptsConfig } from './prompt-library'
-import { attachRequestErrorMeta } from './retry-policy'
+import { attachRequestErrorMeta } from './request/retry-policy'
 import { thinkingBodyFields } from './thinking'
 import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 

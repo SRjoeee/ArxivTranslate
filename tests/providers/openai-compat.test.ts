@@ -2,7 +2,7 @@ import { APICallError } from 'ai'
 import { MockLanguageModelV4 } from 'ai/test'
 import { describe, expect, it } from 'vitest'
 import { createOpenAICompatProvider } from '@/providers/openai-compat'
-import { getRequestErrorMeta } from '@/providers/retry-policy'
+import { getRequestErrorMeta } from '@/providers/request/retry-policy'
 import { ProviderError, type TranslateRequest } from '@/providers/types'
 
 const cfg = { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'k', model: 'test/model' }

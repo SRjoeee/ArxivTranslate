@@ -2,7 +2,7 @@
 // 端点、API key 常量、请求体形状与响应解析照搬；改为一次请求多条（原版一次一条，端点本身支持数组，
 // 实测 150 条 556 ms，见 RESEARCH.md §6.6）；去掉 preserveLineBreaks 那套换行标记——
 // 我们送的是占位符标记文本，走 html 格式原样发送；去掉 escapeText 依赖（protector 已做转义）。
-import { attachRequestErrorMeta } from './retry-policy'
+import { attachRequestErrorMeta } from './request/retry-policy'
 import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 
 const ENDPOINT = 'https://translate-pa.googleapis.com/v1/translateHtml'

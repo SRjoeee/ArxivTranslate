@@ -3,7 +3,7 @@
 import PQueue from 'p-queue'
 import { cacheKeyFor, type RenderPath } from '@/cache/key'
 import { withRetry, type RetryOptions } from './retry'
-import { attachRequestErrorMeta } from './retry-policy'
+import { attachRequestErrorMeta } from './request/retry-policy'
 import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 
 export interface CacheEntry {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { attachRequestErrorMeta } from '@/providers/retry-policy'
+import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
 import { createTranslateService, type CacheEntry, type CachePort } from '@/providers/translate-service'
 import { ProviderError, type TranslationProvider } from '@/providers/types'
 
