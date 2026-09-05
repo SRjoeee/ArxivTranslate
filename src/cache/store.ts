@@ -178,6 +178,10 @@ export class TranslationCache {
     }
   }
 
+  /**
+   * 清掉过期条目。失败要**抛出去**而不是吞掉：唯一的运行时调用方是 cache-stats，
+   * 吞掉的话统计会把清不掉的过期条目当成功结果报给设置页（Codex 在 #52 指出）
+   */
   async cleanup(now = Date.now()): Promise<void> {
     try {
       await this.db.entries.where('expiresAt').belowOrEqual(now).delete()
@@ -186,6 +190,7 @@ export class TranslationCache {
       for (const [key, record] of this.memory) if (this.isExpired(record, now)) this.memory.delete(key)
     } catch (error) {
       console.warn('[axt] 缓存清理失败', error)
+      throw error
     }
   }
 

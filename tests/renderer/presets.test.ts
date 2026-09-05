@@ -66,11 +66,12 @@ describe('样式预设（§7.5）', () => {
     expect(RULES).toMatch(/html\[data-axt-style="quote"\] \.axt-t:not\(\[data-axt-inline\]/)
   })
 
-  it('装饰一律不落到加载圆环与失败控件上：它们也带 .axt-t 但不是译文（Codex 在 #52 指出）', () => {
-    // gradient 的 color: transparent 会把「重试」按钮的字变透明，正好是最需要点它的时候
+  it('装饰一律不落到加载圆环、失败控件与 side 模式的结构性克隆上：它们也带 .axt-t 但不是译文（Codex 在 #52 指出）', () => {
+    // gradient 的 color: transparent 会把「重试」按钮的字变透明；blur 会把镜像到右栏的公式糊掉
     for (const line of RULES.split('\n')) {
       if (!line.includes('.axt-t')) continue
-      expect([line, line.includes('.axt-pending') && line.includes('.axt-error')]).toEqual([line, true])
+      const excluded = ['.axt-pending', '.axt-error', '.axt-mirror', '.axt-split'].every(c => line.includes(c))
+      expect([line, excluded]).toEqual([line, true])
     }
   })
 

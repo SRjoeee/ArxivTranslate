@@ -30,7 +30,7 @@ describe('prompt', () => {
   })
 
   it('带版本号：目标语言改填英文名后升到 3', () => {
-    expect(PROMPT_VERSION).toBe('3')
+    expect(PROMPT_VERSION).toBe('4')
   })
 
   it('system prompt = 提示词库模板 + 协议块；协议块写明占位符与输出形状', () => {

@@ -10,7 +10,9 @@ import {
 import { englishName } from '@/config/languages'
 import type { TranslateRequest } from './types'
 
-export const PROMPT_VERSION = '3'
+// 4：自定义模板漏写 {{glossary}} 时自动追加术语表——实际发给模型的内容变了，
+// 不升版本旧缓存会照常命中、术语表等于没配（Codex 在 #52 指出）
+export const PROMPT_VERSION = '4'
 
 /** 收发协议：不随提示词库变化 */
 export const PROTOCOL_BLOCK = [

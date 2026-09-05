@@ -69,6 +69,15 @@ describe('TranslationCache', () => {
     expect((await c.stats()).entries).toBe(0)
   })
 
+  it('cleanup 失败时拒绝而不是吞掉：统计不能把清不掉的过期条目当成功结果（Codex 在 #52 指出）', async () => {
+    const c = make()
+    const db = (c as unknown as { db: { entries: { where: unknown } } }).db
+    const original = db.entries.where
+    db.entries.where = () => { throw new Error('IndexedDB 不可用') }
+    await expect(c.cleanup()).rejects.toThrow('IndexedDB 不可用')
+    db.entries.where = original
+  })
+
   it('超大单条与空译文不入库', async () => {
     const c = make({ maxEntryBytes: 10 })
     expect(await c.set('k', 'x'.repeat(100), 'p')).toBe(false)

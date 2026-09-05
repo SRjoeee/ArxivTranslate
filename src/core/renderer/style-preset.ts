@@ -22,8 +22,8 @@ export const DECORATION_PRESETS: readonly StylePreset[] = ['underline', 'dotted'
 export const STYLE_ATTR_NAME = 'data-axt-style'
 
 /** 自定义 CSS 的选择器由我们给出，用户只填花括号里的声明 */
-// 与 presets.css 同一条界线：加载圆环与失败控件也带 .axt-t，但它们不是译文
-export const CUSTOM_STYLE_SELECTOR = 'html[data-axt-style="custom"] .axt-t:not(.axt-pending, .axt-error)'
+// 与 presets.css 同一条界线：加载圆环、失败控件、side 模式的镜像与拆分克隆都带 .axt-t，但都不是译文
+export const CUSTOM_STYLE_SELECTOR = 'html[data-axt-style="custom"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
 
 /**
  * 用户写的是**声明块**，不是完整规则：整段插进一对花括号中间。
