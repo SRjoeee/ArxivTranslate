@@ -1,7 +1,8 @@
 // 配置形状（DESIGN §9）。改形状就升 version 并在 storage.ts 的 migrations 里写迁移。
 import { z } from 'zod'
+import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
 
-export const CONFIG_VERSION = 1
+export const CONFIG_VERSION = 2
 
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
@@ -16,6 +17,11 @@ export const configSchema = z.object({
   }),
   targetLanguage: z.string().min(2),
   mode: z.enum(['stack', 'side', 'only']),
+  /** 提示词库（移植自 Read Frog）：当前选用的 id + 用户自定义 */
+  prompts: z.object({
+    promptId: z.string().min(1),
+    patterns: z.array(z.object({ id: z.string().min(1), name: z.string(), systemPrompt: z.string(), prompt: z.string() })),
+  }).default(DEFAULT_PROMPTS_CONFIG),
 })
 
 export type Config = z.infer<typeof configSchema>
@@ -32,4 +38,5 @@ export const DEFAULT_CONFIG: Config = {
   },
   targetLanguage: 'zh-CN',
   mode: 'stack',
+  prompts: DEFAULT_PROMPTS_CONFIG,
 }

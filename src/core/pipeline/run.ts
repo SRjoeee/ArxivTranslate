@@ -1,5 +1,6 @@
 // 翻译运行循环（DESIGN §4 数据流、§6.3 / §8.2 降级链）。content 侧的纯逻辑，通过 transport 与 background 通信。
 import { markBlocks, type TextBlock } from '@/core/extractor'
+import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate } from '@/core/protector'
 import { enable, renderTable, renderText, setState, type Mode } from '@/core/renderer'
 import type { RenderPath } from '@/cache/key'
@@ -33,6 +34,8 @@ export interface RunOptions {
   concurrency?: number
   /** 视口优先（§10）：取下一批时优先取含此谓词为真的块的批次 */
   isPriority?: (block: Block) => boolean
+  /** 论文级上下文（标题、摘要、术语表），每批都带；章节标题由批次自己补 */
+  context?: TranslateContext
 }
 
 const FATAL_KINDS = new Set(['no-key', 'auth'])
@@ -50,11 +53,13 @@ export async function runTranslation(options: RunOptions): Promise<Progress> {
   markBlocks(blocks)
   for (const block of blocks) setState(block, 'pending')
 
-  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string) =>
-    transport({
-      request: { segments: items, source: 'en', target: options.target, context: sectionTitle ? { sectionTitle } : undefined },
+  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string) => {
+    const context: TranslateContext = { ...options.context, ...(sectionTitle ? { sectionTitle } : {}) }
+    return transport({
+      request: { segments: items, source: 'en', target: options.target, context: Object.keys(context).length ? context : undefined },
       cache: { paper: options.paper, renderPath },
     })
+  }
 
   const noteFatal = (res: Extract<TranslateMessageResponse, { ok: false }>) => {
     if (FATAL_KINDS.has(res.error.kind)) progress.fatal = `${res.error.kind}: ${res.error.message}`

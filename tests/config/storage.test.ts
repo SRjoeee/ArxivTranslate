@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 import { DEFAULT_CONFIG } from '@/config/schema'
 import { configItem, getConfig, setConfig } from '@/config/storage'
@@ -52,5 +52,22 @@ describe('provider 选择', () => {
 
   it('未知 provider 被 schema 拒绝', async () => {
     await expect(setConfig({ ...DEFAULT_CONFIG, provider: 'nope' } as never)).rejects.toThrow()
+  })
+
+  it('v1 配置升级到 v2：补上提示词库，API key 与其他字段原样保留', async () => {
+    // WXT 在 defineItem 时就跑迁移，所以要先写入 v1 数据再重新加载模块
+    const v1 = {
+      version: 1, provider: 'openai-compat',
+      openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-keep', model: 'x/y', thinking: 'disabled' },
+      targetLanguage: 'ja', mode: 'side',
+    }
+    await fakeBrowser.storage.local.set({ config: v1, config$: { v: 1 } })
+    vi.resetModules()
+    const fresh = await import('@/config/storage')
+    const c = await fresh.getConfig()
+    expect(c.version).toBe(2)
+    expect(c.openaiCompat.apiKey).toBe('sk-keep')
+    expect(c.targetLanguage).toBe('ja')
+    expect(c.prompts).toEqual({ promptId: 'default', patterns: [] })
   })
 })

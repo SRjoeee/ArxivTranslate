@@ -149,7 +149,10 @@ export const FIGURE_MEDIA = 'img, svg, object, math, canvas, video, .ltx_picture
 export const MARGIN_ASIDE = '.ltx_pubnotes, .ltx_note'
 
 /** 文档主标题：靠 text-align:center 居中，不能与译文同行（§7.3） */
-const DOCUMENT_TITLE = '.ltx_title_document'
+export const DOCUMENT_TITLE = '.ltx_title_document'
+
+/** 摘要块与它自己的标题（"Abstract"）；论文级上下文取正文时要把标题去掉 */
+export const ABSTRACT = { root: '.ltx_abstract', title: '.ltx_title' } as const
 
 /** 短标题同行的候选：title 单元里除文档主标题外的标题（长度另由渲染层判断） */
 export function isInlineTitleCandidate(el: Element): boolean {

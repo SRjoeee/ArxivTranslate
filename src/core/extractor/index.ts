@@ -113,3 +113,5 @@ export function extract(root: Document | Element): Block[] {
 export function markBlocks(blocks: Block[]): void {
   for (const b of blocks) b.el.setAttribute(ID_ATTR, b.id)
 }
+
+export * from './context'

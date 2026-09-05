@@ -368,8 +368,10 @@ export interface TranslateResult {
 ### 8.2 LLM 调用约定
 
 - 用 AI SDK 7 的 `generateText` + `Output.object({ schema })`（`generateObject` 已被取代）+ zod schema `{ segments: { id, text }[] }`，让结构校验由 SDK 完成；SDK 自身 `maxRetries: 0`，重试交给移植的 retry policy
-- system prompt 固定要素：学术论文翻译；占位符标签必须原样保留、不可增删改；人名/期刊名/会议名保留原文；术语表优先；只返回译文
-- prompt 带版本号 `PROMPT_VERSION`，写入缓存键
+- **提示词分两层** [决定，2026-09-05]：`prompt-library.ts` 移植自 Read Frog（模板变量 `{{targetLanguage}}` `{{input}}` `{{paperTitle}}` `{{abstract}}` `{{sectionTitle}}` `{{glossary}}`、内置提示词 `default` / `precision-rewrite`、用户自定义 `patterns`、按 `promptId` 选择、找不到回退 default），负责"怎么翻"；`prompt.ts` 的**协议块**（JSON segments + 占位符规则 + 输出形状）追加在任何 system prompt 之后，负责"怎么收发"，用户自定义提示词也改不掉它。协议是我们的（AI SDK 结构化输出 + zod），比 Read Frog 的文本分隔符批处理稳，不换；Read Frog 的网页摘要要多调一次 LLM，论文自带 abstract 直接用
+- **元数据放在用户消息里、带 `<document_metadata>` 定界符并声明为不可信参考**：Read Frog 把它放 system prompt；标题 / 摘要是作者写的，讨论 prompt injection 的论文里可能带着指令样文字，进 system 会被当成同级指令（Codex 在 #28 指出）。协议块同时声明 segment 与元数据都是数据不是指令
+- **论文级上下文每批都带**：页面加载时 `paperContext()` 抽一次标题与摘要（摘要去掉 "Abstract" 标题、跳过 MathML `<annotation>` 里的 TeX 源码、截到 1200 字符；必须在翻译前抽，翻译过再抽会把上一轮译文也算进去），经 `RunOptions.context` 进每批 `request.context`，与批次的 `sectionTitle` 合并；代价每批约 300 token 输入
+- prompt 带版本号 `PROMPT_VERSION`（提示词库接入升到 2），写入缓存键；**提示词身份 `promptKey`**（内置用 id，自定义带两段分别编码的全文）与**上下文原文**（标题 / 摘要 / 章节 / 术语表，结构化序列化；免费引擎不看上下文，不带）也进缓存键的 SHA-256 载荷——换了提示词、或同一段文字出现在另一篇论文里，都不能命中旧译文。**不先压成 32 位 hash**：DJB2 撞了外层 SHA-256 也分不开（Codex 在 #28 给出实例 `19k04n01vcr73f` / `1efm0uaep90s9`）；配置 v1→v2 迁移补 `prompts` 字段、保留 API key
 - 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`（默认照 Read Frog：1000 字 / 4 段，provider 并发 8——小批高并发，首屏快）；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
 - 批次失败：对半拆分重试 → 单块 → 标记失败
 

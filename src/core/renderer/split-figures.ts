@@ -11,6 +11,7 @@
 // 实测更糟：面板缩成 160px 还溢出 555px，所以那个变量保持不动。
 import { DOCUMENT_ROOT, FIGURE_MEDIA } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
+import { hashText } from '@/shared/hash'
 import { MIRROR_CLASS } from './mirror'
 import { FOR_ATTR, T_CLASS } from './index'
 
@@ -23,11 +24,8 @@ const KEY_ATTR = 'data-axt-split-key'
 
 /** 译文的签名：数量相同但内容变了（换目标语言重翻）也要重建，只数个数会一直用陈旧的副本（Codex 在 #26 指出） */
 function translationKey(fig: Element): string {
-  let hash = 5381
-  for (const t of Array.from(fig.querySelectorAll(`.${T_CLASS}`))) {
-    for (const ch of `${t.textContent ?? ''}\u0000`) hash = ((hash * 33) ^ ch.charCodeAt(0)) >>> 0
-  }
-  return `${fig.querySelectorAll(`.${T_CLASS}`).length}:${hash.toString(36)}`
+  const texts = Array.from(fig.querySelectorAll(`.${T_CLASS}`), t => t.textContent ?? '')
+  return `${texts.length}:${hashText(JSON.stringify(texts))}`
 }
 
 /**
