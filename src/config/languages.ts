@@ -918,17 +918,25 @@ export function toBcp47(code: string): string {
 }
 
 /**
- * BCP-47 → ISO 639-3，配置 v3→v4 迁移用：先精确反查（zh-TW → cmn-Hant），
- * 再按主语言子标签反查（zh-CN → zh → cmn；表里 cmn 排在 yue 前面，所以 zh 取到 cmn），都没有回退简体中文
+ * BCP-47 → ISO 639-3，配置 v3→v4 迁移用。BCP-47 不分大小写（Codex 在 #39 指出）。
+ * 依次：精确反查（zh-TW → cmn-Hant）；子标签相交——表里同主语言的条目中，取地区 / 文字子标签有交集的
+ * （zh-Hant-TW ∩ zh-TW → cmn-Hant）；中文的繁体文字标签或港澳台地区（zh-Hant、zh-HK、zh-MO）表里没有对应条目，
+ * 归 cmn-Hant（Codex 在 #39 第二轮指出：只按主语言回退会把繁体悄悄换成简体）；再按主语言回退
+ * （zh-CN → zh → cmn，表里 cmn 排在 yue 前面）；都没有回退简体中文
  */
 export function fromBcp47(tag: string): LangCode {
   if (isLangCode(tag)) return tag
-  // BCP-47 不分大小写（zh-tw 与 zh-TW 是同一个标签；Codex 在 #39 指出）
   const wanted = tag.toLowerCase()
-  const entries = Object.entries(ISO6393_TO_6391) as [LangCode, string][]
-  const exact = entries.find(([, bcp]) => bcp.toLowerCase() === wanted)
+  const [primary = '', ...subtags] = wanted.split('-')
+  const entries = (Object.entries(ISO6393_TO_6391) as [LangCode, string][]).map(([code, bcp]) => [code, bcp.toLowerCase().split('-')] as const)
+  const exact = entries.find(([, parts]) => parts.join('-') === wanted)
   if (exact) return exact[0]
-  const primary = wanted.split('-')[0]!
-  const byPrimary = entries.find(([, bcp]) => bcp.split('-')[0]!.toLowerCase() === primary)
-  return byPrimary ? byPrimary[0] : DEFAULT_LANG_CODE
+  const sameLanguage = entries.filter(([, parts]) => parts[0] === primary)
+  const overlapping = sameLanguage.find(([, parts]) => parts.slice(1).some(part => subtags.includes(part)))
+  if (overlapping) return overlapping[0]
+  if (primary === 'zh' && subtags.some(part => TRADITIONAL_CHINESE_SUBTAGS.has(part))) return 'cmn-Hant'
+  return sameLanguage[0]?.[0] ?? DEFAULT_LANG_CODE
 }
+
+/** 繁体中文的文字 / 地区子标签（小写） */
+const TRADITIONAL_CHINESE_SUBTAGS = new Set(['hant', 'tw', 'hk', 'mo'])

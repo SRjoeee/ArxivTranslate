@@ -44,7 +44,10 @@ describe('languages', () => {
     expect(fromBcp47('zh-CN')).toBe('cmn')
     expect(fromBcp47('zh-TW')).toBe('cmn-Hant')
     expect(fromBcp47('zh-tw')).toBe('cmn-Hant')
-    expect(fromBcp47('ZH-Hant-TW')).toBe('cmn')
+    // 文字 / 地区子标签指向繁体的都归 cmn-Hant，不能悄悄换成简体（Codex 在 #39 第二轮指出）
+    for (const tag of ['ZH-Hant-TW', 'zh-Hant', 'zh-HK', 'zh-MO', 'zh-Hant-HK']) expect(fromBcp47(tag)).toBe('cmn-Hant')
+    expect(fromBcp47('zh-Hans')).toBe('cmn')
+    expect(fromBcp47('zh-Hans-SG')).toBe('cmn')
     expect(fromBcp47('zh')).toBe('cmn')
     expect(fromBcp47('ja')).toBe('jpn')
     expect(fromBcp47('en')).toBe('eng')
