@@ -2,8 +2,8 @@
 // 依据 DESIGN.md §5.1 / §5.2 / §5.3 / §5.6 / §6.1，实测依据见 docs/RESEARCH.md §2。
 // 本文件只放数据表与纯函数，不含遍历；遍历在 src/core/extractor。
 
-/** 任何表或函数的行为变化都要递增；进缓存键 */
-export const RULES_VERSION = '0.4.0'
+/** 任何表或函数的行为变化都要递增；进缓存键。0.5.0：单元格取任意深度、格内单元走进去序列化（§5.3） */
+export const RULES_VERSION = '0.5.0'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'

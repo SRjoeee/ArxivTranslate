@@ -64,6 +64,8 @@ export function markPartial(block: Block): void {
 export function clearTranslation(block: Block): void {
   // 脚注归位的标记与副本跟着译文走：译文没了，原件边注要重新露出来
   delocalizeNotes(block.el)
+  // 同行标记也跟着译文走：留着它，没有译文的短标题仍会被压成 inline-block（Codex 在 #30 指出）；renderText 成功后再加回
+  block.el.removeAttribute(INLINE_ATTR)
   const parent = block.el.parentElement
   if (!parent) return
   for (const sibling of Array.from(parent.children)) {

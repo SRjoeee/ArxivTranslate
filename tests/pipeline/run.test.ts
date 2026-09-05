@@ -165,6 +165,25 @@ describe('runTranslation', () => {
     expect(original.hasAttribute(PARTIAL_ATTR)).toBe(false)
   })
 
+  it('短标题再翻失败：删译文的同时摘掉同行标记，否则没有译文的标题仍被压成 inline-block（Codex 在 #30 指出）', async () => {
+    const doc = new DOMParser().parseFromString(
+      '<!doctype html><html><head></head><body><article class="ltx_document">'
+      + '<h2 class="ltx_title ltx_title_section" id="s1">Introduction</h2><p class="ltx_p" id="p1">Text.</p>'
+      + '</article></body></html>', 'text/html',
+    )
+    await run(doc, makeTransport().transport)
+    const title = doc.getElementById('s1')!
+    expect(title.hasAttribute('data-axt-inline')).toBe(true)
+    const { transport } = makeTransport((_req, seg) => (seg.id === 's1' ? { error: 'unknown' } : undefined as unknown as string))
+    await run(doc, transport)
+    expect(title.getAttribute(STATE_ATTR)).toBe('failed')
+    expect(title.hasAttribute('data-axt-inline')).toBe(false)
+    expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="s1"]`)).toBeNull()
+    // 再翻成功：标记加回来
+    await run(doc, makeTransport().transport)
+    expect(title.hasAttribute('data-axt-inline')).toBe(true)
+  })
+
   it('再翻失败的块要删掉上一轮的译文，不能挂着旧译文冒充这一轮（Codex 在 #9 指出）', async () => {
     const doc = docOf()
     await run(doc, makeTransport().transport)
