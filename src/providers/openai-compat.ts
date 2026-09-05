@@ -26,6 +26,15 @@ function isLoopback(baseURL: string): boolean {
   }
 }
 
+/** 端点的 origin，用作缓存身份的一部分；解析不了就用原串（总比把不同端点混成一个好） */
+function endpointOrigin(baseURL: string): string {
+  try {
+    return new URL(baseURL).origin
+  } catch {
+    return baseURL
+  }
+}
+
 export function createOpenAICompatProvider(
   config: OpenAICompatConfig,
   deps: { model?: LanguageModel; prompts?: PromptsConfig } = {},
@@ -42,6 +51,8 @@ export function createOpenAICompatProvider(
     // 本机端点压低速率：Ollama 默认只并行 4 个，多出来的在服务端排队，会撞我们的超时再重试，空转
     ...(isLoopback(config.baseURL) ? { rateLimit: LOOPBACK_RATE_LIMIT } : {}),
     promptKey: promptKey(deps.prompts),
+    // 端点进缓存身份：同名模型在不同端点上是不同的东西（issue #45）。只取 origin，不带路径也不带 key
+    cacheId: `openai-compat:${endpointOrigin(config.baseURL)}`,
     async isAvailable() {
       return hasKey()
     },
