@@ -5,7 +5,9 @@ import type { ProviderStatus } from '@/entrypoints/background/translate-handler'
 import type { Mode } from '@/core/renderer'
 import { getConfig, setConfig } from '@/config/storage'
 import type { Config } from '@/config/schema'
+import { BUILTIN_SOURCE_LANGUAGE } from '@/providers/chrome-builtin'
 import { BUILT_IN_PROMPTS } from '@/providers/prompt-library'
+import { toBcp47 } from '@/config/languages'
 import { sendMessage, sendToActiveTab, type PageStatus } from '@/shared/messages'
 
 const scriptStart = performance.now()
@@ -18,12 +20,26 @@ export function App() {
   const [stats, setStats] = useState<BlockStats | null>(null)
   const [note, setNote] = useState('')
   const [config, setLocalConfig] = useState<Config | null>(null)
+  /** Chrome 内置翻译的语言包状态（§8.4）：downloadable 时要在点击处理函数里 create() 才有用户手势 */
+  const [pack, setPack] = useState<'unsupported' | 'available' | 'downloadable' | 'downloading' | 'unavailable' | null>(null)
+  const [packNote, setPackNote] = useState('')
 
   const refresh = useCallback(() => {
     sendToActiveTab({ type: 'axt:page-status' }).then(setPage).catch(() => setPage(null))
   }, [])
   const loadStats = useCallback(() => {
     sendToActiveTab({ type: 'axt:stats' }).then(setStats).catch(() => setStats(null))
+  }, [])
+  /** 语言包状态（§8.4）：popup 是扩展页面，Translator 在这里同样可用，不必绕 content script */
+  const checkPack = useCallback(async (target: string) => {
+    const api = (globalThis as { Translator?: { availability(o: { sourceLanguage: string; targetLanguage: string }): Promise<string> } }).Translator
+    if (!api) return setPack('unsupported')
+    try {
+      const state = await api.availability({ sourceLanguage: BUILTIN_SOURCE_LANGUAGE, targetLanguage: toBcp47(target) })
+      setPack(state as 'available' | 'downloadable' | 'downloading' | 'unavailable')
+    } catch {
+      setPack('unavailable')
+    }
   }, [])
 
   useEffect(() => {
@@ -36,10 +52,13 @@ export function App() {
       })
       .catch(e => setPing(`后台未响应：${String(e)}`))
     sendMessage({ type: 'axt:provider-status' }).then(setProvider).catch(() => setProvider(null))
-    getConfig().then(setLocalConfig).catch(() => setLocalConfig(null))
+    getConfig().then(config => {
+      setLocalConfig(config)
+      void checkPack(config.targetLanguage)
+    }).catch(() => setLocalConfig(null))
     loadStats()
     refresh()
-  }, [refresh, loadStats])
+  }, [refresh, loadStats, checkPack])
 
   // 页面还在加载时 content script 尚未注入（document_idle），首问会"没有接收方"；
   // 隔 500 ms 再问几次，别一开就判定"不是 arXiv 页面"（Codex 在 #3 指出）
@@ -121,6 +140,26 @@ export function App() {
     }
   }
 
+  /**
+   * 下载语言包。**必须由点击直接触发**：availability 是 downloadable 时无手势 create() 抛 NotAllowedError（RESEARCH §6.1）。
+   * 首次下载期间 availability() 一直是 downloadable、monitor 也没有进度事件（实测 67 s），所以只给不确定态提示
+   */
+  async function downloadPack() {
+    if (!config) return
+    const api = (globalThis as { Translator?: { create(o: { sourceLanguage: string; targetLanguage: string }): Promise<unknown> } }).Translator
+    if (!api) return
+    setPack('downloading')
+    setPackNote('正在下载语言包，首次约需 1 分钟…')
+    try {
+      await api.create({ sourceLanguage: BUILTIN_SOURCE_LANGUAGE, targetLanguage: toBcp47(config.targetLanguage) })
+      setPackNote('已就绪，下次翻译会优先用内置引擎')
+      await checkPack(config.targetLanguage)
+    } catch (e) {
+      setPackNote(`下载失败：${e instanceof Error ? e.message : String(e)}`)
+      await checkPack(config.targetLanguage)
+    }
+  }
+
   async function restorePage() {
     setNote('')
     try {
@@ -183,6 +222,15 @@ export function App() {
               <p style={{ margin: '0 0 8px', padding: 6, background: '#fff4e5', borderRadius: 4, fontSize: 12, lineHeight: 1.5 }}>
                 {page.engine.demoted.displayName}不可用（{page.engine.demoted.kind}），已降级到{page.engine.displayName}。
                 译文质量不如 LLM；修好设置后恢复原文再翻即可切回
+              </p>
+            )}
+            {(pack === 'downloadable' || pack === 'downloading' || packNote) && (
+              <p style={{ margin: '0 0 8px', fontSize: 12, color: '#666' }}>
+                {pack === 'downloadable' && (
+                  <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={downloadPack}>下载离线语言包</button>
+                )}
+                {pack === 'downloading' && <span>正在下载…</span>}
+                {packNote && <span style={{ display: 'block', marginTop: 4 }}>{packNote}</span>}
               </p>
             )}
             <ProgressLine page={page} />
