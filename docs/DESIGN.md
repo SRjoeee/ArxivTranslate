@@ -420,7 +420,7 @@ export interface TranslateResult {
 - 首次下载期间 `availability()` 不会变成 `downloading`，`monitor` 也没有 `downloadprogress` 事件（实测 67 s 内一直是 `downloadable`），UI 用不确定态"正在下载语言包"提示；下载完成后再次 `create()` 才会有 0→1 的进度事件（约 8 s 的本地加载）
 - 语言包按语言对独立下载（en→zh 与 en→ja 各一份）
 - 译文需归一化句号后的多余空格（「。 」→「。」）
-- content script 隔离世界是否同样暴露 `Translator` 待接 `chrome-builtin` 时用真实 content script 验证 [待验证]
+- content script 的隔离世界同样暴露 `Translator`（2026-09-05 实测，Chrome 153，RESEARCH §6.3）：`'Translator' in self` 为真、`availability()` 与主世界一致，可以直接在 content 侧调用
 
 ---
 
