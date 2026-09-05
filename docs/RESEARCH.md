@@ -329,7 +329,18 @@ worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在
 | 启动后 | 1 | 5 ms | 1 ms | 1 ms | 0 ms |
 | 闲置 36 s ×3 | 1 / 1 / 1 | 1 ms | 1 ms | 0–1 ms | 0 ms |
 
-两点结论：(1) `getConfig()` + `getProvider()` + `isAvailable()` 这条路径的**稳态成本约 1 ms**，§6.5 看到的 6.7–77 s 不是代码本身的开销；(2) **Playwright 环境里 worker 从不被回收**（三次闲置后存活数仍为 1——被调试器附着的 service worker 不受 MV3 空闲回收），CDP 的 `ServiceWorker` 域在浏览器级会话上也不可用，所以 §6.5 那种「冷 worker」在这里**造不出来**，三段拆分无法在自动化环境完成。要定位 §6.5 的根因，得在真实 Chrome 里用 `chrome://serviceworker-internals` 手动停掉 worker 后重测，并在 handler 内部分别打 `getConfig` / `getProvider` / `isAvailable` 三个时间戳；这一步留给用户手动验证。在拿到那组数据之前，§8.0「把请求移到 content」的**延迟**理由既未被证实也未被推翻，而它的 **CORS / 混合内容**代价已经被本节实测坐实。
+两点结论：(1) `getConfig()` + `getProvider()` + `isAvailable()` 这条路径的**稳态成本约 1 ms**，§6.5 看到的 6.7–77 s 不是代码本身的开销；(2) **Playwright 环境里 worker 从不被回收**（三次闲置后存活数仍为 1——被调试器附着的 service worker 不受 MV3 空闲回收），CDP 的 `ServiceWorker` 域在浏览器级会话上也不可用，所以 §6.5 那种「冷 worker」在这里**造不出来**，三段拆分无法在自动化环境完成。**真实 Chrome 的冷启动重测（2026-09-06，Chrome 152，用户的浏览器，Claude in Chrome 驱动，构建 `c24ebbd`）**：关掉扩展的所有页面、闲置 40 s（超过 MV3 的 30 s 空闲回收），再重载论文页并读 content 日志。当前架构下 content 在启动路径上唯一发给 background 的消息是 `axt:cache-get`，所以「13 块全部命中缓存」的耗时就是**冷 worker 上一次消息往返 + IndexedDB 读**的上界：
+
+| 轮次 | `start: ready` | `session idle`（13 块全部缓存命中） | 读缓存超时警告 / channel closed |
+|---|---|---|---|
+| 首次加载（热） | 33 ms | 1633 ms（13 请求，1 命中，走 google-web） | 无 |
+| 闲置 40 s #1 | 4 ms | 77 ms | 无 |
+| 闲置 40 s #2 | 22 ms | 81 ms | 无 |
+| 闲置 40 s #3 | 21 ms | 77 ms | 无 |
+
+三轮冷启动的 background 往返都在 80 ms 以内，1.5 s 的读缓存预算一次没触发。**§6.5 记录的 6.7–77 s 在当前代码上重现不出来**——那次测量发生在缓存写入还会扫全库的版本（§9 已修），而且当时 `provider-status` 走的是 background，现在启动路径根本不经过它。结论：worker 冷启动本身不是延迟来源，§8.0「把请求移到 content」的**延迟**理由不成立；它的 **CORS / 混合内容**代价则已被本节实测坐实。仍未覆盖：popup 打开时的 `axt:provider-status`（浏览器工具打不开 popup），需要用户手动确认冷启动后「翻译」按钮是否会灰几秒。
+
+**顺带发现（同一次实测）**：用户的 Chrome 里存着 v7 配置（之前试过设置页分支的构建），而加载的构建是 v6 的，`@wxt-dev/storage` 报 `Version downgrade detected (v7 -> v6)` 拒绝迁移，`getConfig()` 校验失败回退默认值——API key 被静默忽略，链落到 google-web，用户看不出区别。这是 Codex 在 #52 指出的「一条术语让整份配置回退」的同一类问题，只是触发条件换成了「装了旧构建」。值得在 DESIGN §9 记一条：回退默认值时至少要在 popup 上显式提示，不能静默。
 
 ## 7. DESIGN.md 修订清单
 
