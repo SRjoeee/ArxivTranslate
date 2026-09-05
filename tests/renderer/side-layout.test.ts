@@ -6,7 +6,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { extract } from '@/core/extractor'
+import { extract, markBlocks } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { SIDE_DENY, SIDE_DENY_SUBTREE, SIDE_STACK, T_CLASS, isSideContainer } from '@/core/renderer'
 import { docOf } from './helpers'
@@ -18,10 +18,10 @@ const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
 
 /** 从样式表里取出容器判定，样式表是唯一事实来源，改了这里测试自动跟上 */
 function selectorsFromCss(): { container: string; deny: string } {
-  const match = /:where\(:has\(\.axt-t\):not\(:is\(([\s\S]*?)\)\)\)/.exec(CSS)
+  const match = /:where\(:has\(\.axt-t, \[data-axt-id\]\):not\(:is\(([\s\S]*?)\)\)\)/.exec(CSS)
   if (!match) throw new Error('modes.css 里找不到容器判定选择器')
   const deny = match[1]!.replace(/\s+/g, ' ').trim()
-  return { container: `:has(.${T_CLASS}):not(:is(${deny}))`, deny }
+  return { container: `:has(.${T_CLASS}, [data-axt-id]):not(:is(${deny}))`, deny }
 }
 
 /** 模拟渲染：给每个块插一个译文兄弟，形状与 renderText 一致 */
@@ -85,7 +85,7 @@ describe('side 模式的容器覆盖', () => {
     expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) \{\s*padding-inline-start: 0/)
     expect(RULES).toMatch(/&\.ltx_item:has\(> \.ltx_tag\) \{[^}]*padding-inline-start: 0/)
     // 只缩进容器的直接子元素：写成后代选择器会连脚注里的译文一起缩进（实测）
-    expect(RULES).toMatch(/&:is\(\.ltx_item, \.ltx_item \*\) > :where\(:has\(\+ \.axt-t\), \.axt-t\):not\(\.ltx_tag\) \{\s*padding-inline-start: 2\.5rem/)
+    expect(RULES).toMatch(/&:is\(\.ltx_item, \.ltx_item \*\) > :where\(\[data-axt-id\], :has\(\+ \.axt-t\), \.axt-t\):not\(\.ltx_tag\) \{\s*padding-inline-start: 2\.5rem/)
     expect(RULES).not.toMatch(/&\.ltx_item :where\(:has\(\+ \.axt-t\), \.axt-t\)/)
   })
 
@@ -160,4 +160,19 @@ describe('side 模式的容器覆盖', () => {
       }).toMatchSnapshot()
     })
   }
+
+  it('块标记本身就让容器成为两栏网格：会话一开始整页变两栏，不等译文（2026-09-05 修订）', () => {
+    const doc = new DOMParser().parseFromString(
+      '<!doctype html><html><body><article class="ltx_document"><section class="ltx_section"><div class="ltx_para"><p class="ltx_p" id="p1">Text.</p></div></section></article></body></html>',
+      'text/html',
+    )
+    // happy-dom 会按选择器字符串缓存 matches() 的结果、后代改属性也不刷新，所以"打标记前"用另一份文档
+    const untouched = new DOMParser().parseFromString(doc.documentElement.outerHTML, 'text/html')
+    expect(isSideContainer(untouched.querySelector('.ltx_section')!)).toBe(false)
+    markBlocks(extract(doc))
+    expect(isSideContainer(doc.querySelector('.ltx_section')!)).toBe(true)
+    expect(isSideContainer(doc.querySelector('.ltx_para')!)).toBe(true)
+    // 配对规则：带标记的块占左栏，不再要求后面紧跟译文
+    expect(RULES).toMatch(/& > :is\(\[data-axt-id\], :has\(\+ \.axt-t\)\) \{\s*grid-column: 1/)
+  })
 })

@@ -31,8 +31,12 @@ export const SIDE_DENY_SUBTREE = [
   '[data-axt-split]', '.axt-split',
 ].join(', ')
 
-/** 会被 CSS 设成两栏网格的元素 */
-export const SIDE_CONTAINER = `:has(.axt-t):not(:is(${SIDE_DENY}))`
+/**
+ * 会被 CSS 设成两栏网格的元素：内部含有译文**或块标记**的元素（减去排除项）。
+ * 块标记在会话一开始就打上（§10），整页一次性变两栏、之后不再横向跳动；只认译文的话，
+ * 懒加载下预翻译距离之外的块一直通栏、进入边距才缩到左栏（用户反馈，2026-09-05 修订）
+ */
+export const SIDE_CONTAINER = `:has(.axt-t, [data-axt-id]):not(:is(${SIDE_DENY}))`
 
 /** 是不是配对容器（含子树排除）。运行时一律走这里，别直接 matches(SIDE_CONTAINER) */
 export function isSideContainer(el: Element): boolean {
@@ -46,7 +50,7 @@ export function isSideContainer(el: Element): boolean {
  * 块标记在翻译开始的第一刻就写好，所以第一趟 side prep 就能把它们镜像完。
  * 安全边界不变：带块标记或内部含块的子元素仍然不镜像（mirror.ts 的闸 2），整块复制的事故不会重演。
  */
-export const MIRROR_CONTAINER = `:has(.axt-t, [data-axt-id]):not(:is(${SIDE_DENY}))`
+export const MIRROR_CONTAINER = SIDE_CONTAINER
 
 export function isMirrorContainer(el: Element): boolean {
   return el.matches(MIRROR_CONTAINER) && el.closest(SIDE_DENY_SUBTREE) === null

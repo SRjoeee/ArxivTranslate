@@ -171,7 +171,7 @@ function ProgressLine({ page }: { page: PageStatus }) {
   return (
     <p style={{ margin: 0 }}>
       {text}
-      {p.fatal && <span style={{ color: '#b00' }}>｜{p.fatal}</span>}
+      {p.fatal && <span style={{ color: '#b00' }}>｜{p.fatal}。修好配置后点"翻译"继续</span>}
     </p>
   )
 }
