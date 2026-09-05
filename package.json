@@ -15,9 +15,12 @@
     "postinstall": "wxt prepare",
     "fixtures:stats": "tsx scripts/fixtures-stats.ts",
     "check:output": "node scripts/check-output.mjs",
-    "e2e": "node tests/e2e/extension.mjs"
+    "e2e": "node tests/e2e/extension.mjs",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.12",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@wxt-dev/module-react": "^1.2.2",

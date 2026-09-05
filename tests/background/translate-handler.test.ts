@@ -65,7 +65,7 @@ describe('translate handler', () => {
     await vi.advanceTimersByTimeAsync(1_000) // 第三个等下一个令牌
     expect(release.length).toBe(3)
     expect(peak).toBe(3)
-    release.forEach(fn => fn())
+    for (const fn of release) fn()
     await vi.advanceTimersByTimeAsync(0)
     const results = await all
     expect(results.every(r => r.ok)).toBe(true)

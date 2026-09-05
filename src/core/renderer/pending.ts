@@ -2,7 +2,6 @@
 // 译文到达后被真译文替换——renderText / renderTable 开头的 clearTranslation 会删掉同 data-axt-for 的兄弟。
 // 与 §7.1 一致：它只是原块的下一个兄弟，原节点不动。
 import type { Block, TextBlock } from '@/core/extractor'
-import { T_CLASS } from '@/core/marks'
 import { FOR_ATTR, INLINE_ATTR, shouldInline, translationClass } from './index'
 import { cancelSpinnersIn, createSpinnerInside } from './spinner'
 

@@ -149,9 +149,9 @@ export function App() {
       </label>
 
       <p>
-        <button onClick={save}>保存</button>
+        <button type="button" onClick={save}>保存</button>
         {' '}
-        <button onClick={testConnection} disabled={testing}>{testing ? '测试中…' : '测试连接（用已保存的配置）'}</button>
+        <button type="button" onClick={testConnection} disabled={testing}>{testing ? '测试中…' : '测试连接（用已保存的配置）'}</button>
         {' '}
         <span>{notice}</span>
       </p>
