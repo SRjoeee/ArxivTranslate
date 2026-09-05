@@ -74,7 +74,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 
 **数据流（单个块）**
 1. `extractor` 按规则收集所有 Block，打上稳定 id（`data-axt-id`）
-2. `scheduler` 视口优先排队；不可见的块在后台顺序翻完整篇
+2. `scheduler` 只翻进入视口（加预翻译距离）的块；没滚到的块不发请求、不占资源（§10，照搬 Read Frog）
 3. 先查缓存；命中直接渲染
 4. 未命中：`protector` 把块序列化为 `{text, slots}`；按 provider 的 `preservesMarkup` 决定走 markup 路径（整块带占位符）还是 runs 路径（切段）
 5. content 侧的 `queue` 按 provider 并发上限发请求（§8.0：请求不经过 background）；失败退避、重试、必要时切换 fallback provider
@@ -308,6 +308,14 @@ interface ProtectedBlock {
 - 参考 KISS 的做法：一组 CSS 预设（下划线、虚线、淡色、引用块、无样式），通过 `--axt-*` 变量实现，用户可自定义 CSS
 - 译文节点复制原块 class（§7.1），字体、字号、行高、对齐、grid 位置天然与原块一致，`--axt-*` 预设只做叠加装饰。注入的 `<style>` 排在站点样式之后，`.axt-t` 上**不要**写 `font: inherit` 这类会以同等特异度盖掉站点样式的属性（实测会把摘要标题的 1.4rem 和参考文献的字体覆盖成父级默认值）
 
+### 7.6 等待态：加载圆环 [决定，2026-09-05，照搬 Read Frog]
+
+- 请求发出**之前**先在原块后面插一个 pending 译文节点（`.axt-t.axt-pending`，与原块同标签、同 class，`data-axt-for` 指向原块），里面只有一个 6px 的圆环 `<span class="axt-spinner">`。包裹先插、内容后填，与 §7.1 "译文只作为原块的下一个兄弟"完全一致；译文到达后填进同一个节点、去掉 `axt-pending`
+- 圆环照搬 Read Frog `utils/host/translate/ui/spinner.ts`：内联 `!important` 样式（不受站点 CSS 影响）、Web Animations API 转 600ms 一圈、颜色只用一个变量 `--axt-muted`；`prefers-reduced-motion` 时静止；**同时转动的圆环最多 60 个**，超出的是静止环（Read Frog 实测两千多个动画会拖垮主线程）；动画句柄存 WeakMap，删节点前先取消
+- 失败：圆环换成错误提示 + "重试"按钮（Shadow DOM 隔离，§技术栈），节点留着；用户取消（恢复原文 / 关闭翻译）：整个 pending 节点删除，不显示错误
+- side 模式的整理步骤（拆图、镜像、脚注归位、边距对齐）**只认真正的译文**（不带 `axt-pending` 的 `.axt-t`）：pending 节点的高度与译文无关，拿它算 `translationKey` 或复制脚注只会白做一遍。配对规则 `:has(+ .axt-t)` 对 pending 节点照常生效，原块与圆环各占一栏，译文到达时版式不再跳
+- only 模式下 pending 的原块照常可见（隐藏规则只认 `translated`，§7.4），圆环跟在后面
+
 ---
 
 ## 8. Provider 接口
@@ -410,15 +418,25 @@ export interface TranslateResult {
 
 ---
 
-## 10. 调度
+## 10. 调度 [决定，2026-09-05 重做：照搬 Read Frog 的加载模式，用户拍板]
 
-- `IntersectionObserver` 给视口内及其前后各一屏的块最高优先级（参数照 FluentRead：`rootMargin: '600px 0px'`、`threshold: 0.01`，Read Frog 同为 600px）；批次队列每次取批时优先取含临近视口块的批次。IO 首次回调是异步的，而运行循环一开始就同步取走并发数个批次，所以追踪器创建时先按 `getBoundingClientRect` 同步播种一次临近集合，之后以 IO 为准
+**看到哪翻到哪**：只翻视口内与其下方一段距离内的块，没滚到的块不发请求、不占资源。这是 Read Frog 页面翻译**唯一**的模式（`PageTranslationManager`，没有"整篇翻"的开关），做法照搬；它的模块解耦、效果经过验证，能整段搬的整段搬（见 §12 的 `feat/lazy-loading`）。
+
+- 开始翻译时只给所有块打标记（`data-axt-id`、`pending`）并逐块交给一个 `IntersectionObserver`，**不发任何请求**。参数照 Read Frog 的 `pageTranslation.page.preload` 默认值：`rootMargin` **1000px**、`threshold` **0**；设置页暴露为"预翻译距离"（0–10000px，步进 100）与"可见阈值"（0–1），与 Read Frog 同名同义。原先照 FluentRead 的 600px / 0.01 作废
+- 块**第一次**进入视口加边距时才发请求，同时 `unobserve`——一次性；视口外的块永远不会被请求。没有"整篇翻完"的后台队列，想整篇就把预翻译距离调大（Read Frog 也是这么做的）
+- 同一次 IO 回调里进入的块**攒成一批**：一次滚动会让几十个块同时进入，按 §8.2 的 1000 字 / 4 条切批发出，表格整表一批不变；`planBatches` 只对"这一批进入视口的块"运行，不再预先规划整篇。IO 首次回调是异步的，创建时仍按 `getBoundingClientRect` 同步播种一次，首屏不等回调
+- 请求期间原块旁边先插带加载圆环的 pending 节点（§7.6），译文到达后填入；失败换错误提示与"重试"；取消则删除
+- **取消**：恢复原文或关闭翻译时带 session id 撤掉排队与在飞的请求（Read Frog `translation-session` + `cancelPageTranslationRequests` 的做法：进程内的 `AbortController` 一起中止，pending 节点连同圆环一起删）；被撤掉的请求的结果即使返回也不渲染、不写缓存
+- Read Frog 的 `MutationObserver`（动态页面新增内容）与巨型段落拆分（高于三屏的段落按子段落观察）**不搬**：arXiv 页面是静态的，段落也不会高过三屏；将来接其他站点再说
+- popup 的进度语义随之改变：翻译是一个"开着"的状态而不是一次会结束的任务。显示"已翻 / 已进入视口 / 失败"，`total` 只作参考；"翻译中"表示还有在飞的请求，没有在飞的请求即静止，滚动后再次进入"翻译中"
+
+以下不变：
+
 - **插入译文时不做滚动锚定，也不做任何布局读取** [决定，2026-09-05]：视口不跳交给 Chrome 原生 scroll anchoring（`overflow-anchor: auto` 是默认值；实测在视口上方插入 600px，浏览器自动补偿 575px 滚动、锚点位移 0）。早期移植 FluentRead 的 JS 锚定（`elementFromPoint` + `getBoundingClientRect`）每批强制两次全页布局，side 模式下每次 130–150ms、stack 90–100ms（15644 个节点、~700 个 subgrid 容器）；8 个 worker 一百多批下来，全命中缓存的 826 块也要 16.5s，主线程长任务 52 条、每条 ~90ms 首尾相接。去掉后翻译只受网络 / 缓存往返约束
 - **进度事件用带最长等待的合并器，不用纯去抖** [决定，2026-09-05]：翻译中每秒几十次进度回调，150ms 去抖计时器一直被重置，side prep 直到整篇翻完才跑（实测 413 个镜像在最后一刻同时出现，之前公式一直居中横跨两栏）。`createCoalescer(fn, { delay: 150, maxWait: 1000 })`：事件再密也至少每秒整理一次
 - **镜像不等译文** [决定，2026-09-05]：公式与插图本来就没有译文，等它们所在段落的译文到达才镜像是白等。块标记（`data-axt-id`）在翻译开始的第一刻就写好，镜像的容器判定改为 `:has(.axt-t, [data-axt-id])`，第一趟 prep 就把它们全部镜像；闸 2（带块标记或内部含块的不镜像）不变，整块复制的事故不会重演
-- 其余块按文档顺序在后台排队，一篇论文最终全部翻完
-- 每个 provider 一个 `p-queue` 实例，并发上限来自 provider 声明
-- popup 显示进度（已翻 / 总数 / 失败数），失败块可单击重试
+- 每个 provider 一个队列，并发上限来自 provider 声明。**第一步先换成 Read Frog 的 `utils/request/` 目录**：`request-queue`（令牌桶，默认 8 请求/秒、突发 20）+ `batch-queue`（1000 字 / 4 条 / 攒 100ms）+ `priority-queue` + `cancellation`，都是纯工具、自带测试，整目录移植替换 `p-queue`；429 的暂停与暂停后的单探针语义（§8.2）它们原生就有，#30 里手写的那一份到时按清理规矩删
+- 失败块的"重试"按钮在错误提示里（§7.6），popup 不再单独列失败块
 
 ---
 
@@ -460,6 +478,17 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 
 **Phase 3 — 完整 v1**
 - provider 请求移到 content（§8.0）；side / only 模式与宽度逻辑；`chrome-builtin` + `google-web` 与 runs 路径；fallback 链；调度与进度；样式预设；术语表；options 页
+- `feat/lazy-loading`（§10 / §7.6，2026-09-05 列入）：照搬 Read Frog 的加载模式，按目录搬、不按函数挑（CLAUDE.md 的搬运判定）。
+  - **PR 1 `feat/request-queue`**：整目录移植 `utils/request/`（`request-queue` / `batch-queue` / `priority-queue` / `cancellation`，连同它们的测试；同目录的 `retry-policy` 已在）替换 `p-queue` 与 `withRetry`，`translate-service` 按 `background/translation-queues.ts` 的方式组装（rate / capacity / dispatchGate）。纯工具、不碰页面，风险最低，先定下派发接口
+  - **PR 2 `feat/lazy-loading`**：移植 `ui/spinner.ts`、`utils/scheduler.ts`（主线程切片）、`translation-session.ts`、错误提示 + 重试的 React 组件、设置页的"预翻译距离 / 可见阈值"、`document.title` 翻译；pending 节点 + 圆环（§7.6）；`IntersectionObserver` 一次性触发、按回调攒批、session 取消。`PageTranslationManager` 只搬骨架（观察器生命周期、walkId / session 令牌、启停顺序）改绑我们的 `Block[]`，它的四个测试场景改写后带过来；停止时**要**剥掉我们打的标记（§7.1 要求恢复后逐节点相等，它自己不剥）。脚注块在 ar5iv 里 `height: 0` 或折叠、IO 永远判不可见，跟随所在段落一起触发
+  - **搬运取舍**（2026-09-05 讨论，用户拍板：无负担就搬、有负面影响才取舍）。一起搬、暂时用不上：跨标签页去重与 `cancelledScopes` 登记（不跑的分支没有代价）、`document.title` 翻译（一个 head 观察器加一条请求）、work pacer（只有好处）。**不搬，各有具体的负面影响**：
+    - `MutationObserver`：盯整棵 `documentElement` 的子树 / 属性 / 文本；arXiv 页面本身不动，动的是我们插的几千个节点，它的"自己造成的变化不算"过滤器只认 `read-frog-*` 标记，每批译文都会让它重走一遍甚至判定原文变了去重翻。接了是纯负担；真要接得改成认 `axt-` 前缀，那是改写不是搬
+    - 巨型段落拆分（高于三屏的单元按子段落观察）：我们的块里有整表，六百格的表轻松超过三屏，拆开就破坏"整表一块"的模型；`threshold` 0 意味着表顶一进视口就整表触发，收益为零
+    - 仅译文模式的原地替换文本节点：违反 §7.1，恢复后 DOM 对不上；我们的 only 模式用 CSS 隐藏已达同样效果
+    - 纯文本协议与分隔符批处理：Phase 0 实测公式密集段落要占位符 + 结构化输出才稳（§8.2），换回去是降级
+    - 队列放 background：MV3 挂起是实测根因（§8.0），位置不搬，组装方式抄过来
+    - 通用 DOM walker（`dom/traversal.ts` / `filter.ts`）：不接线没有代价，但只有 v2 的其他站点才用，参考仓库钉在快照 commit 上、晚搬不损失，留给 v2
+  - 每个移植文件带来源行并登记 THIRD_PARTY
 
 **Phase 4 — 打磨**
 - 更多 fixture 与规则修正；性能；导出/导入缓存；发布
