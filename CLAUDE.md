@@ -123,6 +123,7 @@ pnpm dev            # WXT 开发模式，自动加载到 Chrome
 pnpm build
 pnpm test
 pnpm test:watch
+pnpm e2e            # 真实浏览器端到端（Playwright 起带扩展的 Chromium，先 pnpm build；首次 npx playwright install chromium）
 pnpm fixtures:stats # Phase 0 的类名直方图脚本（待创建）
 ```
 

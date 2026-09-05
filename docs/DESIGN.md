@@ -449,7 +449,8 @@ export interface TranslateResult {
 | 占位符 | Vitest | 序列化 → 假译文 → 回填，往返后受保护节点等价；校验器对各类破坏（丢 id、多 id、嵌套错）都能识别 |
 | 渲染 | Vitest + happy-dom | 翻译 → 切换三模式 → 恢复，恢复后 DOM 与原始逐节点相等 |
 | provider | Vitest（mock fetch）| 请求拼装与响应解析；免费接口另有可选的 live 测试，默认跳过 |
-| 端到端 | 手动清单 | 真实 arXiv 页面：锚点跳转、脚注弹出、公式渲染、Ctrl+F、打印 |
+| 端到端 | Playwright（`pnpm e2e`，`tests/e2e/extension.mjs`，2026-09-05 起） | 起一个装着 `.output/chrome-mv3` 的 Chromium（`channel: 'chromium'` 的新 headless 支持扩展），驱动设置页与 popup、读控制台与网络：google-web 整篇翻完与速率、刷新命中缓存、翻译中途恢复原文（译文与 `data-axt-*` 全清、不再发请求）、错 key 的 auth 排空整队。不碰用户浏览器与 key，LLM 只测错 key 不花钱。layout 类断言待补（清理期第 4 项） |
+| 手动清单 | 用户在自己的 Chrome | 走真实 key 的 LLM 路径；锚点跳转、脚注弹出、公式渲染、Ctrl+F、打印 |
 
 fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取，覆盖多领域与多结构，含一篇转换失败页；全部为 oxide 0.7.6）。规则测试用 happy-dom 解析，1.8 MB 页面约 0.6 s，可直接跑全量 fixture。
 
