@@ -210,6 +210,12 @@ export default defineContentScript({
         case 'axt:set-mode':
           setPageMode(message.mode).then(r => sendResponse({ mode: r.effective, preference: r.mode }))
           return true
+        case 'axt:retry-failed': {
+          const failed = run?.failed() ?? []
+          void run?.translate(failed)
+          sendResponse({ retried: failed.length })
+          return true
+        }
         case 'axt:page-status':
           sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress })
           return true

@@ -88,6 +88,17 @@ export function App() {
     }
   }
 
+  async function retryFailed() {
+    setNote('')
+    try {
+      const r = await sendToActiveTab({ type: 'axt:retry-failed' })
+      setNote(`已重新提交 ${r.retried} 块`)
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e))
+    }
+    refresh()
+  }
+
   async function restorePage() {
     setNote('')
     try {
@@ -137,6 +148,11 @@ export function App() {
               ))}
             </p>
             <ProgressLine page={page} />
+            {page.progress.failed > 0 && page.progress.state !== 'idle' && (
+              <p style={{ margin: '6px 0 0' }}>
+                <button style={{ font: 'inherit', fontSize: 12 }} onClick={retryFailed}>重试失败的 {page.progress.failed} 块</button>
+              </p>
+            )}
           </section>
         )}
       {note && <p style={{ margin: '8px 0 0', color: '#b00' }}>{note}</p>}

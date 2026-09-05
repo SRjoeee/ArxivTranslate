@@ -301,7 +301,7 @@ interface ProtectedBlock {
 
 - 原块 `display: none`（不是删除、不是替换文本节点）；选择器是 `[data-axt-state="translated"]`，所以只隐藏真的有译文的块
 - 参考文献条目**不再豁免**（2026-09-04 修订）：条目改为按 `.ltx_bibblock` 分段翻译后（§5.4），作者段本来就不翻、没有 `data-axt-state`，只译文模式下自然保留，条目仍完整可读。旧豁免是整条翻译时代的遗留
-- 未翻译成功的块保持原文可见：隐藏规则只匹配 `data-axt-state="translated"`，`pending` / `failed` 不被匹配即可。**不要**写 `display: revert`——revert 会把站点的 display 一并撤销（`.ltx_bibblock` 从 block 变回 inline），2026-09-05 已删（Codex 在 #19 指出）
+- 未翻译成功的块保持原文可见：隐藏规则只匹配 `data-axt-state="translated"`，`pending` / `failed` 不被匹配即可，失败块旁的重试小部件（§7.6）也跟着可见。**不要**写 `display: revert`——revert 会把站点的 display 一并撤销（`.ltx_bibblock` 从 block 变回 inline），2026-09-05 已删（Codex 在 #19 指出）
 
 ### 7.5 译文样式
 
@@ -315,6 +315,7 @@ interface ProtectedBlock {
 - 失败：圆环换成错误提示 + "重试"按钮（Shadow DOM 隔离，§技术栈），节点留着；用户取消（恢复原文 / 关闭翻译）：整个 pending 节点删除，不显示错误
 - side 模式的整理步骤（拆图、镜像、脚注归位、边距对齐）**只认真正的译文**（不带 `axt-pending` 的 `.axt-t`）：pending 节点的高度与译文无关，拿它算 `translationKey` 或复制脚注只会白做一遍。配对规则 `:has(+ .axt-t)` 对 pending 节点照常生效，原块与圆环各占一栏，译文到达时版式不再跳
 - only 模式下 pending 的原块照常可见（隐藏规则只认 `translated`，§7.4），圆环跟在后面
+- **失败态**（PR 2b，2026-09-05）：失败块旁插 `.axt-t.axt-error` 小部件——Shadow DOM 里一个"重试"按钮与带原因的"！"（宿主与"！"都带 `title`），原块标 `failed` 画红线。重试 = 把该块再交给 `run.translate`，先删小部件再插 pending；popup 的"重试失败的 N 块"（`axt:retry-failed`）走同一条路。原因由 pipeline 逐段记下（provider 的 kind + message、"译文的占位符与原文对不上"、"已取消"）。Read Frog 的 React + jotai + @tabler/icons + base-ui 版本不搬（§12 取舍）；side 模式下小部件落在右栏，与它的行内错误块位置相当
 
 ---
 
@@ -483,7 +484,7 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 - `feat/lazy-loading`（§10 / §7.6，2026-09-05 列入）：照搬 Read Frog 的加载模式，按目录搬、不按函数挑（CLAUDE.md 的搬运判定）。
   - **PR 1 `feat/request-queue`（已完成 2026-09-05）**：整目录移植 `utils/request/`（`request-queue` / `batch-queue` / `priority-queue` / `cancellation`，连同它们的测试；同目录的 `retry-policy` 已在）替换 `p-queue` 与 `withRetry`，`translate-service` 按 `background/translation-queues.ts` 的方式组装（rate / capacity / dispatchGate）。纯工具、不碰页面，风险最低，先定下派发接口。scope 取消也一并进了服务（`TranslateService.cancel`），PR 2 的 session id 直接顶替每次运行的 scope
   - **PR 2a `feat/lazy-loading`（已完成 2026-09-05）**：移植 `ui/spinner.ts`、`utils/scheduler.ts`（主线程切片）、`translation-session.ts`；pending 节点 + 圆环（§7.6）；`IntersectionObserver` 一次性触发、按回调攒批、session 取消；`document.title` 翻译；配置 v3 加 `preload`。`PageTranslationManager` 只搬了观察器骨架改绑我们的 `Block[]`（`scheduler/lazy.ts`），启动标记按 12ms 切片；停止时剥掉我们打的标记（§7.1）。脚注块在 ar5iv 里 `height: 0` 或折叠、IO 永远判不可见，挂在所在段落上一起触发（FluentRead 锚点的思路）。e2e 加了"不滚动只翻首屏附近、逐屏滚到底其余跟上"的检查
-  - **PR 2b**：设置页的"预翻译距离 / 可见阈值"两个数字框；失败块的重试 / 错误小部件——Read Frog 的是 React 组件挂 Shadow host，依赖 jotai、@tabler/icons-react、base-ui，每个失败块一个 React root（它自己吃过 #1831 的泄漏亏），三个新依赖加逐块 React root 是负担，改用几十行原生 DOM + Shadow DOM 做同样的两个控件；popup 的失败块列表
+  - **PR 2b（已完成 2026-09-05）**：设置页的"预翻译距离 / 可见阈值"两个数字框；失败块的重试 / 错误小部件——Read Frog 的是 React 组件挂 Shadow host，依赖 jotai、@tabler/icons-react、base-ui，每个失败块一个 React root（它自己吃过 #1831 的泄漏亏），三个新依赖加逐块 React root 是负担，改用几十行原生 DOM + Shadow DOM 做同样的两个控件；popup 的失败块列表
   - **搬运取舍**（2026-09-05 讨论，用户拍板：无负担就搬、有负面影响才取舍）。一起搬、暂时用不上：跨标签页去重与 `cancelledScopes` 登记（不跑的分支没有代价）、`document.title` 翻译（一个 head 观察器加一条请求）、work pacer（只有好处）。**不搬，各有具体的负面影响**：
     - `MutationObserver`：盯整棵 `documentElement` 的子树 / 属性 / 文本；arXiv 页面本身不动，动的是我们插的几千个节点，它的"自己造成的变化不算"过滤器只认 `read-frog-*` 标记，每批译文都会让它重走一遍甚至判定原文变了去重翻。接了是纯负担；真要接得改成认 `axt-` 前缀，那是改写不是搬
     - 巨型段落拆分（高于三屏的单元按子段落观察）：我们的块里有整表，六百格的表轻松超过三屏，拆开就破坏"整表一块"的模型；`threshold` 0 意味着表顶一进视口就整表触发，收益为零

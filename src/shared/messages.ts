@@ -40,6 +40,8 @@ export interface AxtMessages {
   'axt:cache-put': { request: { entries: { key: string; translation: string; paper: string }[] }; response: { written: number } }
   'axt:cache-clear': { request: { paper?: string }; response: { removed: number } }
   'axt:cache-stats': { request: Record<never, never>; response: { entries: number; bytes: number } }
+  /** popup → content：把翻失败的块再翻一遍（§7.6） */
+  'axt:retry-failed': { request: Record<never, never>; response: { retried: number } }
 }
 
 export type AxtMessageType = keyof AxtMessages
