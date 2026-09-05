@@ -8,12 +8,20 @@
 // 后代会落进别人的轨道里（实测 2609.00097：有序列表里的段落被塞进 ar5iv 编号网格的 12px 轨道，
 // 英文横跨分割线、中文挤成 39px 的窄条）。ar5iv 自己的网格（.ltx_enumerate / .ltx_biblist 等）
 // 必须由我们接管而不是排除。
+/**
+ * 多面板的 flex 图：有任何一个格子不是整栏（ltx_flex_size_1）的 .ltx_flex_figure。
+ * 只有这种才排除，而且是**整棵子树**排除（面板并排靠 ar5iv 的 flex，里面的配对自然上下堆叠、不生成镜像）；
+ * 所有格子都是 size_1 的单列 flex 图（常见于表格 + 脚注，实测 2609.03768v1 的 Table 1）格子整栏宽，
+ * 按普通容器接管，表格与脚注左右配对。以前按类名整类排除，单列的也被堆叠规则误伤成上下排。
+ * happy-dom 对 `:not(:is(带 :has 的复杂选择器))` 判定有误，所以这条走 closest()，与其他子树排除一样
+ */
+export const MULTI_PANEL_FLEX = '.ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1))'
+
 export const SIDE_DENY = [
   '.axt-t',                                            // 译文自身不是容器
   'table', 'thead', 'tbody', 'tr', 'td', 'th',         // 表格内部结构，改成网格会毁掉表格
   '.ltx_inline-block', '.ltx_note', '.ltx_listing',    // 行内与预格式化上下文
   '.ltx_p', '.ltx_title', '.ltx_caption', '.ltx_bibblock', // 配对成员本身，内部的译文是脚注那种嵌套
-  '.ltx_flex_figure', '.ltx_flex_cell',                // 多面板插图：ar5iv 用 flex 让面板并排
 ].join(', ')
 
 /**
@@ -29,6 +37,7 @@ export const SIDE_DENY_SUBTREE = [
   '.ltx_note', // 脚注（上面那段）
   // 整块拆开的插图：两份都不参与配对网格，内部一律交给 ar5iv 自己排（DESIGN §7.2）
   '[data-axt-split]', '.axt-split',
+  MULTI_PANEL_FLEX, // 多面板插图（上面那段）
 ].join(', ')
 
 /**
@@ -59,7 +68,7 @@ export function isMirrorContainer(el: Element): boolean {
 // 堆叠区：这些格子里不做左右分栏，配对降级为上下堆叠（modes.css 里有同一份清单，测试守着）。
 // 既然没有右栏，里面就**不能生成镜像**——镜像本来是为了"右栏别空着"，
 // 在堆叠区只会变成同一列里上下两份（实测 2312.17141 的三面板图：每个面板的公式重复了一遍）。
+// 多面板 flex 图不在这里：它整棵子树都不是容器（SIDE_DENY_SUBTREE），里面的配对本来就是块级上下排，镜像也进不去
 export const SIDE_STACK = [
   '.ltx_td', '.ltx_inline-block', // 段内嵌套的容器
-  '.ltx_flex_cell',               // 多面板插图的分格，宽度只有半栏
 ].join(', ')

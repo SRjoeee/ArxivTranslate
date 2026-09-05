@@ -39,6 +39,8 @@ Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起
 | 2609.00245 | 618 | 37556 | 12.9% | 49.6% | 37.5% | 0 |
 | 2609.00246 | 263 | 16279 | 26.9% | 30.6% | 42.4% | 3 |
 
+2026-09-05 为 side 模式版式回归又抓了两篇（未入上表的统计）：2609.04056（math.OC，定理里只含公式的列表项、右侧沟槽的致谢块）、2609.03768（physics.comp-ph，表格 + 脚注在单列 flex 图里），见 `tests/fixtures/arxiv/README.md`。
+
 合计 112,268 个文本节点，漏网 33 个（0.03%）。happy-dom 解析 1.8 MB 页面 618 ms，可直接用于 Vitest。`protected` 占比高是因为 MathML 内部的 `mo` / `mi` / `mn` / `annotation` 都算文本节点。
 
 ### 2.2 (a) 规则中不存在于任何 fixture 的选择器
@@ -179,6 +181,15 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 - `li.ltx_item > .ltx_tag { display: inline; margin-inline-start: -2.5rem; padding-inline-end: .5rem; text-align: end }`——itemize 的标记悬挂 2.5rem，modes.css 里标记槽的 2.5rem 由此而来
 - `.ltx_enumerate { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: .5em; padding-inline-start: 0 }`，`.ltx_enumerate > .ltx_item { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1 }`——enumerate 的编号列按**内容宽度**，长标签（"(Assumption 1)"）在原版式里不会溢出；我们固定 2.5rem 的绝对定位槽会（Codex #25），但站点**没有** `--ltx-enum-leftmargin` 之类的变量可取，按变量取宽的提议不成立
 - 嵌套列表的缩进只有 `.ltx_item > .ltx_para > :is(.ltx_enumerate, .ltx_itemize, .ltx_description) { margin-inline-start: var(--space-xs) }` 加内层自己的编号列；side 模式把标记改成绝对定位后这一层缩进丢了（Codex #25，2609.00245 的 (k.i) 列表），留给真实浏览器布局测试那批一起处理
+
+与 side 模式**宽度契约**直接相关的（2026-09-05 补，DESIGN §7.2）：
+
+- 主题 `body { grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr; grid-template-areas: "... . nav article . ." }`，`--nav-width: minmax(14rem, 25rem)`；第 4 列无命名区域。实测原生：1280px 时 `0 224 832 224 0`，≥ 1800px 时导航封顶 400
+- `.ltx_page_content { margin: 1rem }`（主题覆盖 ar5iv 的 `var(--space-xl) var(--space-sm)`）——文章列减 2rem 才是两栏可用宽
+- ar5iv 右侧沟槽：`.ltx_note_outer` 只在 `@media (width >= 96rem)` 显示（`float: inline-end; padding-inline-end: 3rem; position: relative`），宽度按断点写死：`96rem < width <= 109rem` 为 `width: 20rem; margin-inline-end: -24rem`，`> 109rem` 为 `27rem / -31rem`；`< 96rem` 时 `display: none`，`:focus-within` 弹出。`.ltx_note.ltx_role_footnotetext .ltx_note_outer { position: absolute; inset-inline-start: var(--main-width-margin) }`（`--main-width-margin: 54rem`，全站只有这一处用它）
+- `.ltx_pubnotes.ltx_pubnotes_meta .ltx_pubnotes_content { float: inline-end; width: min(27rem, calc((100vw - var(--main-width)) / 2 - 2rem)); margin-inline-end: calc(1rem - (100vw - var(--main-width)) / 2) }`；`.ltx_note.ltx_note_frontmatter.ltx_role_thanks` 同样的宽度，`position: absolute; inset-inline-end: calc(1rem - (100vw - var(--main-width)) / 2)`（参照文章盒子右缘）；作者区 `.ltx_authors ... :last-child.ltx_role_affiliation / .ltx_role_address { position: absolute; width: min(var(--main-width), 100dvw); inset-inline-start: max(0px, calc((100dvw - var(--main-width)) / 2)) }`。四组都假设文章居中、两侧沟槽等宽
+- 主题 `@media (max-width: 1279px)` 把导航栏改成 `position: fixed` 的抽屉（与 `responsive.ts` 切 stack 的断点一致）
+- `ltx_flex_size_N`：LaTeXML 给 flex 图格子标的份数，`size_1` 整栏、`size_2` 半栏、`size_3` 三分之一栏；fixture 里 21 个 size_1、13 个 size_2/3，单列 flex 图（所有格子都是 size_1）常见于表格加脚注（2609.03768v1 的 Table 1）
 
 ## 4. 参考文件地图（DESIGN.md §4 各模块）
 

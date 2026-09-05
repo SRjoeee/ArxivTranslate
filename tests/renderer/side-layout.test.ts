@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { SIDE_DENY, SIDE_DENY_SUBTREE, SIDE_STACK, T_CLASS, isSideContainer } from '@/core/renderer'
+import { MULTI_PANEL_FLEX, SIDE_DENY, SIDE_DENY_SUBTREE, SIDE_STACK, T_CLASS, isSideContainer } from '@/core/renderer'
 import { docOf } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
@@ -58,19 +58,34 @@ describe('side 模式的容器覆盖', () => {
     }
   })
 
-  it('多面板插图不接管：flex 容器与分格都不算配对容器', () => {
-    // ar5iv 用 flex 让面板并排，接管成网格后每个面板各占一行、撑满文章列（实测 2410.00260）
-    let checked = 0
+  it('多面板插图不接管，单列 flex 图照常接管：只看格子是不是整栏（ltx_flex_size_1）', () => {
+    // ar5iv 用 flex 让面板并排，接管成网格后每个面板各占一行、撑满文章列（实测 2410.00260）；
+    // 但所有格子都是 size_1 的单列 flex 图格子整栏宽，排除它只会把表格与脚注堆成上下排（实测 2609.03768v1 的 Table 1）
+    let multi = 0
+    let single = 0
     for (const file of files) {
-      const doc = new DOMParser().parseFromString(readFileSync(join(FIXTURE_DIR, file), 'utf8'), 'text/html')
+      const html = readFileSync(join(FIXTURE_DIR, file), 'utf8')
+      // 没有 flex 图的 fixture 不解析：12 篇全解析一遍会把 worker 的堆撑爆（实测 4.4 GB RSS 后 OOM）
+      if (!html.includes('ltx_flex_figure')) continue
+      const doc = new DOMParser().parseFromString(html, 'text/html')
       const root = doc.querySelector(DOCUMENT_ROOT)
       if (!root) continue
       fakeTranslate(doc)
-      const flex = Array.from(root.querySelectorAll('.ltx_flex_figure, .ltx_flex_cell'))
-      checked += flex.length
-      expect(flex.filter(el => el.matches(container)).map(el => el.className)).toEqual([])
+      for (const figure of Array.from(root.querySelectorAll('.ltx_flex_figure'))) {
+        const cells = Array.from(figure.querySelectorAll(':scope > .ltx_flex_cell'))
+        const isMulti = cells.some(cell => !cell.classList.contains('ltx_flex_size_1'))
+        expect(figure.matches(MULTI_PANEL_FLEX)).toBe(isMulti)
+        for (const el of [figure, ...cells]) {
+          // 多面板：整棵子树都不接管；单列：含译文的就是普通容器。
+          // 用 isSideContainer 而不是原始选择器：happy-dom 对 :not(:is(带 :has 的复杂选择器)) 判定有误，线上 Chrome 没问题
+          expect(isSideContainer(el)).toBe(!isMulti && el.querySelector(`.${T_CLASS}`) !== null)
+        }
+        if (isMulti) multi++
+        else single++
+      }
     }
-    expect(checked).toBeGreaterThan(0) // fixture 里确实有多面板插图，这条测试不是空跑
+    expect(multi).toBeGreaterThan(0) // fixture 里两种都有，这条测试不是空跑
+    expect(single).toBeGreaterThan(0)
   })
 
   it('列表标记要脱离网格流，并且两栏各挂一份', () => {
@@ -89,10 +104,16 @@ describe('side 模式的容器覆盖', () => {
     expect(RULES).not.toMatch(/&\.ltx_item :where\(:has\(\+ \.axt-t\), \.axt-t\)/)
   })
 
+  it('没有配对的列表项及其镜像也用同一个标记槽：不是网格的项保留 ar5iv 的悬挂标记会伸出栏外', () => {
+    // 实测 2609.04056v1 Definition 1.2：只有公式的第一项标记 x=208、兄弟项 248，压到导航栏上
+    // 槽宽要跟着标记走：写死 2.5rem 时 \item[(Assumption 1)] 这类宽标记会盖住正文（Codex 在 #40 指出）
+    expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) > \.ltx_item:not\(:has\(\.axt-t, \[data-axt-id\]\)\) \{[^}]*grid-template-columns: minmax\(2\.5rem, max-content\)/)
+    expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) > \.ltx_item:not\(:has\(\.axt-t, \[data-axt-id\]\)\) \{[\s\S]*?& > \.ltx_tag \{[^}]*grid-column: 1/)
+  })
+
   it('堆叠区清单：样式表与 side-layout.ts 保持一致（TS 是事实来源）', () => {
-    const stack = /:is\(([^)]*)\)[^{]*\{\s*display: block/.exec(RULES)
-    const normalize = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean).sort().join(',')
-    expect(normalize(stack?.[1] ?? '')).toBe(normalize(SIDE_STACK))
+    // 样式表里的堆叠区规则直接引用 TS 清单的原文（顺序与写法都要一致，选择器里有嵌套括号，不再用正则去抠）
+    expect(RULES).toContain(`:is(${SIDE_STACK}) :is(.ltx_para, .ltx_abstract, :has(.axt-t, [data-axt-id]))`)
   })
 
   it('堆叠区规则不碰嵌套的 .ltx_flex_figure：它本身是 flex，压成 block 会把面板竖着摞起来（Codex 在 #25 指出）', () => {

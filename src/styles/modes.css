@@ -46,7 +46,8 @@ html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption,
    否则每个容器按自己的宽度各切一半，列表里缩进的段落、参考文献条目的分界线会和正文错开
    （实测同一页出现 720 / 715 / 736 三个位置）。 */
 html[data-axt-mode="side"] {
-  --axt-gap: 1.5em;
+  /* 用 rem 不用 em：右侧沟槽的规则要拿它算栏宽，em 会在脚注的 .85rem 字号里被重新解释 */
+  --axt-gap: 1.5rem;
 }
 
 html[data-axt-mode="side"] .ltx_document {
@@ -76,16 +77,16 @@ html[data-axt-mode="side"] .ltx_document {
    165px 高 781px 宽横在正文中间，与中栏译文互相干扰（实测 2312.17141，用户反馈）；
    .ltx_p / .ltx_title / .ltx_caption / .ltx_bibblock 本身就是配对的成员，
    内部若有译文（脚注那种嵌套）不该再开一套两栏。
-   多面板插图（.ltx_flex_figure / .ltx_flex_cell）用 flex 让面板并排，接管成网格后每个面板各占一行、
-   撑满整个文章列（实测 2410.00260：原本 left 321 / 721 各 398 宽，接管后都在 321、798 宽）；
-   flex 可以放心排除——后代要 subgrid 得先是网格项，父级是 flex 就够不着外面的轨道，
-   代价是格内的配对要显式降级为堆叠（见下面的堆叠区规则），否则它们会各自长出隐式两列。
+   多面板插图（有任何一个格子不是整栏 ltx_flex_size_1 的 .ltx_flex_figure）用 flex 让面板并排，接管成网格后每个面板各占一行、
+   撑满整个文章列（实测 2410.00260：原本 left 321 / 721 各 398 宽，接管后都在 321、798 宽），所以连整棵子树一起排除，
+   里面的配对按块级上下堆叠、不生成镜像。所有格子都是 size_1 的单列 flex 图不排除：格子整栏宽，
+   表格与脚注照常左右配对（实测 2609.03768v1 的 Table 1，以前按类名整类排除，被堆叠成上下排）。
    排除项只能是**本身不是网格**的元素：排除一个网格祖先并不能阻止它的后代去 subgrid 那个外来网格。
    ar5iv 的 .ltx_enumerate 曾经在排除清单里，结果列表项内的段落 subgrid 了它的编号网格，
    英文横跨分割线、中文挤成 39px 的窄条（实测 2609.00097）；这类网格必须接管而不是排除。
    整体包在 :where() 里让权重为 0，否则会压过下面的配对规则（实测过这个坑）。
    column-gap 要显式写——.ltx_biblist 自带 3em 的间距，subgrid 会用容器自己的值，右栏偏 12px */
-html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *))) {
+html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *, .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)), .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)) *))) {
   display: grid;
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
@@ -98,7 +99,7 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
    版式由"这一块在翻译会话里"决定，不由"译文到了没"决定（§7.2）。构建会把嵌套编译成扁平选择器 */
 html[data-axt-mode="side"] .ltx_document,
 html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(:is(.axt-t, table, thead, tbody, tr, td, th,
-  .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, .ltx_flex_figure, .ltx_flex_cell, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *))) {
+  .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *, .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)), .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)) *))) {
   & > * {
     grid-column: 1 / -1;
   }
@@ -164,6 +165,31 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
   &:is(.ltx_item, .ltx_item *) > :where([data-axt-id], :has(+ .axt-t), .axt-t):not(.ltx_tag) {
     padding-inline-start: 2.5rem;
   }
+
+  /* 没有配对的项（只有公式的项、被跳过的项）及其镜像也走同一个标记槽。它们不是网格、保留着 ar5iv 的悬挂式标记
+     （itemize：margin-inline-start: -2.5rem），而列表容器的内边距已经归零，悬挂的标记就伸出文章列压到导航栏上
+     （实测 2609.04056v1 Definition 1.2：标记 x=208、兄弟项 248；镜像同样悬挂进栏间距）。
+     display: block 是为了脱离 ar5iv 给 enumerate 项的自带网格 */
+  &:is(.ltx_itemize, .ltx_enumerate, .ltx_description) > .ltx_item:not(:has(.axt-t, [data-axt-id])) {
+    display: grid;
+    /* 标记列**至少** 2.5rem（与配对项的槽同宽，窄标记两边对齐），需要时长到标记的实际宽度：
+       写死 2.5rem 的话 \item[(Assumption 1)] 这类宽标记会盖住正文（Codex 在 #40 指出）。
+       这里不能像配对项那样用绝对定位——绝对定位不占位，槽宽就没法跟着标记走 */
+    grid-template-columns: minmax(2.5rem, max-content) minmax(0, 1fr);
+    margin-inline-start: 0;
+    padding-inline-start: 0;
+
+    & > * {
+      grid-column: 2;
+    }
+
+    & > .ltx_tag {
+      grid-column: 1;
+      margin: 0;
+      padding-inline-end: 0.5rem;
+      text-align: end;
+    }
+  }
 }
 
 /* 表格装进自己那一栏（§7.2）：论文里的数值表最小内容宽度普遍超过半栏——实测同一页三张表是
@@ -185,14 +211,19 @@ html[data-axt-mode="side"] [data-axt-fit="scroll"] {
 }
 
 /* 堆叠区：这些格子里不做左右分栏，配对降级为上下堆叠。
-   表格单元格与 inline-block 是段内嵌套的容器；多面板插图的分格只有半栏宽、本身又是 flex 项，
-   硬分两列会溢出，而且它们够不到文档的轨道（父级是 flex），不降级就会各自长出隐式两列。
+   表格单元格与 inline-block 是段内嵌套的容器，硬分两列会溢出，而且它们够不到文档的轨道，
+   不降级就会各自长出隐式两列（多面板 flex 图不在这里：它整棵子树都不是容器，见上面的排除清单）。
    内层用 :is(...) 而不是 :where(...)：要压过上面 (0,2,1) 的容器规则。
    脚注子树要排除：改它的 display 会把 ar5iv 折叠起来的脚注掀开。
    嵌套的 .ltx_flex_figure 也要排除：它本身是 flex（面板并排），含译文时会命中 :has(.axt-t) 被压成 block，
    内层面板就竖着摞起来（2312.17141 有这种嵌套；Codex 在 #25 指出） */
-html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block, .ltx_flex_cell) :is(.ltx_para, .ltx_abstract, :has(.axt-t, [data-axt-id])):not(:is(.ltx_note, .ltx_note *, .ltx_flex_figure)) {
+html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block) :is(.ltx_para, .ltx_abstract, :has(.axt-t, [data-axt-id])):not(:is(.ltx_note, .ltx_note *, .ltx_flex_figure)) {
   display: block;
+}
+
+/* 单列 flex 图接管成子网格后，ar5iv 的换行占位 .ltx_flex_break 是个零高的空网格项，隐藏 */
+html[data-axt-mode="side"] .ltx_flex_figure:not(.ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1))) > .ltx_flex_break {
+  display: none;
 }
 
 /* 镜像节点只在 side 模式出现（§7.2）：其他模式下它会让公式、图表重复一份 */
@@ -242,16 +273,75 @@ html[data-axt-mode="only"] [data-axt-split] {
   display: none;
 }
 
-/* 宽度（§7.2 [决定]，2026-09-04 重做）：
-   body 是五列命名网格 `1fr nav article nav 1fr`，第 4 列在所有实测页面上都是空的预留列。
-   保留左侧 TOC（收窄），把预留列压到最小，文章列按视口动态取值且永远不超出视口。
-   只覆盖 --main-width 而不动轨道会横向溢出：隐藏导航栏不会收掉它的轨道
-   （实测 1500px 视口：224 + 1440 + 224 = 1888px，溢出 388px）。 */
-html[data-axt-mode="side"] body {
-  --nav-width: minmax(8rem, 12rem);
-}
+/* ── 宽度契约（§7.2 [决定]，2026-09-05 定稿）──────────────────────────────
+   arXiv 的 body 是五列网格 `1fr nav article aside 1fr`（主题 `--nav-width: minmax(14rem, 25rem)`、
+   文章 52rem 居中；第 4 列没有命名区域，只给 ar5iv 挂在文章右侧的边注 / 致谢 / 出版说明留位）。
+   side 模式要把文章列拉宽成两栏，三列一起定，次序是**正文优先**：
+   - 两侧先按"正文吃满 96rem 之后还剩多少"取，下限 14rem、上限 25rem——两个数都是 arXiv 主题 --nav-width 的原生范围
+   - 正文吃掉其余的，封顶 96rem（arXiv 自己的上限）：宽窗口下每栏 740px，与改动之前逐像素相同
+   - 两侧对称，所以文章始终居中；封顶之后多出来的宽度落到两侧的 1fr 页边距（--axt-margin-w）
+   三个 token 都是 100vw 的闭式函数：依赖列宽的规则直接引用，不需要 JS 去量轨道。
+   ar5iv 的 --main-width / --main-width-margin 跟着文章列走。
+
+   **旧版把两侧写死在 minmax(8rem, 12rem)**：导航永远 176px（目录条目最多折 4 行），2560px 视口下
+   两侧各有 512px 的纯空白却不分给导航——用户反馈的就是这个。现在导航从空出来的页边距里拿，
+   1440–2000px 得到 208–216px（折行降到 3 行）、2560px 得到 384px，**正文一个像素都没让**。
+   中途走错的两版：(1) 把导航压到 12rem、正文拿 96rem —— 就是旧版，导航过窄；
+   (2) 按视口给导航 14–25rem、右侧只在 ≥ 96rem 留位 —— 1333px 窗口里导航 267、右侧 16，整篇被推到右边（用户打回）；
+   (3) 正文 clamp(58rem, 62vw, 84rem)、剩余空间两侧均分 —— 居中对称了，但 2000px 下正文从 1536 缩到 1240，
+   每栏 740 → 592，这篇论文 145 张行间公式里 25 张放不下（用户反馈"公式出界"）。按 62vw 分是**让两侧去分正文的宽度**，
+   方向反了：两侧只该拿正文用不掉的那部分。 */
 html[data-axt-mode="side"] {
-  --main-width: min(96rem, calc(100vw - 26rem));
+  --axt-side-w: clamp(14rem, calc((100vw - 96rem) / 2), 25rem);
+  --axt-article-w: min(96rem, calc(100vw - 2 * var(--axt-side-w)));
+  --axt-margin-w: max(0px, calc((100vw - var(--axt-article-w) - 2 * var(--axt-side-w)) / 2));
+  --main-width: var(--axt-article-w);
+  --main-width-margin: calc(var(--axt-article-w) + 1rem);
+}
+/* 正文轨道再套一层"容器宽度减两侧"的上限：token 是按 100vw 算的，而 body 是 width: 100%，
+   非覆盖式滚动条（Windows / Linux 默认）下 100vw 比容器宽出一条滚动条，三条固定轨道的和就会超出容器、
+   横向溢出（Codex 在 #40 指出）。这里的 100% 在 grid-template-columns 里就是网格容器的宽度，正好扣掉滚动条。
+   **不能把三条都写成 minmax(0, …)**：两侧的 1fr 增长上限是无穷，会在"最大化轨道"那一步跟正文一起分空间，
+   实测 1280px 下正文从 832 掉到 704、两侧各多出 64px 空白 */
+html[data-axt-mode="side"] body {
+  grid-template-columns:
+    1fr var(--axt-side-w)
+    min(var(--axt-article-w), calc(100% - 2 * var(--axt-side-w)))
+    var(--axt-side-w) 1fr;
+}
+
+/* 右侧沟槽（≥ 96rem，与 ar5iv 显示边注的断点一致）：ar5iv 的四组规则都用 (100vw - --main-width) / 2 当沟槽宽、
+   边注宽度按 96 / 109rem 写死 20 / 27rem——那是给 52rem 文章配的，我们的沟槽在 1600px 只有 19rem，照写会溢出视口。
+   这些几何改成跟 --axt-side-w 走，显隐与 hover / focus 交互原样不动。盒子一律占 [文章右缘 + 1rem, 文章右缘 + side - 1rem]。
+   96rem 以下 ar5iv 本来就不显示边注（折叠成 hover 弹出），沟槽只是对称的留白。 */
+@media (width >= 96rem) {
+  /* 边注：float: inline-end + 负的 margin-inline-end 推到文章外（ar5iv 按 96 / 109rem 写死 20 / 27rem 两档） */
+  html[data-axt-mode="side"] .ltx_note_outer {
+    box-sizing: border-box;
+    width: calc(var(--axt-side-w) - 2rem);
+    margin-inline-end: calc(1rem - var(--axt-side-w));
+    padding-inline-end: 1rem;
+  }
+  /* 还没翻译的段落里，脚注原件从**左栏**起浮：再多推一栏加一个间距，否则它会横在右栏等译文的位置上
+     （译文到达后原件被 localizeNotes 标记隐藏、副本从右栏起浮，用上面的基本偏移） */
+  html[data-axt-mode="side"] [data-axt-id]:not(.axt-t) .ltx_note_outer {
+    /* 栏宽 = (文章列 - 主题给 .ltx_page_content 的 1rem 左右外边距 - 栏距) / 2 */
+    margin-inline-end: calc(1rem - var(--axt-side-w) - (var(--axt-article-w) - 2rem - var(--axt-gap)) / 2 - var(--axt-gap));
+  }
+  /* 出版说明（float）与致谢（absolute，参照文章盒子的右缘） */
+  html[data-axt-mode="side"] .ltx_pubnotes.ltx_pubnotes_meta .ltx_pubnotes_content {
+    width: calc(var(--axt-side-w) - 2rem);
+    margin-inline-end: calc(1rem - var(--axt-side-w));
+  }
+  html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter.ltx_role_thanks {
+    width: calc(var(--axt-side-w) - 2rem);
+    inset-inline-end: calc(1rem - var(--axt-side-w));
+  }
+  /* 作者区末位的单位 / 地址块：ar5iv 用 absolute 把它铺到文章正下方居中（inset = (100dvw - main) / 2） */
+  html[data-axt-mode="side"] .ltx_authors > :last-child:is(.ltx_role_affiliation, .ltx_role_address) {
+    width: var(--axt-article-w);
+    inset-inline-start: calc(var(--axt-margin-w) + var(--axt-side-w));
+  }
 }
 
 /* 文档主标题与它的译文通栏居中，像论文页眉那样；不参与左右配对。

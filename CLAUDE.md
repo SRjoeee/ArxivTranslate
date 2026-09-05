@@ -126,6 +126,7 @@ pnpm test
 pnpm test:watch
 pnpm lint           # Biome linter；pnpm lint:fix 应用安全修复
 pnpm e2e            # 真实浏览器端到端（Playwright 起带扩展的 Chromium，先 pnpm build；首次 npx playwright install chromium）
+pnpm e2e:layout     # 真实浏览器的 side 模式布局断言（宽度契约、列表标记槽、flex 图配对、边注位置）
 pnpm fixtures:stats # Phase 0 的类名直方图脚本（待创建）
 ```
 

@@ -158,8 +158,8 @@ describe('fixture 不变量', () => {
   /** 合成结构 fixture：覆盖真实论文里没出现过的模板结构（RESEARCH.md §2.12） */
   const SYNTHETIC = 'synthetic-structures.html'
 
-  it('有 10 篇真实论文 + 1 份合成结构', () => {
-    expect(files.filter(f => f !== SYNTHETIC)).toHaveLength(10)
+  it('有 12 篇真实论文 + 1 份合成结构', () => {
+    expect(files.filter(f => f !== SYNTHETIC)).toHaveLength(12)
     expect(files).toContain(SYNTHETIC)
   })
 
