@@ -291,6 +291,28 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 
 ---
 
+## 6.7 请求执行位置：content 侧 fetch 受 CORS 与混合内容双重约束（2026-09-05，issue #42）
+
+**方法**：本地起两个只有 CORS 头不同、其余完全一样的 OpenAI 兼容端点（`/v1/chat/completions` 带 `Access-Control-Allow-Origin: *` 并应答预检；`/nocors/...` 不带任何 CORS 头），用 Playwright 装载一个探针扩展（`host_permissions` 覆盖端点），分别从 **background service worker**、**content script 隔离世界**、**页面主世界** 发同一个带 `Authorization` 头的 POST，服务端记录 Origin、预检与状态。探针在会话临时目录，不进仓库。
+
+| 执行位置 | 端点带 CORS 头 | 端点不带 CORS 头 | 服务端看到的 Origin / 预检 |
+|---|---|---|---|
+| background service worker | 200 | **200** | `chrome-extension://<id>`，**没有预检** |
+| content script（隔离世界） | 200（先发 `OPTIONS` 预检） | **`TypeError: Failed to fetch`** | 页面 origin（`http://localhost:8898`），预检发出、响应缺 CORS 头即失败 |
+| 页面主世界 | 同 content script | 同 content script | 同上 |
+
+再把页面换成真实的 `https://arxiv.org/html/...`、端点保持 `http://127.0.0.1`：页面里的 fetch 直接 `Failed to fetch`，**请求根本没有离开浏览器**（服务端日志为空），background 照常 200。这是混合内容拦截，在 CORS 之前生效，与端点有没有 CORS 头无关。
+
+**结论**：
+1. MV3 下 `host_permissions` **不会**解除 content script 的 CORS 约束：content 的请求带页面 origin、走预检，与页面主世界完全一致（Chrome 85 起的行为，官方文档 developer.chrome.com/docs/extensions/develop/concepts/network-requests）。
+2. background 的请求带扩展 origin、不走预检，不带 CORS 头的端点也能用。
+3. `https` 页面不能调 `http` 端点：本地 Ollama（`http://localhost:11434`）从 content 侧**不可达**，从 background 可达。CLAUDE.md 列出的 Ollama 在当前架构下只有设置页的连接测试（走 background）能通过，正式翻译（走 content）必然失败——两条路径行为不一致，正是 issue #42 指出的问题。
+4. 对 OpenRouter / DeepSeek 这类公开 API，content 侧能否直连取决于对方是否长期给浏览器发 CORS 头，这是我们控制不了的外部条件；background 不依赖它。
+
+**§6.5 的一处错误**：那节写「Read Frog 把 provider 的 fetch 放在 content script、service worker 完全不在请求链路上」。核对参考快照：`utils/host/translate/translate-text.ts:360` 通过 `sendMessage("enqueueTranslateRequest", …)` 把请求发给 background，`entrypoints/background/translation-queues.ts:490` 在 worker 里排队并真正调用模型——Read Frog 的请求**就是在 background 执行的**，只是把等待与队列也放在那里。§6.5 关于 worker 冷启动 6.7–77 s 的测量本身仍有效，但「参考项目怎么绕开」那段的依据不成立，DESIGN §8.0 引用它作为把请求移到 content 的理由之一也随之失效。
+
+**尚未重测**：§6.5 的冷启动延迟只测了一次（2026-09-04），当时没有区分「worker 启动」「读 storage」「消息边界」三段各占多少；issue #42 要求先定位再下结论。在决定把请求移回 background 之前要补这组测量，见 §7 第 24 条。
+
 ## 7. DESIGN.md 修订清单
 
 按章节排列。每条只提建议，是否采纳由设计文档决定。
@@ -320,3 +342,4 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 | 22 | §8 / §10 provider 请求跑在 background | 实测 MV3 的 service worker 会在等待中被挂起，一条无 I/O 的 `provider-status` 冷启动要 6.7–77 s，翻译中途出现"消息通道关闭"报错。建议照 Read Frog 把 provider 的 fetch 移到 content script，background 只保留缓存与配置 | §6.5 |
 | 23 | §8 `google-gtx` 用 `translate_a/single`、`preservesMarkup: false` | 改用 Read Frog 的 `translate-pa.googleapis.com/v1/translateHtml`：实测保留占位符，`preservesMarkup: true`，批量 150 条 556 ms | §6.6 |
 | 20 | §15.1 SVG 图文字按普通块翻译 | 实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics` | §2.9 |
+| 24 | §8.0 请求跑在 content script | 实测 content 侧 fetch 受 CORS 与混合内容约束（§6.7）：不带 CORS 头的端点、`http` 的本地端点（Ollama）从 content 不可达，从 background 可达；连接测试走 background、正式翻译走 content，两条路径行为不一致。且 §8.0 引用的「Read Frog 在 content 发请求」核对为误读。建议：抽离 transport，默认在 background 执行请求（无 CORS、无混合内容、key 不进页面世界），content 只保留调度；先按 issue #42 要求重测冷启动延迟的三段分布，确认 §6.5 的 6.7–77 s 不是我们自己的 storage / 初始化开销，再定 | §6.7 |
