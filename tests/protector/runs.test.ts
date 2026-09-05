@@ -41,3 +41,50 @@ describe('runs 路径', () => {
     expect(() => joinRuns(['only one'], layout, b, document)).toThrow()
   })
 })
+
+describe('降级不能把可点击的内容变成纯文字（issue #44）', () => {
+  const runsOf = (html: string) => {
+    const node = el(html)
+    const block = serialize(node)
+    return { block, layout: splitRuns(block), doc: node.ownerDocument }
+  }
+  const render = (html: string, translate: (r: string) => string = r => `译[${r}]`) => {
+    const { block, layout, doc } = runsOf(html)
+    const holder = doc.createElement('div')
+    holder.append(joinRuns(layout.runs.map(translate), layout, block, doc))
+    return holder
+  }
+
+  it('普通链接整块保留，href 与文字都在，周围照常翻译', () => {
+    const holder = render('<p class="ltx_p">Read <a href="https://example.org">the project</a> now.</p>')
+    const link = holder.querySelector('a')
+    expect(link).not.toBeNull()
+    expect(link?.getAttribute('href')).toBe('https://example.org')
+    expect(link?.textContent).toBe('the project')
+    expect(holder.textContent).toContain('译[Read ]')
+    expect(holder.textContent).toContain('译[ now.]')
+  })
+
+  it('链接内部的文字不进 runs：降级路径不翻它，但也不丢它', () => {
+    const { layout } = runsOf('<p class="ltx_p">Read <a href="https://example.org">the project</a> now.</p>')
+    expect(layout.runs).toEqual(['Read ', ' now.'])
+  })
+
+  it('链接里嵌套元素时整棵子树一起保留，不会被内层的结束标记提前收尾', () => {
+    const holder = render('<p class="ltx_p">See <a href="/x"><em>this <b>paper</b></em></a> too.</p>')
+    expect(holder.querySelector('a em b')?.textContent).toBe('paper')
+    expect(holder.textContent).toContain('译[See ]')
+    expect(holder.textContent).toContain('译[ too.]')
+  })
+
+  it('没有 href 的 <a> 仍按普通 paired 处理：它本来就不可点', () => {
+    const { layout } = runsOf('<p class="ltx_p">Read <a name="anchor">the project</a> now.</p>')
+    expect(layout.runs).toEqual(['Read the project now.'])
+  })
+
+  it('样式标签照旧并入文本（既定取舍：样式可丢，行为不可丢）', () => {
+    const holder = render('<p class="ltx_p">We <em>follow</em> it.</p>')
+    expect(holder.querySelector('em')).toBeNull()
+    expect(holder.textContent).toBe('译[We follow it.]')
+  })
+})
