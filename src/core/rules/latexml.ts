@@ -3,7 +3,7 @@
 // 本文件只放数据表与纯函数，不含遍历；遍历在 src/core/extractor。
 
 /** 任何表或函数的行为变化都要递增；进缓存键。0.5.0：单元格取任意深度、格内单元走进去序列化（§5.3） */
-export const RULES_VERSION = '0.6.0'
+export const RULES_VERSION = '0.6.1'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -184,6 +184,12 @@ export function classify(el: Element): Classification | null {
   if (protect) return { kind: 'protect', rule: protect.id, descend: protect.descend ?? false }
   return null
 }
+
+/**
+ * **带功能的行内元素**：丢了它内容还在，但行为没了。runs 降级路径要整块保留这类节点（§6.5，issue #44）。
+ * arXiv 正文里的链接几乎全是 .ltx_ref 或 mailto，已被 PROTECT_RULES 挡住；这条是给普通 <a> 与 v2 的其他站点兜底
+ */
+export const FUNCTIONAL_INLINE = 'a[href]'
 
 /** 插图与图形（Phase 0 统计脚本用） */
 export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics' } as const
