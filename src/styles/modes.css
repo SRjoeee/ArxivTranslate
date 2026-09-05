@@ -165,6 +165,27 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
   &:is(.ltx_item, .ltx_item *) > :where([data-axt-id], :has(+ .axt-t), .axt-t):not(.ltx_tag) {
     padding-inline-start: 2.5rem;
   }
+
+  /* 没有配对的项（只有公式的项、被跳过的项）及其镜像也走同一个标记槽。它们不是网格、保留着 ar5iv 的悬挂式标记
+     （itemize：margin-inline-start: -2.5rem），而列表容器的内边距已经归零，悬挂的标记就伸出文章列压到导航栏上
+     （实测 2609.04056v1 Definition 1.2：标记 x=208、兄弟项 248；镜像同样悬挂进栏间距）。
+     display: block 是为了脱离 ar5iv 给 enumerate 项的自带网格 */
+  &:is(.ltx_itemize, .ltx_enumerate, .ltx_description) > .ltx_item:not(:has(.axt-t, [data-axt-id])) {
+    display: block;
+    position: relative;
+    margin-inline-start: 0;
+    padding-inline-start: 2.5rem;
+
+    & > .ltx_tag {
+      position: absolute;
+      inset-inline-start: 0;
+      box-sizing: border-box;
+      width: 2.5rem;
+      margin: 0;
+      padding-inline-end: 0.5rem;
+      text-align: end;
+    }
+  }
 }
 
 /* 表格装进自己那一栏（§7.2）：论文里的数值表最小内容宽度普遍超过半栏——实测同一页三张表是

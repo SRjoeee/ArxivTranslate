@@ -89,10 +89,15 @@ describe('side 模式的容器覆盖', () => {
     expect(RULES).not.toMatch(/&\.ltx_item :where\(:has\(\+ \.axt-t\), \.axt-t\)/)
   })
 
+  it('没有配对的列表项及其镜像也用同一个标记槽：不是网格的项保留 ar5iv 的悬挂标记会伸出栏外', () => {
+    // 实测 2609.04056v1 Definition 1.2：只有公式的第一项标记 x=208、兄弟项 248，压到导航栏上
+    expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) > \.ltx_item:not\(:has\(\.axt-t, \[data-axt-id\]\)\) \{[^}]*padding-inline-start: 2\.5rem/)
+    expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) > \.ltx_item:not\(:has\(\.axt-t, \[data-axt-id\]\)\) \{[\s\S]*?& > \.ltx_tag \{[^}]*position: absolute/)
+  })
+
   it('堆叠区清单：样式表与 side-layout.ts 保持一致（TS 是事实来源）', () => {
-    const stack = /:is\(([^)]*)\)[^{]*\{\s*display: block/.exec(RULES)
-    const normalize = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean).sort().join(',')
-    expect(normalize(stack?.[1] ?? '')).toBe(normalize(SIDE_STACK))
+    // 样式表里的堆叠区规则直接引用 TS 清单的原文（顺序与写法都要一致，选择器里有嵌套括号，不再用正则去抠）
+    expect(RULES).toContain(`:is(${SIDE_STACK}) :is(.ltx_para, .ltx_abstract, :has(.axt-t, [data-axt-id]))`)
   })
 
   it('堆叠区规则不碰嵌套的 .ltx_flex_figure：它本身是 flex，压成 block 会把面板竖着摞起来（Codex 在 #25 指出）', () => {
