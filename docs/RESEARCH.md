@@ -256,6 +256,17 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 - ~~content script 的隔离世界是否同样暴露 `Translator`~~ **已实测（2026-09-05，Chrome 153）**：用一个只做探测的临时扩展（不改本项目源码）在 `arxiv.org/html/*` 注入 content script，隔离世界里 `'Translator' in self` 与 `'LanguageDetector' in self` 均为 `true`、`isSecureContext` 为 `true`、`Translator.availability({en→zh})` 与同页主世界同为 `downloadable`（en→ja 亦然）。Web API 确实不受 world 隔离影响，`chrome-builtin` 可以直接在 content script 里用。
 - 语言包大小未测（Chrome 不暴露字节数，`total` 恒为 1）；67 s 的下载时长对应本机网络，仅作量级参考。
 
+### 6.4 service worker 里也有 `Translator`（2026-09-05，Chrome 153，Playwright 装载当前构建）
+
+Codex 在 #50 断言 MV3 的 background service worker 不暴露 `Translator`，据此推论 background 侧的可用性判断永远报「不可用」。实测相反：
+
+| 上下文 | `'Translator' in self` | `Translator.availability({ en → zh })` |
+|---|---|---|
+| background service worker | true（function） | `downloadable` |
+| popup 页面 | true（function） | `downloadable` |
+
+worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在 background 判断 chrome-builtin 是否可用是准确的。仍然成立的边界：worker 里没有用户手势，语言包为 `downloadable` 时 `create()` 抛 `NotAllowedError`，所以下载入口只能放在 popup 的点击处理函数里（DESIGN §8.4）。
+
 ## 6.5 MV3 service worker 是当前延迟的根因（2026-09-04）
 
 页面加载后要等几十秒才开始翻译，逐层测下来结论如下（日志见 content 的 `[axt] start:`）：
@@ -291,6 +302,46 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 
 ---
 
+## 6.7 请求执行位置：content 侧 fetch 受 CORS 与混合内容双重约束（2026-09-05，issue #42）
+
+**方法**：本地起两个只有 CORS 头不同、其余完全一样的 OpenAI 兼容端点（`/v1/chat/completions` 带 `Access-Control-Allow-Origin: *` 并应答预检；`/nocors/...` 不带任何 CORS 头），用 Playwright 装载一个探针扩展（`host_permissions` 覆盖端点），分别从 **background service worker**、**content script 隔离世界**、**页面主世界** 发同一个带 `Authorization` 头的 POST，服务端记录 Origin、预检与状态。探针在会话临时目录，不进仓库。
+
+| 执行位置 | 端点带 CORS 头 | 端点不带 CORS 头 | 服务端看到的 Origin / 预检 |
+|---|---|---|---|
+| background service worker | 200 | **200** | `chrome-extension://<id>`，**没有预检** |
+| content script（隔离世界） | 200（先发 `OPTIONS` 预检） | **`TypeError: Failed to fetch`** | 页面 origin（`http://localhost:8898`），预检发出、响应缺 CORS 头即失败 |
+| 页面主世界 | 同 content script | 同 content script | 同上 |
+
+再把页面换成真实的 `https://arxiv.org/html/...`、端点保持 `http://127.0.0.1`：页面里的 fetch 直接 `Failed to fetch`，**请求根本没有离开浏览器**（服务端日志为空），background 照常 200。这是混合内容拦截，在 CORS 之前生效，与端点有没有 CORS 头无关。
+
+**结论**：
+1. MV3 下 `host_permissions` **不会**解除 content script 的 CORS 约束：content 的请求带页面 origin、走预检，与页面主世界完全一致（Chrome 85 起的行为，官方文档 developer.chrome.com/docs/extensions/develop/concepts/network-requests）。
+2. background 的请求带扩展 origin、不走预检，不带 CORS 头的端点也能用。
+3. `https` 页面不能调 `http` 端点：本地 Ollama（`http://localhost:11434`）从 content 侧**不可达**，从 background 可达。CLAUDE.md 列出的 Ollama 在当前架构下只有设置页的连接测试（走 background）能通过，正式翻译（走 content）必然失败——两条路径行为不一致，正是 issue #42 指出的问题。
+4. 对 OpenRouter / DeepSeek 这类公开 API，content 侧能否直连取决于对方是否长期给浏览器发 CORS 头，这是我们控制不了的外部条件；background 不依赖它。
+
+**§6.5 的一处错误**：那节写「Read Frog 把 provider 的 fetch 放在 content script、service worker 完全不在请求链路上」。核对参考快照：`utils/host/translate/translate-text.ts:360` 通过 `sendMessage("enqueueTranslateRequest", …)` 把请求发给 background，`entrypoints/background/translation-queues.ts:490` 在 worker 里排队并真正调用模型——Read Frog 的请求**就是在 background 执行的**，只是把等待与队列也放在那里。§6.5 关于 worker 冷启动 6.7–77 s 的测量本身仍有效，但「参考项目怎么绕开」那段的依据不成立，DESIGN §8.0 引用它作为把请求移到 content 的理由之一也随之失效。
+
+**冷启动延迟的重测（2026-09-05，Playwright + 当前 main 构建）**：从 popup 页面计时 `axt:ping`、`axt:provider-status`（冷 / 热）与 `chrome.storage.local.get`，四轮（启动后 + 三次闲置 36 s 后）全部落在 **0–5 ms**：
+
+| 轮次 | 测前 worker 存活 | ping | provider-status 冷 | 热 | storage |
+|---|---|---|---|---|---|
+| 启动后 | 1 | 5 ms | 1 ms | 1 ms | 0 ms |
+| 闲置 36 s ×3 | 1 / 1 / 1 | 1 ms | 1 ms | 0–1 ms | 0 ms |
+
+两点结论：(1) `getConfig()` + `getProvider()` + `isAvailable()` 这条路径的**稳态成本约 1 ms**，§6.5 看到的 6.7–77 s 不是代码本身的开销；(2) **Playwright 环境里 worker 从不被回收**（三次闲置后存活数仍为 1——被调试器附着的 service worker 不受 MV3 空闲回收），CDP 的 `ServiceWorker` 域在浏览器级会话上也不可用，所以 §6.5 那种「冷 worker」在这里**造不出来**，三段拆分无法在自动化环境完成。**真实 Chrome 的冷启动重测（2026-09-06，Chrome 152，用户的浏览器，Claude in Chrome 驱动，构建 `c24ebbd`）**：关掉扩展的所有页面、闲置 40 s（超过 MV3 的 30 s 空闲回收），再重载论文页并读 content 日志。当前架构下 content 在启动路径上唯一发给 background 的消息是 `axt:cache-get`，所以「13 块全部命中缓存」的耗时就是**冷 worker 上一次消息往返 + IndexedDB 读**的上界：
+
+| 轮次 | `start: ready` | `session idle`（13 块全部缓存命中） | 读缓存超时警告 / channel closed |
+|---|---|---|---|
+| 首次加载（热） | 33 ms | 1633 ms（13 请求，1 命中，走 google-web） | 无 |
+| 闲置 40 s #1 | 4 ms | 77 ms | 无 |
+| 闲置 40 s #2 | 22 ms | 81 ms | 无 |
+| 闲置 40 s #3 | 21 ms | 77 ms | 无 |
+
+三轮冷启动的 background 往返都在 80 ms 以内，1.5 s 的读缓存预算一次没触发。**§6.5 记录的 6.7–77 s 在当前代码上重现不出来**——那次测量发生在缓存写入还会扫全库的版本（§9 已修），而且当时 `provider-status` 走的是 background，现在启动路径根本不经过它。结论：worker 冷启动本身不是延迟来源，§8.0「把请求移到 content」的**延迟**理由不成立；它的 **CORS / 混合内容**代价则已被本节实测坐实。popup 那条路径由用户手动确认（2026-09-06）：冷启动后点扩展图标，「翻译」按钮**立刻可点**，没有出现灰几秒的情况——`axt:provider-status` 这条唯一还走 background 的启动期消息同样不受 worker 冷启动影响。至此 §6.5 的延迟结论在当前代码上全部推翻。
+
+**顺带发现（同一次实测）**：用户的 Chrome 里存着 v7 配置（之前试过设置页分支的构建），而加载的构建是 v6 的，`@wxt-dev/storage` 报 `Version downgrade detected (v7 -> v6)` 拒绝迁移，`getConfig()` 校验失败回退默认值——API key 被静默忽略，链落到 google-web，用户看不出区别。这是 Codex 在 #52 指出的「一条术语让整份配置回退」的同一类问题，只是触发条件换成了「装了旧构建」。值得在 DESIGN §9 记一条：回退默认值时至少要在 popup 上显式提示，不能静默。
+
 ## 7. DESIGN.md 修订清单
 
 按章节排列。每条只提建议，是否采纳由设计文档决定。
@@ -320,3 +371,4 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 | 22 | §8 / §10 provider 请求跑在 background | 实测 MV3 的 service worker 会在等待中被挂起，一条无 I/O 的 `provider-status` 冷启动要 6.7–77 s，翻译中途出现"消息通道关闭"报错。建议照 Read Frog 把 provider 的 fetch 移到 content script，background 只保留缓存与配置 | §6.5 |
 | 23 | §8 `google-gtx` 用 `translate_a/single`、`preservesMarkup: false` | 改用 Read Frog 的 `translate-pa.googleapis.com/v1/translateHtml`：实测保留占位符，`preservesMarkup: true`，批量 150 条 556 ms | §6.6 |
 | 20 | §15.1 SVG 图文字按普通块翻译 | 实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics` | §2.9 |
+| 24 | §8.0 请求跑在 content script | 实测 content 侧 fetch 受 CORS 与混合内容约束（§6.7）：不带 CORS 头的端点、`http` 的本地端点（Ollama）从 content 不可达，从 background 可达；连接测试走 background、正式翻译走 content，两条路径行为不一致。且 §8.0 引用的「Read Frog 在 content 发请求」核对为误读。建议：抽离 transport，默认在 background 执行请求（无 CORS、无混合内容、key 不进页面世界），content 只保留调度；先按 issue #42 要求重测冷启动延迟的三段分布，确认 §6.5 的 6.7–77 s 不是我们自己的 storage / 初始化开销，再定 | §6.7 |
