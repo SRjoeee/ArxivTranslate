@@ -30,6 +30,11 @@ export interface FallbackStatus {
 
 export interface FallbackService extends TranslateService {
   status(): FallbackStatus
+  /**
+   * 撤销所有降级记录。永久降级（no-key / auth）是「配置问题不会自己好」，但配置问题**可以被用户修好**：
+   * 语言包下载完、key 填好之后，链要回到首选，否则这一页会一直用着兜底引擎直到恢复重开（Codex 在 #50 指出）
+   */
+  reset(): void
 }
 
 /**
@@ -113,11 +118,16 @@ export function createFallbackService(
   /** 恢复原文要撤掉每套队列：漏一个就有在飞请求回来往 DOM 写 */
   const cancel = (scope: string): number => steps.reduce((n, step) => n + step.service.cancel(scope), 0)
 
+  const reset = (): void => {
+    demotions.clear()
+    lastDemoted = undefined
+  }
+
   const status = (): FallbackStatus => ({
     configuredId: steps[0]!.provider.id,
     activeId: available()[0]!.provider.id,
     ...(lastDemoted ? { demoted: lastDemoted } : {}),
   })
 
-  return { translate, cancel, status }
+  return { translate, cancel, status, reset }
 }

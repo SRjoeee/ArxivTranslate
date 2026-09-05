@@ -126,3 +126,54 @@ describe('translate handler + 缓存', () => {
     expect((await cache.stats()).entries).toBe(0)
   })
 })
+
+describe('引擎状态里的降级信息（Codex 在 #50 指出）', () => {
+  const provider = (id: string, available: boolean): TranslationProvider => ({
+    id,
+    displayName: id === 'google-web' ? 'Google 网页翻译（免费）' : id,
+    kind: 'mt',
+    preservesMarkup: true,
+    maxBatchChars: 1000,
+    maxBatchItems: 4,
+    isAvailable: async () => available,
+    translate: async () => ({ segments: [], provider: id }),
+  })
+
+  it('首选可用时不报降级', async () => {
+    const status = createStatusHandler({
+      getProvider: async () => provider('openai-compat', true),
+      getModel: async () => 'm/1',
+      getChain: async () => [provider('openai-compat', true), provider('google-web', true)],
+    })
+    const r = await status()
+    expect(r.available).toBe(true)
+    expect(r.fallback).toBeUndefined()
+  })
+
+  it('首选不可用但链上有兜底时报出来：popup 据此保持「翻译」可点', async () => {
+    const status = createStatusHandler({
+      getProvider: async () => provider('chrome-builtin', false),
+      getModel: async () => undefined,
+      getChain: async () => [provider('chrome-builtin', false), provider('google-web', true)],
+    })
+    const r = await status()
+    expect(r.available).toBe(false)
+    expect(r.fallback).toEqual({ id: 'google-web', displayName: 'Google 网页翻译（免费）' })
+  })
+
+  it('整条链都不可用时不报降级：这时按钮该是灰的', async () => {
+    const status = createStatusHandler({
+      getProvider: async () => provider('openai-compat', false),
+      getModel: async () => undefined,
+      getChain: async () => [provider('openai-compat', false), provider('google-web', false)],
+    })
+    expect((await status()).fallback).toBeUndefined()
+  })
+
+  it('没给 getChain 时行为不变：只看首选引擎', async () => {
+    const status = createStatusHandler({ getProvider: async () => provider('openai-compat', false), getModel: async () => undefined })
+    const r = await status()
+    expect(r.available).toBe(false)
+    expect(r.fallback).toBeUndefined()
+  })
+})

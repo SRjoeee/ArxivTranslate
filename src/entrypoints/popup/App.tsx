@@ -5,7 +5,9 @@ import type { ProviderStatus } from '@/entrypoints/background/translate-handler'
 import type { Mode } from '@/core/renderer'
 import { getConfig, setConfig } from '@/config/storage'
 import type { Config } from '@/config/schema'
+import { BUILTIN_SOURCE_LANGUAGE } from '@/providers/chrome-builtin'
 import { BUILT_IN_PROMPTS } from '@/providers/prompt-library'
+import { toBcp47 } from '@/config/languages'
 import { sendMessage, sendToActiveTab, type PageStatus } from '@/shared/messages'
 
 const scriptStart = performance.now()
@@ -18,12 +20,30 @@ export function App() {
   const [stats, setStats] = useState<BlockStats | null>(null)
   const [note, setNote] = useState('')
   const [config, setLocalConfig] = useState<Config | null>(null)
+  /** Chrome 内置翻译的语言包状态（§8.4）：downloadable 时要在点击处理函数里 create() 才有用户手势 */
+  const [pack, setPack] = useState<'unsupported' | 'available' | 'downloadable' | 'downloading' | 'unavailable' | null>(null)
+  const [packNote, setPackNote] = useState('')
 
   const refresh = useCallback(() => {
     sendToActiveTab({ type: 'axt:page-status' }).then(setPage).catch(() => setPage(null))
   }, [])
   const loadStats = useCallback(() => {
     sendToActiveTab({ type: 'axt:stats' }).then(setStats).catch(() => setStats(null))
+  }, [])
+  /** 引擎可用性。语言包下载完、设置改过之后都要重查，否则"翻译"按钮停在挂载时的旧状态 */
+  const loadProvider = useCallback(() => {
+    sendMessage({ type: 'axt:provider-status' }).then(setProvider).catch(() => setProvider(null))
+  }, [])
+  /** 语言包状态（§8.4）：popup 是扩展页面，Translator 在这里同样可用，不必绕 content script */
+  const checkPack = useCallback(async (target: string) => {
+    const api = (globalThis as { Translator?: { availability(o: { sourceLanguage: string; targetLanguage: string }): Promise<string> } }).Translator
+    if (!api) return setPack('unsupported')
+    try {
+      const state = await api.availability({ sourceLanguage: BUILTIN_SOURCE_LANGUAGE, targetLanguage: toBcp47(target) })
+      setPack(state as 'available' | 'downloadable' | 'downloading' | 'unavailable')
+    } catch {
+      setPack('unavailable')
+    }
   }, [])
 
   useEffect(() => {
@@ -35,11 +55,14 @@ export function App() {
         console.debug(`[axt] ping round-trip ${Math.round(performance.now() - t0)} ms`)
       })
       .catch(e => setPing(`后台未响应：${String(e)}`))
-    sendMessage({ type: 'axt:provider-status' }).then(setProvider).catch(() => setProvider(null))
-    getConfig().then(setLocalConfig).catch(() => setLocalConfig(null))
+    loadProvider()
+    getConfig().then(config => {
+      setLocalConfig(config)
+      void checkPack(config.targetLanguage)
+    }).catch(() => setLocalConfig(null))
     loadStats()
     refresh()
-  }, [refresh, loadStats])
+  }, [refresh, loadStats, checkPack, loadProvider])
 
   // 页面还在加载时 content script 尚未注入（document_idle），首问会"没有接收方"；
   // 隔 500 ms 再问几次，别一开就判定"不是 arXiv 页面"（Codex 在 #3 指出）
@@ -121,6 +144,30 @@ export function App() {
     }
   }
 
+  /**
+   * 下载语言包。**必须由点击直接触发**：availability 是 downloadable 时无手势 create() 抛 NotAllowedError（RESEARCH §6.1）。
+   * 首次下载期间 availability() 一直是 downloadable、monitor 也没有进度事件（实测 67 s），所以只给不确定态提示
+   */
+  async function downloadPack() {
+    if (!config) return
+    const api = (globalThis as { Translator?: { create(o: { sourceLanguage: string; targetLanguage: string }): Promise<unknown> } }).Translator
+    if (!api) return
+    setPack('downloading')
+    setPackNote('正在下载语言包，首次约需 1 分钟…')
+    try {
+      await api.create({ sourceLanguage: BUILTIN_SOURCE_LANGUAGE, targetLanguage: toBcp47(config.targetLanguage) })
+      await checkPack(config.targetLanguage)
+      // 重查引擎可用性：不查的话"翻译"按钮会停在下载前的状态，要关掉 popup 再开一次才可点
+      loadProvider()
+      // 当前页若已在翻译，它的降级链早把内置引擎永久降级了；通知它撤销，后面的块就走离线引擎
+      const reset = await sendToActiveTab({ type: 'axt:engine-ready', id: 'chrome-builtin' }).then(r => r.reset).catch(() => false)
+      setPackNote(reset ? '已就绪，接下来的段落会用离线引擎' : '已就绪，可以直接点"翻译"')
+    } catch (e) {
+      setPackNote(`下载失败：${e instanceof Error ? e.message : String(e)}`)
+      await checkPack(config.targetLanguage)
+    }
+  }
+
   async function restorePage() {
     setNote('')
     try {
@@ -132,7 +179,8 @@ export function App() {
     refresh()
   }
 
-  const canTranslate = !!page?.paper && !!provider?.available && !on
+  // 首选引擎不可用但链上有兜底时照样能翻（§8.5）：不看 fallback 的话会出现「有 Google 兜底、按钮却是灰的」
+  const canTranslate = !!page?.paper && (!!provider?.available || !!provider?.fallback) && !on
   const canRestore = !!page && page.progress.state !== 'idle'
 
   return (
@@ -143,7 +191,15 @@ export function App() {
       </h1>
       <p style={{ margin: '0 0 4px', color: '#666' }}>{ping}</p>
       <p style={{ margin: '0 0 8px', color: '#666' }}>
-        {provider === null ? '引擎状态未知' : provider.available ? `引擎：${provider.providerId} · ${provider.model ?? ''}` : '未配置 API key，请先到设置页填写'}
+        {provider === null
+          ? '引擎状态未知'
+          : provider.available
+            ? `引擎：${provider.providerId} · ${provider.model ?? ''}`
+            : provider.fallback
+              ? `${provider.providerId} 不可用，将使用${provider.fallback.displayName}`
+              : provider.providerId === 'chrome-builtin'
+                ? '内置翻译的语言包还没准备好，点下面的按钮下载'
+                : '未配置 API key，请先到设置页填写'}
       </p>
 
       {page === null
@@ -183,6 +239,15 @@ export function App() {
               <p style={{ margin: '0 0 8px', padding: 6, background: '#fff4e5', borderRadius: 4, fontSize: 12, lineHeight: 1.5 }}>
                 {page.engine.demoted.displayName}不可用（{page.engine.demoted.kind}），已降级到{page.engine.displayName}。
                 译文质量不如 LLM；修好设置后恢复原文再翻即可切回
+              </p>
+            )}
+            {(pack === 'downloadable' || pack === 'downloading' || packNote) && (
+              <p style={{ margin: '0 0 8px', fontSize: 12, color: '#666' }}>
+                {pack === 'downloadable' && (
+                  <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={downloadPack}>下载离线语言包</button>
+                )}
+                {pack === 'downloading' && <span>正在下载…</span>}
+                {packNote && <span style={{ display: 'block', marginTop: 4 }}>{packNote}</span>}
               </p>
             )}
             <ProgressLine page={page} />

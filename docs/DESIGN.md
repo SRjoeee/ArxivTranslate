@@ -386,7 +386,7 @@ export interface TranslateResult {
 | `openai-compat` | Vercel AI SDK `@ai-sdk/openai-compatible` 的 `createOpenAICompatible({ baseURL })`，覆盖 OpenRouter（默认端点）、DeepSeek、Ollama 等；默认模型取便宜快速档，设置页可改 | true |
 | `anthropic` | AI SDK `@ai-sdk/anthropic` | true |
 | `gemini` | AI SDK `@ai-sdk/google` | true |
-| `chrome-builtin` | `Translator` API（Chrome 138+ 桌面），类型来自 `@types/dom-chromium-ai`，约定见 §8.4 | true（实测保留标签与 void / paired 占位符）|
+| `chrome-builtin` | `Translator` API（Chrome 138+ 桌面），类型来自 `@types/dom-chromium-ai`，约定见 §8.4；2026-09-05 实现 | true（实测保留标签与 void / paired 占位符）|
 | `google-web` | `translate-pa.googleapis.com/v1/translateHtml`，移植 Read Frog `utils/host/translate/api/google.ts`；一次请求多条，body `[[[items...], from, to], "wt_lib"]` | true（实测原样保留 void / paired 占位符）|
 
 `preservesMarkup: true` 的免费引擎仍走 §6.3 的校验，失败后降级 runs；runs 路径退为纯兜底。
@@ -424,8 +424,10 @@ export interface TranslateResult {
 - `isAvailable()` 以 `Translator.availability({ sourceLanguage, targetLanguage })` 为准：`available` 直接可用；`downloadable` / `downloading` 需要**用户手势**——只能在 popup 的点击处理函数里调用 `create()` 触发语言包下载，否则抛 `NotAllowedError`；模型就绪后 `create()` 不再需要手势（1 ms）
 - 首次下载期间 `availability()` 不会变成 `downloading`，`monitor` 也没有 `downloadprogress` 事件（实测 67 s 内一直是 `downloadable`），UI 用不确定态"正在下载语言包"提示；下载完成后再次 `create()` 才会有 0→1 的进度事件（约 8 s 的本地加载）
 - 语言包按语言对独立下载（en→zh 与 en→ja 各一份）
+- **实现约定**（2026-09-05）：`isAvailable()` **只认 `available`**——`downloadable` / `downloading` 都要用户手势，链上自动降级时拿不到，`create()` 会抛 `NotAllowedError`；下载入口因此只放在 popup 的点击处理函数里，且只给不确定态提示（首次下载期间没有进度事件）。**会话创建不接任何一批的 signal**（Codex 在 #50 指出）：会话是所有批次共用的，模型加载要几秒到十几秒，期间并发的批次都等同一个 Promise；把首个批次的 signal 传进 `create()`，那一批一超时就会把共用会话连根拒掉、其余批次全收到 `aborted`，而降级链对 `aborted` 既不重试也不降级，整页翻译就断在这里。单次翻译的取消仍然生效。**并发闸是 provider 级的**（同上）：批次是 pipeline 按**首选**引擎的上限规划的，降级链把同一个调用原样转过来——首选是 `google-web`（8000 字 / 100 条）时，会一口气对本地模型发起 100 个并发推理，正好在需要兜底时把它压垮。闸门用一个 provider 实例共享的信号量守 `BUILTIN_MAX_ITEMS = 20`，**不是在一次调用内分批**：队列可以同时派发多个批次，只管一次调用就等于没管（Codex 在 #50 指出）。**会话创建有独立超时**（同上，60 s，实测本地加载约 8.6 s）：共用的会话 Promise 既然不接任何一批的 signal，就必须有自己的到期机制——否则一次永不返回的 `create()` 会长驻缓存，之后每次重试都在等同一个死 Promise；超时按 `timeout` 上报（可重试、可降级），并把表项删掉让下一次真的重建；超时还要通过 provider 自己的 `AbortController` **真的中止**底层模型加载，否则重试再起一次、挂着的那次照旧在跑，一个标签页里越积越多。**语言包下载完要通知进行中的会话**：下载前就开始翻译的页面已经把 `chrome-builtin` 永久降级（`no-key`），不撤销的话这一页会一直走在线兜底直到恢复重开；popup 下载成功后发 `axt:engine-ready` 给当前页，content 调 `FallbackService.reset()` 撤销降级记录，后面的块就回到离线引擎（Codex 在 #50 指出）。**会话按语言对缓存**（照 KISS `builtinAI.js` 的 `#translatorMap`）：模型就绪后 `create()` 仍要约 8.6 s 本地加载，每批新建会话会把 10 ms 的翻译拖成秒级；`create` 失败时把表项删掉以便重试。错误分类：`NotAllowedError` / `NotSupportedError` → `no-key`（缺的是手势或语言对支持，重试无用，让链永久降级它）、`AbortError` → `aborted`、其余 → `unknown`。译文按 §6.2 的实测归一化中日韩标点后的多余空格
+- **e2e 覆盖不到**：headless Chromium 里语言包是 `downloadable`，下载要用户手势且约 1 分钟，不适合进回归。单测用注入的假 `Translator` 覆盖全部分支，真实链路由手动验证；`pnpm e2e` 只保证内置引擎不可用时链的行为不变
 - 译文需归一化句号后的多余空格（「。 」→「。」）
-- content script 隔离世界是否同样暴露 `Translator` 待接 `chrome-builtin` 时用真实 content script 验证 [待验证]
+- content script 的隔离世界同样暴露 `Translator`（2026-09-05 实测，Chrome 153，RESEARCH §6.3）：`'Translator' in self` 为真、`availability()` 与主世界一致，可以直接在 content 侧调用
 
 ---
 
@@ -433,7 +435,7 @@ export interface TranslateResult {
 
 硬规则 4 要求"失败必须可恢复并触发 fallback 链，不能让扩展整体挂掉"。在这之前，key 过期、额度用尽或网络抖动会让 `run.ts` 命中 `no-key` / `auth` 后 `scheduler.disconnect()`，整页翻译停死、读者对着半篇译文干等。
 
-- **链的形状**：配置里选的引擎在前，其后接不与它重复的免费引擎（当前只有 `google-web`，`chrome-builtin` 接上后插在它之前）。组装在 `providers/index.ts` 的 `buildChain`，两道过滤：`isAvailable()` 为假的剔除（免得链里躺着必然失败的一环），但**首个引擎不可用时保留**——popup 要据此提示"未配置 API key"，而不是悄悄换成免费引擎
+- **链的形状**：配置里选的引擎在前，其后接不与它重复的免费引擎，顺序是 `chrome-builtin` → `google-web`（内置离线、单句 10–20 ms、不受限流，所以在前；语言包没下载时它的 `isAvailable()` 为假，自动被跳过）。组装在 `providers/index.ts` 的 `buildChain`，两道过滤：`isAvailable()` 为假的剔除（免得链里躺着必然失败的一环），但**首个引擎不可用时保留**——popup 要据此提示"未配置 API key"，而不是悄悄换成免费引擎
 - **不进 `translate-service`** [决定]：那里已经是"一个 provider 一套队列 + 缓存 + 批处理"的闭包，缓存键带 `providerId | model | promptKey`，不同引擎的译文天然分开存。链做成外面薄薄一层 `providers/fallback.ts`（约 110 行）：每个步骤一个完整服务，链只管在失败时把**同一个 call** 交给下一步。塞进服务内部会把队列、攒批、缓存三件事和引擎选择耦在一起
 - **降级期限分两档**：`no-key` / `auth` 是配置问题、不会自己好，本会话内永久降级；`network` / `timeout` / `rate-limit` / `invalid-response` / `unknown` 是瞬时的，降级 60s 冷却后自动恢复，该引擎一旦成功立即清空记录。队列自己的重试（retry-policy）跑完才会走到链上，所以链不叠加重试；冷却是为了避免持续故障时每次调用都白等一遍最长 120s 的批次超时。`aborted` 永不降级也永不记账——会话取消不是引擎的错，换个引擎重来只会再被取消一次
 - **全部降级后退回最后一步**：宁可再失败一次并把错误如实报给 `run.ts`（它据此停下并画失败小部件），也不能出现"无引擎可用"的状态

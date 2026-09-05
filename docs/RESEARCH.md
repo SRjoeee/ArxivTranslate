@@ -253,7 +253,7 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 
 ### 6.3 未覆盖
 
-- 本次在页面主世界执行；content script 的隔离世界是否同样暴露 `Translator`，待 Phase 1 有 WXT 骨架后用真实 content script 验证（预期可用，Web API 不受 world 隔离影响）。
+- ~~content script 的隔离世界是否同样暴露 `Translator`~~ **已实测（2026-09-05，Chrome 153）**：用一个只做探测的临时扩展（不改本项目源码）在 `arxiv.org/html/*` 注入 content script，隔离世界里 `'Translator' in self` 与 `'LanguageDetector' in self` 均为 `true`、`isSecureContext` 为 `true`、`Translator.availability({en→zh})` 与同页主世界同为 `downloadable`（en→ja 亦然）。Web API 确实不受 world 隔离影响，`chrome-builtin` 可以直接在 content script 里用。
 - 语言包大小未测（Chrome 不暴露字节数，`total` 恒为 1）；67 s 的下载时长对应本机网络，仅作量级参考。
 
 ## 6.5 MV3 service worker 是当前延迟的根因（2026-09-04）
