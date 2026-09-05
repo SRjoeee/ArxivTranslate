@@ -30,6 +30,10 @@ export function App() {
   const loadStats = useCallback(() => {
     sendToActiveTab({ type: 'axt:stats' }).then(setStats).catch(() => setStats(null))
   }, [])
+  /** 引擎可用性。语言包下载完、设置改过之后都要重查，否则"翻译"按钮停在挂载时的旧状态 */
+  const loadProvider = useCallback(() => {
+    sendMessage({ type: 'axt:provider-status' }).then(setProvider).catch(() => setProvider(null))
+  }, [])
   /** 语言包状态（§8.4）：popup 是扩展页面，Translator 在这里同样可用，不必绕 content script */
   const checkPack = useCallback(async (target: string) => {
     const api = (globalThis as { Translator?: { availability(o: { sourceLanguage: string; targetLanguage: string }): Promise<string> } }).Translator
@@ -51,14 +55,14 @@ export function App() {
         console.debug(`[axt] ping round-trip ${Math.round(performance.now() - t0)} ms`)
       })
       .catch(e => setPing(`后台未响应：${String(e)}`))
-    sendMessage({ type: 'axt:provider-status' }).then(setProvider).catch(() => setProvider(null))
+    loadProvider()
     getConfig().then(config => {
       setLocalConfig(config)
       void checkPack(config.targetLanguage)
     }).catch(() => setLocalConfig(null))
     loadStats()
     refresh()
-  }, [refresh, loadStats, checkPack])
+  }, [refresh, loadStats, checkPack, loadProvider])
 
   // 页面还在加载时 content script 尚未注入（document_idle），首问会"没有接收方"；
   // 隔 500 ms 再问几次，别一开就判定"不是 arXiv 页面"（Codex 在 #3 指出）
@@ -152,8 +156,10 @@ export function App() {
     setPackNote('正在下载语言包，首次约需 1 分钟…')
     try {
       await api.create({ sourceLanguage: BUILTIN_SOURCE_LANGUAGE, targetLanguage: toBcp47(config.targetLanguage) })
-      setPackNote('已就绪，下次翻译会优先用内置引擎')
+      setPackNote('已就绪，可以直接点"翻译"')
       await checkPack(config.targetLanguage)
+      // 重查引擎可用性：不查的话"翻译"按钮会停在下载前的状态，要关掉 popup 再开一次才可点
+      loadProvider()
     } catch (e) {
       setPackNote(`下载失败：${e instanceof Error ? e.message : String(e)}`)
       await checkPack(config.targetLanguage)
@@ -182,7 +188,13 @@ export function App() {
       </h1>
       <p style={{ margin: '0 0 4px', color: '#666' }}>{ping}</p>
       <p style={{ margin: '0 0 8px', color: '#666' }}>
-        {provider === null ? '引擎状态未知' : provider.available ? `引擎：${provider.providerId} · ${provider.model ?? ''}` : '未配置 API key，请先到设置页填写'}
+        {provider === null
+          ? '引擎状态未知'
+          : provider.available
+            ? `引擎：${provider.providerId} · ${provider.model ?? ''}`
+            : provider.providerId === 'chrome-builtin'
+              ? '内置翻译的语言包还没准备好，点下面的按钮下载'
+              : '未配置 API key，请先到设置页填写'}
       </p>
 
       {page === null
