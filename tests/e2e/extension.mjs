@@ -88,7 +88,8 @@ async function scrollThrough(page) {
   }
 }
 const countDom = page => page.evaluate(() => ({
-  translations: document.querySelectorAll('.axt-t:not(.axt-mirror):not(.axt-pending)').length,
+  translations: document.querySelectorAll('.axt-t:not(.axt-mirror):not(.axt-pending):not(.axt-error)').length,
+  errorWidgets: document.querySelectorAll('.axt-error').length,
   pendingNodes: document.querySelectorAll('.axt-pending').length,
   failed: document.querySelectorAll('[data-axt-state="failed"]').length,
   pending: document.querySelectorAll('[data-axt-state="pending"]').length,
@@ -106,6 +107,19 @@ await options.getByRole('button', { name: /测试连接/ }).click()
 const testText = await (await options.waitForSelector('main p[style*="background"]', { timeout: 30_000 })).textContent()
 check('设置页测试连接（background 路径，google-web）', /ms/.test(testText) && !/失败/.test(testText), testText)
 await options.screenshot({ path: `${SHOTS}/options.png` })
+
+// ── 设置页：预翻译距离（配置 v3 的 preload）保存后重载仍在 ─────────────
+const marginInput = 'input[type="number"] >> nth=0'
+await options.fill(marginInput, '300')
+await options.getByRole('button', { name: '保存', exact: true }).click()
+await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+await options.reload({ waitUntil: 'domcontentloaded' })
+await options.waitForFunction(() => document.querySelector('input[type="number"]')?.value === '300', null, { timeout: 5_000 }).catch(() => undefined)
+const marginBack = await options.inputValue(marginInput)
+check('设置页：预翻译距离保存后重载仍是 300', marginBack === '300', `读回 ${marginBack}`)
+await options.fill(marginInput, '1000')
+await options.getByRole('button', { name: '保存', exact: true }).click()
+await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 
 // ── 论文 1：看到哪翻到哪（§10）：不滚动只翻首屏附近；逐屏滚到底其余跟上；标题翻译；速率 ────
 {
@@ -187,6 +201,9 @@ await options.screenshot({ path: `${SHOTS}/options.png` })
   await sleep(2_000)
   // 首波只有首屏附近的几批（令牌桶突发 20 封顶）；第一个 401 回来就排空整队，不该再有第二波
   check('错 key：首波 ≤ 20 个请求，auth 后整条队列停下（不重试、没有第二波）', requests.length <= 20 && /fatal: auth/.test(done?.text ?? ''), `${requests.length} 个请求；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
+  const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
+  const idle = idleOf(done)
+  check('失败块旁有重试 / 原因小部件（§7.6）', !!idle && widgets > 0 && widgets === idle.failed, `${widgets} 个小部件，${idle?.failed ?? '?'} 个失败块`)
   await page.close()
 }
 
