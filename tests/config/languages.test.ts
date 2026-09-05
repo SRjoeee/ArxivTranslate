@@ -36,6 +36,9 @@ describe('languages', () => {
     expect(toBcp47('jpn')).toBe('ja')
     // 表里 yue 也是 zh，但端点直接认 yue（实测返回粤语）；压成 zh 就成了普通话
     expect(toBcp47('yue')).toBe('yue')
+    // ckb（索拉尼）与 kmr（库尔曼吉）表里都是 ku，端点分得清（实测），ckb 保留原码
+    expect(toBcp47('ckb')).toBe('ckb')
+    expect(toBcp47('kmr')).toBe('ku')
     const noShort = LANG_CODES.find(code => !(code in ISO6393_TO_6391))!
     expect(toBcp47(noShort)).toBe(noShort)
   })

@@ -50,5 +50,8 @@ export function buildPrompts(request: TranslateRequest, prompts: PromptsConfig =
   let prompt = renderTemplate(template.prompt, values)
   // 自定义提示词漏写了 {{input}} 也得把原文发出去
   if (!template.prompt.includes(getTokenCellText('input'))) prompt = `${prompt}\n\n${values.input}`
+  // 漏写了 {{targetLanguage}} 模型就不知道译成哪种语言——协议块只讲收发，不点名语言（Codex 在 #39 指出）
+  const mentionsTarget = `${template.systemPrompt}\n${template.prompt}`.includes(getTokenCellText('targetLanguage'))
+  if (!mentionsTarget) prompt = `Target language: ${values.targetLanguage}\n\n${prompt}`
   return { system, prompt }
 }

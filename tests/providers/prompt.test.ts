@@ -11,6 +11,15 @@ const request: TranslateRequest = {
 }
 
 describe('prompt', () => {
+  it('自定义提示词两段都没写 {{targetLanguage}} 时，用户消息前面补一行目标语言', () => {
+    const prompts = { promptId: 'mine', patterns: [{ id: 'mine', name: 'mine', systemPrompt: 'Be terse.', prompt: '{{input}}' }] }
+    const { prompt } = buildPrompts(request, prompts)
+    expect(prompt.startsWith('Target language: Simplified Mandarin Chinese')).toBe(true)
+    // 写了就不重复补
+    const withTarget = { promptId: 'mine', patterns: [{ id: 'mine', name: 'mine', systemPrompt: 'Translate into {{targetLanguage}}.', prompt: '{{input}}' }] }
+    expect(buildPrompts(request, withTarget).prompt.startsWith('Target language:')).toBe(false)
+  })
+
   it('带版本号：目标语言改填英文名后升到 3', () => {
     expect(PROMPT_VERSION).toBe('3')
   })

@@ -22,6 +22,10 @@ const TOKEN_HINTS: Record<(typeof PROMPT_TOKENS)[number], string> = {
   glossary: '术语表',
 }
 
+/** 新建提示词的起点：点名目标语言并带上原文，只填名称也能用（Codex 在 #39 指出只有 {{input}} 的模板不知道译成哪种语言） */
+const NEW_SYSTEM_PROMPT = `You are a professional ${getTokenCellText('targetLanguage')} translator of academic papers.`
+const NEW_USER_PROMPT = `Translate the following into ${getTokenCellText('targetLanguage')}:\n\n${getTokenCellText('input')}`
+
 const field = { display: 'block', width: '100%', boxSizing: 'border-box' as const, padding: '6px 8px', font: 'inherit', marginTop: 4 }
 const small = { display: 'block', color: '#666', fontSize: 12 }
 const row = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #eee' }
@@ -39,7 +43,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
 
   function open(mode: EditorMode, template?: PromptTemplate) {
     setMessage('')
-    setEditor({ mode, draft: template ?? { id: uuid(), name: '', systemPrompt: '', prompt: getTokenCellText('input') } })
+    setEditor({ mode, draft: template ?? { id: uuid(), name: '', systemPrompt: NEW_SYSTEM_PROMPT, prompt: NEW_USER_PROMPT } })
   }
 
   /** 内置只读；"复制并自定义"给一份新 id 的副本，保存后直接选用（Read Frog 的做法） */

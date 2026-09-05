@@ -907,10 +907,11 @@ export function label(code: LangCode): string {
 const BCP47: Partial<Record<LangCode, string>> = ISO6393_TO_6391
 
 /**
- * 两字母码撞车的语言不能压成同一个标签：yue 与 cmn 在表里都是 zh，发 zh 就成了普通话。
- * Google 的 translateHtml 直接认 yue（实测返回"巴士站喺邊"，zh 返回"公交车站在哪里"；Codex 在 #39 指出）
+ * 表里被压成同一个两字母码、而端点其实分得清的语言，保留 ISO 639-3 码直接发（Codex 在 #39 两轮指出）：
+ * yue 与 cmn 都是 zh，发 zh 就成了普通话（实测 yue 返回"巴士站喺邊"，zh 返回"公交车站在哪里"）；
+ * ckb（索拉尼）与 kmr（库尔曼吉）都是 ku，发 ku 就成了库尔曼吉（实测 ckb 返回阿拉伯字母的 "وێستگەی پاس"，ku / kmr 返回拉丁字母的 "Rawestgeha"）
  */
-const BCP47_OVERRIDES: Partial<Record<LangCode, string>> = { yue: 'yue' }
+const BCP47_OVERRIDES: Partial<Record<LangCode, string>> = { yue: 'yue', ckb: 'ckb' }
 
 export function toBcp47(code: string): string {
   if (!isLangCode(code)) return code
