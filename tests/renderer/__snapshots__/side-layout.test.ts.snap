@@ -7,7 +7,7 @@ exports[`side 模式的容器覆盖 > 2312.17141.html：配对能否连到翻译
     "ltx_inline-block": 4,
     "ltx_note": 2,
   },
-  "connected": "817/826",
+  "connected": "819/828",
 }
 `;
 
@@ -16,7 +16,7 @@ exports[`side 模式的容器覆盖 > 2312.17527.html：配对能否连到翻译
   "blockedBy": {
     "ltx_note": 4,
   },
-  "connected": "164/168",
+  "connected": "168/172",
 }
 `;
 
@@ -25,7 +25,7 @@ exports[`side 模式的容器覆盖 > 2401.00418.html：配对能否连到翻译
   "blockedBy": {
     "ltx_note": 2,
   },
-  "connected": "291/293",
+  "connected": "292/294",
 }
 `;
 
@@ -34,7 +34,7 @@ exports[`side 模式的容器覆盖 > 2401.00596.html：配对能否连到翻译
   "blockedBy": {
     "ltx_note": 15,
   },
-  "connected": "174/189",
+  "connected": "175/190",
 }
 `;
 
@@ -44,7 +44,7 @@ exports[`side 模式的容器覆盖 > 2410.00260.html：配对能否连到翻译
     "ltx_flex_figure": 2,
     "ltx_note": 2,
   },
-  "connected": "216/220",
+  "connected": "219/223",
 }
 `;
 
@@ -53,7 +53,7 @@ exports[`side 模式的容器覆盖 > 2507.00150.html：配对能否连到翻译
   "blockedBy": {
     "ltx_note": 7,
   },
-  "connected": "188/195",
+  "connected": "195/202",
 }
 `;
 
@@ -62,7 +62,7 @@ exports[`side 模式的容器覆盖 > 2608.29808.html：配对能否连到翻译
   "blockedBy": {
     "ltx_inline-block": 13,
   },
-  "connected": "346/359",
+  "connected": "350/363",
 }
 `;
 
@@ -78,7 +78,7 @@ exports[`side 模式的容器覆盖 > 2609.00245.html：配对能否连到翻译
   "blockedBy": {
     "ltx_note": 11,
   },
-  "connected": "665/676",
+  "connected": "666/677",
 }
 `;
 
@@ -87,14 +87,14 @@ exports[`side 模式的容器覆盖 > 2609.00246.html：配对能否连到翻译
   "blockedBy": {
     "ltx_note": 9,
   },
-  "connected": "534/543",
+  "connected": "538/547",
 }
 `;
 
 exports[`side 模式的容器覆盖 > 2609.03768.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
 {
   "blockedBy": {},
-  "connected": "178/178",
+  "connected": "179/179",
 }
 `;
 
@@ -103,7 +103,7 @@ exports[`side 模式的容器覆盖 > 2609.04056.html：配对能否连到翻译
   "blockedBy": {
     "ltx_note": 2,
   },
-  "connected": "743/745",
+  "connected": "745/747",
 }
 `;
 

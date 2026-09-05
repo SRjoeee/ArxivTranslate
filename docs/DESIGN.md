@@ -119,6 +119,7 @@ interface Block {
 | `.ltx_bibblock` | 参考文献条目内的片段（作者 / 标题 / 出处）；没有分段的条目用 `.ltx_bibitem` 兜底，见 5.4 |
 | `.ltx_acknowledgements` | 致谢。正文是容器里的裸文本，容器本身就是单元；它的 run-in 标题**不单独成块**（2026-09-04 修订），否则外层单元会把标题当 void 占位符克隆一份英文，页面上出现两个英文标题加一段中文正文（实测 2609.00095）。不成块时标题是成对占位符，随外层一起翻、原位还原。`.ltx_keywords` 同理 |
 | `.ltx_keywords` | 关键词 |
+| `.ltx_personname` | 作者姓名（2026-09-06 起，见 §5.2 的决定）。是 `.ltx_creator` 里的 `<span>`，译文作为兄弟 span 跟在原名后面，天然行内；名字里的 `<sup>*</sup>` 脚注标记走成对占位符原位还原 |
 | `.ltx_contact`, `.ltx_role_affiliation`, `.ltx_role_address`, `.ltx_dates`, `.ltx_date` | 作者的机构、联系方式、日期。**2026-09-04 修订**：作者区从"整块跳过"改为"默认翻译"，只排除姓名与邮箱。原策略会漏掉致谢性质的作者注（如《Attention Is All You Need》的 “†Equal contribution. Listing order is random…”，它在 `.ltx_creator > .ltx_note` 里）|
 | `.ltx_role_dedicatory`, `.ltx_item`, `.ltx_marginpar`, `.ltx_indexentry`, `.ltx_cv_item_label`, `.ltx_cv_item_content`, `.ltx_cv_entry_date` | 献词、列表项裸文本、边注、索引词条、CV 字段。这些没在抓过的真实论文里出现，由 `tests/fixtures/arxiv/synthetic-structures.html` 守护（RESEARCH.md §2.12）|
 
@@ -131,7 +132,6 @@ interface Block {
 | `.ltx_tag` | 公式编号、章节号、图表号、列表符号、代码行号 |
 | `.ltx_listing`, `.ltx_listingline`, `.ltx_listing_data`, `.ltx_verbatim`, `pre`, `code` | 代码、verbatim、隐藏的代码数据。算法框 `figure.ltx_float.ltx_algorithm` / `.ltx_float_algorithm` 内部即 `.ltx_listingline`，由本条覆盖，框内 `.ltx_caption` 正常翻译 |
 | `.ltx_text.ltx_font_typewriter` | 等宽文本（视为代码）|
-| `.ltx_personname` | 作者姓名：音译后引用检索会失效（2026-09-04 修订：作者区不再整块跳过）|
 | `.ltx_author_before`, `.ltx_author_after` | 作者之间的连接词（“ and ”“, ”），单独成块会打断姓名列表 |
 | `.ltx_classification` | MSC / ACM 分类号，如 “Primary: 11L07” |
 | `.ltx_ERROR`, `.ltx_FATAL`, `.ltx_WARNING`, `.ltx_INFO` | LaTeXML 的转换错误与提示，不是论文内容 |
@@ -139,6 +139,14 @@ interface Block {
 | `svg`, `.ltx_picture` | TikZ 图，实测没有可翻译文字，见 §15.1 |
 | `.ltx_ERROR` | LaTeXML 转换错误块（也会出现在转换失败页 "Untitled Document" 上，扩展须安静处理）|
 | `.ltx_page_navbar`, `.ltx_TOC` | 导航栏与目录。位于翻译根之外，列出仅供渲染层隐藏用 |
+
+- **作者姓名也翻** [决定，2026-09-06，用户拍板]：作者区的其余部分（机构、联系方式、日期、作者注）2026-09-04 就已经放开，只剩姓名还挡着，理由是"音译后引用检索会失效"。这条理由在**双语**阅读器上站不住：stack 与 side 模式里原名就在译名旁边，要复制去检索的人拿得到原文；只有 `only` 模式会把原名藏起来，那是该模式对所有内容的固有取舍，不该由姓名单独承担。放开后 `.ltx_personname` 从跳过规则挪到翻译单元。
+
+  **fixture 实测**（12 篇共 30 个 `.ltx_personname`）：全部位于 `article.ltx_document` 内的 `.ltx_creator` 里，**参考文献里一个都没有**——引文作者段仍由 §5.4 的 `bib-authors` 单独跳过，不受这条影响。结构一致：纯文本，个别带 `<sup>*</sup>` 脚注标记（走成对占位符）；个别模板会把两位作者塞进同一个元素（`Matías Blaña and Marcelo D. Mora`），整体翻也正确。
+
+  **译文质量实测**（google-web，免费引擎里最差的情况）：30 个里 28 个是正常音译，中文名还能还原成汉字（`Yuan Xia` → 袁霞、`Haipeng Cai` → 蔡海鹏、`Fumihiro Imoto` → 井本文宏，具体用字是猜的）。一个翻车：**`Brian Street` → 布莱恩街**，姓氏被当成普通名词。约 3% 的错误率，且错得显眼、原文就在旁边。LLM 有论文标题与摘要作上下文，表现应当更好。**没有为此改 prompt**：为几个姓名给每一批都加一句约束不划算，而 `PROMPT_VERSION` 一升会把所有缓存作废；这条留待有真实反馈再议。
+
+  改这条要升 `RULES_VERSION`（进缓存键），已升到 0.7.0。姓名之间的连接词 `.ltx_author_before` / `.ltx_author_after` 仍然跳过——它们单独成块会打断姓名列表。
 
 - **带环境名的 `.ltx_tag` 要翻译** [决定，2026-09-05，用户反馈]：LaTeXML 把定理环境、图表、算法、附录的**名字**也放进 `.ltx_tag`，`Definition 1.1.` 整体被当编号保护，中文读者看到的还是英文。按细分类名区分：`ltx_tag_theorem` / `ltx_tag_figure` / `ltx_tag_table` / `ltx_tag_float` / `ltx_tag_appendix` / `ltx_tag_part` / `ltx_tag_chapter` 参与翻译，其余（equation、section、subsection、ref、item、note）仍作 void。**光看类名不够**：LaTeXML 给子图面板的标签也用 `.ltx_tag_figure`，内容是纯标识符 `(a)` `(b)` `(c)`（387 个带名 tag 里有 5 个，Codex 在 #53 指出），翻了会被模型改写、与面板的对应关系断掉。所以再加一道内容判定 `isNamedTag`：类名在清单里，**去掉只含标识符的括号段之后**仍含连续两个及以上字母才翻（括号里有非罗马数字的词就保留：`(Figure 1)` 整体带括号的标签不能连环境名一起丢掉；Codex 在 #53 指出）。只数字母不够——面板标识符可以是 `(ii)` `(iii)` 这种多字母罗马数字；而括号本来就是 LaTeXML 给标识符的形状，环境名从不带括号（`Definition 1.2 (Hall set)` 去掉括号后仍有 Definition，照样要翻）。依据是全部 12 篇 fixture 里 1241 个 `.ltx_tag` 的实测分布：theorem 的 246 个全部形如 "Definition 1"、table 的 43 个全是 "Table 1:"、figure 的 63 个里 58 个是 "Figure 1."、appendix 20 个全是 "Appendix A"、float 13 个全是 "Algorithm 1"；反过来 equation 的 344 个里只有 13 个带字母（`(let.lin)` 这类 LaTeX 标签，动不得），section / subsection / ref 的 439 个里带字母的全是罗马数字（II、III.1），note 的 54 个是脚注标记。**罗马数字编号的一律不翻**：2026-09-05 用 google-gtx 实测（Codex 在 #53 指出），`Table IV:` → `表四：`、`Table X:` → `表十：`、`Part I` → `第一部分`，而指向它的 `.ltx_ref` 是受保护的原文，一翻正文与交叉引用就对不上；阿拉伯数字（`Table 4:` → `表 4：`）、字母编号（`Appendix A` → `附录A`）、括号面板（`Figure 1(a)`）实测都原样保留。Google 自己也只把 I / V / X / L / M 当数字，单个 C、D 当字母，`ROMAN_ID` 照此判定；复合编号看首段（`Table IV.1` 实测 → 表四.1，`IV.1` / `IV-A` 都算罗马编号），大小写都算（LaTeX `\roman` 给出的 `Table iv:` 实测 → 表四：）。审计脚本 `fixtures-stats.ts` 的规则命中数同样走 `classify()`，不按选择器数，否则会把这些放行的 tag 记成 protect/tag。同一篇论文的编号风格是一致的，读者不会同时看到「表 4」与「Table IV」。fixture 上的结果：387 个带名 tag 中 368 个翻、19 个保护（5 个面板标签 + 13 张罗马编号的表 + `Part I`）。改这条要升 `RULES_VERSION`（进缓存键），已升到 0.6.2。实测 2609.04056v1：定理标题块从 34 个增加到 75 个，`Definition 1.2 (Hall set).` → `定义 1.2（大厅布置）。`
 
