@@ -32,7 +32,7 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.5.0')
+    expect(RULES_VERSION).toBe('0.5.1')
   })
 })
 
