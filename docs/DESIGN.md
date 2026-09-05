@@ -458,6 +458,8 @@ export interface TranslateResult {
 - **坏译文不入库、重发不读库** [决定，2026-09-05]：markup 路径的请求带 `accept` 回调（进程内调用才有，过不了消息边界），translate-service 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）；占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
 - 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、v5 加 `fallback: { enabled }`（默认开，§8.5）、v6 加 `glossary`（默认空表，§8.2）、v7 加 `style`（默认 `none`，§7.5）、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
+- **配置回退必须让用户看见** [决定，2026-09-06，实测撞到]：`getConfig()` 校验失败时回退 `DEFAULT_CONFIG` 是对的（不能让扩展挂掉），但原来只打一行 `console.warn`——用户的 key 明明存着却不生效、翻译悄悄降级到免费引擎，界面上没有任何线索。实测触发过一次：Chrome 里存着 v7 配置，加载的却是 v6 的构建，WXT 按设计拒绝降级迁移（`Version downgrade detected`），整份配置连同 API key 被静默忽略。现在 `getConfig()` 记下回退原因（版本比扩展新 / 具体是哪个字段不合法），`configFallbackReason()` 供 UI 查询，popup 顶部挂一条红色警告说明「key 与引擎选择都没有生效」。回退原因按执行上下文各存一份——popup 本来就自己调 `getConfig()`，读到的正是它自己那次的结论。与 §8.2 术语表限额在迁移里规整是同一条原则的两面：能规整的在迁移里规整，规整不了的必须说出来
+
 ---
 
 ## 10. 调度 [决定，2026-09-05 重做：照搬 Read Frog 的加载模式，用户拍板；PR 2a 已实现：`scheduler/lazy.ts`、`renderer/pending.ts`、`scheduler/title.ts`、`pipeline/run.ts` 的 `startTranslation`]
