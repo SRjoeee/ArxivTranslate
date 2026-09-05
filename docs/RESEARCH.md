@@ -39,6 +39,8 @@ Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起
 | 2609.00245 | 618 | 37556 | 12.9% | 49.6% | 37.5% | 0 |
 | 2609.00246 | 263 | 16279 | 26.9% | 30.6% | 42.4% | 3 |
 
+2026-09-05 为 side 模式版式回归又抓了两篇（未入上表的统计）：2609.04056（math.OC，定理里只含公式的列表项、右侧沟槽的致谢块）、2609.03768（physics.comp-ph，表格 + 脚注在单列 flex 图里），见 `tests/fixtures/arxiv/README.md`。
+
 合计 112,268 个文本节点，漏网 33 个（0.03%）。happy-dom 解析 1.8 MB 页面 618 ms，可直接用于 Vitest。`protected` 占比高是因为 MathML 内部的 `mo` / `mi` / `mn` / `annotation` 都算文本节点。
 
 ### 2.2 (a) 规则中不存在于任何 fixture 的选择器

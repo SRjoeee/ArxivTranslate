@@ -280,6 +280,61 @@ exports[`fixture > 2609.00246.html 1`] = `
 }
 `;
 
+exports[`fixture > 2609.03768.html 1`] = `
+{
+  "byUnit": {
+    "authorinfo": 2,
+    "bibblock": 38,
+    "caption": 15,
+    "keywords": 1,
+    "p": 85,
+    "table": 6,
+    "title": 31,
+  },
+  "cells": 245,
+  "firstIds": [
+    "axt-b1",
+    "axt-b2",
+    "axt-b3",
+  ],
+  "lastIds": [
+    "axt-b176",
+    "axt-b177",
+    "axt-b178",
+  ],
+  "numericCells": 202,
+  "table": 6,
+  "text": 172,
+  "total": 178,
+}
+`;
+
+exports[`fixture > 2609.04056.html 1`] = `
+{
+  "byUnit": {
+    "bibblock": 89,
+    "footnote": 2,
+    "p": 457,
+    "title": 153,
+  },
+  "cells": 0,
+  "firstIds": [
+    "axt-b1",
+    "axt-b2",
+    "axt-b3",
+  ],
+  "lastIds": [
+    "axt-b699",
+    "axt-b700",
+    "axt-b701",
+  ],
+  "numericCells": 0,
+  "table": 0,
+  "text": 701,
+  "total": 701,
+}
+`;
+
 exports[`fixture > synthetic-structures.html 1`] = `
 {
   "byUnit": {

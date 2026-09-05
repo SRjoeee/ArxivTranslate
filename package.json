@@ -16,6 +16,7 @@
     "fixtures:stats": "tsx scripts/fixtures-stats.ts",
     "check:output": "node scripts/check-output.mjs",
     "e2e": "node tests/e2e/extension.mjs",
+    "e2e:layout": "node tests/e2e/layout.mjs",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write ."
   },

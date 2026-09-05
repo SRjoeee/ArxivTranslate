@@ -64,7 +64,10 @@ describe('side 模式的容器覆盖', () => {
     let multi = 0
     let single = 0
     for (const file of files) {
-      const doc = new DOMParser().parseFromString(readFileSync(join(FIXTURE_DIR, file), 'utf8'), 'text/html')
+      const html = readFileSync(join(FIXTURE_DIR, file), 'utf8')
+      // 没有 flex 图的 fixture 不解析：12 篇全解析一遍会把 worker 的堆撑爆（实测 4.4 GB RSS 后 OOM）
+      if (!html.includes('ltx_flex_figure')) continue
+      const doc = new DOMParser().parseFromString(html, 'text/html')
       const root = doc.querySelector(DOCUMENT_ROOT)
       if (!root) continue
       fakeTranslate(doc)

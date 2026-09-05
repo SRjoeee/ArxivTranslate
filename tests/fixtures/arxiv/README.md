@@ -18,6 +18,8 @@ Phase 0 抓取的真实 `https://arxiv.org/html/<id>` 页面，原样保存（�
 | 2609.00245 | 2026-08-31 | math.AP | 1.7 MB | math 2131 · eqn 446 · thm 148 · proof 41 · note 11 · ref 1827 | 2026；公式最密集 + 定理 + 脚注 |
 | 2609.00246 | 2026-08-31 | cs.PL | 1.4 MB | td 1603 · listing 254 · typewriter 1457 · thm 60 | 2026；代码密集 + 大表格 |
 | 2608.30667 | 2026-08-31 | cs.DS | 20 KB | **ERROR 2** · 仅 1 个 `.ltx_p` · 标题 "Untitled Document" | 转换失败页，边界用例（扩展不得挂掉） |
+| 2609.04056 | 2026-09-03 | math.OC | 1.3 MB | math 2084 · eqn 302 · thm 166 · proof 54 · item 58 · note 2 | 2026-09-05 抓（CC BY-SA 4.0）：定理里只含公式的列表项、致谢块挂在右侧沟槽——side 模式版式回归用（DESIGN §7.2） |
+| 2609.03768 | 2026-09-03 | physics.comp-ph | 311 KB | td 267 · math 407 · flex 1（两个 size_1 格子） | 2026-09-05 抓（CC BY 4.0）：表格 + 脚注放在单列 flex 图里——side 模式配对回归用 |
 
 计数口径：`math`=`<math` 出现次数；`eqn`=`ltx_equation`；`listing`=`ltx_listingline`；`algo`=`ltx_float_algorithm|ltx_algorithm`；`td`=`ltx_td`；`note`=`ltx_note_content`；`thm`=`ltx_theorem`；`svg`=`<svg`。粗粒度 grep，仅用于选片，精确审计见 `docs/RESEARCH.md` §2。
 
