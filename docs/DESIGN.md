@@ -435,7 +435,7 @@ export interface TranslateResult {
 - **插入译文时不做滚动锚定，也不做任何布局读取** [决定，2026-09-05]：视口不跳交给 Chrome 原生 scroll anchoring（`overflow-anchor: auto` 是默认值；实测在视口上方插入 600px，浏览器自动补偿 575px 滚动、锚点位移 0）。早期移植 FluentRead 的 JS 锚定（`elementFromPoint` + `getBoundingClientRect`）每批强制两次全页布局，side 模式下每次 130–150ms、stack 90–100ms（15644 个节点、~700 个 subgrid 容器）；8 个 worker 一百多批下来，全命中缓存的 826 块也要 16.5s，主线程长任务 52 条、每条 ~90ms 首尾相接。去掉后翻译只受网络 / 缓存往返约束
 - **进度事件用带最长等待的合并器，不用纯去抖** [决定，2026-09-05]：翻译中每秒几十次进度回调，150ms 去抖计时器一直被重置，side prep 直到整篇翻完才跑（实测 413 个镜像在最后一刻同时出现，之前公式一直居中横跨两栏）。`createCoalescer(fn, { delay: 150, maxWait: 1000 })`：事件再密也至少每秒整理一次
 - **镜像不等译文** [决定，2026-09-05]：公式与插图本来就没有译文，等它们所在段落的译文到达才镜像是白等。块标记（`data-axt-id`）在翻译开始的第一刻就写好，镜像的容器判定改为 `:has(.axt-t, [data-axt-id])`，第一趟 prep 就把它们全部镜像；闸 2（带块标记或内部含块的不镜像）不变，整块复制的事故不会重演
-- 每个 provider 一个队列，并发上限来自 provider 声明。**下一步换成 Read Frog 的 `request-queue`（令牌桶，默认 8 请求/秒、突发 20）+ `batch-queue`（1000 字 / 4 条 / 攒 100ms）+ `priority-queue`**，三个都是纯工具、自带测试，整段移植替换 `p-queue`；429 的暂停与暂停后的单探针语义（§8.2）它们原生就有
+- 每个 provider 一个队列，并发上限来自 provider 声明。**第一步先换成 Read Frog 的 `utils/request/` 目录**：`request-queue`（令牌桶，默认 8 请求/秒、突发 20）+ `batch-queue`（1000 字 / 4 条 / 攒 100ms）+ `priority-queue` + `cancellation`，都是纯工具、自带测试，整目录移植替换 `p-queue`；429 的暂停与暂停后的单探针语义（§8.2）它们原生就有，#30 里手写的那一份到时按清理规矩删
 - 失败块的"重试"按钮在错误提示里（§7.6），popup 不再单独列失败块
 
 ---
@@ -478,7 +478,17 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 
 **Phase 3 — 完整 v1**
 - provider 请求移到 content（§8.0）；side / only 模式与宽度逻辑；`chrome-builtin` + `google-web` 与 runs 路径；fallback 链；调度与进度；样式预设；术语表；options 页
-- `feat/lazy-loading`（§10 / §7.6，2026-09-05 列入）：照搬 Read Frog 的加载模式。第一个 PR：移植 `ui/spinner.ts` 与 `utils/scheduler.ts`（主线程切片），pending 节点 + 圆环，`IntersectionObserver` 一次性触发、按回调攒批、session 取消，设置页加"预翻译距离 / 可见阈值"；观察器的生命周期改写绑到我们的 `Block[]`（它绑的是自家 DOM walker）。第二个 PR：移植 `request-queue` / `batch-queue` / `priority-queue` / `cancellation.ts` 替换 `p-queue` 与 `planBatches` 的整篇规划。每个移植文件带来源行并登记 THIRD_PARTY
+- `feat/lazy-loading`（§10 / §7.6，2026-09-05 列入）：照搬 Read Frog 的加载模式，按目录搬、不按函数挑（CLAUDE.md 的搬运判定）。
+  - **PR 1 `feat/request-queue`**：整目录移植 `utils/request/`（`request-queue` / `batch-queue` / `priority-queue` / `cancellation`，连同它们的测试；同目录的 `retry-policy` 已在）替换 `p-queue` 与 `withRetry`，`translate-service` 按 `background/translation-queues.ts` 的方式组装（rate / capacity / dispatchGate）。纯工具、不碰页面，风险最低，先定下派发接口
+  - **PR 2 `feat/lazy-loading`**：移植 `ui/spinner.ts`、`utils/scheduler.ts`（主线程切片）、`translation-session.ts`、错误提示 + 重试的 React 组件、设置页的"预翻译距离 / 可见阈值"、`document.title` 翻译；pending 节点 + 圆环（§7.6）；`IntersectionObserver` 一次性触发、按回调攒批、session 取消。`PageTranslationManager` 只搬骨架（观察器生命周期、walkId / session 令牌、启停顺序）改绑我们的 `Block[]`，它的四个测试场景改写后带过来；停止时**要**剥掉我们打的标记（§7.1 要求恢复后逐节点相等，它自己不剥）。脚注块在 ar5iv 里 `height: 0` 或折叠、IO 永远判不可见，跟随所在段落一起触发
+  - **搬运取舍**（2026-09-05 讨论，用户拍板：无负担就搬、有负面影响才取舍）。一起搬、暂时用不上：跨标签页去重与 `cancelledScopes` 登记（不跑的分支没有代价）、`document.title` 翻译（一个 head 观察器加一条请求）、work pacer（只有好处）。**不搬，各有具体的负面影响**：
+    - `MutationObserver`：盯整棵 `documentElement` 的子树 / 属性 / 文本；arXiv 页面本身不动，动的是我们插的几千个节点，它的"自己造成的变化不算"过滤器只认 `read-frog-*` 标记，每批译文都会让它重走一遍甚至判定原文变了去重翻。接了是纯负担；真要接得改成认 `axt-` 前缀，那是改写不是搬
+    - 巨型段落拆分（高于三屏的单元按子段落观察）：我们的块里有整表，六百格的表轻松超过三屏，拆开就破坏"整表一块"的模型；`threshold` 0 意味着表顶一进视口就整表触发，收益为零
+    - 仅译文模式的原地替换文本节点：违反 §7.1，恢复后 DOM 对不上；我们的 only 模式用 CSS 隐藏已达同样效果
+    - 纯文本协议与分隔符批处理：Phase 0 实测公式密集段落要占位符 + 结构化输出才稳（§8.2），换回去是降级
+    - 队列放 background：MV3 挂起是实测根因（§8.0），位置不搬，组装方式抄过来
+    - 通用 DOM walker（`dom/traversal.ts` / `filter.ts`）：不接线没有代价，但只有 v2 的其他站点才用，参考仓库钉在快照 commit 上、晚搬不损失，留给 v2
+  - 每个移植文件带来源行并登记 THIRD_PARTY
 
 **Phase 4 — 打磨**
 - 更多 fixture 与规则修正；性能；导出/导入缓存；发布
