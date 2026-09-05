@@ -2,8 +2,12 @@
 // 依据 DESIGN.md §5.1 / §5.2 / §5.3 / §5.6 / §6.1，实测依据见 docs/RESEARCH.md §2。
 // 本文件只放数据表与纯函数，不含遍历；遍历在 src/core/extractor。
 
-/** 任何表或函数的行为变化都要递增；进缓存键。0.5.0：单元格取任意深度、格内单元走进去序列化（§5.3） */
-export const RULES_VERSION = '0.6.1'
+/**
+ * 任何表或函数的行为变化都要递增；进缓存键。0.5.0：单元格取任意深度、格内单元走进去序列化（§5.3）。
+ * 0.6.2：带环境名的 tag 改为可翻，纯标识符（`(a)`、`(ii)`）仍保护——分类语义变了，
+ * 旧缓存不该跨过去（Codex 在 #53 指出）
+ */
+export const RULES_VERSION = '0.6.2'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -88,10 +92,14 @@ export const SKIP_RULES: readonly Rule[] = [
  * 这几类要翻，其余的 tag 是纯编号与符号，必须保持原样。
  *
  * 依据是全部 12 篇 fixture 的实测（`.ltx_tag` 共 1241 个）：
- * theorem 246 个全部形如 "Definition 1" / "Example 1"；figure 63 个里 58 个是 "Figure 1."；
- * table 43 个全是 "Table 1:"；appendix 20 个全是 "Appendix A"；float 13 个全是 "Algorithm 1"；
+ * theorem 246 个全部形如 "Definition 1" / "Example 1"；table 43 个全是 "Table 1:"；
+ * figure 63 个里 58 个是 "Figure 1."；appendix 20 个全是 "Appendix A"；float 13 个全是 "Algorithm 1"；
  * part / chapter 各 1 个。反过来 equation 的 344 个里只有 13 个带字母（"(let.lin)" 这类 LaTeX 标签，不能动），
  * section / subsection / ref 的 439 个里带字母的都是罗马数字（II、III.1），note 的 54 个是脚注标记。
+ *
+ * **光看类名不够**：LaTeXML 给子图面板的标签也用 `.ltx_tag_figure`，内容是纯标识符 `(a)` `(b)` `(c)`
+ *（387 个带名 tag 里有 5 个，实测于 2410.00260 与 2312.17141；Codex 在 #53 指出）。
+ * 这类翻了会被模型改写或重排，与面板的对应关系就断了。所以再加一道内容判定：要含**词**才翻。
  */
 export const NAMED_TAGS = [
   '.ltx_tag_theorem', // Definition 1.1 / Theorem 2 / Lemma 3
@@ -108,7 +116,7 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
   { id: 'math', selector: 'math, .ltx_Math', note: '行内公式；行间公式已被 equation 整块跳过' },
   { id: 'ref', selector: '.ltx_ref', note: '交叉引用，含内部 .ltx_ref_tag' },
   { id: 'cite', selector: '.ltx_cite', note: '引用标记' },
-  { id: 'tag', selector: `.ltx_tag:not(:is(${NAMED_TAGS}))`, note: '编号与符号：章节号、公式编号、列表符号、脚注标记、代码行号' },
+  { id: 'tag', selector: '.ltx_tag', note: '编号与符号：章节号、公式编号、列表符号、脚注标记、代码行号；带环境名的除外，见 isNamedTag' },
   { id: 'tt', selector: '.ltx_text.ltx_font_typewriter', note: '等宽文本，视为代码' },
   { id: 'note', selector: '.ltx_note', descend: true, note: '脚注容器：对外层段落是 void，内部的 .ltx_note_content 仍要被发现为块' },
   { id: 'note-mark', selector: '.ltx_note_mark, .ltx_note_type', note: '脚注标记与类型标签（容器外层与正文内各一次）' },
@@ -152,6 +160,55 @@ export function isBibAuthorBlock(el: Element): boolean {
   return siblings.length > 1 && siblings[0] === el
 }
 
+/** 括号里的整段标识符：子图面板的 `(a)` `(ii)` `(iii)`、公式标签的 `(let.lin)` 都是这个形状 */
+const PARENTHESIZED = /[(（][^)）]*[)）]/g
+
+/**
+ * 罗马数字编号的 tag 一律不翻：机器翻译会把它**本地化**，而指向它的 `.ltx_ref` 是受保护的原文，
+ * 一翻正文与交叉引用就对不上。2026-09-05 用 google-gtx 实测（Codex 在 #53 指出）：
+ *
+ * | 原文 | 译文 |     | 原文 | 译文 |
+ * |---|---|---|---|---|
+ * | `Table IV:` | 表四： |  | `Table 4:` | 表 4： |
+ * | `Table X:` | 表十： |  | `Appendix A` | 附录A |
+ * | `Part I` | 第一部分 |  | `Appendix C` / `D` | 附录C / 附录D |
+ *
+ * 阿拉伯数字、字母编号、括号面板都原样保留，只有罗马数字会被改写；Google 自己也只把
+ * I / V / X / L / M 当数字，单个 C、D 当字母，这里照此判定。同一篇论文的编号风格是一致的，
+ * 所以读者不会同时看到「表 4」与「Table IV」
+ */
+// 复合编号也算：`Table IV.1:` 的末尾 token 是 `IV.1`、`Theorem IV-A` 是 `IV-A`，首段是罗马数字就会被本地化
+// （2026-09-05 实测 google-gtx：`Table IV.1` → 表四.1）。LaTeX 的 \roman 给出小写，同样会被本地化
+// （`Table iv:` → 表四：、`Theorem ii.3` → 定理二.3），所以不分大小写（Codex 在 #53 指出）
+const ROMAN_ID = /^(?:[IVXLCDM]{2,}|[IVXLM])(?:[.\-–][A-Za-z0-9]+)*$/i
+
+/**
+ * 带环境名、且确实含词的 tag：`Definition 1.1` 要翻，子图面板的 `(a)` `(ii)` 不能翻。
+ *
+ * 判定分三步：**先去掉括号里的整段内容**，再看剩下的有没有连续两个及以上字母，
+ * 最后排除罗马数字编号（见 ROMAN_ID）。
+ * 只看字母数不够——面板标识符可以是 `(ii)` `(iii)` 这种多字母罗马数字（Codex 在 #53 指出）；
+ * 而括号本来就是 LaTeXML 给标识符的形状，环境名从不带括号（`Definition 1.2 (Hall set)` 去掉括号后
+ * 仍有 "Definition"，照样判为要翻）
+ */
+/**
+ * 括号里是不是「词」而不是标识符：`(Hall set)`、`(Figure 1)` 里有非罗马数字的词，保留；
+ * `(a)`、`(ii)`、`(A.1)` 只有标识符，去掉。整段去掉会把 `(Figure 1)` 这种整体带括号的标签
+ * 连环境名一起丢掉，于是永远不翻（Codex 在 #53 指出）
+ */
+const hasNonRomanWord = (inner: string): boolean =>
+  (inner.match(/[A-Za-z]{2,}/g) ?? []).some(word => !ROMAN_ID.test(word))
+
+export function isNamedTag(el: Element): boolean {
+  if (!el.matches(NAMED_TAGS)) return false
+  const text = (el.textContent ?? '').replace(PARENTHESIZED, group => (hasNonRomanWord(group) ? group : ''))
+  if (!/[A-Za-z]{2,}/.test(text)) return false
+  // 末尾的编号 token：`Table XIII:` → `XIII`。先去标点再 trim：`Table IV :` 去掉冒号后尾巴是空格，
+  // 不 trim 的话 pop() 拿到空串、罗马数字判定被绕过（Codex 在 #53 指出）
+  const last = text.replace(/[\s.:：。()（）]+$/, '').trim().split(/\s+/).pop() ?? ''
+  return !ROMAN_ID.test(last)
+}
+
 export function classify(el: Element): Classification | null {
   if (isBibAuthorBlock(el)) return { kind: 'skip', rule: 'bib-authors', descend: false }
   const skip = SKIP_RULES.find(r => el.matches(r.selector))
@@ -160,6 +217,8 @@ export function classify(el: Element): Classification | null {
   const unit = UNIT_RULES.find(r => el.matches(r.selector))
   if (unit) return { kind: 'unit', rule: unit.id, descend: true }
   const protect = PROTECT_RULES.find(r => el.matches(r.selector))
+  // 带环境名的 tag 不作 void：它内含 Definition / Table / Algorithm 这类要翻的词
+  if (protect?.id === 'tag' && isNamedTag(el)) return null
   if (protect) return { kind: 'protect', rule: protect.id, descend: protect.descend ?? false }
   return null
 }

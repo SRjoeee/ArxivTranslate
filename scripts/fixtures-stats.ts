@@ -89,8 +89,14 @@ function auditFixture(file: string): FixtureStats {
     return classCache.get(el) ?? null
   }
 
-  for (const r of [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES]) s.ruleElements[r.id] = doc.querySelectorAll(r.selector).length
-  s.ruleElements.table = doc.querySelectorAll(TABLE_RULES.root).length
+  // 规则命中的元素数也走 classify()：光按选择器数，带环境名的 tag（isNamedTag 放行的那 368 个）
+  // 会被记成 protect/tag，审计口径就与运行时脱节（Codex 在 #53 指出）
+  for (const r of [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES]) s.ruleElements[r.id] = 0
+  s.ruleElements.table = 0
+  for (const el of Array.from(doc.querySelectorAll('*'))) {
+    const c = classOf(el)
+    if (c) inc(s.ruleElements, c.rule)
+  }
 
   const classSet = new Set<string>()
   for (const el of Array.from(root.querySelectorAll('*'))) {
