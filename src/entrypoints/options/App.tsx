@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
 import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
 import { DEFAULT_CONFIG, configSchema, type Config } from '@/config/schema'
@@ -38,14 +38,30 @@ export function App() {
   const [cache, setCache] = useState<{ entries: number; bytes: number } | null>(null)
   const [cacheNote, setCacheNote] = useState('')
 
+  const loadCacheStats = useCallback(async () => {
+    try {
+      setCache(await sendMessage({ type: 'axt:cache-stats' }))
+    } catch {
+      setCache(null)
+    }
+  }, [])
+
   useEffect(() => {
     getConfig().then(c => {
       setLocal(c)
       setHasStoredKey(c.openaiCompat.apiKey.length > 0)
       setGlossaryText(formatGlossaryText(c.glossary))
     })
-    sendMessage({ type: 'axt:cache-stats' }).then(setCache).catch(() => setCache(null))
-  }, [])
+    void loadCacheStats()
+    // 翻译发生在别的标签页：切回设置页时重新读一次，否则显示的永远是打开那一刻的数字
+    const onVisible = () => { if (!document.hidden) void loadCacheStats() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
+  }, [loadCacheStats])
 
   const patchOpenAI = (patch: Partial<Config['openaiCompat']>) =>
     setLocal(c => ({ ...c, openaiCompat: { ...c.openaiCompat, ...patch } }))
@@ -120,6 +136,7 @@ export function App() {
     }
   }
 
+
   /** 清空整库。设置页拿不到当前论文 id，所以只做全局清空（§9） */
   async function clearCache() {
     if (!window.confirm('清空全部译文缓存？之后重新翻译会重新请求引擎。')) return
@@ -127,7 +144,7 @@ export function App() {
     try {
       const { removed } = await sendMessage({ type: 'axt:cache-clear', paper: undefined })
       setCacheNote(`已删除 ${removed} 条`)
-      setCache(await sendMessage({ type: 'axt:cache-stats' }))
+      await loadCacheStats()
     } catch (e) {
       setCacheNote(`清空失败：${e instanceof Error ? e.message : String(e)}`)
     }
@@ -251,11 +268,12 @@ export function App() {
       {testResult && <p style={{ padding: 8, background: '#f4f4f4', borderRadius: 4 }}>{testResult}</p>}
 
       <h2 style={{ fontSize: 15, marginTop: 24 }}>译文缓存</h2>
-      <p style={{ margin: '0 0 8px', color: '#666', fontSize: 13 }}>
+      <p style={{ margin: '0 0 4px', fontSize: 13 }}>
         {cache === null ? '读取中…' : `已缓存 ${cache.entries} 条 · ${(cache.bytes / 1024 / 1024).toFixed(2)} MB`}
-        <br />
-        缓存按引擎、模型、提示词、术语表分开存；换了其中任何一样都不会命中旧译文，通常不需要手动清
       </p>
+      <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>
+        缓存按引擎、模型、提示词、术语表分开存；换了其中任何一样都不会命中旧译文，通常不需要手动清
+      </small>
       <p>
         <button type="button" onClick={clearCache}>清空全部缓存</button>
         {' '}

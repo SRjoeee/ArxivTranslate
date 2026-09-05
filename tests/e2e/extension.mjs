@@ -145,6 +145,31 @@ await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 
 const promptGone = (await options.getByText('e2e 提示词').count()) === 0
 check('设置页：删除自定义提示词后选回默认', promptGone, `残留 ${promptGone ? 0 : 1}`)
 
+// ── 设置页：译文样式预设与缓存管理（§7.5 / §9）──────────────────────────
+{
+  await options.bringToFront()
+  await options.getByLabel('外观').selectOption('quote')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
+  const page = await context.newPage()
+  await page.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(() => document.querySelector('.axt-t:not([data-axt-inline])') !== null, null, { timeout: 60_000 }).catch(() => undefined)
+  const styled = await page.evaluate(() => {
+    const el = document.querySelector('.axt-t:not([data-axt-inline])')
+    return {
+      attr: document.documentElement.dataset.axtStyle ?? null,
+      border: el ? Math.round(Number.parseFloat(getComputedStyle(el).borderInlineStartWidth)) : -1,
+      // 行内标题译文不该加线（会把「Abstract 摘要」挤歪）
+      inline: (() => { const t = document.querySelector('.axt-t[data-axt-inline]'); return t ? Math.round(Number.parseFloat(getComputedStyle(t).borderInlineStartWidth)) : 0 })(),
+    }
+  })
+  check('样式预设 quote：<html> 带属性、块级译文有竖线、同行标题译文没有', styled.attr === 'quote' && styled.border > 0 && styled.inline === 0, JSON.stringify(styled))
+  await page.screenshot({ path: `${SHOTS}/style-quote.png` })
+  await page.close()
+
+}
+
 // ── 论文 1：看到哪翻到哪（§10）：不滚动只翻首屏附近；逐屏滚到底其余跟上；标题翻译；速率 ────
 {
   const { page, logs, requests, originalTitle, spinnersSeen } = await openPaper(PAPER, GOOGLE)
@@ -211,6 +236,24 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await popup.screenshot({ path: `${SHOTS}/popup-after-restore.png` })
   await popup.close()
   await page.close()
+}
+
+// ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
+{
+  await options.bringToFront()
+  await options.reload({ waitUntil: 'domcontentloaded' })
+  await options.getByLabel('外观').selectOption('none')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
+  // 前面两篇论文翻过，缓存里应当有条目；重载保证读到的是最新统计
+  await options.getByText(/已缓存 [1-9]\d* 条/).waitFor({ timeout: 15_000 }).catch(() => undefined)
+  const before = await options.getByText(/已缓存 \d+ 条/).textContent()
+  options.once('dialog', d => d.accept())
+  await options.getByRole('button', { name: '清空全部缓存' }).click()
+  await options.getByText(/已删除 \d+ 条/).waitFor({ timeout: 10_000 })
+  const after = await options.getByText(/已缓存 \d+ 条/).textContent()
+  check('缓存管理：显示条数，清空后归零', /已缓存 [1-9]/.test(before ?? '') && /已缓存 0 条/.test(after ?? ''), `清空前「${before}」，清空后「${after}」`)
 }
 
 // ── 错 key + 降级链开启（§8.5）：LLM 报 auth 后自动切到 google-web，整页照常翻完 ──

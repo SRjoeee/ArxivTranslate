@@ -314,10 +314,12 @@ interface ProtectedBlock {
 - 参考文献条目**不再豁免**（2026-09-04 修订）：条目改为按 `.ltx_bibblock` 分段翻译后（§5.4），作者段本来就不翻、没有 `data-axt-state`，只译文模式下自然保留，条目仍完整可读。旧豁免是整条翻译时代的遗留
 - 未翻译成功的块保持原文可见：隐藏规则只匹配 `data-axt-state="translated"`，`pending` / `failed` 不被匹配即可，失败块旁的重试小部件（§7.6）也跟着可见。**不要**写 `display: revert`——revert 会把站点的 display 一并撤销（`.ltx_bibblock` 从 block 变回 inline），2026-09-05 已删（Codex 在 #19 指出）
 
-### 7.5 译文样式
+### 7.5 译文样式 [决定，2026-09-05 实现]
 
-- 参考 KISS 的做法：一组 CSS 预设（下划线、虚线、淡色、引用块、无样式），通过 `--axt-*` 变量实现，用户可自定义 CSS
-- 译文节点复制原块 class（§7.1），字体、字号、行高、对齐、grid 位置天然与原块一致，`--axt-*` 预设只做叠加装饰。注入的 `<style>` 排在站点样式之后，`.axt-t` 上**不要**写 `font: inherit` 这类会以同等特异度盖掉站点样式的属性（实测会把摘要标题的 1.4rem 和参考文献的字体覆盖成父级默认值）
+- 译文节点复制原块 class（§7.1），字体、字号、行高、对齐、grid 位置天然与原块一致，预设**只做叠加装饰**。注入的 `<style>` 排在站点样式之后，`.axt-t` 上**不要**写 `font: inherit` 这类会以同等特异度盖掉站点样式的属性（实测会把摘要标题的 1.4rem 和参考文献的字体覆盖成父级默认值）。`presets.test.ts` 用正则守着预设里不出现 `font` / `display` / `margin` / `line-height` / `width`
+- **只挑 4 种静态效果加一个自定义位**：`none`（默认，与原文一致）、`muted`（淡一档，`color-mix` 兑透明而不是写死灰色，深色模式下也对）、`quote`（左侧竖线，只加在块级译文上——行内标题译文加线会把「Abstract 摘要」挤歪）、`dashed`（虚线下划，`text-decoration` 不参与盒模型，side 模式下不影响两栏对齐）、`custom`。KISS 有 18 种（马克笔、渐变、发光、闪烁、模糊……），那是为网页速读设计的；论文要读上几十分钟，动效与高饱和底色只会碍事
+- **样式与模式同层**：`data-axt-style` 写在 `<html>` 上（与 `data-axt-mode` 并列），切换只改一个属性、不动 DOM
+- **`custom` 只接受声明块，不接受完整规则**：选择器由扩展补（`html[data-axt-style="custom"] .axt-t { … }`），用户填的内容整段插进花括号中间，因此 `{` `}` `@` `<` 一律拒绝。这不是安全边界（用户本来就能装任何扩展），是防手滑——一个多余的花括号会把整篇论文的排版改掉，而且很难看出原因
 
 ### 7.6 等待态：加载圆环 [决定，2026-09-05，照搬 Read Frog]
 
@@ -442,9 +444,10 @@ export interface TranslateResult {
 - 译文缓存：IndexedDB，**Dexie**，移植 FluentRead `services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层），crypto-js 换成 Web Crypto SHA-256（v0.4 修订，原定 idb-keyval）
 - 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
 - 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有（IndexedDB 按扩展 origin 隔离，跨论文共享），content 侧通过 `axt:cache-get` / `axt:cache-put` 读写；provider 请求本身不经过 background（§8.0）
+- **缓存管理只在设置页做全局清空** [决定，2026-09-05]：`axt:cache-stats` 显示条数与体积，`axt:cache-clear`（不带 paper）清空整库，切回设置页时重读统计（翻译发生在别的标签页，不重读就永远显示打开那一刻的数字）。**不做「只清本篇」**：设置页是独立扩展页面，没有当前论文的概念，为它绕一圈问 content script 不值当；真正需要按篇清的场景（这篇译得不好想重来）在 popup 上更顺手，留作后续。缓存键本来就带引擎、模型、提示词、术语表，换任何一样都不会命中旧译文，手动清是兜底而不是常规操作
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
 - **坏译文不入库、重发不读库** [决定，2026-09-05]：markup 路径的请求带 `accept` 回调（进程内调用才有，过不了消息边界），translate-service 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）；占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
-- 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、v5 加 `fallback: { enabled }`（默认开，§8.5）、v6 加 `glossary`（默认空表，§8.2）、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
+- 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、v5 加 `fallback: { enabled }`（默认开，§8.5）、v6 加 `glossary`（默认空表，§8.2）、v7 加 `style`（默认 `none`，§7.5）、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
 ---
 
