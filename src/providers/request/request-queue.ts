@@ -12,6 +12,13 @@ import { defaultRequestRetryPolicy } from "./retry-policy"
 /** 超时错误按 name 识别（与 cancellation.ts 同一模式），服务层据此归到 timeout */
 export const REQUEST_TIMEOUT_ERROR_NAME = "RequestTimeoutError"
 
+/**
+ * 本项目新增（issue #43）：并发满载时 `nextDispatchEtaMs()` 报的等待时长。
+ * 槽位什么时候空出来取决于在飞请求何时返回，没有下界可算；这里报一个「不是现在、稍后再问」的值，
+ * 让攒批门闸继续攒而不是按 batchDelay 冲小批。具体数值只影响门闸的重问节奏（它自己有上限）
+ */
+export const SATURATED_DISPATCH_ETA_MS = 1000
+
 /** 对象展开代替 deepmerge：显式传 undefined 的字段不能把已有值冲掉 */
 function withoutUndefined<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>
@@ -230,7 +237,32 @@ export class RequestQueue {
       this.bucketTokens >= tokensNeeded
         ? 0
         : Math.ceil(((tokensNeeded - this.bucketTokens) / this.options.rate) * 1000)
-    return Math.max(pauseDelayMs, tokenDelayMs)
+    // 并发满载也是「现在起不了新请求」的一种，漏掉它门闸会以为槽位就绪、按 batchDelay 冲小批
+    // （本项目新增，issue #43）
+    const concurrencyDelayMs = this.isSaturated() ? SATURATED_DISPATCH_ETA_MS : 0
+    return Math.max(pauseDelayMs, tokenDelayMs, concurrencyDelayMs)
+  }
+
+  /** 在飞数已达 maxConcurrent：此刻不能再起新请求，且没有可算的等待时长（本项目新增，issue #43） */
+  private isSaturated(): boolean {
+    return this.executingTasks.size >= (this.options.maxConcurrent ?? Number.POSITIVE_INFINITY)
+  }
+
+  /**
+   * 距任务总时限还剩多少毫秒；没设 maxTotalMs 就是 Infinity（本项目新增，issue #43）。
+   * 派发前、单次尝试的超时、安排重试三处都用它，总时长才真的被兜住
+   */
+  private remainingBudgetMs(task: QueuedRequestTask, now: number): number {
+    const budget = this.options.maxTotalMs
+    if (budget === undefined) return Number.POSITIVE_INFINITY
+    return task.enqueuedAt + budget - now
+  }
+
+  private budgetExceededError(task: QueuedRequestTask): Error {
+    const error = new Error(`Task ${task.id} exceeded its ${this.options.maxTotalMs}ms total budget`)
+    // 归到 timeout：调用方要的答案是「这批翻不出来了」，与单次超时同一类
+    error.name = REQUEST_TIMEOUT_ERROR_NAME
+    return error
   }
 
   private schedule() {
@@ -245,8 +277,7 @@ export class RequestQueue {
       return
     }
 
-    const maxConcurrent = this.options.maxConcurrent ?? Number.POSITIVE_INFINITY
-    while (this.bucketTokens >= 1 && this.waitingQueue.size() > 0 && this.executingTasks.size < maxConcurrent) {
+    while (this.bucketTokens >= 1 && this.waitingQueue.size() > 0 && !this.isSaturated()) {
       const now = Date.now()
 
       const task = this.waitingQueue.peek()
@@ -260,6 +291,12 @@ export class RequestQueue {
       if (task && task.scheduleAt <= now) {
         this.waitingQueue.pop()
         this.waitingTasks.delete(task.hash)
+        // 排在并发上限后面等太久的任务，起跑前就已经超了总时限：不要白发一次请求
+        // （本项目新增，issue #43）
+        if (this.remainingBudgetMs(task, now) <= 0) {
+          task.reject(this.budgetExceededError(task))
+          continue
+        }
         this.executingTasks.set(task.hash, task)
         this.bucketTokens--
         void this.executeTask(task)
@@ -268,7 +305,10 @@ export class RequestQueue {
       }
     }
 
-    if (this.waitingQueue.size() > 0) {
+    // 并发满载时不要武装定时器：定时器只解决「时间到了才能发」，而槽位是被在飞请求占着的，
+    // 算出来的 delay 是 0，会一直以 0 毫秒空转直到有请求返回。执行结束的 finally 已经会再调
+    // schedule()（本项目新增，issue #43）
+    if (this.waitingQueue.size() > 0 && !this.isSaturated()) {
       const nextTask = this.waitingQueue.peek()
       if (nextTask) {
         const now = Date.now()
@@ -304,7 +344,12 @@ export class RequestQueue {
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     const abortController = new AbortController()
     task.abortController = abortController
-    const timeoutMs = task.timeoutMs ?? this.options.timeoutMs
+    // 单次尝试也不许超出剩余总预算：否则 120 秒的一次尝试可以在 180 秒预算只剩 1 秒时开跑
+    // （本项目新增，issue #43）
+    const timeoutMs = Math.min(
+      task.timeoutMs ?? this.options.timeoutMs,
+      Math.max(1, this.remainingBudgetMs(task, Date.now())),
+    )
 
     try {
       // Create a timeout promise
@@ -360,10 +405,17 @@ export class RequestQueue {
         consecutiveRateLimits: this.consecutiveRateLimits,
       })
 
-      // 总时限到了就不再重试：尝试次数有限但每次限流暂停都可能很长，
-      // 调用方需要一个「多久之后可以认为这批翻不出来」的确定答案（本项目新增，issue #43）
-      const totalBudget = this.options.maxTotalMs
-      if (totalBudget !== undefined && decision.action !== "fail" && now - task.enqueuedAt >= totalBudget) {
+      // 总时限管的是「多久之后可以认为这批翻不出来」，所以判的是**下一次尝试能否在预算内跑完**，
+      // 而不是「此刻是否已经超了」——300 秒的 Retry-After 在预算只剩几毫秒时照样会被排进去，
+      // 等它醒来早已超时几分钟（本项目新增，issue #43；Codex 在 #56 指出）
+      const remainingMs = this.remainingBudgetMs(task, now)
+      const nextDelayMs = decision.action === "retry"
+        ? decision.delayMs
+        : decision.action === "pause-and-retry"
+          ? Math.max(decision.pauseMs, this.pausedUntil - now)
+          : 0
+      if (decision.action !== "fail" && remainingMs - nextDelayMs <= 0) {
+        // 上报最后一次的真实错误（限流 / 网络）而不是「超预算」：降级链据此判断要不要换引擎
         task.reject(error)
       } else if (decision.action === "retry") {
         task.retryCount++
