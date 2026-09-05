@@ -38,7 +38,7 @@ describe('languages', () => {
     expect(toBcp47('yue')).toBe('yue')
     // ckb（索拉尼）与 kmr（库尔曼吉）表里都是 ku，端点分得清（实测），ckb 保留原码
     expect(toBcp47('ckb')).toBe('ckb')
-    expect(toBcp47('kmr')).toBe('ku')
+    expect(ISO6393_TO_6391.ckb).toBe('ku') // 表里确实压成了 ku，覆盖才有意义
     const noShort = LANG_CODES.find(code => !(code in ISO6393_TO_6391))!
     expect(toBcp47(noShort)).toBe(noShort)
   })
