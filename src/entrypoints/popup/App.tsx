@@ -3,6 +3,9 @@ import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
 import type { ProviderStatus } from '@/entrypoints/background/translate-handler'
 import type { Mode } from '@/core/renderer'
+import { getConfig, setConfig } from '@/config/storage'
+import type { Config } from '@/config/schema'
+import { BUILT_IN_PROMPTS } from '@/providers/prompt-library'
 import { sendMessage, sendToActiveTab, type PageStatus } from '@/shared/messages'
 
 const scriptStart = performance.now()
@@ -14,6 +17,7 @@ export function App() {
   const [page, setPage] = useState<PageStatus | null>(null)
   const [stats, setStats] = useState<BlockStats | null>(null)
   const [note, setNote] = useState('')
+  const [config, setLocalConfig] = useState<Config | null>(null)
 
   const refresh = useCallback(() => {
     sendToActiveTab({ type: 'axt:page-status' }).then(setPage).catch(() => setPage(null))
@@ -32,6 +36,7 @@ export function App() {
       })
       .catch(e => setPing(`后台未响应：${String(e)}`))
     sendMessage({ type: 'axt:provider-status' }).then(setProvider).catch(() => setProvider(null))
+    getConfig().then(setLocalConfig).catch(() => setLocalConfig(null))
     loadStats()
     refresh()
   }, [refresh, loadStats])
@@ -99,6 +104,19 @@ export function App() {
     refresh()
   }
 
+  /** 提示词切换（对应 Read Frog popup 的 translate-prompt-selector）：立即落盘，下次点"翻译"生效 */
+  async function choosePrompt(promptId: string) {
+    if (!config) return
+    const next = { ...config, prompts: { ...config.prompts, promptId } }
+    setLocalConfig(next)
+    try {
+      await setConfig(next)
+      if (on) setNote('提示词已保存，恢复原文后再点"翻译"生效')
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   async function restorePage() {
     setNote('')
     try {
@@ -148,6 +166,15 @@ export function App() {
                 </button>
               ))}
             </p>
+            {config?.provider === 'openai-compat' && (
+              <p style={{ margin: '0 0 8px', display: 'flex', gap: 4, alignItems: 'center' }}>
+                <span style={{ color: '#666' }}>提示词</span>
+                <select style={{ font: 'inherit', fontSize: 12, flex: 1 }} value={config.prompts.promptId} onChange={e => choosePrompt(e.target.value)}>
+                  {Object.values(BUILT_IN_PROMPTS).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {config.prompts.patterns.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </p>
+            )}
             <ProgressLine page={page} />
             {page.progress.failed > 0 && page.progress.state !== 'idle' && (
               <p style={{ margin: '6px 0 0' }}>
