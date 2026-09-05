@@ -146,6 +146,27 @@ describe('provider 选择', () => {
     expect(c.openaiCompat.apiKey).toBe('sk-keep')
   })
 
+  it('v6 配置升级到 v7：补上默认样式（none，与实现之前的外观一致）', async () => {
+    const v6 = {
+      version: 6, provider: 'openai-compat',
+      openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-keep', model: 'x/y', thinking: 'disabled' },
+      targetLanguage: 'cmn', mode: 'stack', prompts: { promptId: 'default', patterns: [] },
+      preload: { margin: 1000, threshold: 0 }, fallback: { enabled: true }, glossary: [{ term: 'weights', translation: '权重' }],
+    }
+    await fakeBrowser.storage.local.set({ config: v6, config$: { v: 6 } })
+    vi.resetModules()
+    const fresh = await import('@/config/storage')
+    const c = await fresh.getConfig()
+    expect(c.version).toBe(CONFIG_VERSION)
+    expect(c.style).toEqual({ preset: 'none', customCss: '' })
+    expect(c.glossary).toEqual([{ term: 'weights', translation: '权重' }])
+  })
+
+  it('样式预设只认清单里的 id，自定义 CSS 有长度上限', async () => {
+    await expect(setConfig({ ...DEFAULT_CONFIG, style: { preset: 'rainbow' as never, customCss: '' } })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, style: { preset: 'custom', customCss: 'x'.repeat(2001) } })).rejects.toThrow()
+  })
+
   it('术语表超过 200 条被 schema 拒绝，条目缺字段也拒绝', async () => {
     const many = Array.from({ length: 201 }, (_, i) => ({ term: `t${i}`, translation: `译${i}` }))
     await expect(setConfig({ ...DEFAULT_CONFIG, glossary: many })).rejects.toThrow()

@@ -6,6 +6,7 @@ import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate } from '@/core/protector'
 import {
   clearAllPending, enable, markPartial, renderFailed, renderPending, renderTable, renderText, setState, type Mode,
+  type StylePreset,
 } from '@/core/renderer'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
 import { createWorkPacer, pauseIfBudgetSpent } from '@/core/scheduler/pacer'
@@ -36,6 +37,8 @@ export interface RunOptions {
   blocks: Block[]
   target: string
   mode: Mode
+  /** 译文样式预设（§7.5）；不传就沿用页面上已有的属性 */
+  style?: { preset: StylePreset; customCss?: string }
   paper: string
   capabilities: { maxBatchChars: number; maxBatchItems: number; preservesMarkup: boolean }
   transport: Transport
@@ -97,7 +100,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
   }
   const halted = () => stopped || fatal !== undefined
 
-  enable(doc, options.mode)
+  enable(doc, options.mode, options.style)
   const sectionOf = sectionTitles(blocks)
 
   // 标记切片进行：几百个块的属性写入一口气做会冻住页面（Read Frog 的 #1881）

@@ -5,6 +5,8 @@ import type { Block, TableBlock, TextBlock } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
 import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
 import modesCss from '@/styles/modes.css?inline'
+import presetsCss from '@/styles/presets.css?inline'
+import { STYLE_ATTR_NAME, customStyleRule, type StylePreset } from './style-preset'
 import { delocalizeNotes } from './notes'
 import { cancelSpinnersIn } from './spinner'
 
@@ -27,20 +29,35 @@ export const PARTIAL_ATTR = 'data-axt-partial'
 export const INLINE_TITLE_MAX_CHARS = 60
 
 /** 注入的 <style> 的标记属性；恢复原文时按它整体移除。曾叫 data-axt，不合硬规则 5 的 data-axt- 前缀（Codex 在 #3 指出） */
-export const STYLE_ATTR = 'data-axt-style'
+/** 我们注入的 <style> 元素的标记；恢复原文时按它清理。与 <html> 上的 data-axt-style（样式预设）不是一回事 */
+export const STYLE_ATTR = 'data-axt-sheet'
 const STYLE_MARK = 'modes'
 const AXT_ATTR_PREFIX = 'data-axt-'
 
-/** 打开翻译态：<html> 上写状态属性，注入模式样式（幂等） */
-export function enable(doc: Document, mode: Mode): void {
+/**
+ * 打开翻译态：<html> 上写状态属性，注入模式与预设样式（幂等）。
+ * 样式预设与模式一样只是 <html> 上的一个属性（§7.5），切换不动 DOM；自定义 CSS 每次注入时重算
+ */
+export function enable(doc: Document, mode: Mode, style?: { preset: StylePreset; customCss?: string }): void {
   doc.documentElement.setAttribute(ON_ATTR, '')
   doc.documentElement.setAttribute(MODE_ATTR, mode)
-  if (!doc.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)) {
-    const style = doc.createElement('style')
-    style.setAttribute(STYLE_ATTR, STYLE_MARK)
-    style.textContent = modesCss
-    doc.head.append(style)
+  if (style) setStylePreset(doc, style)
+  const existing = doc.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)
+  const css = `${modesCss}\n${presetsCss}\n${style ? customStyleRule(style.customCss ?? '') : ''}`
+  if (existing) {
+    // 自定义 CSS 可能变了（设置页改完再翻一次）：内容不同才写，避免无谓的样式重算
+    if (existing.textContent !== css) existing.textContent = css
+    return
   }
+  const el = doc.createElement('style')
+  el.setAttribute(STYLE_ATTR, STYLE_MARK)
+  el.textContent = css
+  doc.head.append(el)
+}
+
+/** 只改属性的样式切换（§7.5）；custom 的声明块由 enable 注入 */
+export function setStylePreset(doc: Document, style: { preset: StylePreset }): void {
+  doc.documentElement.setAttribute(STYLE_ATTR_NAME, style.preset)
 }
 
 /** 模式切换只改一个属性，不经过翻译流程（§4 第 9 步） */
@@ -179,3 +196,4 @@ export * from './responsive'
 export * from './spinner'
 export * from './pending'
 export * from './failed'
+export * from './style-preset'

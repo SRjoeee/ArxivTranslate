@@ -1,0 +1,31 @@
+/* 译文样式预设（DESIGN §7.5）。选择器一律 html[data-axt-style="<id>"] .axt-t，
+   与模式属性同一层写在 <html> 上，切换只改一个属性、不动 DOM。
+   
+   **克制是这里的第一原则**：译文节点复制原块的 class（§7.1），字体、字号、行高、对齐、grid 位置
+   都随站点样式走；预设只做叠加装饰，绝不写 font / display / margin / line-height 这类会与站点打架的属性
+   （§7.5 记着 font: inherit 把摘要标题的 1.4rem 覆盖成父级默认值的实测教训）。
+   KISS 有 18 种（马克笔、渐变、发光、闪烁、模糊……），那是为网页速读设计的；论文要读上几十分钟，
+   动效与高饱和底色只会碍事，所以只挑 4 种静态的加一个自定义位。 */
+
+/* muted：译文淡一档，扫读时一眼能分出哪段是译文，又不影响细读。
+   用 color-mix 兑透明而不是写死灰色：译文继承站点的前景色（深色模式下也对） */
+html[data-axt-style="muted"] .axt-t {
+  --axt-color: color-mix(in oklab, currentColor 75%, transparent);
+}
+
+/* quote：左侧一条竖线，像引用块。只加在块级译文上——
+   行内标题译文（data-axt-inline，§7.3 的「Abstract 摘要」同行）加竖线会把标题挤歪 */
+html[data-axt-style="quote"] .axt-t:not([data-axt-inline]) {
+  border-inline-start: 2px solid var(--axt-quote-color, color-mix(in oklab, currentColor 30%, transparent));
+  padding-inline-start: 0.6em;
+}
+
+/* dashed：虚线下划。text-decoration 不参与盒模型，side 模式下不会影响两栏对齐 */
+html[data-axt-style="dashed"] .axt-t {
+  text-decoration: underline dashed color-mix(in oklab, currentColor 35%, transparent);
+  text-underline-offset: 0.25em;
+  text-decoration-thickness: 1px;
+}
+
+/* custom 的规则不在这里：用户写的声明块由 style-preset.ts 包进
+   html[data-axt-style="custom"] .axt-t { … } 后与本文件一起注入 */

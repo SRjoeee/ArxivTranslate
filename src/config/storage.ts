@@ -18,7 +18,9 @@ export const configItem = storage.defineItem<Config>('local:config', {
     // v4 -> v5：加引擎降级链，默认开启（硬规则 4：失败必须可恢复，不能让扩展整体挂掉）
     5: (v4: Omit<Config, 'version' | 'fallback' | 'glossary'> & { version: 4 }) => ({ ...v4, version: 5 as const, fallback: { enabled: true } }),
     // v5 -> v6：加术语表，默认空表（空表不进 prompt 也不进缓存键，行为与之前一致）
-    6: (v5: Omit<Config, 'version' | 'glossary'> & { version: 5 }) => ({ ...v5, version: 6 as const, glossary: [] }),
+    6: (v5: Omit<Config, 'version' | 'glossary' | 'style'> & { version: 5 }) => ({ ...v5, version: 6 as const, glossary: [] }),
+    // v6 -> v7：加译文样式，默认 none（与实现之前的外观一致）
+    7: (v6: Omit<Config, 'version' | 'style'> & { version: 6 }) => ({ ...v6, version: 7 as const, style: { preset: 'none' as const, customCss: '' } }),
   },
 })
 

@@ -2,9 +2,10 @@
 import { z } from 'zod'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
+import { STYLE_PRESETS } from '@/core/renderer/style-preset'
 import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
-export const CONFIG_VERSION = 6
+export const CONFIG_VERSION = 7
 
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
@@ -30,6 +31,11 @@ export const configSchema = z.object({
    * 上限 200 条——200 条约 2–3 KB、约 700 token，与摘要同量级；再多就该按段落命中过滤，那是 v2 的事
    */
   glossary: z.array(z.object({ term: z.string().min(1), translation: z.string().min(1) })).max(200).default([]),
+  /** 译文样式（§7.5）：预设只做叠加装饰，custom 只填声明块、选择器由扩展补 */
+  style: z.object({
+    preset: z.enum(STYLE_PRESETS),
+    customCss: z.string().max(2000),
+  }).default({ preset: 'none', customCss: '' }),
   /** 引擎降级链（§8.5）：首选引擎失败时自动切到免费引擎，别让整页翻译停死 */
   fallback: z.object({ enabled: z.boolean() }).default({ enabled: true }),
   /** 按视口翻译的范围（§10，Read Frog 的 preload）：视口下方多少像素算临近（0–10000）、露出多少比例算进入（0–1） */
@@ -54,6 +60,7 @@ export const DEFAULT_CONFIG: Config = {
   targetLanguage: DEFAULT_LANG_CODE,
   mode: 'stack',
   glossary: [],
+  style: { preset: 'none', customCss: '' },
   fallback: { enabled: true },
   prompts: DEFAULT_PROMPTS_CONFIG,
   preload: { ...DEFAULT_PRELOAD },
