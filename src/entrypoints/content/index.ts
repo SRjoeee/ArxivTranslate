@@ -252,6 +252,14 @@ export default defineContentScript({
           sendResponse({ retried: failed.length })
           return true
         }
+        case 'axt:engine-ready': {
+          // 语言包下载完之前就开始翻译的会话已经把 chrome-builtin 永久降级；不撤销的话
+          // 这一页会一直走在线兜底，直到用户恢复原文再重开（Codex 在 #50 指出）
+          const reset = service !== null && activeChain?.some(engine => engine.id === message.id) === true
+          if (reset) service!.reset()
+          sendResponse({ reset })
+          return true
+        }
         case 'axt:page-status':
           sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, ...(engineStatus() ?? {}) })
           return true

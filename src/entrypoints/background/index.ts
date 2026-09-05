@@ -1,6 +1,6 @@
 import { translationCache } from '@/cache'
 import { getConfig } from '@/config/storage'
-import { getProvider } from '@/providers'
+import { buildChain, getProvider } from '@/providers'
 import { isAxtMessage } from '@/shared/messages'
 import { handlePing } from '@/shared/ping'
 import { createStatusHandler, createTranslateHandler } from './translate-handler'
@@ -13,7 +13,7 @@ export default defineBackground(() => {
     return config.provider === 'openai-compat' ? config.openaiCompat.model : undefined
   }
   const translate = createTranslateHandler({ getProvider: providerFromConfig, getModel: modelFromConfig, cache: translationCache })
-  const status = createStatusHandler({ getProvider: providerFromConfig, getModel: modelFromConfig })
+  const status = createStatusHandler({ getProvider: providerFromConfig, getModel: modelFromConfig, getChain: async () => buildChain(await getConfig()) })
 
   browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!isAxtMessage(message)) return

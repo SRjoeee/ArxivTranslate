@@ -1,23 +1,29 @@
 import type { Config } from '@/config/schema'
+import { createChromeBuiltinProvider } from './chrome-builtin'
 import { createGoogleWebProvider } from './google-web'
 import { createOpenAICompatProvider } from './openai-compat'
 import type { TranslationProvider } from './types'
 
-/** 按配置取 provider。chrome-builtin 还没接（DESIGN §8.1） */
+/** 按配置取 provider */
 export function getProvider(config: Config): TranslationProvider {
   switch (config.provider) {
     case 'openai-compat':
       return createOpenAICompatProvider(config.openaiCompat, { prompts: config.prompts })
     case 'google-web':
       return createGoogleWebProvider()
+    case 'chrome-builtin':
+      return createChromeBuiltinProvider(config.targetLanguage)
   }
 }
 
 /**
- * 降级链上的免费引擎，按优先级排列（DESIGN §8.5）。
- * 免费引擎不需要 key、不花钱，作为兜底；chrome-builtin 接上后插在 google-web 之前（离线、更快）
+ * 降级链上的免费引擎，按优先级排列（DESIGN §8.5）。都不需要 key、不花钱。
+ * 内置引擎在前：离线、单句 10–20 ms，而且不受任何限流；语言包没下载时 isAvailable() 为假，自动被跳过
  */
-const FREE_ENGINES: readonly (() => TranslationProvider)[] = [createGoogleWebProvider]
+const FREE_ENGINES: readonly ((config: Config) => TranslationProvider)[] = [
+  config => createChromeBuiltinProvider(config.targetLanguage),
+  () => createGoogleWebProvider(),
+]
 
 /**
  * 组装降级链：配置里选的引擎在前，其后接不与它重复的免费引擎（DESIGN §8.5）。
@@ -33,7 +39,7 @@ export async function buildChain(config: Config): Promise<TranslationProvider[]>
   if (!config.fallback.enabled) return [primary]
   const chain = [primary]
   for (const create of FREE_ENGINES) {
-    const candidate = create()
+    const candidate = create(config)
     if (candidate.id === primary.id) continue
     if (candidate.preservesMarkup !== primary.preservesMarkup) {
       console.warn(`[axt] ${candidate.displayName} 的 preservesMarkup 与首选引擎不同，不加入降级链`)
