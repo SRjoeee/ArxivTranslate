@@ -24,5 +24,8 @@
 | `src/providers/request/cancellation.ts` | `reference/read-frog/src/utils/request/cancellation.ts@9b44f82` | 2026-09-05 | 原样移植，仅加文件头 |
 | `src/shared/uuid.ts` | `reference/read-frog/src/utils/crypto-polyfill.ts@9b44f82` | 2026-09-05 | 原样移植，改名 |
 | `tests/providers/request/*.test.ts` | `reference/read-frog/src/utils/request/__tests__/*@9b44f82` | 2026-09-05 | 六个测试文件移植：改 import 路径；`batch-queue.test.ts` 依赖的分隔符解析、hash、`executeTranslate` 换成测试内替身。`batch-separator-parsing.test.ts` 测的是它自己的分隔符解析，不搬 |
+| `src/core/renderer/spinner.ts` | `reference/read-frog/src/utils/host/translate/ui/spinner.ts@9b44f82` | 2026-09-05 | 圆环与动画注册表原样；class / 颜色变量改本项目前缀；去掉它的请求胶水 `getTranslatedTextAndRemoveSpinner`（含 React 错误组件），加 `cancelSpinnersIn` |
+| `src/core/scheduler/pacer.ts` | `reference/read-frog/src/utils/scheduler.ts@9b44f82` | 2026-09-05 | 原样移植，仅加文件头 |
+| `src/core/scheduler/session.ts` | `reference/read-frog/src/utils/host/translate/translation-session.ts@9b44f82` | 2026-09-05 | 去掉 providerRef 的两个函数；函数改名 begin / end / getSessionId |
 
 登记格式：`src/<path>` ← `reference/<repo>/<path>@<commit>`，一句话说明改了什么（改名、去掉配置依赖、适配块模型等）。改写幅度大到不再像原文件的也要登记。
