@@ -22,6 +22,39 @@ describe('config storage', () => {
     expect(c.targetLanguage).toBe('jpn')
   })
 
+  it('回退不是静默的：版本比扩展新时说清楚是装了旧版本（2026-09-06 实测撞到）', async () => {
+    // WXT 拒绝降级迁移后 getValue() 原样返回 v8 对象，schema 的 version 字面量不匹配
+    await fakeBrowser.storage.local.set({ config: { ...DEFAULT_CONFIG, version: CONFIG_VERSION + 1 }, config$: { v: CONFIG_VERSION + 1 } })
+    vi.resetModules()
+    const fresh = await import('@/config/storage')
+    expect(await fresh.getConfig()).toEqual(DEFAULT_CONFIG)
+    expect(fresh.configFallbackReason()).toContain(`v${CONFIG_VERSION + 1}`)
+    expect(fresh.configFallbackReason()).toContain('更旧的版本')
+  })
+
+  it('结构坏掉时指出是哪个字段，不只说「不合法」', async () => {
+    await fakeBrowser.storage.local.set({ config: { ...DEFAULT_CONFIG, targetLanguage: 'nope' }, config$: { v: CONFIG_VERSION } })
+    vi.resetModules()
+    const fresh = await import('@/config/storage')
+    expect(await fresh.getConfig()).toEqual(DEFAULT_CONFIG)
+    expect(fresh.configFallbackReason()).toContain('targetLanguage')
+  })
+
+  it('配置正常时不留回退原因：不能对着好配置报警', async () => {
+    vi.resetModules()
+    const fresh = await import('@/config/storage')
+    await fresh.setConfig({ ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-ok' } })
+    expect((await fresh.getConfig()).openaiCompat.apiKey).toBe('sk-ok')
+    expect(fresh.configFallbackReason()).toBeNull()
+  })
+
+  it('空存储读到默认值，同样不算回退（首次安装不该报警）', async () => {
+    vi.resetModules()
+    const fresh = await import('@/config/storage')
+    expect(await fresh.getConfig()).toEqual(DEFAULT_CONFIG)
+    expect(fresh.configFallbackReason()).toBeNull()
+  })
+
   it('存储里是坏数据时回退默认', async () => {
     await configItem.setValue({ nonsense: true } as never)
     expect(await getConfig()).toEqual(DEFAULT_CONFIG)

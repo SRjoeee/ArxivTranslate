@@ -30,11 +30,48 @@ export const configItem = storage.defineItem<Config>('local:config', {
   },
 })
 
-/** 读到的值不合 schema（升级失败、手工改坏）时回退默认，不让扩展挂掉 */
+/**
+ * 最近一次 `getConfig()` 的回退原因，`null` 表示配置正常。
+ * 每个执行上下文（popup / content / background）各存一份自己那次调用的结果——它们互不共享内存，
+ * 而 popup 本来就自己调 `getConfig()`，读这个变量拿到的正是它自己那次的结论
+ */
+let fallbackReason: string | null = null
+
+/** 供 UI 查询：配置是不是被回退成默认值了。回退时用户的 API key、引擎、模式全部不生效，必须让他看见 */
+export function configFallbackReason(): string | null {
+  return fallbackReason
+}
+
+/**
+ * 说清楚为什么回退。两种已知成因：
+ * (1) 存储里的版本比当前扩展新——装了更旧的构建，WXT 拒绝降级迁移（实测：v7 配置 + v6 扩展）；
+ * (2) 结构不合 schema——手工改坏，或某个字段超出限额
+ */
+function describeFallback(stored: unknown, issues: readonly { path: PropertyKey[]; message: string }[]): string {
+  const version = (stored as { version?: unknown } | null)?.version
+  if (typeof version === 'number' && version > CONFIG_VERSION) {
+    return `存储里的配置是 v${version}，当前扩展只支持到 v${CONFIG_VERSION}（可能装了更旧的版本）`
+  }
+  const issue = issues[0]
+  if (!issue) return '未知原因'
+  const where = issue.path.map(String).join('.')
+  return where ? `${where}：${issue.message}` : issue.message
+}
+
+/**
+ * 读到的值不合 schema（升级失败、手工改坏）时回退默认，不让扩展挂掉。
+ * **回退不能是静默的**：用户的 key 明明存着却不生效、翻译悄悄降级到免费引擎，
+ * 界面上没有任何线索时谁也发现不了（2026-09-06 实测撞到：v7 配置 + v6 构建）
+ */
 export async function getConfig(): Promise<Config> {
-  const parsed = configSchema.safeParse(await configItem.getValue())
-  if (parsed.success) return parsed.data
-  console.warn('[axt] 配置不合法，已回退默认值')
+  const stored = await configItem.getValue()
+  const parsed = configSchema.safeParse(stored)
+  if (parsed.success) {
+    fallbackReason = null
+    return parsed.data
+  }
+  fallbackReason = describeFallback(stored, parsed.error.issues)
+  console.warn(`[axt] 配置不合法，已回退默认值：${fallbackReason}`)
   return DEFAULT_CONFIG
 }
 

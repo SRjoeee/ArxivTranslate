@@ -3,7 +3,7 @@ import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
 import type { ProviderStatus } from '@/entrypoints/background/translate-handler'
 import type { Mode } from '@/core/renderer'
-import { getConfig, setConfig } from '@/config/storage'
+import { configFallbackReason, getConfig, setConfig } from '@/config/storage'
 import type { Config } from '@/config/schema'
 import { BUILTIN_SOURCE_LANGUAGE } from '@/providers/chrome-builtin'
 import { BUILT_IN_PROMPTS } from '@/providers/prompt-library'
@@ -23,6 +23,8 @@ export function App() {
   /** Chrome 内置翻译的语言包状态（§8.4）：downloadable 时要在点击处理函数里 create() 才有用户手势 */
   const [pack, setPack] = useState<'unsupported' | 'available' | 'downloadable' | 'downloading' | 'unavailable' | null>(null)
   const [packNote, setPackNote] = useState('')
+  /** 配置被回退成默认值的原因；非 null 时顶部挂一条警告 */
+  const [configFallback, setConfigFallback] = useState<string | null>(null)
 
   const refresh = useCallback(() => {
     sendToActiveTab({ type: 'axt:page-status' }).then(setPage).catch(() => setPage(null))
@@ -58,6 +60,8 @@ export function App() {
     loadProvider()
     getConfig().then(config => {
       setLocalConfig(config)
+      // 回退成默认值时用户的 key / 引擎 / 模式全部不生效，必须显式说出来
+      setConfigFallback(configFallbackReason())
       void checkPack(config.targetLanguage)
     }).catch(() => setLocalConfig(null))
     loadStats()
@@ -189,6 +193,12 @@ export function App() {
         arXiv HTML Translator
         <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={() => browser.runtime.openOptionsPage()}>设置</button>
       </h1>
+      {configFallback && (
+        <p style={{ margin: '0 0 8px', padding: '6px 8px', borderRadius: 4, background: '#fdf0f0', color: '#b00' }}>
+          配置读取失败，正在使用默认设置，你保存的 API key 与引擎选择<strong>都没有生效</strong>。
+          <span style={{ display: 'block', marginTop: 4, color: '#666' }}>{configFallback}</span>
+        </p>
+      )}
       <p style={{ margin: '0 0 4px', color: '#666' }}>{ping}</p>
       <p style={{ margin: '0 0 8px', color: '#666' }}>
         {provider === null
