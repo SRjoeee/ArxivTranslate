@@ -149,6 +149,9 @@ export default defineContentScript({
      * 位图与文字块一样按视口懒加载；当前模式不在用户勾选的集合里时进入视口的图先停着，切回来再翻
      */
     function startImages(session: string, config: Config, context: Parameters<typeof startTranslation>[0]['context']): void {
+      // 上一轮（致命错误后没恢复原文就重开）留下的叠加层与模式闸先摘掉：helper 没了、图片翻译关了、
+      // 目标语言换了，旧的都不该再显示；新一轮处理到那张图时会替换它（Codex 在 #89 指出）
+      setImageModes(document, [])
       if (config.image.modes.length === 0) return
       sendMessage({ type: 'axt:helper-status' }).then(status => {
         if (!status.available || getSessionId() !== session || !paper) return

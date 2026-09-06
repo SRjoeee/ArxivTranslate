@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { extract, markBlocks } from '@/core/extractor'
-import { MAX_IMAGE_BYTES, collectImageTargets, startImageTranslation, toBase64, type ImageRunOptions, type ImageTarget } from '@/core/image'
+import { MAX_IMAGE_BYTES, captionOf, collectImageTargets, startImageTranslation, toBase64, type ImageRunOptions, type ImageTarget } from '@/core/image'
 import { IMG_CLASS } from '@/core/marks'
 import { restore } from '@/core/renderer'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
@@ -169,6 +169,78 @@ describe('startImageTranslation', () => {
     expect(all.rendered).toEqual([])
   })
 
+  it('配置级错误（auth / no-key）：第一张图就停调度，之后进入的图不再取、不再识别；fatal() 给出原因（Codex 在 #89 指出）', async () => {
+    const doc = docOf(FIGURE + FIGURE.replace(/F1/g, 'F2'))
+    markBlocks(extract(doc))
+    const targets = collectImageTargets(doc)
+    const ocr = vi.fn(async (_call: OcrCall) => ({ ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false }))
+    const run = startImageTranslation({
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }),
+      ocr,
+      translate: async () => ({ ok: false, error: { kind: 'auth', message: 'User not found.' } }),
+      isEnabled: () => true, isCurrent: () => true,
+    })
+    await run.translate([targets[0]!])
+    expect(run.fatal()).toContain('auth')
+    expect(run.failed()).toEqual([targets[0]])
+    await run.translate([targets[1]!]) // 停了：第二张连 OCR 都不做
+    expect(ocr).toHaveBeenCalledTimes(1)
+    expect(run.progress().requested).toBe(1)
+  })
+
+  it('普通失败（network）不算致命：下一张照常处理', async () => {
+    const doc = docOf(FIGURE + FIGURE.replace(/F1/g, 'F2'))
+    markBlocks(extract(doc))
+    const targets = collectImageTargets(doc)
+    const ocr = vi.fn(async (_call: OcrCall) => ({ ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false }))
+    const run = startImageTranslation({
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr,
+      translate: async () => ({ ok: false, error: { kind: 'network', message: 'offline' } }),
+      isEnabled: () => true, isCurrent: () => true,
+    })
+    await run.translate(targets)
+    expect(run.fatal()).toBeUndefined()
+    expect(ocr).toHaveBeenCalledTimes(2)
+    expect(run.failed()).toHaveLength(2)
+  })
+
+  it('并发有上限：同时在处理的图不超过 maxConcurrent，其余排队（Codex 在 #89 指出）', async () => {
+    const doc = docOf([1, 2, 3, 4, 5].map(i => FIGURE.replace(/F1/g, `F${i}`)).join(''))
+    markBlocks(extract(doc))
+    const targets = collectImageTargets(doc)
+    expect(targets).toHaveLength(5)
+    let inFlight = 0
+    let peak = 0
+    const release: (() => void)[] = []
+    const ocr = vi.fn(async (_call: OcrCall) => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise<void>(resolve => release.push(resolve))
+      inFlight--
+      return { ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false }
+    })
+    const run = startImageTranslation({
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr, maxConcurrent: 2,
+      translate: async (call: { request: { segments: { id: string; text: string }[] } }) => ({ ok: true as const, result: { segments: call.request.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' }, cached: 0 }),
+      isEnabled: () => true, isCurrent: () => true,
+    })
+    const all = run.translate(targets)
+    const releaseAll = () => { for (const r of release.splice(0)) r() }
+    await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(2))
+    expect(inFlight).toBe(2) // 5 张只开了 2 张，其余排队
+    releaseAll()
+    await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(4))
+    releaseAll()
+    await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(5))
+    releaseAll()
+    await all
+    expect(peak).toBe(2)
+    expect(run.progress().done).toBe(5)
+  })
+
   it('已在请求中的目标不重复请求', async () => {
     let release: () => void = () => {}
     const held = new Promise<void>(resolve => { release = resolve })
@@ -180,5 +252,19 @@ describe('startImageTranslation', () => {
     release()
     await first
     expect(ocr).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('captionOf', () => {
+  it('嵌套分图取自己那层的说明，不是最外层的第一个说明（2410.00260 的 A2.F4，Codex 在 #89 指出）', () => {
+    const doc = docOf('<figure id="A2.F4" class="ltx_figure"><div class="ltx_flex_figure">'
+      + '<div class="ltx_flex_cell"><figure id="sf1" class="ltx_figure ltx_figure_panel"><img class="ltx_graphics" id="g1" src="a.png"><figcaption class="ltx_caption">(a) Classifier confusion matrix</figcaption></figure></div>'
+      + '<div class="ltx_flex_cell"><figure id="sf2" class="ltx_figure ltx_figure_panel"><img class="ltx_graphics" id="g2" src="b.png"><figcaption class="ltx_caption">(b) Agreement between LLM judge and classifier</figcaption></figure></div>'
+      + '</div><figcaption class="ltx_caption">Figure 4: Results comparison</figcaption></figure>'
+      + '<figure id="F9" class="ltx_figure"><div class="ltx_flex_cell"><img class="ltx_graphics" id="g3" src="c.png"></div><figcaption class="ltx_caption">Figure 9: Outer only</figcaption></figure>')
+    expect(captionOf(doc.getElementById('g2')!)).toBe('(b) Agreement between LLM judge and classifier')
+    expect(captionOf(doc.getElementById('g1')!)).toBe('(a) Classifier confusion matrix')
+    // 分图自己没有说明就往外层找
+    expect(captionOf(doc.getElementById('g3')!)).toBe('Figure 9: Outer only')
   })
 })

@@ -8,7 +8,6 @@
 import { ID_ATTR } from '@/core/extractor'
 import { decodeText, escapeText } from '@/core/protector/text'
 import { type ImageLabel, type ImageTarget, renderImage } from '@/core/renderer/image'
-import { outermostFigure } from '@/core/renderer/split-figures'
 import { DOCUMENT_ROOT, FIGURE_SELECTORS } from '@/core/rules/latexml'
 import { INJECTED_SELECTOR } from '@/core/marks'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
@@ -26,6 +25,10 @@ export const MAX_IMAGE_BYTES = 6 * 1024 * 1024
 const IMAGE_TYPES = /^image\/(png|jpe?g|gif|webp|bmp|tiff)$/i
 /** 图注做上下文时的长度上限：进 prompt 也进缓存键 */
 const CAPTION_MAX_CHARS = 300
+/** 配置级错误（与文字管线的 FATAL_KINDS 同一套）：第一次遇到就停调度，别让之后进入视口的每张图都去取图、识别、再撞一次 */
+const FATAL_KINDS = new Set(['no-key', 'auth'])
+/** 同时在处理的图：取字节、base64、消息载荷都占内存，helper 又是顺序的，多开只是把 6 MB 一张的图囤在那里 */
+const MAX_CONCURRENT = 2
 
 export interface ImageBytes {
   bytes: ArrayBuffer
@@ -47,6 +50,8 @@ export interface ImageRunOptions {
   isEnabled: () => boolean
   /** 会话还是当前这一个（恢复原文 / 重开之后为假） */
   isCurrent: () => boolean
+  /** 测试注入：并发上限 */
+  maxConcurrent?: number
   /** 测试注入：取字节 */
   fetchBytes?: (url: string) => Promise<ImageBytes>
   onProgress?: (progress: ImageProgress) => void
@@ -54,6 +59,8 @@ export interface ImageRunOptions {
 }
 
 export interface ImageRun {
+  /** 配置级错误（auth / no-key）之后停下的原因；停下后 translate / resume 都不再动 */
+  fatal(): string | undefined
   /** 手动把目标交出去翻（重试）；已在请求中的不重复 */
   translate(targets: ImageTarget[]): Promise<void>
   /** 模式闸打开了：把停着的目标放出去 */
@@ -106,11 +113,19 @@ export function sameText(a: string, b: string): boolean {
   return norm(a) === norm(b)
 }
 
-/** 图注文字做上下文（§15.1：Safari 逐行无上下文的翻法是质量差的原因） */
-function captionOf(target: ImageTarget): string | undefined {
-  const caption = outermostFigure(target.el)?.querySelector('figcaption')
-  const text = caption?.textContent?.replace(/\s+/g, ' ').trim()
-  return text ? text.slice(0, CAPTION_MAX_CHARS) : undefined
+/**
+ * 图注文字做上下文（§15.1：Safari 逐行无上下文的翻法是质量差的原因）。
+ * 取**离图最近**的那一层 figure 自己的说明（`:scope > figcaption`），没有再往外层找：多面板插图里
+ * 每个分图各有说明，从最外层 `querySelector('figcaption')` 会把第一个分图的说明给所有分图
+ *（2410.00260 的 A2.F4：(b) 会拿到 (a) 的 "Classifier confusion matrix"，Codex 在 #89 指出）
+ */
+export function captionOf(el: Element): string | undefined {
+  for (let fig = el.closest('figure'); fig; fig = fig.parentElement?.closest('figure') ?? null) {
+    const own = Array.from(fig.children).find(child => child.tagName === 'FIGCAPTION')
+    const text = own?.textContent?.replace(/\s+/g, ' ').trim()
+    if (text) return text.slice(0, CAPTION_MAX_CHARS)
+  }
+  return undefined
 }
 
 export function startImageTranslation(options: ImageRunOptions): ImageRun {
@@ -120,7 +135,8 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
   /** 进入过视口但模式闸关着的目标 */
   const parked = new Set<ImageTarget>()
   let stopped = false
-  const alive = () => !stopped && options.isCurrent()
+  let fatal: string | undefined
+  const alive = () => !stopped && fatal === undefined && options.isCurrent()
 
   const progress = (): ImageProgress => {
     let requested = 0
@@ -157,7 +173,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
         outcome.set(target, 'done') // 图里没有可翻的文字：算完成，不插叠加层
         return
       }
-      const caption = captionOf(target)
+      const caption = captionOf(target.el)
       const context: TranslateContext = { ...options.context, ...(caption ? { sectionTitle: caption } : {}) }
       const res = await options.translate({
         request: {
@@ -170,7 +186,15 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
         scope: options.scope,
       })
       if (!alive()) return
-      if (!res.ok) return fail(target, `翻译失败：${res.error.message}`)
+      if (!res.ok) {
+        // key 失效 / 没配 key：与文字管线一样，第一次遇到就停调度，之后的图不再取、不再识别
+        if (FATAL_KINDS.has(res.error.kind) && fatal === undefined) {
+          fatal = `${res.error.kind}: ${res.error.message}`
+          scheduler?.disconnect()
+          parked.clear()
+        }
+        return fail(target, `翻译失败：${res.error.message}`)
+      }
       const translated = new Map(res.result.segments.map(s => [s.id, decodeText(s.text)]))
       const labels: ImageLabel[] = []
       for (const [i, box] of boxes.entries()) {
@@ -206,7 +230,12 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       outcome.set(t, 'requested')
     }
     report()
-    await Promise.all(fresh.map(process))
+    // 有上限地并发：同一时刻最多处理几张，其余排队（fetch → hash → base64 → OCR 一条龙，别一次全开）
+    const queue = fresh.slice()
+    const workers = Array.from({ length: Math.min(options.maxConcurrent ?? MAX_CONCURRENT, queue.length) }, async () => {
+      for (let next = queue.shift(); next; next = queue.shift()) await process(next)
+    })
+    await Promise.all(workers)
     report()
   }
 
@@ -229,6 +258,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       parked.clear()
     },
     failed: () => options.targets.filter(t => outcome.get(t) === 'failed'),
+    fatal: () => fatal,
     progress,
   }
 }

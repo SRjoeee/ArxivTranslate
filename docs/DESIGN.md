@@ -779,6 +779,10 @@ content script                       background (service worker)          axt-he
 - **定位用 CSS 锚点定位**（Chrome ≥131，为了 `anchor-scope`；内置翻译 API 已要求 138+）：`img:has(+ .axt-img)` 声明锚点名，`.axt-img` 用 `anchor()` / `anchor-size()` 贴到图的盒子上，父元素 `position: relative; anchor-scope` 限定作用域，`grid-column: auto` 脱离配对网格。零 JS 几何读取、零 ResizeObserver；拆图副本结构相同，锚点自动成立。标签字号用容器查询单位（`cqh` / `cqw`）按框高与字数算成一个字符串写一次，不读布局——ImageTrans 那种 JS 二分量字号每框要 12 次强制布局，不用
 - **等待 / 失败态不建 DOM 节点**：pending 叠加层会被拆图克隆进副本、`stripIds` 又剥掉它的状态属性。只在成功时插叠加层（Safari 也是翻完才出现）；失败记在 image run 里，popup 显示计数、重试按钮管。可见性 CSS 只看结构与 `<html>` 属性（`data-axt-img-modes`），不看叠加层自己的属性
 - side 模式下插图整块拆两份（§7.2）：叠加层属于「只有译文」的那一份，原件那份由样式隐藏（**只限 side**——stack 显示原件、only 显示副本，叠加层跟着显示的那份走）；拆图副本的重建签名把叠加层算进去，否则译文到齐后副本里没有它。镜像每会话一次、跑在 OCR 之前，会插在 `<img>` 与叠加层之间：`mirror.ts` 的闸认 `isInjected`，插叠加层时顺手删掉紧跟的镜像；side → only 之后 OCR 才到时叠加层进了被隐藏的原件、副本签名过期，非 side 分支的整理对脏根删掉过期副本，回 side 时重建
+- **配置级错误停调度**（Codex 在 #89 指出）：翻译回 `auth` / `no-key` 时与文字管线一样第一次就停（`fatal()`），之后进入视口的图不再取字节、不再识别；popup 的「修好配置后点翻译」提示同样适用。普通失败（网络、helper 断开）只记这一张，重试按钮算上图片
+- **并发上限 2**（Codex 在 #89 指出）：取字节、base64、消息载荷都占内存，helper 又是顺序的，一次全开只是把 6 MB 一张的图囤在内存里
+- **图注取离图最近那层 figure 自己的说明**（Codex 在 #89 指出）：多面板插图每个分图各有说明，从最外层拿第一个 `figcaption` 会把 (a) 的说明给 (b)，既污染 prompt 也进错缓存键
+- **新会话先摘掉上一轮的模式闸**（Codex 在 #89 指出）：致命错误后没恢复原文就重开时，上一轮的叠加层还在——helper 没了、图片翻译关了、目标语言换了，旧的都不该再显示；新一轮处理到那张图时替换它
 - **块内图片不翻**：目标 = `img.ltx_graphics` 且不在任何翻译块内（与拆图的"游离媒体"同一判定）。块内的图会随占位符克隆进译文、only 模式下原块整个隐藏，叠加层无处可挂；12 篇 fixture 的 16 张位图全在 figure / flex cell 里，无一在块内
 - **取消**：`axt:ocr` 带会话 `scope`；helper 客户端区分排队与在飞（在飞上限 1，helper 本就是顺序的，这样撤才真能撤掉活），撤 scope 时拒掉排队的、在飞的到达后丢弃；`axt:cancel-scope` 与标签页关闭都经 sessions 的 `onDrop` 钩子调它。DOM 安全仍由 content 侧每个 `await` 之后重查会话 id 保证（与文字管线同一模式）
 - helper 放在本仓库 `helper/`（Swift Package，无第三方依赖），与扩展同 PR 演进；分发要做时再拆独立仓库

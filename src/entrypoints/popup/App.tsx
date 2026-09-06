@@ -269,9 +269,11 @@ export function App() {
             {/* 致命错误后不给重试：那一轮的 run 已经 halted，content 侧的 translate() 会立刻返回，
                 却照旧报告失败块数，popup 于是宣称"已重新提交 N 块"——一个请求都没发（Codex 在 #36 指出）。
                 出路是上面那句提示说的：修好配置后点"翻译"，那会开一轮新的 run */}
-            {page.progress.failed > 0 && page.progress.state !== 'idle' && !page.progress.fatal && (
+            {(page.progress.failed > 0 || (page.images?.failed ?? 0) > 0) && page.progress.state !== 'idle' && !page.progress.fatal && (
               <p style={{ margin: '6px 0 0' }}>
-                <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={retryFailed}>重试失败的 {page.progress.failed} 块</button>
+                <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={retryFailed}>
+                  重试失败的 {[page.progress.failed > 0 ? `${page.progress.failed} 块` : '', (page.images?.failed ?? 0) > 0 ? `${page.images?.failed} 张图` : ''].filter(Boolean).join('、')}
+                </button>
               </p>
             )}
           </section>
