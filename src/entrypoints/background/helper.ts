@@ -25,6 +25,8 @@ export interface HelperClientDeps {
   lastError?: () => string | undefined
   /** 单个请求的超时；OCR 一张图通常一秒内 */
   timeoutMs?: number
+  /** 本 worker 里**第一次** OCR 的超时：机器上首次跑 Vision 要做一次性模型准备（实测 26.6 s），30 s 会误判 helper 挂了 */
+  firstOcrTimeoutMs?: number
   /** 有请求在飞时的保活间隔与动作 */
   keepAliveMs?: number
   keepAlive?: () => void
@@ -58,6 +60,7 @@ interface Queued extends Pending {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
+const DEFAULT_FIRST_OCR_TIMEOUT_MS = 120_000
 const DEFAULT_KEEP_ALIVE_MS = 20_000
 const MAX_IN_FLIGHT = 1
 
@@ -68,6 +71,9 @@ function isMissingHost(reason: string | undefined): boolean {
 
 export function createHelperClient(deps: HelperClientDeps): HelperClient {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const firstOcrTimeoutMs = deps.firstOcrTimeoutMs ?? DEFAULT_FIRST_OCR_TIMEOUT_MS
+  /** 本 worker 里成功识别过一次：Vision 的一次性准备已经付过，之后按正常超时 */
+  let warmed = false
   const keepAliveMs = deps.keepAliveMs ?? DEFAULT_KEEP_ALIVE_MS
   let port: NativePort | null = null
   /** 本次连接 ping 过的结果；断开就作废。没握过手的连接不发 OCR——pump 会先插一个 ping 到队头 */
@@ -137,14 +143,15 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       entry?.resolve(reply as Record<string, unknown>)
       if (id.startsWith('ping-')) {
         // ping 的回应：这条连接握过手了，版本记下来（status() 与 pump 插的内部 ping 都走这里）。
-        // 握手回的是错误信封（helper 不兼容）：排队的活全部拒掉、断开端口——否则 pump 会一直插 ping、
-        // 一直收到错误，无限循环（Codex 在 #87 指出）
-        if (reply && !reply.error) known = { available: true, version: typeof reply.version === 'string' ? reply.version : 'unknown' }
+        // 握手回的是错误信封（helper 不兼容）或协议版本对不上（装了别的版本的 helper）：排队的活全部拒掉、
+        // 断开端口——否则 pump 会一直插 ping、一直收到错误，无限循环（Codex 在 #87 指出）
+        if (reply && !reply.error && reply.v === HELPER_PROTOCOL) known = { available: true, version: typeof reply.version === 'string' ? reply.version : 'unknown' }
         else {
           dropPort()
-          failAll('invalid-response', `helper 握手失败：${errorOf(reply ?? {})?.message ?? '回应不合法'}`)
+          const why = reply?.error ? errorOf(reply)?.message : `协议版本 ${String(reply?.v)}，扩展要 ${HELPER_PROTOCOL}`
+          failAll('invalid-response', `helper 握手失败：${why ?? '回应不合法'}`)
         }
-      }
+      } else if (id.startsWith('ocr-') && reply && !reply.error) warmed = true
       pump()
     })
     opened.onDisconnect.addListener(() => {
@@ -172,13 +179,14 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       }
       const item = queue.shift() as Queued
       pending.set(item.id, item)
+      const budget = item.id.startsWith('ocr-') && !warmed ? firstOcrTimeoutMs : timeoutMs
       item.timer = setTimeout(() => {
-        settle(item.id)?.reject(new HelperError('timeout', `helper ${timeoutMs} ms 没有回应`))
+        settle(item.id)?.reject(new HelperError('timeout', `helper ${budget} ms 没有回应`))
         // 超时的请求 helper 还在处理：断开端口，下一条起新进程。握手本身超时说明 helper 起不来，排队的一起拒掉
         dropPort()
         if (item.id.startsWith('ping-')) failAll('timeout', `helper ${timeoutMs} ms 没有回应握手`)
         pump()
-      }, timeoutMs)
+      }, budget)
       try {
         ensurePort().postMessage(item.message)
       } catch (e) {
@@ -211,6 +219,7 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
         const reply = await send('ping', {})
         const failure = errorOf(reply)
         if (failure) return { available: false, reason: failure.message }
+        if (reply.v !== HELPER_PROTOCOL) return { available: false, reason: `helper 协议版本 ${String(reply.v)}，扩展要 ${HELPER_PROTOCOL}，请重新安装 helper` }
         // known 已在 onMessage 里按 ping 回应记下；这里只是把它交出去
         return known ?? { available: true, version: typeof reply.version === 'string' ? reply.version : 'unknown' }
       } catch (e) {
@@ -223,7 +232,7 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       const failure = errorOf(reply)
       if (failure) throw failure
       const lines = reply.lines
-      if (!Array.isArray(lines) || typeof reply.width !== 'number' || typeof reply.height !== 'number') {
+      if (reply.v !== HELPER_PROTOCOL || !Array.isArray(lines) || typeof reply.width !== 'number' || typeof reply.height !== 'number') {
         throw new HelperError('invalid-response', 'helper 的回应缺 lines / width / height')
       }
       return { result: { width: reply.width, height: reply.height, lines: lines as OcrResult['lines'] }, version: known?.version ?? 'unknown' }

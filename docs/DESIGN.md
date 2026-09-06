@@ -804,6 +804,9 @@ content script                       background (service worker)          axt-he
 - Swift，~100–200 行：读 stdin 长度前缀 JSON、解码图片、跑 Vision、写 stdout
 - host manifest 的用户级目录是 **`<用户数据目录>/NativeMessagingHosts/<name>.json`**（2026-09-07 实测：不是固定的 `Google/Chrome/…`，那只是默认用户数据目录恰好在那里；Dia 的在 `Dia/User Data/NativeMessagingHosts`）。安装脚本写 Chrome 与 Chromium 的默认目录；Playwright 用 `--user-data-dir` 指向临时 profile，e2e 得把 manifest 复制进 `<profile>/NativeMessagingHosts/`，放在系统级 `Google/Chrome` 目录里 Chrome for Testing 也找不到。`allowed_origins` 绑定扩展 id。**不钉 `key`** [决定，2026-09-07]：钉了 id 会变、本机存储的配置全丢；未打包扩展的 id 由路径推出，本机稳定，Playwright 从同一路径 `.output/chrome-mv3` 加载得到同一个 id。安装脚本接收 id 参数，分发阶段再议
 - **分发延后** [决定，2026-09-07]：第一阶段只做开发者安装——`swift build` + 一段注册脚本，在作者的 Mac 上验证价值；签名、公证、pkg / Homebrew 到那时再立项。扩展启动时 `ping` 检测，检测不到则设置项灰掉、图片翻译静默不跑
+- **`nativeMessaging` 暂作必需权限** [决定，2026-09-07，Codex 在 #87 建议改可选]：必需权限会让商店安装 / 更新时弹「与本机应用通信」的警告，非 Mac 用户也看得到，更新加权限还可能让已装的扩展停用到用户接受为止。这些都只在**分发**时发生，未打包加载没有这一步；分发立项时随签名 / pkg 一起改成 `optional_permissions` + 设置页的授权按钮（`permissions.request` 要用户手势，保存按钮就是），e2e 照 local-endpoint 那样复制一份构建产物、给副本的 manifest 加上权限——原生授权弹窗 Playwright 点不到
+- **协议版本**：请求带 `v`，helper 不认就回 `unsupported-protocol`；扩展侧握手时核对回应的 `v`，对不上按握手失败处理（排队的活拒掉、断开端口），设置页显示「请重新安装 helper」。扩展与 helper 分开安装，版本会对不上
+- **首次 OCR 的超时**：本 worker 里第一次识别给 120 s（机器上第一次跑 Vision 要做一次性模型准备，实测 26.6 s，30 s 会把健康的 helper 当挂了），成功过一次之后按 30 s
 - 后话：helper 存在后可顺手加 `apple-translate` provider（`preservesMarkup: false`，Mac 专属、离线），macOS 15 上需用透明窗口承载 SwiftUI 的变通方案（参考 SystemTranslation 库），macOS 26 可直接初始化
 
 ### 15.4b helper 实测（2026-09-07，用户给的参考图 579×699，Apple Silicon，macOS 27）

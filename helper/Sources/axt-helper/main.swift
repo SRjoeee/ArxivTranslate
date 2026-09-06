@@ -14,12 +14,14 @@ enum HelperError: Error {
   case badBase64
   case undecodableImage
   case badRequest(String)
+  case unsupportedProtocol(Any?)
 
   var code: String {
     switch self {
     case .badBase64: return "bad-base64"
     case .undecodableImage: return "undecodable-image"
     case .badRequest: return "bad-request"
+    case .unsupportedProtocol: return "unsupported-protocol"
     }
   }
 
@@ -28,6 +30,7 @@ enum HelperError: Error {
     case .badBase64: return "image 不是合法的 base64"
     case .undecodableImage: return "ImageIO 解不开这张图"
     case .badRequest(let why): return why
+    case .unsupportedProtocol(let v): return "协议版本 \(v.map { "\($0)" } ?? "缺失")，本 helper 只支持 \(PROTOCOL)"
     }
   }
 }
@@ -112,6 +115,8 @@ while let frame = readFrame() {
   var reply: [String: Any] = ["v": PROTOCOL, "id": id]
   do {
     guard let request = parsed, let cmd = request["cmd"] as? String else { throw HelperError.badRequest("请求不是带 cmd 的 JSON 对象") }
+    // 扩展与 helper 分开安装，版本可能对不上：协议号不一致就拒，让扩展侧按握手失败处理（Codex 在 #87 指出）
+    guard let version = request["v"] as? Int, version == PROTOCOL else { throw HelperError.unsupportedProtocol(request["v"]) }
     switch cmd {
     case "ping":
       reply["ok"] = true
