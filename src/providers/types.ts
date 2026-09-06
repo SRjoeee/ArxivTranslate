@@ -46,6 +46,11 @@ export interface TranslationProvider {
   maxBatchItems: number
   /** 请求速率（令牌桶：每秒 rate 个、最多攒 capacity 个）；不声明则用服务默认的 8 / 20，即 Read Frog 的默认值（§8.2） */
   rateLimit?: { rate: number; capacity: number }
+  /**
+   * 同时在飞的请求数上限；不声明则用服务默认的 8。与 rateLimit 是两种闸：令牌桶管「每秒发几个」，
+   * 这个管「同时挂着几个」。响应快的端点靠它就够，用速率去限反而会让快响应白等令牌（§8.3）
+   */
+  maxConcurrent?: number
   /** 健康检查：key 是否配置、端点是否可达、内置模型是否可用 */
   isAvailable(): Promise<boolean>
   translate(request: TranslateRequest): Promise<TranslateResult>
@@ -60,7 +65,7 @@ export interface TranslationProvider {
   cacheId?: string
 }
 
-export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'invalid-response' | 'timeout' | 'aborted' | 'unknown'
+export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'bad-request' | 'invalid-response' | 'timeout' | 'aborted' | 'unknown'
 
 /**
  * 每种 kind 对应的重试元数据，构造时就挂上：移植的 retry-policy 只认它自己的 kind，
@@ -73,6 +78,8 @@ const META_BY_KIND: Record<ProviderErrorKind, RequestErrorMeta> = {
   'auth': { kind: 'access-denied', isRetryable: false },
   'aborted': { isRetryable: false },
   'invalid-response': { isRetryable: false },
+  // 请求本身不对（4xx，非 401/403/429）：重试多少次都一样，交给降级链换个引擎（Codex 在 #17 指出）
+  'bad-request': { kind: 'bad-request', isRetryable: false },
   'rate-limit': { kind: 'rate-limit' },
   'timeout': { kind: 'timeout', isRetryable: true },
   'network': { kind: 'network', isRetryable: true },
@@ -80,9 +87,19 @@ const META_BY_KIND: Record<ProviderErrorKind, RequestErrorMeta> = {
 }
 
 export class ProviderError extends Error {
-  constructor(readonly kind: ProviderErrorKind, message: string, options?: { cause?: unknown }) {
+  /**
+   * 这次失败**换更小的批次重试有没有可能成功**（Codex 在 #61 指出）。默认认为有：
+   * LLM 的 `invalid-response` 多半是某一段把输出带偏了，拆小能定位到它，所以 BatchQueue 会
+   * 重试 3 次再逐条兜底。但服务端整个返回坏了（不是 JSON、格式不对）属于**系统性**失败，
+   * 拆多小都一样——100 段的一批会白打 104 次请求，而且打在我们本就想省着用的免费端点上。
+   * provider 遇到这种情况显式声明 false，`asBatchError` 就不把它转成批次错误
+   */
+  readonly isolatable: boolean
+
+  constructor(readonly kind: ProviderErrorKind, message: string, options?: { cause?: unknown; isolatable?: boolean }) {
     super(message, options)
     this.name = 'ProviderError'
+    this.isolatable = options?.isolatable ?? true
     attachRequestErrorMeta(this, META_BY_KIND[kind])
   }
 }

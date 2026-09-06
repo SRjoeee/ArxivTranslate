@@ -4,7 +4,7 @@
 // 我们送的是占位符标记文本，走 html 格式原样发送；去掉 escapeText 依赖（protector 已做转义）。
 import { toBcp47 } from '@/config/languages'
 import { attachRequestErrorMeta } from './request/retry-policy'
-import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
+import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 
 const ENDPOINT = 'https://translate-pa.googleapis.com/v1/translateHtml'
 /** 公开常量，来自 Google 翻译网页版；不是用户凭据 */
@@ -13,6 +13,20 @@ const CLIENT = 'wt_lib'
 
 export interface GoogleWebDeps {
   fetch?: typeof globalThis.fetch
+}
+
+/**
+ * HTTP 状态到错误类型（Codex 在 #17 指出）。**不能把 4xx 一律归成 `network`**：
+ * retry-policy 的 `isRetryableRequestErrorMeta` 会**先看 kind 再看状态码**，`network` 直接判定可重试，
+ * 于是一个永远不会成功的 400 会被重试满 3 次、再被 BatchQueue 对半拆分逐条重来——
+ * 100 段的一批能放大成几十次无用请求。只有 5xx 与连接层失败才是瞬时的。
+ */
+function kindOfStatus(status: number): ProviderErrorKind {
+  if (status === 429) return 'rate-limit'
+  if (status === 401 || status === 403) return 'auth'
+  // 408 超时、409 冲突照 retry-policy 的状态码表算瞬时，交给它按状态码判定
+  if (status >= 400 && status < 500 && status !== 408 && status !== 409) return 'bad-request'
+  return 'network'
 }
 
 /** 端点按 items 数组返回同长度的译文数组 */
@@ -36,9 +50,8 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
-    const kind = response.status === 429 ? 'rate-limit' : 'network'
     throw attachRequestErrorMeta(
-      new ProviderError(kind, `translateHtml ${response.status} ${response.statusText}${detail ? `：${detail.slice(0, 200)}` : ''}`),
+      new ProviderError(kindOfStatus(response.status), `translateHtml ${response.status} ${response.statusText}${detail ? `：${detail.slice(0, 200)}` : ''}`),
       { statusCode: response.status, responseHeaders: response.headers },
     )
   }
@@ -47,12 +60,13 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
   try {
     payload = await response.json()
   } catch (error) {
-    throw new ProviderError('invalid-response', 'translateHtml 返回的不是 JSON', { cause: error })
+    // 整个响应就不是 JSON：拆小批次重来也是一样的结果（§8.3）
+    throw new ProviderError('invalid-response', 'translateHtml 返回的不是 JSON', { cause: error, isolatable: false })
   }
 
   const translated = Array.isArray(payload) ? payload[0] : undefined
   if (!Array.isArray(translated) || translated.some(item => typeof item !== 'string')) {
-    throw new ProviderError('invalid-response', `translateHtml 响应格式异常：${JSON.stringify(payload).slice(0, 200)}`)
+    throw new ProviderError('invalid-response', `translateHtml 响应格式异常：${JSON.stringify(payload).slice(0, 200)}`, { isolatable: false })
   }
   if (translated.length !== items.length) {
     throw new ProviderError('invalid-response', `translateHtml 返回 ${translated.length} 条，期望 ${items.length} 条`)
@@ -73,7 +87,13 @@ export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationPr
     // 端点一次能吃很多条；批次给大、速率给小——免费端点经不起 8/s 的默认速率（DESIGN §8.3）
     maxBatchChars: 8000,
     maxBatchItems: 100,
-    rateLimit: { rate: 2, capacity: 2 },
+    // 原本是 p-queue 的 concurrency: 2（同时 2 个在飞，不限速率）。2026-09-05 移植 RequestQueue 时
+    // 误写成 rate: 2（每秒 2 个）——Google 响应中位只有 63 ms，却被令牌桶按 500 ms 一个卡着，
+    // 整篇 216 块要 29.6 秒（实测，§8.3）。并发上限回到 2，速率只作突发的安全闸：
+    // 速率闸只兜病态情况，**不该成为常态约束**：响应 63 ms、并发 2，自然吞吐约 30/s，
+    // 20/s 基本碰不到；先设 4/s 时它又变成了新瓶颈（24 个请求跑满 5.3 秒），正是同一个错误
+    rateLimit: { rate: 20, capacity: 8 },
+    maxConcurrent: 2,
     async isAvailable() {
       // 免费端点不需要凭据；是否可达留给实际请求，失败走 fallback 链
       return true
