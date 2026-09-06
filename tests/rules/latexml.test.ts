@@ -312,6 +312,14 @@ describe('参考文献条目的每一段都翻，作者段不再例外（§5.4�
     for (const el of d.querySelectorAll('.ltx_bibblock')) expect(classify(el)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
   })
 
+  it('第一段是整条引文、第二段是 doi 的模板：两段都翻（实测 2609.03896，用户反馈）', () => {
+    // 按位置判断的老规则在这里翻车得最厉害：它把第一段当作者列表跳掉，
+    // 于是整条参考文献一个字都不翻，页面上只有 doi 那行变成中文标点
+    const d = entry('<span class="ltx_bibblock">T. M. Apostol, <em class="ltx_emph">Introduction to Analytic Number Theory</em>, Undergraduate Texts in Mathematics, Springer, New York, 1976.</span>'
+      + '<span class="ltx_bibblock">doi: <a class="ltx_ref ltx_href" href="https://doi.org/10.1007/978-1-4757-5579-4">10.1007/978-1-4757-5579-4</a>.</span>')
+    for (const el of d.querySelectorAll('.ltx_bibblock')) expect(classify(el)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
+  })
+
   it('只有一段的条目仍然整条一个单元，行为没变', () => {
     const d = entry('<span class="ltx_bibblock">Doe, J. A Title. Journal, 2020.</span>')
     expect(classify(d.querySelector('.ltx_bibblock')!)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
