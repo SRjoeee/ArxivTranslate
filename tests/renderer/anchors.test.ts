@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { extract, markBlocks, type TextBlock } from '@/core/extractor'
-import { installAnchorFallback, renderFailed, renderPending, renderText } from '@/core/renderer'
+import { SPLIT_ATTR, installAnchorFallback, renderFailed, renderPending, renderText, splitFigures } from '@/core/renderer'
 import { docOf, frag } from './helpers'
 
 // happy-dom 没有布局引擎：getClientRects 一律为空，那样所有元素都"不可见"。
@@ -181,6 +181,32 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     const off = installAnchorFallback(doc)
     doc.getElementById('link')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
     expect(scrolled).toEqual([outerT])
+    off()
+  })
+
+  it('拆开的插图：只译文模式下原件整个被藏，落到它旁边的克隆上（Codex 在 #80 指出）', () => {
+    // side 模式先跑过 splitFigures，再切 only —— 这时 [data-axt-split] 的原件被 CSS 整个藏起来，
+    // 可见的是紧跟其后的克隆，而克隆被 stripIds 剥了 id，图注引用指不到它
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="src">See <a href="#fig" id="link">Fig 2</a>.</p></div>'
+      + '<figure id="fig" class="ltx_figure"><img class="ltx_graphics" src="x.png" alt="">'
+      + '<figcaption class="ltx_caption" id="cap">Figure 2: A picture.</figcaption></figure>')
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    const cap = doc.getElementById('cap')!
+    renderText(blocks.find(b => b.el === cap) as TextBlock, frag(doc, '图 2：一张图。'))
+    expect(splitFigures(doc)).toBe(1)
+    const fig = doc.getElementById('fig')!
+    expect(fig.hasAttribute(SPLIT_ATTR)).toBe(true)
+    const clone = fig.nextElementSibling!
+    expect(clone.classList.contains('axt-split')).toBe(true)
+    expect(clone.id).toBe('') // 克隆剥了 id：锚点指不到它
+    // only 模式：原件（连同里面的图注与它的译文）整个隐藏，克隆可见
+    layout(doc, [fig, cap, ...[...fig.querySelectorAll('*')]])
+    const scrolled: Element[] = []
+    for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }
+    const off = installAnchorFallback(doc)
+    doc.getElementById('link')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+    expect(scrolled).toEqual([clone])
     off()
   })
 

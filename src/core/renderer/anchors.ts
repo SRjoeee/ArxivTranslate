@@ -13,6 +13,7 @@ import type { Block } from '@/core/extractor'
 import { ID_ATTR } from '@/core/extractor'
 import { FOR_ATTR, T_CLASS } from './index'
 import { MIRROR_CLASS } from './mirror'
+import { SPLIT_ATTR, SPLIT_CLASS } from './split-figures'
 import { PENDING_CLASS } from './pending'
 import { ERROR_CLASS } from './failed'
 
@@ -42,6 +43,14 @@ function targetOf(doc: Document, href: string): Element | null {
  * 滚到它们等于滚到一个空盒子
  */
 function standIn(doc: Document, target: Element): Element | null {
+  // 拆开的插图（Codex 在 #80 指出）：side 模式下 splitFigures 把整张图克隆成"只有译文"的一份，
+  // 切到 only 之后 `[data-axt-split]` 那份原件被整个藏起来（modes.css），可见的是紧跟其后的克隆——
+  // 而克隆被 stripIds 剥了 id，`#S2.F2` 这类图注引用指不到它。插图又不是翻译单元，
+  // 底下那圈块查找根本够不着，所以先在这里把它接过去
+  const split = target.closest(`[${SPLIT_ATTR}]`)
+  const clone = split?.nextElementSibling
+  if (clone?.classList.contains(SPLIT_CLASS) && visible(clone)) return clone
+
   for (let block = target.closest(`[${ID_ATTR}]`); block; block = block.parentElement?.closest(`[${ID_ATTR}]`) ?? null) {
     const id = block.getAttribute(ID_ATTR)
     if (!id) continue
