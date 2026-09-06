@@ -9,8 +9,13 @@ import Vision
 
 let VERSION = "0.1.0"
 let PROTOCOL = 1
-/// Chrome 对 helper → 扩展的单条消息上限是 1 MB，超了整条连接被断、排队的活全作废。留出余量
-let MAX_REPLY_BYTES = 900_000
+/// Chrome 对 helper → 扩展的单条消息上限是 1 MB，超了整条连接被断、排队的活全作废。
+/// 实际取 250 KB：扩展的缓存单条上限是 256 KiB（cache/store.ts 的 maxEntryBytes），比它大的结果每次都要重识别（Codex 在 #87 指出）
+let MAX_REPLY_BYTES = 250_000
+/// Vision 的文字识别模型版本：换了它识别结果会变，所以进 helper 报的版本、进扩展的 OCR 缓存键
+let VISION_REVISION = VNRecognizeTextRequest.supportedRevisions.max() ?? 0
+/// 报给扩展的版本 = 程序版本 + Vision revision；系统升级换了模型，旧缓存自然失效
+let REPORTED_VERSION = "\(VERSION)+vision\(VISION_REVISION)"
 
 enum HelperError: Error {
   case badBase64
@@ -39,19 +44,24 @@ enum HelperError: Error {
 
 // MARK: - 帧读写（Chrome Native Messaging：长度是本机字节序的 UInt32）
 
+/// 读满 n 字节；管道一次可能只给一部分（合法的短读），读到 EOF 返回 nil
+func readExactly(_ n: Int) -> Data? {
+  var buffer = Data()
+  while buffer.count < n {
+    let chunk = FileHandle.standardInput.readData(ofLength: n - buffer.count)
+    if chunk.isEmpty { return nil } // EOF：Chrome 断开端口
+    buffer.append(chunk)
+  }
+  return buffer
+}
+
 func readFrame() -> Data? {
-  let header = FileHandle.standardInput.readData(ofLength: 4)
-  if header.count < 4 { return nil } // EOF：Chrome 断开端口
+  // 长度前缀也要读满：短读 1–3 字节时当 EOF 退出，会让排队的识别全部作废（Codex 在 #87 指出）
+  guard let header = readExactly(4) else { return nil }
   var length: UInt32 = 0
   _ = withUnsafeMutableBytes(of: &length) { header.copyBytes(to: $0) }
   if length == 0 { return Data() }
-  var body = Data()
-  while body.count < Int(length) {
-    let chunk = FileHandle.standardInput.readData(ofLength: Int(length) - body.count)
-    if chunk.isEmpty { return nil }
-    body.append(chunk)
-  }
-  return body
+  return readExactly(Int(length))
 }
 
 /// 序列化；超过上限就按置信度从低到高丢行，直到装得下（正常一张图几 KB，只有极端文字密集的图会撞到）
@@ -102,7 +112,7 @@ func recognize(base64: String, languages: [String]) throws -> [String: Any] {
   request.recognitionLevel = .accurate
   request.usesLanguageCorrection = true
   request.recognitionLanguages = languages
-  if let latest = VNRecognizeTextRequest.supportedRevisions.max() { request.revision = latest }
+  if VISION_REVISION > 0 { request.revision = VISION_REVISION }
   // 曲线图的刻度与图例很小；原版 0.01 会漏掉不到图高 1% 的字
   request.minimumTextHeight = 0.008
 
@@ -123,7 +133,7 @@ func recognize(base64: String, languages: [String]) throws -> [String: Any] {
 // MARK: - 主循环
 
 if CommandLine.arguments.contains("--version") {
-  print(VERSION)
+  print(REPORTED_VERSION)
   exit(0)
 }
 
@@ -138,7 +148,7 @@ while let frame = readFrame() {
     switch cmd {
     case "ping":
       reply["ok"] = true
-      reply["version"] = VERSION
+      reply["version"] = REPORTED_VERSION
     case "ocr":
       guard let image = request["image"] as? String else { throw HelperError.badRequest("ocr 请求缺 image") }
       let languages = request["langs"] as? [String] ?? ["en-US"]

@@ -21,6 +21,8 @@ export interface OcrResult {
   width: number
   height: number
   lines: OcrLine[]
+  /** helper 的回应超过大小上限、按置信度丢过行（§15.3）；结果不完整，调用方可据此提示 */
+  truncated?: boolean
 }
 
 export interface HelperStatus {

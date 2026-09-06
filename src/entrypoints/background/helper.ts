@@ -239,7 +239,7 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       }
       const version = known?.version
       if (!version) throw new HelperError('invalid-response', 'helper 的回应到了但这条连接没握过手')
-      return { result: { width: reply.width, height: reply.height, lines: lines as OcrResult['lines'] }, version }
+      return { result: { width: reply.width, height: reply.height, lines: lines as OcrResult['lines'], ...(reply.truncated === true ? { truncated: true } : {}) }, version }
     },
 
     cancel(scope) {

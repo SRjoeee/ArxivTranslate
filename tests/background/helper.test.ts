@@ -255,6 +255,19 @@ describe('createHelperClient', () => {
     await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('版本号') })
   })
 
+  it('helper 丢过行的回应带 truncated，原样透传给调用方（Codex 在 #87 指出）', async () => {
+    const { client, port } = setup()
+    const a = client.ocr({ image: 'A' })
+    await flush()
+    await handshake(port())
+    port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [], truncated: true })
+    expect((await a).result.truncated).toBe(true)
+    const b = client.ocr({ image: 'B' })
+    await flush()
+    port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
+    expect((await b).result.truncated).toBeUndefined()
+  })
+
   it('host 没装（断开原因是 not found）：status 报不可用，之后不再尝试连接', async () => {
     const { client, port, ports } = setup({ lastError: () => 'Specified native messaging host not found.' })
     const status = client.status()
