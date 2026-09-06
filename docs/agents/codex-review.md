@@ -12,6 +12,8 @@
 - **不要"先找 👀 再找它之后的 👍"**（2026-09-06 实测踩到）：**同一账号在一个 issue 上只留一个反应**，Codex 收尾时是把 👀 **换成** 👍，不是在它旁边加一个。所以「取本轮 👀 的时刻当 ROUND，再找 ROUND 之后的 👍」这种写法，在它审完的那一刻 ROUND 恰好变成空，👍 永远数不到——PR #61 明明已经审完，脚本却一直报"等待中"。直接用 `created_at >= PRE` 过滤反应即可，不需要 ROUND。
 - **"没有建议"是 👍 + 一条摘要评论**：正文形如 `Codex Review: Didn't find any major issues.`，并带 `**Reviewed commit:** <sha>`——**用它核对审的是不是当前 HEAD**，这是无建议那条路径上唯一的 commit 凭据（👍 反应本身没有 commit 字段）。只查 `pulls/{n}/reviews` 会漏掉它：无建议时那个接口是空的。
 - **翻页**：两个列表接口都加 `--paginate`，否则超过一页的反应 / 评论只看得到第一页。
+- **👍 可以单独出现、不带摘要评论**（2026-09-06/07 实测 #84 第二轮与 #85）：两次都只有 `+1` 反应，`issues/{n}/comments` 里没有 `Codex Review` 摘要，`pulls/{n}/reviews` 与行内评论也是空的。这时把 👍 归到哪个 HEAD 只能靠时间：`created_at >= PRE`（PRE 是 push 之前记的时刻）。四个端点**都查**再下"无建议"的结论——#80 时只查了两个就误报"没审过"。
+- **已合并的 PR 用 `@codex review` 补审时，摘要里的 `Reviewed commit` 是 merge commit**（2026-09-06 实测 #80）：不是分支 HEAD，也不是最后一个功能提交。核对时拿 `gh pr view <N> --json mergeCommit --jq .mergeCommit.oid` 比。
 
 ```sh
 set -e                                               # push 失败就停，别带着旧 SHA 轮询到天荒地老
@@ -35,7 +37,7 @@ gh api --paginate "repos/{owner}/{repo}/issues/<N>/comments" \
 | 信号（都按 `created_at >= PRE` 过滤） | 含义 |
 |---|---|
 | 👀 反应 | 本轮开始，正在审，继续等 |
-| 👍 反应 + `Codex Review: Didn't find any major issues` 摘要评论（同一时刻，👀 被换掉） | 审完了，没有建议；用摘要里的 `Reviewed commit` 核对 HEAD |
+| 👍 反应（👀 被换掉；多数时候还带一条 `Codex Review: Didn't find any major issues` 摘要评论，也可能只有 👍，见上） | 审完了，没有建议；有摘要就用 `Reviewed commit` 核对 HEAD，没有就按 PRE 时间归轮 |
 | 针对当前 HEAD 的 review（`COMMENTED`）+ 行内评论 | 有建议 |
 | "You have reached your Codex usage limits" | 这次没审 |
 
