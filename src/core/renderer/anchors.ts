@@ -13,7 +13,7 @@ import type { Block } from '@/core/extractor'
 import { ID_ATTR } from '@/core/extractor'
 import { FOR_ATTR, T_CLASS } from './index'
 import { MIRROR_CLASS } from './mirror'
-import { SPLIT_ATTR, SPLIT_CLASS } from './split-figures'
+import { SPLIT_ATTR, SPLIT_CLASS, SPLIT_OF_ATTR } from './split-figures'
 import { PENDING_CLASS } from './pending'
 import { ERROR_CLASS } from './failed'
 
@@ -49,7 +49,15 @@ function standIn(doc: Document, target: Element): Element | null {
   // 底下那圈块查找根本够不着，所以先在这里把它接过去
   const split = target.closest(`[${SPLIT_ATTR}]`)
   const clone = split?.nextElementSibling
-  if (clone?.classList.contains(SPLIT_CLASS) && visible(clone)) return clone
+  if (clone?.classList.contains(SPLIT_CLASS) && visible(clone)) {
+    // 指向图**内部**某一处的锚点要落到克隆里对应的那一处，不是整张图的顶部——
+    // 2312.17141 有 21 个这种锚点（`#S3.Ex73`–`Ex79` 是 Figure 6 里的公式行，Codex 在 #80 指出）。
+    // 克隆把原 id 挪进了 data-axt-split-of，按它找；找不到（那处在克隆里被摘掉了）才退回图顶
+    const id = target.getAttribute('id')
+    const inner = id ? clone.querySelector(`[${SPLIT_OF_ATTR}="${CSS.escape(id)}"]`) : null
+    if (inner && visible(inner)) return inner
+    return clone
+  }
 
   for (let block = target.closest(`[${ID_ATTR}]`); block; block = block.parentElement?.closest(`[${ID_ATTR}]`) ?? null) {
     const id = block.getAttribute(ID_ATTR)

@@ -210,6 +210,55 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off()
   })
 
+  it('指向图内某一行的锚点落到克隆里对应的那一行，不是图顶（Codex 在 #80 指出）', () => {
+    // 实测 2312.17141 有 21 个这种锚点：#S3.Ex73–Ex79 都是 Figure 6 里的公式行
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="src">See <a href="#eq" id="link">(7)</a>.</p></div>'
+      + '<figure id="fig" class="ltx_figure"><img class="ltx_graphics" src="x.png" alt="">'
+      + '<span id="eq" class="ltx_equation">x = 1</span>'
+      + '<figcaption class="ltx_caption" id="cap">Figure 6: Rows.</figcaption></figure>')
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    const cap = doc.getElementById('cap')!
+    renderText(blocks.find(b => b.el === cap) as TextBlock, frag(doc, '图 6：各行。'))
+    expect(splitFigures(doc)).toBe(1)
+    const fig = doc.getElementById('fig')!
+    const clone = fig.nextElementSibling!
+    // 克隆里那一行带着 data-axt-split-of，指回原 id
+    const innerCopy = clone.querySelector('[data-axt-split-of="eq"]')!
+    expect(innerCopy).not.toBeNull()
+    expect(innerCopy.id).toBe('') // 不是 id，不会重复
+    layout(doc, [fig, ...[...fig.querySelectorAll('*')]])
+    const scrolled: Element[] = []
+    for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }
+    const off = installAnchorFallback(doc)
+    doc.getElementById('link')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+    // 落在对应的那一行，而不是克隆的根
+    expect(scrolled).toEqual([innerCopy])
+    expect(scrolled).not.toEqual([clone])
+    off()
+  })
+
+  it('图内那一处在克隆里被摘掉了（它有译文）就退回图顶', () => {
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="src">See <a href="#cap" id="link">caption</a>.</p></div>'
+      + '<figure id="fig" class="ltx_figure"><img class="ltx_graphics" src="x.png" alt="">'
+      + '<figcaption class="ltx_caption" id="cap">Figure 6.</figcaption></figure>')
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    const cap = doc.getElementById('cap')!
+    renderText(blocks.find(b => b.el === cap) as TextBlock, frag(doc, '图 6。'))
+    splitFigures(doc)
+    const clone = doc.getElementById('fig')!.nextElementSibling!
+    // 图注有译文，克隆里原文那份被摘掉了，找不到对应
+    expect(clone.querySelector('[data-axt-split-of="cap"]')).toBeNull()
+    layout(doc, [doc.getElementById('fig')!, ...[...doc.getElementById('fig')!.querySelectorAll('*')]])
+    const scrolled: Element[] = []
+    for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }
+    const off = installAnchorFallback(doc)
+    doc.getElementById('link')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+    expect(scrolled).toEqual([clone])
+    off()
+  })
+
   it('hashchange 也走同一条兜底：地址栏输入、前进后退都算', () => {
     const { doc, translation, scrolled } = setup()
     const off = installAnchorFallback(doc)
