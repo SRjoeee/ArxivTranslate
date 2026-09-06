@@ -15,9 +15,23 @@ button:disabled { opacity: 0.5; cursor: default; }
 .mark { color: var(--axt-failed-color, rgba(220, 38, 38, 0.9)); font-weight: 700; cursor: help; }
 `
 
+/** 删掉块旁边的失败小部件（重试开始时）；返回是否删掉了 */
+export function clearFailed(block: Block): boolean {
+  const parent = block.el.parentElement
+  if (!parent) return false
+  let removed = false
+  for (const sibling of Array.from(parent.children)) {
+    if (sibling.classList.contains(ERROR_CLASS) && sibling.getAttribute(FOR_ATTR) === block.id) {
+      sibling.remove()
+      removed = true
+    }
+  }
+  return removed
+}
+
 /**
  * 失败：删掉 pending / 旧译文、标 failed（红线照旧），再插小部件。
- * 点"重试"时按钮禁用并调 retry——run.ts 会先 clearTranslation 删掉这个小部件再插 pending
+ * 点"重试"时按钮禁用并调 retry；小部件由 renderPending 在插圆环之前删掉（见那里）
  */
 export function renderFailed(block: Block, reason: string, retry: () => void): Element {
   clearTranslation(block)
