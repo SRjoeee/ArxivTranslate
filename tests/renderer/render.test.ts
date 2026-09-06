@@ -127,6 +127,22 @@ describe('译文与原文相同就标出来（Codex 在 #74 指出）', () => {
     expect(render('Doe,  J.\n and Roe, R.', 'Doe, J. and Roe, R.').hasAttribute(IDENTITY_ATTR)).toBe(true)
   })
 
+  it('内层块先翻完，不影响外层的恒等判定（Codex 在 #81 指出）', () => {
+    // 块可以嵌套（致谢里含标题、段落里含脚注正文）。run.ts 并发处理批次，内层可能先到，
+    // 那时原块的 textContent 里多出一段内层译文，而候选译文那边 stripCloned 已经删掉了它
+    const doc = docOf('<div class="ltx_acknowledgements" id="outer">Thanks to <h6 class="ltx_title" id="inner">Acknowledgements</h6></div>')
+    const blocks = extract(doc)
+    const inner = doc.getElementById('inner')!
+    const innerBlock = blocks.find(b => b.el === inner) as TextBlock
+    const outerBlock = blocks.find(b => b.el === doc.getElementById('outer')) as TextBlock
+    // 内层先完成：它的译文被插进了外层原块内部
+    renderText(innerBlock, frag(doc, '致谢'))
+    expect(doc.getElementById('outer')!.textContent).toContain('致谢')
+    // 外层原样返回（提示词让模型保留专名）——排除注入节点后两边应当一致
+    const outerT = renderText(outerBlock, frag(doc, 'Thanks to <h6 class="ltx_title">Acknowledgements</h6>'))
+    expect(outerT.hasAttribute(IDENTITY_ATTR)).toBe(true)
+  })
+
   it('真的翻了就不打标记', () => {
     expect(render('The quick brown fox.', '敏捷的棕色狐狸。').hasAttribute(IDENTITY_ATTR)).toBe(false)
   })

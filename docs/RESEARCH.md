@@ -333,7 +333,7 @@ worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在
 3. 公网页面调不到本机端点（**本地网络门禁**，与端点用什么 scheme 无关，见上面的对照实验）：本地 Ollama（`http://localhost:11434`）从 content 侧**不可达**，从 background 可达。CLAUDE.md 列出的 Ollama 在当前架构下只有设置页的连接测试（走 background）能通过，正式翻译（走 content）必然失败——两条路径行为不一致，正是 issue #42 指出的问题。
 4. 对 OpenRouter / DeepSeek 这类公开 API，content 侧能否直连取决于对方是否长期给浏览器发 CORS 头，这是我们控制不了的外部条件；background 不依赖它。
 
-**§6.5 的一处错误**：那节写「Read Frog 把 provider 的 fetch 放在 content script、service worker 完全不在请求链路上」。核对参考快照：`utils/host/translate/translate-text.ts:360` 通过 `sendMessage("enqueueTranslateRequest", …)` 把请求发给 background，`entrypoints/background/translation-queues.ts:490` 在 worker 里排队并真正调用模型——Read Frog 的请求**就是在 background 执行的**，只是把等待与队列也放在那里。§6.5 关于 worker 冷启动 6.7–77 s 的测量本身仍有效，但「参考项目怎么绕开」那段的依据不成立，DESIGN §8.0 引用它作为把请求移到 content 的理由之一也随之失效。
+**§6.5 的一处错误**：那节写「Read Frog 把 provider 的 fetch 放在 content script、service worker 完全不在请求链路上」。核对参考快照：`utils/host/translate/translate-text.ts:360` 通过 `sendMessage("enqueueTranslateRequest", …)` 把请求发给 background，`entrypoints/background/translation-queues.ts:490` 在 worker 里排队并真正调用模型——Read Frog 的请求**就是在 background 执行的**，只是把等待与队列也放在那里。§6.5 那次量到的 6.7–77 s **是当时观察到的延迟**，但它是不是「worker 冷启动」造成的，从来没有被验证过（worker 状态没记录，见下面重测那段的局限），而且在当前代码上重现不出来；「参考项目怎么绕开」那段的依据也不成立，DESIGN §8.0 引用它作为把请求移到 content 的理由之一随之失效。
 
 **冷启动延迟的重测（2026-09-05，Playwright + 当前 main 构建）**：从 popup 页面计时 `axt:ping`、`axt:provider-status`（冷 / 热）与 `chrome.storage.local.get`，四轮（启动后 + 三次闲置 36 s 后）全部落在 **0–5 ms**：
 

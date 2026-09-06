@@ -151,14 +151,30 @@ export function renderText(block: TextBlock, content: DocumentFragment): Element
     node.setAttribute(INLINE_ATTR, '')
   }
   // 归一化后逐字相同 = 这一块其实没被翻译。空白差异不算数：rehydrate 回填时
-  // 标签边界处的空白与原文未必一一对应
-  if (squash(node.textContent) === squash(block.el.textContent)) node.setAttribute(IDENTITY_ATTR, '')
+  // 标签边界处的空白与原文未必一一对应。
+  // 两边都要**跳过注入节点**（Codex 在 #81 指出）：块可以嵌套，内层块先翻完的话
+  // 原块的 textContent 里就多出一段内层译文，而候选译文那边 stripCloned 早把它删了——
+  // 不排除的话，一个原样返回的外层块永远判不成恒等，stack 模式下照旧重复
+  if (squash(ownText(node)) === squash(ownText(block.el))) node.setAttribute(IDENTITY_ATTR, '')
   block.el.after(node)
   setState(block, 'translated')
   return node
 }
 
 const squash = (text: string | null) => (text ?? '').replace(/\s+/g, ' ').trim()
+
+/** 元素自己的文本，不含我们注入的节点（译文 / 镜像 / 拆分副本 / 圆环 / 失败小部件） */
+function ownText(el: Element): string {
+  let text = ''
+  for (const child of Array.from(el.childNodes)) {
+    if (child.nodeType === 1) {
+      const element = child as Element
+      if (element.classList.contains(T_CLASS)) continue
+      text += ownText(element)
+    } else text += child.textContent ?? ''
+  }
+  return text
+}
 
 /**
  * 表格块（§5.3）：整表克隆置于原表之后，克隆保留原有类名以沿用页面的表格样式；

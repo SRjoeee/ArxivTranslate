@@ -367,7 +367,7 @@ interface ProtectedBlock {
 
 - **可见比例阈值要真的生效，且不能把超大块锁死** [决定，2026-09-06，Codex 在 #32 / #36 指出]：`IntersectionObserver` 的 `isIntersecting` 定义是「相交比例 **> 0**」，不是「≥ threshold」；observe 之后浏览器立刻发一次初始通知，一个刚露出一成的块在 `threshold=0.5` 下照样报 `isIntersecting`，设置等于没配。回调因此要自己比 `intersectionRatio`。
 
-  另一头是反过来的：**比 root（视口 + 上下 margin）还高的块永远达不到高阈值**，比例封顶在 `root 高 ÷ 元素高`；设计上又明确不拆超大表格（§7.2），于是 `threshold=1` 时那张表一辈子不会翻。有效阈值按这个上限钳一下——够得着多少就要求多少。观察器的 `threshold` 传 `[0, 阈值]`：它只决定「在哪些比例上回调」，判定在回调里做，不加 0 的话超大块连回调都收不到。
+  另一头是反过来的：**比 root（视口 + 上下 margin）还高的块永远达不到高阈值**，比例封顶在 `root 高 ÷ 元素高`；设计上又明确不拆超大表格（§7.2），于是 `threshold=1` 时那张表一辈子不会翻。有效阈值按这个上限钳一下——够得着多少就要求多少。观察器的 `threshold` 传**一张 5 % 一档的网格**（`observerThresholds`，另把用户配的值也加进去，它可能不在网格上）：它只决定「在哪些比例上回调」，判定在回调里做；传 `[0, 阈值]` 是不够的，见下一条。
 
 - **译文与原文逐字相同就不重复显示** [决定，2026-09-06，Codex 在 #74 指出]：默认提示词里那条 “Keep author names, journal names, conference names … in the original language” 会让纯人名的引文作者段**原样返回**，而 `renderText` 无条件插入兄弟节点——stack 模式下每一行作者就出现两遍。这不限于人名：任何译文等于原文的块都一样。`renderText` 归一化空白后比较，相同就打 `data-axt-identity`，**stack 模式的 CSS 藏掉那一份**；side 要靠它撑住右栏、only 把原块藏了，两边都保留。
 
