@@ -5,7 +5,7 @@ import type { Progress } from '@/core/pipeline/run'
 import type { Mode } from '@/core/renderer'
 import type { ProviderStatus } from '@/providers/transport'
 import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
-import type { HelperStatus, OcrCall, OcrMessageResponse } from './ocr'
+import type { HelperStatus, ImageProgress, OcrCall, OcrMessageResponse } from './ocr'
 
 export interface PageStatus {
   /** 当前页面的 arXiv id；不是 arXiv HTML 页面时为 null */
@@ -15,6 +15,8 @@ export interface PageStatus {
   /** 用户选定的模式，自动降级不改它 */
   preference: Mode
   progress: Progress
+  /** 图片翻译的进度（§15）；helper 不可用或设置里全关时没有 */
+  images?: ImageProgress
 }
 
 /** 消息表：type → { request, response } */

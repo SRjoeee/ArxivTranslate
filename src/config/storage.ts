@@ -3,7 +3,7 @@ import { storage } from 'wxt/utils/storage'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
 import { fromBcp47 } from './languages'
-import { CONFIG_VERSION, DEFAULT_CONFIG, configSchema, normalizeGlossary, type Config } from './schema'
+import { CONFIG_VERSION, DEFAULT_CONFIG, MODE_VALUES, configSchema, normalizeGlossary, type Config } from './schema'
 
 export const configItem = storage.defineItem<Config>('local:config', {
   fallback: DEFAULT_CONFIG,
@@ -21,12 +21,14 @@ export const configItem = storage.defineItem<Config>('local:config', {
     6: (v5: Omit<Config, 'version' | 'glossary' | 'style'> & { version: 5 }) => ({ ...v5, version: 6 as const, glossary: [] }),
     // v6 -> v7：加译文样式（默认 none，与实现之前的外观一致），并把旧术语表规整到 v7 新加的限额内——
     // 不规整的话一条超长术语就会让整份配置校验失败、回退默认值（Codex 在 #52 指出）
-    7: (v6: Omit<Config, 'version' | 'style'> & { version: 6 }) => ({
+    7: (v6: Omit<Config, 'version' | 'style' | 'image'> & { version: 6 }) => ({
       ...v6,
       version: 7 as const,
       glossary: normalizeGlossary(v6.glossary),
       style: { preset: 'none' as const, customCss: '' },
     }),
+    // v7 -> v8：加图片翻译的模式闸（§15），默认三种模式都开——helper 没装时它不起作用，装了就直接可用
+    8: (v7: Omit<Config, 'version' | 'image'> & { version: 7 }) => ({ ...v7, version: 8 as const, image: { modes: [...MODE_VALUES] } }),
   },
 })
 

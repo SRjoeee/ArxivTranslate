@@ -37,6 +37,14 @@ const extId = worker.url().split('/')[2]
 const options = await context.newPage()
 await options.goto(`chrome-extension://${extId}/options.html`)
 await options.selectOption('select >> nth=0', 'google-web')
+// 图片翻译（DESIGN §15）默认三种模式都开；这台机器装了 helper 的话叠加层与拆图会扰动下面的布局 / 计数断言，
+// 这里关掉，专门的 e2e:image 再开（AXT_E2E_IMAGES=1 时保留）
+if (!process.env.AXT_E2E_IMAGES) {
+  for (const name of ['左右对照', '上下对照', '仅译文']) {
+    const box = options.getByRole('checkbox', { name, exact: true })
+    if (await box.isEnabled()) await box.uncheck()
+  }
+}
 await options.getByRole('button', { name: '保存', exact: true }).click()
 await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 await options.close()

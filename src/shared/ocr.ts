@@ -47,3 +47,11 @@ export interface OcrCall {
 export type OcrMessageResponse =
   | { ok: true; result: OcrResult; cached: boolean }
   | { ok: false; error: { kind: ProviderErrorKind; message: string } }
+
+/** 图片翻译的进度（与 Progress 同样可序列化，popup 显示用）：总数、进入过视口的、翻完的、失败的 */
+export interface ImageProgress {
+  total: number
+  requested: number
+  done: number
+  failed: number
+}

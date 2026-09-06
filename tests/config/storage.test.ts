@@ -228,6 +228,29 @@ describe('provider 选择', () => {
     expect(normalizeGlossary(long).reduce((n, e) => n + e.term.length + e.translation.length, 0)).toBeLessThanOrEqual(GLOSSARY_LIMITS.totalChars)
   })
 
+  it('v7 配置升级到 v8：补上图片翻译的模式闸（默认三种都开），其余含 API key 原样', async () => {
+    const v7 = {
+      version: 7, provider: 'openai-compat',
+      openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-keep', model: 'x/y', thinking: 'disabled' },
+      targetLanguage: 'cmn', mode: 'side', prompts: { promptId: 'default', patterns: [] },
+      preload: { margin: 1000, threshold: 0 }, fallback: { enabled: true }, glossary: [], style: { preset: 'quote', customCss: '' },
+    }
+    await fakeBrowser.storage.local.set({ config: v7, config$: { v: 7 } })
+    vi.resetModules()
+    const fresh = await import('@/config/storage')
+    const c = await fresh.getConfig()
+    expect(c.version).toBe(CONFIG_VERSION)
+    expect(c.image).toEqual({ modes: ['stack', 'side', 'only'] })
+    expect(c.style).toEqual({ preset: 'quote', customCss: '' })
+    expect(c.openaiCompat.apiKey).toBe('sk-keep')
+  })
+
+  it('图片翻译的模式只认三种，空数组合法（= 关闭）', async () => {
+    await expect(setConfig({ ...DEFAULT_CONFIG, image: { modes: ['split' as never] } })).rejects.toThrow()
+    await setConfig({ ...DEFAULT_CONFIG, image: { modes: [] } })
+    expect((await getConfig()).image.modes).toEqual([])
+  })
+
   it('样式预设只认清单里的 id，自定义 CSS 有长度上限', async () => {
     await expect(setConfig({ ...DEFAULT_CONFIG, style: { preset: 'rainbow' as never, customCss: '' } })).rejects.toThrow()
     await expect(setConfig({ ...DEFAULT_CONFIG, style: { preset: 'custom', customCss: 'x'.repeat(2001) } })).rejects.toThrow()

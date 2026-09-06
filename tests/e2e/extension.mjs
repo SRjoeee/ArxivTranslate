@@ -148,6 +148,14 @@ const countDom = page => page.evaluate(() => ({
 const options = await context.newPage()
 await options.goto(`chrome-extension://${extId}/options.html`)
 await options.selectOption('select >> nth=0', 'google-web')
+// 图片翻译（DESIGN §15）默认三种模式都开；这台机器装了 helper 的话叠加层与拆图会扰动下面的布局 / 计数断言，
+// 这里关掉，专门的 e2e:image 再开（AXT_E2E_IMAGES=1 时保留）
+if (!process.env.AXT_E2E_IMAGES) {
+  for (const name of ['左右对照', '上下对照', '仅译文']) {
+    const box = options.getByRole('checkbox', { name, exact: true })
+    if (await box.isEnabled()) await box.uncheck()
+  }
+}
 await options.getByRole('button', { name: '保存', exact: true }).click()
 await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 await options.getByRole('button', { name: /测试连接/ }).click()
@@ -167,6 +175,28 @@ check('设置页：预翻译距离保存后重载仍是 300', marginBack === '30
 await options.fill(marginInput, '1000')
 await options.getByRole('button', { name: '保存', exact: true }).click()
 await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
+// ── 设置页：图片翻译的模式闸（配置 v8，DESIGN §15）保存后重载仍在；helper 没装时整节灰掉 ──────
+{
+  const names = ['左右对照', '上下对照', '仅译文']
+  const boxOf = name => options.getByRole('checkbox', { name, exact: true })
+  const enabled = await boxOf('上下对照').isEnabled()
+  if (enabled && !process.env.AXT_E2E_IMAGES) {
+    await boxOf('上下对照').check()
+    await options.getByRole('button', { name: '保存', exact: true }).click()
+    await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+    await options.reload({ waitUntil: 'domcontentloaded' })
+    await options.getByRole('checkbox', { name: '上下对照', exact: true }).waitFor({ timeout: 5_000 })
+    const states = await Promise.all(names.map(n => boxOf(n).isChecked()))
+    check('设置页：图片翻译只勾「上下对照」保存后重载仍在', JSON.stringify(states) === JSON.stringify([false, true, false]), `读回 ${states.join(',')}`)
+    await boxOf('上下对照').uncheck()
+    await options.getByRole('button', { name: '保存', exact: true }).click()
+    await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  } else {
+    const hint = await options.getByText(/helper/).first().textContent()
+    check('设置页：图片翻译一节在 helper 未检测到时灰掉并说明原因', !enabled && /未检测到/.test(hint ?? ''), hint ?? '')
+  }
+}
 
 // ── 设置页：目标语言（配置 v4 的 ISO 639-3 码）与自定义提示词保存后重载仍在 ──────
 const langSelect = options.getByRole('combobox', { name: /^目标语言/ })
