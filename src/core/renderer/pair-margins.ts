@@ -25,13 +25,22 @@ export function clearPairMargins(root: Document | Element): void {
   for (const t of translations(root)) if (t.style.marginTop) t.style.removeProperty('margin-top')
 }
 
-/** 让每一对原文 / 译文的上边距一致，返回本轮改变了几个译文（稳定后为 0） */
-export function alignPairMargins(root: Document | Element): number {
-  const view = viewOf(root)
-  if (!view) return 0
+/** 一趟里读到的配对与各自该写的值；读与写分开两个函数，好让整理层把"读"排在任何写之前 */
+export interface PairMarginPlan {
+  pairs: Array<[Element, HTMLElement, string]>
+  wanted: Array<string | null>
+}
 
-  // 第三项是上一轮我们写进去的值，用来判断这一轮到底改没改
-  const pairs: Array<[Element, HTMLElement, string]> = []
+/**
+ * 读：收集配对、擦掉上一轮写的值、量两边的计算边距。**不写**（擦内联值只影响自己那个元素的样式，
+ * 不牵动选择器匹配）。整理层在写任何东西之前调它——那一刻样式是干净的，getComputedStyle 不必付
+ * 整篇重算的钱；放在插节点之后再读，`:has()` 的失效会让这一次读花掉上百毫秒（issue #46 实测 2312.17141
+ * 一趟 90 ms，31 趟累计 818 ms——正是把 fitTables 的强制布局挪走之后露出来的那一层）
+ */
+export function readPairMargins(root: Document | Element): PairMarginPlan {
+  const view = viewOf(root)
+  const pairs: PairMarginPlan['pairs'] = []
+  if (!view) return { pairs, wanted: [] }
   for (const t of translations(root)) {
     const original = t.previousElementSibling
     if (!original || original.classList.contains(T_CLASS)) continue
@@ -43,21 +52,28 @@ export function alignPairMargins(root: Document | Element): number {
     if (previous) t.style.removeProperty('margin-top')
     pairs.push([original, t, previous])
   }
-
-  // 读写分开：先一次读完（只触发一次样式重算），再只写不一致的那几个。
-  // 没有声明边距时浏览器给 "0px"，happy-dom 给空串，统一成 "0px" 再比。
+  // 没有声明边距时浏览器给 "0px"，happy-dom 给空串，统一成 "0px" 再比
   const marginTop = (el: Element) => view.getComputedStyle(el).marginTop || '0px'
   const wanted = pairs.map(([original, t]) => {
     const want = marginTop(original)
     return want === marginTop(t) ? null : want
   })
+  return { pairs, wanted }
+}
 
+/** 写：只写不一致的那几个；返回本轮改变了几个译文（稳定后为 0） */
+export function writePairMargins({ pairs, wanted }: PairMarginPlan): number {
   let changed = 0
   wanted.forEach((want, i) => {
     const [, t, previous] = pairs[i]!
     const next = want ?? ''
-    if (next) t.style.marginTop = next // 上面擦过，一致的那些也要写回来
+    if (next) t.style.marginTop = next // 读的时候擦过，一致的那些也要写回来
     if (next !== previous) changed += 1
   })
   return changed
+}
+
+/** 让每一对原文 / 译文的上边距一致，返回本轮改变了几个译文（稳定后为 0） */
+export function alignPairMargins(root: Document | Element): number {
+  return writePairMargins(readPairMargins(root))
 }

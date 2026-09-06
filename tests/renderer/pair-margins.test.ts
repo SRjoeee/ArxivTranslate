@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { T_CLASS, alignPairMargins, clearPairMargins } from '@/core/renderer'
+import { T_CLASS, alignPairMargins, clearPairMargins, readPairMargins, writePairMargins } from '@/core/renderer'
+import { docOf } from './helpers'
 
 /** 站点里形如 ar5iv `.ltx_role_affiliation + .ltx_role_affiliation` 的相邻兄弟边距规则 */
 const SITE_CSS = '.aff + .aff { margin-top: 8px }'
@@ -81,3 +82,18 @@ describe('alignPairMargins', () => {
     expect(document.querySelector('figcaption')!.getAttribute('style')).toBeNull()
   })
 })
+
+describe('读写拆开（issue #46）：整理层把读排在任何写之前', () => {
+  it('readPairMargins 不写内联边距，writePairMargins 才写；合起来与 alignPairMargins 等价', () => {
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" style="margin-top: 8px">A</p><p class="ltx_p axt-t" data-axt-for="a">译</p></div>')
+    const t = doc.querySelector('.axt-t') as HTMLElement
+    const plan = readPairMargins(doc)
+    expect(plan.pairs).toHaveLength(1)
+    expect(t.style.marginTop).toBe('') // 读阶段不写
+    const changed = writePairMargins(plan)
+    const again = docOf('<div class="ltx_para"><p class="ltx_p" style="margin-top: 8px">A</p><p class="ltx_p axt-t" data-axt-for="a">译</p></div>')
+    expect(changed).toBe(alignPairMargins(again))
+    expect(t.style.marginTop).toBe((again.querySelector('.axt-t') as HTMLElement).style.marginTop)
+  })
+})
+

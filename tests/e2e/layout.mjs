@@ -44,6 +44,9 @@ await options.close()
 /** 打开论文，经 popup 选左右模式并开始翻译 */
 async function openSide(id) {
   const page = await context.newPage()
+  // 扩展的控制台日志：side prep 每趟一行带各阶段耗时，整理成本的断言靠它
+  page.axtLogs = []
+  page.on('console', message => { const text = message.text(); if (text.includes('[axt]')) page.axtLogs.push(text) })
   // 主线程长任务记下来：side prep 曾经每张公式表克隆一份去量宽度，392 张公式的 2312.17141 上一趟 45 秒、页面无响应
   await page.addInitScript(() => {
     window.__axtLongTasks = []
@@ -218,6 +221,61 @@ async function measureFrame(page) {
     note.which === 'copy' && note.origHidden && note.l >= note.artR - 4 && note.r <= note.vw + 1,
     `${note.which}，原件隐藏 ${note.origHidden}，${note.l}–${note.r}，文章右缘 ${note.artR}`)
   await page.screenshot({ path: `${SHOTS}/layout-footnote.png` })
+
+  // 增量整理的收敛检查（issue #46）：整篇静止后，每一对原文 / 译文的上边距相等、
+  // 含真译文且有游离媒体的插图都已拆开。只碰变动区域的失效表若有洞，这里会露出来——
+  // 那就记录它，不用"兜底跑一次全量"糊过去
+  const converge = () => page.evaluate(() => {
+    const REAL = '.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
+    const deny = '.ltx_note, [data-axt-split], .axt-split, .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1))'
+    let pairs = 0, misaligned = 0
+    for (const t of document.querySelectorAll('.axt-t')) {
+      const o = t.previousElementSibling
+      if (!o || o.classList.contains('axt-t') || t.closest(deny)) continue
+      pairs++
+      if (getComputedStyle(o).marginTop !== getComputedStyle(t).marginTop) misaligned++
+    }
+    let figures = 0, unsplit = 0
+    for (const f of document.querySelectorAll('figure:not(.axt-t)')) {
+      if (f.parentElement?.closest('figure')) continue
+      if (!f.querySelector(REAL)) continue
+      const loose = [...f.querySelectorAll('img, svg, object, math, canvas, video, .ltx_picture')].some(m => !m.closest('[data-axt-id], .axt-t'))
+      if (!loose) continue
+      figures++
+      if (!f.nextElementSibling?.classList.contains('axt-split')) unsplit++
+    }
+    return { pairs, misaligned, figures, unsplit, mirrors: document.querySelectorAll('.axt-mirror').length }
+  })
+  const c1 = await converge()
+  check('静止后收敛：配对边距全部相等、该拆的图全拆了（增量整理没有漏区域）',
+    c1.pairs > 0 && c1.misaligned === 0 && c1.figures > 0 && c1.unsplit === 0,
+    `${c1.pairs} 对、错位 ${c1.misaligned}；${c1.figures} 张图、未拆 ${c1.unsplit}；镜像 ${c1.mirrors}`)
+
+  // side → stack → side：离开时对齐边距被清掉，回来必须全量重算；镜像留在 DOM 里，数量不该变
+  {
+    const popup = await context.newPage()
+    await popup.goto(`chrome-extension://${extId}/popup.html`)
+    await page.bringToFront()
+    await popup.getByRole('button', { name: '上下', exact: true }).waitFor({ timeout: 10_000 })
+    await popup.getByRole('button', { name: '上下', exact: true }).click()
+    await sleep(600)
+    await popup.getByRole('button', { name: '左右', exact: true }).click()
+    await popup.close()
+    await sleep(1500)
+    const c2 = await converge()
+    // 配对数只会增不会减：切到 stack 页面重排，原本在预翻译距离之外的块进了边距，观察器会再要几块
+    check('side → stack → side 之后镜像数不变、配对仍对齐',
+      c2.mirrors === c1.mirrors && c2.misaligned === 0 && c2.pairs >= c1.pairs,
+      `镜像 ${c1.mirrors} → ${c2.mirrors}，配对 ${c1.pairs} → ${c2.pairs}、错位 ${c2.misaligned}`)
+  }
+
+  // 整理成本（issue #46 的指标）：prep 每趟都打一行带各阶段耗时的日志，这里把它们加起来
+  const prepLines = page.axtLogs.filter(l => l.includes('[axt] side prep'))
+  const stage = k => +prepLines.reduce((n, l) => n + (Number(l.match(new RegExp(`${k}=([\\d.]+)`))?.[1]) || 0), 0).toFixed(1)
+  const cost = { runs: prepLines.length, notes: stage('notes'), split: stage('split'), mirrors: stage('mirrors'), tables: stage('tables'), margins: stage('margins'), total: stage('total') }
+  check('整理成本：prep 累计不超过 600 ms（基线 1912 ms，31 趟；#46 的目标 < 400）',
+    cost.runs > 0 && cost.total < 600,
+    JSON.stringify(cost))
   await page.close()
 }
 
