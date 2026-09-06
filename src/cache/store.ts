@@ -63,8 +63,12 @@ export class TranslationCache {
   private readonly memory = new Map<string, CacheRecord>()
   /** 持久层的条数与字节数；null 表示尚未统计。每次 set 增量更新，clear / cleanup 后作废重算 */
   private totals: { count: number; bytes: number } | null = null
-  /** 正在统计中的那次；并发的 set 共用它，不各算各的（Codex 在 #14 指出） */
-  private counting: Promise<{ count: number; bytes: number }> | null = null
+  /**
+   * 正在统计中的那次，**连同它开始时的代际号**（Codex 在 #14 与 #63 指出）。
+   * 只记 Promise 不记代际的话：统计在飞时 clear() 作废账面，之后开始的 set 捕获的是新代际，
+   * 却复用了作废之前那个 Promise——两个代际号相等，过时快照照样落地
+   */
+  private counting: { generation: number; promise: Promise<{ count: number; bytes: number }> } | null = null
   /** 每次 clear / cleanup 作废账面时 +1：统计期间被作废的快照不能落地 */
   private totalsGeneration = 0
 
@@ -104,8 +108,12 @@ export class TranslationCache {
     for (;;) {
       if (this.totals) return this.totals
       const generation = this.totalsGeneration
-      this.counting ??= this.countAll().finally(() => { this.counting = null })
-      const counted = await this.counting
+      if (this.counting?.generation !== generation) {
+        const pending = { generation, promise: this.countAll() }
+        pending.promise = pending.promise.finally(() => { if (this.counting === pending) this.counting = null })
+        this.counting = pending
+      }
+      const counted = await this.counting.promise
       // **正确性靠这一行**：等待期间别人已经落地了一份就用那份。少了它，每个调用方各自赋值一份，
       // 只有最后那份留下，先前那些 set 的增量永久丢失（单飞只是顺带少扫几遍索引，不是这条的关键）
       if (this.totals) return this.totals
@@ -137,12 +145,18 @@ export class TranslationCache {
    *
    * 不减账的话 `totals` 会一直多算这一条，接近上限时 `evictIfNeeded` 会为一条其实已经不存在的记录
    * 多淘汰一条**没过期的**。而按 `delete(key)` 是否 resolve 来减又会减多次——一批里出现重复的键时
-   * `getMany` 会并发读同一条过期记录，Dexie 对**已经被删掉**的行照样算删除成功，于是每个调用方都减一次，
-   * 账面少算、后续写入突破上限。`where(':id').equals(key).delete()` 返回真实删除条数，按它判断
+   * `getMany` 会并发读同一条过期记录，Dexie 对**已经被删掉**的行照样算删除成功，于是每个调用方都减一次。
+   * 事务里先读再删，同时解决两件事：已经被别人删掉的读不到、不重复减账；被并发 `set` 覆盖成新记录的
+   * 不再过期、不会误删，也不会拿旧的 byteSize 去减（Codex 在 #63 指出）
    */
-  private async dropExpired(key: string, byteSize: number): Promise<void> {
-    const removed = await this.db.entries.where(':id').equals(key).delete()
-    if (removed > 0) this.forgetTotals(byteSize)
+  private async dropExpired(key: string, now: number): Promise<void> {
+    await this.db.transaction('rw', this.db.entries, async () => {
+      const current = await this.db.entries.get(key)
+      // 读到之后可能有并发的 set 覆盖了这个键：那条是新的，不能删，也不能拿旧的 byteSize 去减账
+      if (!current || !this.isExpired(current, now)) return
+      await this.db.entries.delete(key)
+      this.forgetTotals(current.byteSize)
+    })
   }
 
   private forgetTotals(byteSize: number): void {
@@ -182,7 +196,7 @@ export class TranslationCache {
     if (hot) {
       if (this.isExpired(hot, now)) {
         this.forget(key)
-        void this.dropExpired(key, hot.byteSize).catch(() => undefined)
+        void this.dropExpired(key, now).catch(() => undefined)
         return null
       }
       hot.lastAccessedAt = now
@@ -195,7 +209,7 @@ export class TranslationCache {
       const record = await this.db.entries.get(key)
       if (!record) return null
       if (this.isExpired(record, now)) {
-        await this.dropExpired(key, record.byteSize)
+        await this.dropExpired(key, now)
         return null
       }
       record.lastAccessedAt = now

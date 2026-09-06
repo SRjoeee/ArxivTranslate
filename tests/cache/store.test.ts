@@ -181,6 +181,19 @@ describe('账面（totals）的正确性（Codex 在 #14 指出）', () => {
     expect(await c.get('c', 2000)).toBe('v')
   })
 
+  it('过期记录在读到之后被并发 set 覆盖：不删新记录，也不拿旧尺寸减账（Codex 在 #63 指出）', async () => {
+    const c = make({ ttlMs: 1000, memoryEntries: 0 })
+    await c.set('k', '短', 'p', 0)
+    // 读到过期记录、还没删掉时，同一个键被写入一条新的
+    const reading = c.get('k', 2000)
+    await c.set('k', '长很多的新译文内容', 'p', 2000)
+    expect(await reading).toBeNull()
+    // 新记录必须还在，且账面与库一致（拿旧的 byteSize 减账会让 bytes 对不上）
+    expect(await c.get('k', 2000)).toBe('长很多的新译文内容')
+    expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
+    expect(totalsOf(c)!.bytes).toBe((await c.stats()).bytes)
+  })
+
   it('统计进行中被 clear 作废：过时的快照不落地', async () => {
     const c = make()
     await c.set('a', 'v', 'p')
