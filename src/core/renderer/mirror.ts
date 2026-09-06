@@ -9,6 +9,7 @@
 // 所以模式切换仍然只改 <html> 上的一个属性。
 import { DOCUMENT_ROOT, MARGIN_ASIDE } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
+import { stripInjected } from '@/core/marks'
 import { FOR_ATTR, T_CLASS } from './index'
 import { MIRROR_CONTAINER, SIDE_STACK, isMirrorContainer } from './side-layout'
 
@@ -17,15 +18,6 @@ export const MIRROR_CLASS = 'axt-mirror'
 const MIRROR_ID_PREFIX = 'mirror:'
 /** 没有文字也没有这些内容的元素不值得镜像（纯装饰、空白） */
 const MEDIA = 'img, svg, object, math, table, canvas, video'
-
-/** 克隆进镜像的内容不能带 id 与块标记，也不能带上别人的译文 */
-function strip(root: Element): void {
-  for (const stale of Array.from(root.querySelectorAll(`.${T_CLASS}`))) stale.remove()
-  for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
-    el.removeAttribute('id')
-    for (const name of el.getAttributeNames()) if (name.startsWith('data-axt-')) el.removeAttribute(name)
-  }
-}
 
 function needsMirror(child: Element): boolean {
   if (child.classList.contains(T_CLASS)) return false
@@ -62,7 +54,8 @@ export function createMirrors(root: Document | Element): number {
     for (const child of Array.from(container.children)) {
       if (!needsMirror(child)) continue
       const clone = child.cloneNode(true) as Element
-      strip(clone)
+      // 克隆进镜像的内容不能带 id 与块标记，也不能带上别人的译文
+      stripInjected(clone)
       clone.classList.add(T_CLASS, MIRROR_CLASS)
       // 镜像是右栏的视觉配平副本，内容与左栏完全相同、没有译文。不藏起来的话屏幕阅读器
       // 会把同一张图、同一个公式念两遍

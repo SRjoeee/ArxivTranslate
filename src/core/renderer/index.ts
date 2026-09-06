@@ -2,7 +2,7 @@
 // 不变量：译文节点只作为原块的下一个兄弟插入；原节点只追加 data-axt-id / data-axt-state；
 // 全局状态只在 <html> 上；restore 后 DOM 与翻译前逐节点相等。
 import type { Block, TableBlock, TextBlock } from '@/core/extractor'
-import { T_CLASS } from '@/core/marks'
+import { AXT_ATTR_PREFIX, T_CLASS, stripInjected } from '@/core/marks'
 import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
 import modesCss from '@/styles/modes.css?inline'
 import presetsCss from '@/styles/presets.css?inline'
@@ -42,7 +42,6 @@ export const INLINE_TITLE_MAX_CHARS = 60
 /** 我们注入的 <style> 元素的标记；恢复原文时按它清理。与 <html> 上的 data-axt-style（样式预设）不是一回事 */
 export const STYLE_ATTR = 'data-axt-sheet'
 const STYLE_MARK = 'modes'
-const AXT_ATTR_PREFIX = 'data-axt-'
 
 /**
  * 打开翻译态：<html> 上写状态属性，注入模式与预设样式（幂等）。
@@ -108,21 +107,6 @@ export function clearTranslation(block: Block): void {
   }
 }
 
-/**
- * 克隆进译文的内容剥掉 id 与全部 data-axt-*（原表、占位符回填的 .ltx_note 都可能带着块标记）。
- * 还要删掉克隆里已有的译文节点：表格单元格里的 .ltx_p 本身也是块，它的译文作为兄弟插在原表内，
- * 整表克隆会把它一起复制进来，于是译文表里出现重复且无 data-axt-for 的节点（2026-09-04 实测）。
- */
-function stripCloned(root: Element, includeRoot: boolean): void {
-  for (const stale of Array.from(root.querySelectorAll(`.${T_CLASS}`))) stale.remove()
-  const targets = Array.from(root.querySelectorAll('*'))
-  if (includeRoot) targets.unshift(root)
-  for (const el of targets) {
-    el.removeAttribute('id')
-    for (const name of el.getAttributeNames()) if (name.startsWith(AXT_ATTR_PREFIX)) el.removeAttribute(name)
-  }
-}
-
 /** 译文节点的 class：原块的 class 加 axt-t，沿用站点样式（§7.1） */
 export function translationClass(el: Element): string {
   const own = Array.from(el.classList).filter(c => c !== T_CLASS)
@@ -139,7 +123,8 @@ export function renderText(block: TextBlock, content: DocumentFragment): Element
   clearTranslation(block)
   const node = block.el.ownerDocument.createElement(block.el.tagName)
   node.append(content)
-  stripCloned(node, false)
+  // 表格单元格里的 .ltx_p 本身也是块，它的译文作为兄弟插在原表内，整表克隆会把它一起复制进来（2026-09-04 实测）
+  stripInjected(node, false)
   node.className = translationClass(block.el)
   node.setAttribute(FOR_ATTR, block.id)
   // 译文是另一种语言，页面的 <html lang> 说的是原文（arXiv 上是 en）。不标的话屏幕阅读器会用英文
@@ -183,7 +168,7 @@ function ownText(el: Element): string {
 export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragment>): Element {
   clearTranslation(block)
   const clone = block.el.cloneNode(true) as Element
-  stripCloned(clone, true)
+  stripInjected(clone)
   // 两棵树结构相同：原表的单元格与克隆表的单元格按同序对应（tableCells 取任意深度，嵌套 tabular 的格也在内）。
   // 每格替换前重新定位：外层格的译文里带着嵌套表的克隆，先替换外层再替换内层，
   // 事先取好的内层引用会指向已被丢弃的节点（§5.3）

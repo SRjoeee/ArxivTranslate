@@ -1,6 +1,4 @@
-// 译文节点的标记；写死一份常量避免 protector 依赖 renderer（保持单向依赖）
-const TRANSLATION_CLASS = 'axt-t'
-const AXT_ATTR_PREFIX = 'data-axt-'
+import { stripInjected } from '@/core/marks'
 
 /**
  * 把槽位节点克隆到目标文档，剥掉克隆子树内所有 id（避免重复锚点，§6.4）与 data-axt-* 标记；
@@ -10,13 +8,6 @@ const AXT_ATTR_PREFIX = 'data-axt-'
  */
 export function cloneWithoutIds(doc: Document, node: Node, deep: boolean): Node {
   const clone = doc.importNode(node, deep)
-  if (clone.nodeType === 1) {
-    const el = clone as Element
-    for (const stale of Array.from(el.querySelectorAll(`.${TRANSLATION_CLASS}`))) stale.remove()
-    for (const target of [el, ...Array.from(el.querySelectorAll('*'))]) {
-      target.removeAttribute('id')
-      for (const name of target.getAttributeNames()) if (name.startsWith(AXT_ATTR_PREFIX)) target.removeAttribute(name)
-    }
-  }
+  if (clone.nodeType === 1) stripInjected(clone as Element)
   return clone
 }
