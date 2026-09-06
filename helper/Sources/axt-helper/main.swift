@@ -66,6 +66,15 @@ func recognize(base64: String, languages: [String]) throws -> [String: Any] {
   guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else { throw HelperError.badBase64 }
   guard let source = CGImageSourceCreateWithData(data as CFData, nil),
         let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw HelperError.undecodableImage }
+  // JPEG / TIFF 的旋转存在 EXIF 里：像素是存储方向，浏览器显示的是转正后的。方向传给 Vision，
+  // 它返回的坐标就是转正后那张图的归一化坐标；宽高也按显示方向报（5–8 是转了 90°，对调）。
+  // 不传的话识别的是躺着的图，叠加层整个错位（Codex 在 #87 指出）
+  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+  let orientationRaw = properties?[kCGImagePropertyOrientation] as? UInt32 ?? 1
+  let orientation = CGImagePropertyOrientation(rawValue: orientationRaw) ?? .up
+  let swapped = orientationRaw >= 5
+  let width = swapped ? image.height : image.width
+  let height = swapped ? image.width : image.height
 
   let request = VNRecognizeTextRequest()
   request.recognitionLevel = .accurate
@@ -75,7 +84,7 @@ func recognize(base64: String, languages: [String]) throws -> [String: Any] {
   // 曲线图的刻度与图例很小；原版 0.01 会漏掉不到图高 1% 的字
   request.minimumTextHeight = 0.008
 
-  let handler = VNImageRequestHandler(cgImage: image, options: [:])
+  let handler = VNImageRequestHandler(cgImage: image, orientation: orientation, options: [:])
   try handler.perform([request])
 
   var lines: [[String: Any]] = []
@@ -86,7 +95,7 @@ func recognize(base64: String, languages: [String]) throws -> [String: Any] {
       .map { [clamp($0.x), clamp(1 - $0.y)] }
     lines.append(["text": candidate.string, "quad": quad, "conf": Double(observation.confidence)])
   }
-  return ["width": image.width, "height": image.height, "lines": lines]
+  return ["width": width, "height": height, "lines": lines]
 }
 
 // MARK: - 主循环

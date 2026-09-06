@@ -51,24 +51,33 @@ describe('createHelperClient', () => {
     expect(port().sent).toHaveLength(1) // 没有第二个 ping
   })
 
+  /** 新连接会先插一个内部 ping：回应它，让后面的 OCR 放行 */
+  async function handshake(port: FakePort, version = '0.1.0') {
+    expect(port.sent[0]).toMatchObject({ cmd: 'ping' })
+    port.reply({ v: 1, id: port.sent[0]?.id as string, ok: true, version })
+    await flush()
+  }
+
   it('响应按 id 关联：先到的回应不能给错请求；对不上号的回应丢弃', async () => {
     const { client, port } = setup()
     const a = client.ocr({ image: 'A' })
     const b = client.ocr({ image: 'B' })
     await flush()
-    // 在飞上限 1：B 还在排队，端口上只有 A
-    expect(port().sent).toHaveLength(1)
+    await handshake(port())
+    // 在飞上限 1：B 还在排队，端口上只有 ping + A
+    expect(port().sent).toHaveLength(2)
     const idA = port().lastId()
     port().reply({ v: 1, id: 'nobody', width: 1, height: 1, lines: [] }) // 丢弃
     port().reply({ v: 1, id: idA, width: 10, height: 20, lines: [{ text: 'x', quad: [[0, 0], [1, 0], [1, 1], [0, 1]], conf: 1 }] })
     const ra = await a
-    expect(ra.width).toBe(10)
+    expect(ra.result.width).toBe(10)
+    expect(ra.version).toBe('0.1.0')
     await flush()
-    expect(port().sent).toHaveLength(2) // A 结了，B 才写进端口
+    expect(port().sent).toHaveLength(3) // A 结了，B 才写进端口
     const idB = port().lastId()
     expect(idB).not.toBe(idA)
     port().reply({ v: 1, id: idB, width: 30, height: 40, lines: [] })
-    expect((await b).width).toBe(30)
+    expect((await b).result.width).toBe(30)
   })
 
   it('超时：到点拒绝为 timeout，晚到的回应丢弃，队列继续', async () => {
@@ -76,13 +85,14 @@ describe('createHelperClient', () => {
     const a = client.ocr({ image: 'A' })
     const b = client.ocr({ image: 'B' })
     await flush()
+    await handshake(port())
     vi.advanceTimersByTime(1001)
     await expect(a).rejects.toMatchObject({ kind: 'timeout' })
     await flush()
-    expect(port().sent).toHaveLength(2) // B 顶上
-    port().reply({ v: 1, id: port().sent[0]?.id as string, width: 1, height: 1, lines: [] }) // A 的晚到回应
+    expect(port().sent).toHaveLength(3) // B 顶上
+    port().reply({ v: 1, id: port().sent[1]?.id as string, width: 1, height: 1, lines: [] }) // A 的晚到回应
     port().reply({ v: 1, id: port().lastId(), width: 2, height: 2, lines: [] })
-    expect((await b).width).toBe(2)
+    expect((await b).result.width).toBe(2)
   })
 
   it('端口断开：全部 pending 与排队的都拒绝为 network，下一次请求重新连接并重新 ping', async () => {
@@ -106,6 +116,25 @@ describe('createHelperClient', () => {
     expect(await again).toEqual({ available: true, version: '0.2.0' })
   })
 
+  it('重连后的第一条不是 OCR 而是握手：换了版本的 helper 的结果带着新版本回来（Codex 在 #87 指出）', async () => {
+    const { client, port, ports } = setup({ lastError: () => 'Native host has exited.' })
+    const status = client.status()
+    await flush()
+    port().reply({ v: 1, id: port().lastId(), ok: true, version: '0.1.0' })
+    expect((await status).version).toBe('0.1.0')
+    port().drop()
+    // 端口断了；直接发 OCR——新端口上的第一条必须是 ping
+    const a = client.ocr({ image: 'A' })
+    await flush()
+    expect(ports).toHaveLength(2)
+    expect(port().sent.map(m => m.cmd)).toEqual(['ping'])
+    await handshake(port(), '0.2.0')
+    expect(port().sent.map(m => m.cmd)).toEqual(['ping', 'ocr'])
+    port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
+    expect((await a).version).toBe('0.2.0')
+    expect(await client.status()).toEqual({ available: true, version: '0.2.0' })
+  })
+
   it('host 没装（断开原因是 not found）：status 报不可用，之后不再尝试连接', async () => {
     const { client, port, ports } = setup({ lastError: () => 'Specified native messaging host not found.' })
     const status = client.status()
@@ -124,22 +153,24 @@ describe('createHelperClient', () => {
     const b = client.ocr({ image: 'B' }, 's1')
     const c = client.ocr({ image: 'C' }, 's2')
     await flush()
-    expect(port().sent).toHaveLength(1) // A 在飞
+    await handshake(port())
+    expect(port().sent).toHaveLength(2) // ping + A 在飞
     expect(client.cancel('s1')).toBe(2)
     await expect(a).rejects.toMatchObject({ kind: 'aborted' })
     await expect(b).rejects.toMatchObject({ kind: 'aborted' })
     // A 的回应到了：已撤，丢弃；C 顶上
-    port().reply({ v: 1, id: port().sent[0]?.id as string, width: 1, height: 1, lines: [] })
+    port().reply({ v: 1, id: port().sent[1]?.id as string, width: 1, height: 1, lines: [] })
     await flush()
-    expect(port().sent.map(m => m.image)).toEqual(['A', 'C'])
+    expect(port().sent.map(m => m.image ?? m.cmd)).toEqual(['ping', 'A', 'C'])
     port().reply({ v: 1, id: port().lastId(), width: 3, height: 3, lines: [] })
-    expect((await c).width).toBe(3)
+    expect((await c).result.width).toBe(3)
   })
 
   it('helper 的错误信封变成 HelperError：坏请求归 bad-request，其余归 invalid-response', async () => {
     const { client, port } = setup()
     const a = client.ocr({ image: '!!!' })
     await flush()
+    await handshake(port())
     port().reply({ v: 1, id: port().lastId(), error: { code: 'bad-base64', message: 'image 不是合法的 base64' } })
     await expect(a).rejects.toMatchObject({ kind: 'bad-request', message: expect.stringContaining('base64') })
     const b = client.ocr({ image: 'A' })
@@ -157,6 +188,7 @@ describe('createHelperClient', () => {
     const { client, port } = setup({ keepAlive, keepAliveMs: 100 })
     const a = client.ocr({ image: 'A' })
     await flush()
+    await handshake(port())
     vi.advanceTimersByTime(350)
     expect(keepAlive).toHaveBeenCalledTimes(3)
     port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })

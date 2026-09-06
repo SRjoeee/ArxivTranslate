@@ -1,13 +1,15 @@
 // OCR 服务（DESIGN §15.2）：查 OCR 缓存，未命中才叫 helper，结果写回。
 // 缓存与译文共用一个 Dexie 库（cachePortOf），键由 ocrCacheKey 算——只随图片字节与 helper 版本变。
 import { ocrCacheKey } from '@/cache/key'
-import type { CachePort } from '@/providers/translate-service'
+import { CACHE_READ_BUDGET_MS, type CachePort, readWithBudget } from '@/providers/translate-service'
 import type { HelperStatus, OcrCall, OcrMessageResponse, OcrResult } from '@/shared/ocr'
 import { HelperError, type HelperClient } from './helper'
 
 export interface OcrServiceDeps {
   helper: HelperClient
   cache: CachePort
+  /** 读缓存的等待上限（测试用）；默认与译文相同的 CACHE_READ_BUDGET_MS */
+  cacheReadBudgetMs?: number
 }
 
 export interface OcrService {
@@ -45,14 +47,17 @@ export function createOcrService(deps: OcrServiceDeps): OcrService {
       const status = await deps.helper.status()
       if (!status.available) return { ok: false, error: { kind: 'network', message: status.reason ?? 'helper 不可用' } }
       const key = await ocrCacheKey(call.imageHash, status.version ?? 'unknown')
-      const [hit] = await deps.cache.getMany([key])
+      // IndexedDB 可能挂住而不是拒绝：超预算当未命中，否则 helper 的超时永远开始不了、消息通道一直开着（Codex 在 #87 指出）
+      const [hit] = await readWithBudget(deps.cache, [key], deps.cacheReadBudgetMs ?? CACHE_READ_BUDGET_MS)
       const cached = parseCached(hit)
       if (cached) return { ok: true, result: cached, cached: true }
       // 读缓存期间被撤：别再把活交给 helper
       if (call.scope && cancelled.has(call.scope)) return aborted()
       try {
-        const result = await deps.helper.ocr({ image: call.image }, call.scope)
-        await deps.cache.putMany([{ key, translation: JSON.stringify(result), paper: call.paper }])
+        const { result, version } = await deps.helper.ocr({ image: call.image }, call.scope)
+        // 读缓存期间端口断过、重连的 helper 换了版本：按回应所在连接的版本落缓存，别记在旧键下
+        const storeKey = version === status.version ? key : await ocrCacheKey(call.imageHash, version)
+        await deps.cache.putMany([{ key: storeKey, translation: JSON.stringify(result), paper: call.paper }])
         return { ok: true, result, cached: false }
       } catch (e) {
         if (e instanceof HelperError) return { ok: false, error: { kind: e.kind, message: e.message } }

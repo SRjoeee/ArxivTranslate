@@ -124,7 +124,10 @@ export default defineBackground(() => {
         ocr.status().then(sendResponse)
         return true
       case 'axt:ocr':
-        ocr.ocr(message)
+        // 先把 scope 绑到 sender 的标签页：它可能是这个标签页第一条带 scope 的消息，不绑的话关标签页时 dropTab 撤不到
+        // 排队的识别（Codex 在 #87 指出）。绑定失败（建链抛错）不影响识别
+        ;(message.scope ? router.forCall(message.scope, sender.tab?.id).catch(() => undefined) : Promise.resolve())
+          .then(() => ocr.ocr(message))
           .catch((e: unknown) => ({ ok: false as const, error: { kind: 'unknown' as const, message: e instanceof Error ? e.message : String(e) } }))
           .then(sendResponse)
         return true
