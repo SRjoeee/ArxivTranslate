@@ -14,7 +14,7 @@
 **v1 范围 [决定]**
 - 仅 Chrome，仅 `https://arxiv.org/html/*`
 - 三种阅读模式：左右对照（side）、上下对照（stack）、仅译文（only），任意切换，随时无损恢复原文
-- 翻译引擎：LLM（OpenAI 兼容 / Anthropic / Gemini）+ 免费引擎（Chrome 内置 Translator API 优先，Google gtx 兜底）
+- 翻译引擎：LLM（OpenAI 兼容；Anthropic / Gemini 见 §8.1 的暂不实现说明）+ 免费引擎（Chrome 内置 Translator API 优先，`google-web` 的 translateHtml 兜底；原定的 gtx 已被它取代，见 §8.1）
 - 本地缓存，同一论文重开秒出
 - 译文样式预设 + 术语表
 
@@ -75,9 +75,9 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 **数据流（单个块）**
 1. `extractor` 按规则收集所有 Block，打上稳定 id（`data-axt-id`）
 2. `scheduler` 只翻进入视口（加预翻译距离）的块；没滚到的块不发请求、不占资源（§10，照搬 Read Frog）
-3. 先查缓存；命中直接渲染
+3. 先查缓存（缓存与请求同在 background，content 不碰 IndexedDB）；命中直接渲染
 4. 未命中：`protector` 把块序列化为 `{text, slots}`；按 provider 的 `preservesMarkup` 决定走 markup 路径（整块带占位符）还是 runs 路径（切段）
-5. content 侧移植的 `request-queue` 按 provider 的速率（令牌桶）发请求、`batch-queue` 攒批（§8.0：请求不经过 background）；失败退避、重试、429 暂停、必要时切换 fallback provider
+5. background 里移植的 `request-queue` 按 provider 的速率（令牌桶）与并发上限发请求、`batch-queue` 攒批（§8.0：2026-09-06 起请求跑在 background）；失败退避、重试、429 暂停、必要时切换 fallback provider
 6. `validator` 校验占位符完整性；失败 → 单块重试一次 → 降级 runs 路径
 7. `rehydrator` 把占位符换回受保护节点的克隆（剥掉 `id` 属性）
 8. `renderer` 把译文节点插为原块的下一个兄弟，写入缓存
