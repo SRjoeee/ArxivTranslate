@@ -33,7 +33,7 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.9.0')
+    expect(RULES_VERSION).toBe('0.10.0')
   })
 })
 
@@ -310,6 +310,14 @@ describe('参考文献条目的每一段都翻，作者段不再例外（§5.4�
   it('没有标注、只靠位置认出来的第一段也是翻译单元', () => {
     const d = entry('<span class="ltx_bibblock">Doe, J., and Roe, R.</span><span class="ltx_bibblock">A Title.</span>')
     for (const el of d.querySelectorAll('.ltx_bibblock')) expect(classify(el)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
+  })
+
+  it('引文年份作 void 保留，不进翻译文本（Codex 在 #74 指出）', () => {
+    const d = entry('<span class="ltx_bibblock"><span class="ltx_bib_author">Doe, J.</span><span class="ltx_text ltx_bib_year"> (2024)</span></span>')
+    const year = d.querySelector('.ltx_bib_year')!
+    expect(classify(year)).toEqual({ kind: 'protect', rule: 'bib-year', descend: false })
+    // 整段仍然是翻译单元：作者名照翻，年份在里面当占位符
+    expect(classify(d.querySelector('.ltx_bibblock')!)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
   })
 
   it('第一段是整条引文、第二段是 doi 的模板：两段都翻（实测 2609.03896，用户反馈）', () => {

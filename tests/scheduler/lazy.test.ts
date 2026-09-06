@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { extract, markBlocks, type Block } from '@/core/extractor'
-import { DEFAULT_PRELOAD, createLazyScheduler } from '@/core/scheduler/lazy'
+import { DEFAULT_PRELOAD, THRESHOLD_STEP, createLazyScheduler, observerThresholds, quantizeThreshold } from '@/core/scheduler/lazy'
 
 /** happy-dom 没有 IntersectionObserver：用假的记录 observe / unobserve，测试里手动 emit */
 class FakeIntersectionObserver {
@@ -167,21 +167,23 @@ describe('播种与观察器用同一个 threshold（Codex 在 #35 指出）', (
   })
 })
 
+/** 一个块，高度可控，起始位置在很远处（只能走观察器） */
+function oneWith(height: number, threshold: number) {
+  document.body.innerHTML = '<article class="ltx_document"><p class="ltx_p" id="a">A.</p></article>'
+  const blocks = extract(document)
+  markBlocks(blocks)
+  layout(blocks[0]!.el, 5000, height)
+  const entered: Block[][] = []
+  createLazyScheduler(blocks, { margin: 0, threshold, onEnter: picked => entered.push(picked) })
+  return { io: FakeIntersectionObserver.instances[0]!, entered, el: blocks[0]!.el }
+}
+
 describe('可见比例阈值真的起作用（Codex 在 #32 / #36 指出）', () => {
   const g = globalThis as { IntersectionObserver?: unknown; innerHeight?: number }
   beforeEach(() => { FakeIntersectionObserver.instances = []; g.IntersectionObserver = FakeIntersectionObserver; g.innerHeight = 900 })
   afterEach(() => { delete g.IntersectionObserver; document.body.innerHTML = '' })
 
-  /** 一个块，高度可控，起始位置在很远处（只能走观察器） */
-  function one(height: number, threshold: number) {
-    document.body.innerHTML = '<article class="ltx_document"><p class="ltx_p" id="a">A.</p></article>'
-    const blocks = extract(document)
-    markBlocks(blocks)
-    layout(blocks[0]!.el, 5000, height)
-    const entered: Block[][] = []
-    createLazyScheduler(blocks, { margin: 0, threshold, onEnter: picked => entered.push(picked) })
-    return { io: FakeIntersectionObserver.instances[0]!, entered, el: blocks[0]!.el }
-  }
+  const one = oneWith
 
   it('比例不够就不翻：threshold 0.5 时露出一成的块不该被触发', () => {
     const { io, entered, el } = one(200, 0.5)
@@ -211,6 +213,104 @@ describe('可见比例阈值真的起作用（Codex 在 #32 / #36 指出）', ()
     const { io, entered, el } = one(200, 0)
     io.emit([el], 0.01, 900)
     expect(entered.flat()).toHaveLength(1)
+  })
+})
+
+describe('注册给观察器的比例点要覆盖钳过的阈值（Codex 在 #76 指出）', () => {
+  // 观察器**只在跨越注册值时**回调。只注册 [0, threshold] 的话，一个比例上限低于 threshold 的
+  // 超大块跨过 0 之后就再没有通知，钳到上限的判定永远等不到能通过的那一次。
+  // Chromium 实测（3000 px 元素 / 900 px root / threshold 1）：注册 [0,1] 全程一次回调、ratio 0.267；
+  // 换成 5% 细网格后拿到了 ratio 0.3。tests/e2e/layout.mjs 里有一条守着真实浏览器的那一面
+  it('threshold 为 0（默认）时仍是单个 0：任何相交都算进入', () => {
+    expect(observerThresholds(0)).toBe(0)
+  })
+
+  it('threshold 大于 0 时是 5% 一档的细网格，含 0 与 1', () => {
+    const t = observerThresholds(0.5) as number[]
+    expect(Array.isArray(t)).toBe(true)
+    expect(t).toHaveLength(21)
+    expect(t[0]).toBe(0)
+    expect(t.at(-1)).toBe(1)
+  })
+
+  it('任何可达上限都能找到一个不高于它的注册点，差距不超过 5%', () => {
+    const grid = observerThresholds(1) as number[]
+    // 元素高 / root 高 的各种比值：上限 = root / 元素
+    for (const ratio of [0.3, 0.07, 0.42, 0.99, 0.5, 0.13]) {
+      const usable = grid.filter(g => g <= ratio + 1e-9)
+      expect(usable.length).toBeGreaterThan(0)
+      expect(ratio - usable.at(-1)!).toBeLessThanOrEqual(0.05 + 1e-9)
+    }
+  })
+})
+
+describe('判定与注册用同一套刻度（Codex 在 #81 指出）', () => {
+  const g = globalThis as { IntersectionObserver?: unknown; innerHeight?: number }
+  beforeEach(() => { FakeIntersectionObserver.instances = []; g.IntersectionObserver = FakeIntersectionObserver; g.innerHeight = 900 })
+  afterEach(() => { delete g.IntersectionObserver; document.body.innerHTML = '' })
+
+  // 通知里带的是**当时的真实比例**，所以上限落在两个网格点之间的元素永远拿不到
+  // 「比例等于上限」的那一次。Chromium 实测（2700 px 元素 / 900 px root，上限 0.3333）：
+  // 跨越 0.30 的那次报 0.30000001，之后再没有回调——拿精确的 0.3333 去比就永远不通过
+  it('可达上限向下对齐到网格', () => {
+    expect(quantizeThreshold(1 / 3)).toBeCloseTo(0.3, 10)
+    expect(quantizeThreshold(0.3)).toBeCloseTo(0.3, 10)
+    expect(quantizeThreshold(0.0741)).toBeCloseTo(0.05, 10)
+    expect(quantizeThreshold(1)).toBeCloseTo(1, 10)
+  })
+
+  it('对齐后的值一定是注册过的网格点', () => {
+    const grid = observerThresholds(1) as number[]
+    for (const cap of [1 / 3, 0.07, 900 / 2700, 900 / 1234, 0.999]) {
+      const q = quantizeThreshold(cap)
+      expect(grid.some(g => Math.abs(g - q) < 1e-9)).toBe(true)
+      expect(q).toBeLessThanOrEqual(cap + 1e-9)
+      expect(cap - q).toBeLessThan(THRESHOLD_STEP)
+    }
+  })
+
+  it('不在网格上的配置值也要注册进去（Codex 在 #81 指出）', () => {
+    // 用户可以填 0.33：不注册它的话，上限在 0.33–0.35 之间的块会卡死——
+    // 跨越 0.30 的回调报 0.30 < 0.33 被拒，0.35 又够不着
+    const t = observerThresholds(0.33) as number[]
+    expect(t).toContain(0.33)
+    expect(t).toHaveLength(22)
+    expect([...t].sort((a, b) => a - b)).toEqual(t)
+  })
+
+  it('正好落在网格上的配置值不重复注册', () => {
+    const t = observerThresholds(0.5) as number[]
+    expect(t).toHaveLength(21)
+    expect(t.filter(v => Math.abs(v - 0.5) < 1e-9)).toHaveLength(1)
+  })
+
+  it('配置值不在网格上、但块够得着它：按配置值判，回调也到得了', () => {
+    const { io, entered, el } = oneWith(300, 0.33)
+    io.emit([el], 0.32, 900)
+    expect(entered).toEqual([])
+    io.emit([el], 0.33, 900)
+    expect(entered.flat()).toHaveLength(1)
+  })
+
+  it('够得着配置值时不降级：正常大小的块仍按用户配的比例要求', () => {
+    const { io, entered, el } = oneWith(300, 0.5)
+    io.emit([el], 0.4, 900)
+    expect(entered).toEqual([])
+    io.emit([el], 0.5, 900)
+    expect(entered.flat()).toHaveLength(1)
+  })
+
+  it('上限落在网格点之间：按对齐后的值放行（实测里那次 0.30000001）', () => {
+    // 2700 px 元素、900 px root：上限 0.3333，对齐到 0.30
+    const { io, entered, el } = oneWith(2700, 1)
+    io.emit([el], 0.30000001, 900)
+    expect(entered.flat()).toHaveLength(1)
+  })
+
+  it('还没到对齐后的阈值就不放行', () => {
+    const { io, entered, el } = oneWith(2700, 1)
+    io.emit([el], 0.28, 900)
+    expect(entered).toEqual([])
   })
 })
 

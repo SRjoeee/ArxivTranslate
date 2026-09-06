@@ -15,6 +15,44 @@ export interface PreloadOptions {
   threshold: number
 }
 
+/**
+ * 注册给 IntersectionObserver 的比例点。**判定不在这里做**（回调里按逐元素的有效阈值判），
+ * 这串数字只决定「在哪些比例上把回调发给我们」——而这一点是硬约束：观察器**只在跨越注册值时**回调。
+ *
+ * 只注册 `[0, threshold]` 会让钳过阈值的超大块永远收不到够用的那次通知（Codex 在 #76 指出）。
+ * Chromium 实测（元素 3000 px、root 900 px，比例上限 0.3，threshold 1）：
+ * 注册 `[0, 1]` 全程只回调一次、ratio 0.267，之后一路滚到底再无回调，钳到 0.3 的判定永不通过；
+ * 换成 5% 一档的细网格后拿到了 ratio 0.3 的那一次。
+ *
+ * 步长 5%：任何元素的可达上限与某个注册点相差不超过 5%，够精细；一个元素最多 21 次回调，
+ * 且命中即 `unobserve`，回调里只做几次比较，代价可忽略。threshold 为 0 时退回单个 0——
+ * 那是默认值，任何相交都算进入，没必要多注册 20 个点
+ */
+export const THRESHOLD_STEP = 0.05
+
+export function observerThresholds(threshold: number): number | number[] {
+  if (threshold <= 0) return 0
+  const grid = Array.from({ length: Math.round(1 / THRESHOLD_STEP) + 1 }, (_, i) => i * THRESHOLD_STEP)
+  // 用户配的值本身可能不在网格上（schema 只要求 0–1，设置页也收得下 0.33）。
+  // 不把它一起注册的话，一个上限落在「配置值与下一个网格点之间」的元素同样收不到能过关的回调：
+  // 跨越 0.30 那次报 0.30 < 0.33 被拒，0.35 又够不着（Codex 在 #81 指出）
+  if (!grid.some(g => Math.abs(g - threshold) < 1e-9)) grid.push(threshold)
+  return grid.sort((a, b) => a - b)
+}
+
+/**
+ * 把阈值向下对齐到注册网格。**判定必须和注册用同一套刻度**（Codex 在 #81 指出）：
+ * 观察器只在跨越注册点时通知，通知里带的是**当时的真实比例**，所以一个可达上限落在
+ * 两个网格点**之间**的元素，永远拿不到「比例等于上限」的那一次。
+ *
+ * Chromium 实测（元素 2700 px、root 900 px，上限 0.3333，网格 0.30 / 0.35，10 px 一步慢滚）：
+ * 跨越 0.30 的那次报告 0.30000001，此后再没有回调（够不着 0.35）。
+ * 拿精确的 0.3333 去比就永远不通过，块一辈子不翻；对齐到 0.30 才收得下这一次。
+ */
+export function quantizeThreshold(value: number): number {
+  return Math.floor(value / THRESHOLD_STEP + 1e-9) * THRESHOLD_STEP
+}
+
 export const DEFAULT_PRELOAD: PreloadOptions = { margin: 1000, threshold: 0 }
 
 export interface LazyScheduler {
@@ -59,8 +97,13 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
    *    `root 高 ÷ 元素高`。设计上又明确不拆超大表格，于是 threshold=1 时那张表一辈子不翻。
    *    把阈值按这个上限钳一下，够得着多少就要求多少。
    */
-  const effectiveThreshold = (elHeight: number, rootHeight: number) =>
-    elHeight > 0 ? Math.min(options.threshold, Math.min(1, rootHeight / elHeight)) : options.threshold
+  const effectiveThreshold = (elHeight: number, rootHeight: number) => {
+    if (elHeight <= 0) return options.threshold
+    const reachable = Math.min(1, rootHeight / elHeight)
+    // 够得着配置值就按配置值判——它本身也在注册列表里（见 observerThresholds），回调到得了；
+    // 够不着才降到上限，而降下来的那个数要**对齐到网格**，否则同样等不到能过关的回调
+    return options.threshold <= reachable ? options.threshold : quantizeThreshold(reachable)
+  }
 
   const Observer = globalThis.IntersectionObserver
   const observer = typeof Observer === 'function'
@@ -71,14 +114,13 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
           // rootBounds 在跨文档场景下可能为 null；拿不到就退回只看 isIntersecting，宁可早翻不可不翻
           const rootHeight = entry.rootBounds?.height
           const elHeight = entry.boundingClientRect.height
-          if (rootHeight !== undefined && entry.intersectionRatio < effectiveThreshold(elHeight, rootHeight)) continue
+          // 容差：浏览器报的比例是浮点，跨越 0.30 时可能报 0.2999999
+          if (rootHeight !== undefined && entry.intersectionRatio < effectiveThreshold(elHeight, rootHeight) - 1e-6) continue
           io.unobserve(entry.target)
           anchors.push(entry.target)
         }
         enterAnchors(anchors)
-      // threshold 只是"在哪些比例上回调"，判定在上面自己做：加上 0 才收得到刚进场那一次，
-      // 否则超大块（够不着 options.threshold）连回调都不会有
-      }, { rootMargin: `${options.margin}px 0px`, threshold: options.threshold > 0 ? [0, options.threshold] : 0 })
+      }, { rootMargin: `${options.margin}px 0px`, threshold: observerThresholds(options.threshold) })
     : null
 
   // 播种：首屏及边距内的锚点先同步触发一次，其余交给观察器。
@@ -93,7 +135,7 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
     const bottom = Math.min(rect.bottom, height + options.margin)
     const visible = Math.max(0, bottom - top)
     // 与 IntersectionObserver 的 intersectionRatio 同义：相交高度 ÷ 元素自身高度
-    if (visible > 0 && visible / rect.height >= effectiveThreshold(rect.height, height + 2 * options.margin)) seeded.push(anchor)
+    if (visible > 0 && visible / rect.height >= effectiveThreshold(rect.height, height + 2 * options.margin) - 1e-6) seeded.push(anchor)
     else observer?.observe(anchor)
   }
   enterAnchors(seeded)

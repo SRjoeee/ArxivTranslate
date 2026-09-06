@@ -2,8 +2,7 @@
 // 译文到达后被真译文替换——renderText / renderTable 开头的 clearTranslation 会删掉同 data-axt-for 的兄弟。
 // 与 §7.1 一致：它只是原块的下一个兄弟，原节点不动。
 import type { Block, TextBlock } from '@/core/extractor'
-import { FOR_ATTR, INLINE_ATTR, shouldInline, translationClass } from './index'
-import { clearFailed } from './failed'
+import { FOR_ATTR, INLINE_ATTR, clearTranslation, setState, shouldInline, translationClass } from './index'
 import { cancelSpinnersIn, createSpinnerInside } from './spinner'
 
 export const PENDING_CLASS = 'axt-pending'
@@ -20,10 +19,16 @@ function pendingOf(block: Block): Element | null {
 export function renderPending(block: Block): Element {
   const existing = pendingOf(block)
   if (existing) return existing
-  // 重试路径：上一轮的失败小部件还挂在原块旁边，`pendingOf` 认不出它（class 是 axt-error），
-  // 于是圆环插在原块与它之间——读者同时看到"正在翻"和"！重试"，side 模式下右栏还多一项，
-  // 而且整个请求期间都在报一个已经不成立的失败（Codex 在 #36 指出）
-  clearFailed(block)
+  // 重试路径要**整块回到等待态**，上一轮留下的东西一样不能剩：
+  //   - 失败小部件（`.axt-error`）：`pendingOf` 认不出它，圆环会插在原块与它之间，
+  //     读者同时看到"正在翻"和"！重试"，side 模式下右栏还多一项（Codex 在 #36 指出）；
+  //   - `data-axt-state="failed"`：modes.css 按它画红线，不清的话重试期间圆环在转、红线还在（#76）；
+  //   - **半翻的表格**：`cells.size > 0` 那条路走的是 `renderTable` + `markPartial`，
+  //     **不建小部件**却把块记成 failed（run.ts:240-246）。所以重置不能挂在"删掉了小部件"上——
+  //     那种块 `clearFailed` 返回 false，旧克隆、`data-axt-partial` 与 translated 状态会原样留着（#81）。
+  // `clearTranslation` 把同 id 的译文 / 半成品 / 小部件一并清掉，`setState` 顺带清掉 partial 标记
+  clearTranslation(block)
+  setState(block, 'pending')
   const doc = block.el.ownerDocument
   const node = doc.createElement(block.kind === 'table' ? 'div' : block.el.tagName)
   node.className = `${translationClass(block.el)} ${PENDING_CLASS}`

@@ -20,6 +20,13 @@ html[data-axt-on] {
 /* stack / only：译文紧跟原文，压掉站点为该标签留的大边距。
    side 模式不能这么做——译文与原文同处一行，边距不一致会让两边错位
    （实测 h2 差 19px、figure 差 64px），那里让译文沿用 class 自带的边距 */
+/* 译文与原文逐字相同（默认提示词让模型保留人名、期刊名等原文，引文作者段整段返回原样）：
+   stack 是上下两行，重复显示没有意义，藏掉。side 要靠它撑住右栏、only 把原块藏了，两边都保留。
+   `data-axt-identity` 由 renderText 判定后打上（Codex 在 #74 指出） */
+html[data-axt-mode="stack"] .axt-t[data-axt-identity] {
+  display: none;
+}
+
 html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption, li).axt-t {
   margin: 0.25em 0 0;
 }
@@ -43,9 +50,16 @@ html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption,
 
 /* 高度为 0 的分页标记（`\newpage` 的产物，屏幕上没有任何内容）：块布局里它那 32px 上边距会与
    相邻的边距**折叠**，只占一段；side 模式下 .ltx_document 是网格容器（列线只在它身上定义一次，见下），
-   网格禁用子元素间的外边距折叠，于是摘要与正文之间那两个标记各自贡献 32px。
-   实测 2609.03001v1：摘要块底到第一节顶，未翻译 32px、side 96px（用户反馈"间距被拉大"）。
-   把它们的块向外边距归零——它们本来就只靠折叠存在 */
+   网格禁用子元素间的外边距折叠，于是每个标记都实打实地贡献 32px。
+   实测 2609.03001v1（摘要与第一节之间夹着**两个**标记，中间那个 nav.ltx_TOC 被我们隐藏了）：
+   摘要块底到第一节顶，未翻译 32px、side 96px（用户反馈"间距被拉大"）。
+
+   **单独出现的标记也一起归零**，理由是实测（Codex 在 #73 建议只归零成对的，核实后没采纳）：
+   2312.17141 那个夹在两个普通段落之间的独立标记，块布局下前后间距 32px——它的 32px 上边距
+   与前段的 24px 下边距折叠，净贡献只有 8px。同一处在 side 网格下：不归零是 56px（24 + 32 累加，
+   比原始多 24），归零是 24px（只剩前段的下边距，比原始少 8）。网格里没法用静态 CSS 复现
+   「取最大值」的折叠语义，两种都不准，归零偏离得更少；而成对那种（用户实际报告的场景）
+   只有归零才回得到 32px。代价是独立标记处少 8px 的分隔 */
 html[data-axt-mode="side"] .ltx_pagination {
   margin-block: 0;
 }
@@ -340,17 +354,19 @@ html[data-axt-mode="side"] body {
      换行也断得很难看（`giangnh@huce.e-du.vn` 被拦腰折断）。
 
    所以带译文的一律回到文章列、按两栏排；**没有译文的保持沟槽原样**（译文还没到、或翻译失败时
-   不去动 arXiv 自己的版式）。frontmatter 的注永远可见、没有折叠态，所以不受
+   不去动 arXiv 自己的版式）。判定只认**真译文**——圆环是 `.axt-t.axt-pending`、失败小部件是
+   `.axt-t.axt-error`，光写 `:has(.axt-t)` 的话请求一发出注就跳出沟槽、失败后还永远留在错位状态，
+   与上面这句承诺正好相反（Codex 在 #73 指出）。frontmatter 的注永远可见、没有折叠态，所以不受
    「`.ltx_note` 整棵子树排除在配对之外」那条的顾虑——那条是给正文脚注的。 */
-html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter:has(.axt-t) {
+html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter:has(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)) {
   /* ar5iv 在 ≥96rem 时把它绝对定位到页边；带译文的要回到正文流里参与配对 */
   position: static;
   inline-size: auto;
 }
-html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter:has(.axt-t) > .ltx_note_outer {
+html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter:has(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)) > .ltx_note_outer {
   inline-size: 100%;
 }
-html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer:has(> .axt-t) {
+html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer:has(> .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)) {
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: var(--axt-gap);
@@ -382,7 +398,7 @@ html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer:has(
   }
   /* 只给**没有译文**的那些：带译文的已经回到文章列按两栏排（见上），
      这里再给个沟槽宽度会把它压成 192px（实测原文与译文各剩 76px） */
-  html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter.ltx_role_thanks:not(:has(.axt-t)) {
+  html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter.ltx_role_thanks:not(:has(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split))) {
     width: calc(var(--axt-side-w) - 2rem);
     inset-inline-end: calc(1rem - var(--axt-side-w));
   }

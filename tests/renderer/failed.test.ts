@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import { extract, type TextBlock } from '@/core/extractor'
-import { ERROR_CLASS, FOR_ATTR, SPLIT_CLASS, STATE_ATTR, T_CLASS, clearTranslation, renderFailed, renderPending, restore, splitFigures } from '@/core/renderer'
-import { docOf } from './helpers'
+import { extract, type TableBlock, type TextBlock } from '@/core/extractor'
+import { ERROR_CLASS, FOR_ATTR, PARTIAL_ATTR, SPLIT_CLASS, STATE_ATTR, T_CLASS, clearTranslation, markPartial, renderFailed, renderPending, renderTable, restore, splitFigures } from '@/core/renderer'
+import { docOf, frag } from './helpers'
 
 const page = '<p class="ltx_p" id="p1">Text.</p>'
 
@@ -69,6 +69,48 @@ describe('重试开始时旧的失败小部件要消失（Codex 在 #36 指出�
     expect(next.classList.contains('axt-pending')).toBe(true)
     expect(next.getAttribute(FOR_ATTR)).toBe(p.id)
     expect(p.el.parentElement!.querySelectorAll(`[${FOR_ATTR}="${p.id}"]`)).toHaveLength(1)
+  })
+
+  it('重试时状态回到 pending，红线与半翻标记一起消失（Codex 在 #76 指出）', () => {
+    const doc = docOf(page)
+    const p = extract(doc)[0] as TextBlock
+    markPartial(p)
+    renderFailed(p, '网络错误', () => {})
+    expect(p.el.getAttribute(STATE_ATTR)).toBe('failed')
+    renderPending(p)
+    // modes.css 按 data-axt-state="failed" 画红线、按 data-axt-partial 画半翻标记，两个都得清掉
+    expect(p.el.getAttribute(STATE_ATTR)).toBe('pending')
+    expect(p.el.hasAttribute(PARTIAL_ATTR)).toBe(false)
+  })
+
+  it('半翻的表格重试：没有小部件也要清干净（Codex 在 #81 指出）', () => {
+    // run.ts 里 cells.size > 0 那条路：renderTable + markPartial，**不建小部件**，但块记为 failed。
+    // 重置若挂在"删掉了小部件"上，这种块就一点都清不掉
+    const doc = docOf('<table class="ltx_tabular" id="t"><tbody><tr><td class="ltx_td">A</td></tr></tbody></table>')
+    const block = extract(doc)[0]!
+    expect(block.kind).toBe('table')
+    const cell = doc.querySelector('.ltx_td')!
+    renderTable(block as TableBlock, new Map([[cell, frag(doc, '甲')]]))
+    markPartial(block)
+    expect(block.el.getAttribute(STATE_ATTR)).toBe('translated')
+    expect(doc.querySelectorAll(`.${T_CLASS}`)).toHaveLength(1)
+    expect(doc.querySelectorAll(`.${ERROR_CLASS}`)).toHaveLength(0) // 关键：没有小部件
+
+    renderPending(block)
+    expect(block.el.getAttribute(STATE_ATTR)).toBe('pending')
+    expect(block.el.hasAttribute(PARTIAL_ATTR)).toBe(false)
+    // 旧的半成品克隆没了，只剩圆环
+    const mine = [...doc.querySelectorAll(`[${FOR_ATTR}="${block.id}"]`)]
+    expect(mine).toHaveLength(1)
+    expect(mine[0]!.classList.contains('axt-pending')).toBe(true)
+  })
+
+  it('首次翻译（没有失败小部件）时不碰状态：标记循环已经设过 pending 了', () => {
+    const doc = docOf(page)
+    const p = extract(doc)[0] as TextBlock
+    p.el.setAttribute(STATE_ATTR, 'pending')
+    renderPending(p)
+    expect(p.el.getAttribute(STATE_ATTR)).toBe('pending')
   })
 
   it('已经有圆环时是幂等的，不会误删别的东西', () => {
