@@ -81,6 +81,16 @@ const again = await send({ v: 1, cmd: 'ocr', id: 'o1b', image })
 const ms2 = Math.round(performance.now() - t2)
 check('第二次识别结果一致', (again.lines ?? []).length === lines.length, `${ms2} ms（首次 ${ms} ms）`)
 
+// EXIF 方向（Codex 在 #87 指出）：同一张图存成像素转了 90°、方向位为 6 的 JPEG，浏览器显示与 PNG 相同，
+// helper 报的尺寸与坐标也必须与 PNG 那次一致（Vision 按转正后的图归一化）
+const jpeg = readFileSync(join(ROOT, 'helper/Tests/Fixtures/qed3d-string-breaking-exif6.jpg')).toString('base64')
+const exif = await send({ v: 1, cmd: 'ocr', id: 'o3', image: jpeg })
+check('EXIF 方向 6 的 JPEG：尺寸按显示方向报', exif.width === 579 && exif.height === 699, `${exif.width}×${exif.height}`)
+const near = (a, b) => Math.abs(a - b) < 0.02
+const pairs = ['Processes', 'Static charge', 'Odd sites'].map(word => [lines.find(l => l.text.includes(word)), (exif.lines ?? []).find(l => l.text.includes(word))])
+const aligned = pairs.every(([a, b]) => a && b && near(a.quad[0][0], b.quad[0][0]) && near(a.quad[0][1], b.quad[0][1]) && near(a.quad[2][0], b.quad[2][0]) && near(a.quad[2][1], b.quad[2][1]))
+check('EXIF 方向 6 的 JPEG：坐标与 PNG 一致（±0.02）', aligned, pairs.map(([a, b]) => `${a?.text}: png (${a?.quad[0].map(v => v.toFixed(3))}) jpg (${b?.quad[0].map(v => v.toFixed(3)) ?? '缺'})`).join('; '))
+
 const bad = await send({ v: 1, cmd: 'ocr', id: 'o2', image: '!!!' })
 check('坏 base64 回错误信封而不是崩', bad.error?.code === 'bad-base64' && bad.id === 'o2', JSON.stringify(bad.error))
 const unknown = await send({ v: 1, cmd: 'nope', id: 'u1' })

@@ -138,8 +138,8 @@ function uniqueIds(items: QueueItem[]): string[] {
  */
 const admits = (source: string, translated: string): boolean => validate(translated, expectationsFromText(source)).ok
 
-/** 超预算就当全部未命中：多花一次请求，好过整页停在这里 */
-async function readWithBudget(store: CachePort, keys: string[], budgetMs: number): Promise<(string | null)[]> {
+/** 超预算就当全部未命中：多花一次请求，好过整页停在这里。OCR 服务读缓存也用它（Codex 在 #87 指出） */
+export async function readWithBudget(store: CachePort, keys: string[], budgetMs: number): Promise<(string | null)[]> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const hits = await Promise.race([
     store.getMany(keys),

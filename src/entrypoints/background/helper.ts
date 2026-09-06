@@ -32,7 +32,8 @@ export interface HelperClientDeps {
 
 export interface HelperClient {
   status(): Promise<HelperStatus>
-  ocr(request: { image: string; langs?: string[] }, scope?: string): Promise<OcrResult>
+  /** 识别；version 是**回应所在连接**握手到的版本，缓存键按它算（重连后 helper 可能换了版本，Codex 在 #87 指出） */
+  ocr(request: { image: string; langs?: string[] }, scope?: string): Promise<{ result: OcrResult; version: string }>
   /** 撤掉该 scope 排队与在飞的请求，返回撤掉的条数 */
   cancel(scope: string): number
 }
@@ -69,7 +70,7 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const keepAliveMs = deps.keepAliveMs ?? DEFAULT_KEEP_ALIVE_MS
   let port: NativePort | null = null
-  /** 本次连接 ping 过的结果；断开就作废 */
+  /** 本次连接 ping 过的结果；断开就作废。没握过手的连接不发 OCR——pump 会先插一个 ping 到队头 */
   let known: HelperStatus | null = null
   /** host 没装：本 worker 生命周期内不再连 */
   let missing: string | null = null
@@ -109,6 +110,8 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       const reply = raw as Record<string, unknown> | null
       const id = typeof reply?.id === 'string' ? reply.id : ''
       const entry = settle(id)
+      // ping 的回应：这条连接握过手了，版本记下来（status() 与 pump 插的内部 ping 都走这里）
+      if (id.startsWith('ping-') && reply && !reply.error) known = { available: true, version: typeof reply.version === 'string' ? reply.version : 'unknown' }
       // 对不上号（已撤、已超时）的回应丢弃；但队列照样往前走——在飞的位子早在撤销时就腾出来了
       entry?.resolve(reply as Record<string, unknown>)
       pump()
@@ -126,11 +129,17 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
 
   const pump = () => {
     while (pending.size < MAX_IN_FLIGHT && queue.length > 0) {
-      const item = queue.shift() as Queued
       if (missing) {
-        item.reject(new HelperError('network', missing))
+        ;(queue.shift() as Queued).reject(new HelperError('network', missing))
         continue
       }
+      // 新连接先握手：队头不是 ping 而这条连接还没 ping 过（断开重连之后），插一个内部 ping 到队头，
+      // 回应到了（known 有值）再放行后面的 OCR。否则换了版本的 helper 的结果会记在旧版本的缓存键下
+      if (known === null && !(queue[0] as Queued).id.startsWith('ping-')) {
+        const id = `ping-${++sequence}`
+        queue.unshift({ id, message: { v: HELPER_PROTOCOL, cmd: 'ping', id }, resolve: () => {}, reject: () => {} })
+      }
+      const item = queue.shift() as Queued
       pending.set(item.id, item)
       item.timer = setTimeout(() => {
         settle(item.id)?.reject(new HelperError('timeout', `helper ${timeoutMs} ms 没有回应`))
@@ -169,8 +178,8 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
         const reply = await send('ping', {})
         const failure = errorOf(reply)
         if (failure) return { available: false, reason: failure.message }
-        known = { available: true, version: typeof reply.version === 'string' ? reply.version : 'unknown' }
-        return known
+        // known 已在 onMessage 里按 ping 回应记下；这里只是把它交出去
+        return known ?? { available: true, version: typeof reply.version === 'string' ? reply.version : 'unknown' }
       } catch (e) {
         return { available: false, reason: e instanceof Error ? e.message : String(e) }
       }
@@ -184,7 +193,7 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       if (!Array.isArray(lines) || typeof reply.width !== 'number' || typeof reply.height !== 'number') {
         throw new HelperError('invalid-response', 'helper 的回应缺 lines / width / height')
       }
-      return { width: reply.width, height: reply.height, lines: lines as OcrResult['lines'] }
+      return { result: { width: reply.width, height: reply.height, lines: lines as OcrResult['lines'] }, version: known?.version ?? 'unknown' }
     },
 
     cancel(scope) {
