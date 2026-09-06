@@ -105,15 +105,23 @@ export function startTranslation(options: RunOptions): TranslationRun {
   enable(doc, options.mode, options.style, toBcp47(options.target))
   const sectionOf = sectionTitles(blocks)
 
-  // 标记切片进行：几百个块的属性写入一口气做会冻住页面（Read Frog 的 #1881）
+  // 块标记一次性写完，不切片（issue #67）：side prep 的两道闸都看 data-axt-id——
+  // 一个"内部还有未标记块"的容器会被当成静态内容**整块克隆**到右栏，等里面的块翻译出来，
+  // 右栏就多出一整段英文。实测（标记切片进行时跑三趟 prep）2312.17141 36 处、
+  // 2609.00245 87 处，都是 .ltx_para / .ltx_proof / .ltx_theorem 这样的大块。
+  // 切片当初是防"几百个属性写入冻住页面"（Read Frog 的 #1881），但那笔账不成立：
+  // 循环里全是属性写入、不读布局，Chromium 实测 979 块写满 1.2 ms、随后强制布局 0 ms。
+  // 同步写完还顺带解决了 halted() 的竞态——中间没有 await，restore 插不进来
+  for (const block of blocks) block.el.setAttribute(ID_ATTR, block.id)
+
+  // 状态属性仍然切片：它带样式（pending 的 spinner），且不影响 side prep 的判定
   const ready = (async () => {
     const pacer = createWorkPacer()
     for (const block of blocks) {
       // 每写一个块之前都要看会话还在不在：让出主线程期间用户可能已经"恢复原文"，
-      // 循环外才检查的话，restore 清干净之后这里会继续往 DOM 上写标记，
+      // 循环外才检查的话，restore 清干净之后这里会继续往 DOM 上写状态，
       // 页面留下孤儿 data-axt-*（§7.1 的不变量被破坏，issue #45 的实验 1）
       if (halted()) return
-      block.el.setAttribute(ID_ATTR, block.id)
       setState(block, 'pending')
       await pauseIfBudgetSpent(pacer)
     }

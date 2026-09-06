@@ -36,7 +36,9 @@ function needsMirror(child: Element): boolean {
   if (child.nextElementSibling?.classList.contains(T_CLASS)) return false
   // 内部含译文的元素本身是容器，它的子元素各自处理
   if (child.querySelector(`.${T_CLASS}`)) return false
-  // 内部还有等待翻译的块：整块复制过去，译文到达后就会既有副本又有译文
+  // 内部还有等待翻译的块：整块复制过去，译文到达后就会既有副本又有译文。
+  // **这道闸只在块标记完整时有效**——它分辨不出"还没轮到标记的翻译单元"与"永远没有译文的静态内容"。
+  // 安全由 run.ts 提供：块标记在 startTranslation 里同步写完，第一趟 side prep 看到的一定是全集（issue #67）
   if (child.querySelector(`[${ID_ATTR}]`)) return false
   return /\S/.test(child.textContent ?? '') || child.querySelector(MEDIA) !== null || child.matches(MEDIA)
 }
