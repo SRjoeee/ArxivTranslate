@@ -1,39 +1,43 @@
 # Codex 自动审查：合并前必须等它说完
 
-仓库开了 Codex 的 PR 自动审查（`chatgpt-codex-connector[bot]`）。它在 PR 开出或被 push 后开始审：
+仓库开了 Codex 的 PR 自动审查（`chatgpt-codex-connector[bot]`）。它在 PR 开出或被 push 后开始审，
+**也可以在 PR 上评论 `@codex review` 手动触发**——撞过限额、当时没审成的 PR 靠这个补审，
+**已经合并的 PR 同样吃这一招**（2026-09-06 实测 #58 等一批合并时没被审过的 PR，都能这样补回来）：
 先在 PR 上打一个 👀 反应（`eyes`）表示**审查中**，结束时留下三种终态信号之一。**看到终态信号之前不要合并**：
 
-三条查询规矩（Codex 在 #29 上指出的三个漏洞）：
+查询规矩（前三条来自 Codex 在 #29 上指出的漏洞，后两条是 2026-09-06 实测踩到的）：
 
 - **只认这一个账号**：`.user.login == "chatgpt-codex-connector[bot]"`，不要用 `test("codex")` 之类的子串匹配——公开仓库里任何 login 含 "codex" 的账号点个 👍 就能让 PR 看起来审完了。
-- **只认针对当前 HEAD 的信号**：review 带 `commit_id`，只取等于 `git rev-parse HEAD` 的；行内评论要看 **`original_commit_id`**——评论的 `commit_id` 会随后续提交重新锚定（实测 #30：第二轮留在 `5c8a7bd` 的评论，第三轮 push 后 `commit_id` 变成了新 HEAD、行号从 168 挪到 180，按 `commit_id` 过滤会把上一轮的旧评论当成本轮的新建议）。反应和限额提示没有 commit 字段，要靠**本轮标记**：Codex 开始新一轮时会打一个 👀（并清掉上一轮的反应）。在 push（或 `gh pr create`）**之前**用 `date -u` 记下 UTC 时间 `PRE`（和 GitHub 的 `created_at` 同时区；不能用提交时间 `%cI`），`created_at >= PRE` 的 👀 就是本轮标记；**只有该 👀 之后（含同一秒）出现的 👍 / 限额提示**才算这一轮的。用 push 前的时刻而不是"客户端看到新 HEAD 的时刻"：Codex 可能在我们轮询到新 HEAD 之前就已打上 👀，用后者会把唯一的标记丢掉。上一轮在 push 期间刚好收尾留下的 👍 早于新的 👀，被排除。上一轮的旧评论会一直留在接口里，不过滤的话新提交一 push 就"审完了"。
+- **只认针对当前 HEAD 的信号**：review 带 `commit_id`，只取等于 `git rev-parse HEAD` 的；行内评论要看 **`original_commit_id`**——评论的 `commit_id` 会随后续提交重新锚定（实测 #30：第二轮留在 `5c8a7bd` 的评论，第三轮 push 后 `commit_id` 变成了新 HEAD、行号从 168 挪到 180，按 `commit_id` 过滤会把上一轮的旧评论当成本轮的新建议）。反应、摘要评论与限额提示没有 commit 字段，只能按时间过滤：在 push（或 `gh pr create` / `@codex review`）**之前**用 `date -u` 记下 UTC 时间 `PRE`（和 GitHub 的 `created_at` 同时区；不能用提交时间 `%cI`），`created_at >= PRE` 的就是这一轮的。用动作之前的时刻而不是"客户端看到新 HEAD 的时刻"：Codex 可能在我们轮询到新 HEAD 之前就已经打上 👀。上一轮的旧评论会一直留在接口里，不过滤的话新提交一 push 就"审完了"。
+- **不要"先找 👀 再找它之后的 👍"**（2026-09-06 实测踩到）：**同一账号在一个 issue 上只留一个反应**，Codex 收尾时是把 👀 **换成** 👍，不是在它旁边加一个。所以「取本轮 👀 的时刻当 ROUND，再找 ROUND 之后的 👍」这种写法，在它审完的那一刻 ROUND 恰好变成空，👍 永远数不到——PR #61 明明已经审完，脚本却一直报"等待中"。直接用 `created_at >= PRE` 过滤反应即可，不需要 ROUND。
+- **"没有建议"是 👍 + 一条摘要评论**：正文形如 `Codex Review: Didn't find any major issues.`，并带 `**Reviewed commit:** <sha>`——**用它核对审的是不是当前 HEAD**，这是无建议那条路径上唯一的 commit 凭据（👍 反应本身没有 commit 字段）。只查 `pulls/{n}/reviews` 会漏掉它：无建议时那个接口是空的。
 - **翻页**：两个列表接口都加 `--paginate`，否则超过一页的反应 / 评论只看得到第一页。
 
 ```sh
 set -e                                               # push 失败就停，别带着旧 SHA 轮询到天荒地老
 BOT='chatgpt-codex-connector[bot]'; HEAD=$(git rev-parse HEAD)
-PRE=$(date -u +%Y-%m-%dT%H:%M:%SZ); git push         # push 前记 UTC 时刻（新开 PR 则放在 gh pr create 前）
+PRE=$(date -u +%Y-%m-%dT%H:%M:%SZ); git push         # 动作之前记 UTC 时刻（新开 PR 放在 gh pr create 前）
 until [ "$(gh pr view <N> --json headRefOid --jq .headRefOid)" = "$HEAD" ]; do sleep 5; done
-# 本轮标记：PRE 之后的 👀；之后的 +1 才是本轮的"审完无建议"
-ROUND=$(gh api --paginate "repos/{owner}/{repo}/issues/<N>/reactions" \
-  --jq "[.[] | select(.user.login == \"$BOT\") | select(.content == \"eyes\") | select(.created_at >= \"$PRE\") | .created_at] | max // empty")
-# 与标记同一秒的也算（created_at 只到秒；标记本身是 eyes，不会被 +1 的谓词误计）
-[ -n "$ROUND" ] && gh api --paginate "repos/{owner}/{repo}/issues/<N>/reactions" \
-  --jq ".[] | select(.user.login == \"$BOT\") | select(.content == \"+1\") | select(.created_at >= \"$ROUND\") | .content"
-# review + 行内评论（只认针对当前 HEAD 的）
+# 反应：本轮只可能有一个（eyes 审查中 / +1 审完无建议）。不要经由 ROUND 二次过滤，见上一节
+gh api --paginate "repos/{owner}/{repo}/issues/<N>/reactions" \
+  --jq ".[] | select(.user.login == \"$BOT\") | select(.created_at >= \"$PRE\") | .content"
+# 摘要评论：无建议那条路径上唯一带 commit 的凭据，核对 Reviewed commit 是不是 $HEAD
+gh api --paginate "repos/{owner}/{repo}/issues/<N>/comments" \
+  --jq ".[] | select(.user.login == \"$BOT\") | select(.created_at >= \"$PRE\") | select(.body | test(\"Codex Review\")) | .body"
+# review + 行内评论（有建议时才有；只认针对当前 HEAD 的）
 gh api --paginate "repos/{owner}/{repo}/pulls/<N>/reviews"  --jq ".[] | select(.user.login == \"$BOT\") | select(.commit_id == \"$HEAD\") | .state"
 gh api --paginate "repos/{owner}/{repo}/pulls/<N>/comments" --jq ".[] | select(.user.login == \"$BOT\") | select(.original_commit_id == \"$HEAD\") | \"\(.path):\(.line // .original_line) \(.body)\""
-# 限额提示（同样只认本轮 👀 之后的）
-[ -n "$ROUND" ] && gh api --paginate "repos/{owner}/{repo}/issues/<N>/comments" \
-  --jq ".[] | select(.user.login == \"$BOT\") | select(.created_at >= \"$ROUND\") | select(.body | test(\"usage limits\")) | .body"
+# 限额提示
+gh api --paginate "repos/{owner}/{repo}/issues/<N>/comments" \
+  --jq ".[] | select(.user.login == \"$BOT\") | select(.created_at >= \"$PRE\") | select(.body | test(\"usage limits\")) | .body"
 ```
 
-| 信号 | 含义 |
+| 信号（都按 `created_at >= PRE` 过滤） | 含义 |
 |---|---|
-| push 之后的 👀 反应 | 本轮开始，正在审，继续等 |
-| 本轮 👀 之后的 👍 反应 | 审完了，没有建议 |
+| 👀 反应 | 本轮开始，正在审，继续等 |
+| 👍 反应 + `Codex Review: Didn't find any major issues` 摘要评论（同一时刻，👀 被换掉） | 审完了，没有建议；用摘要里的 `Reviewed commit` 核对 HEAD |
 | 针对当前 HEAD 的 review（`COMMENTED`）+ 行内评论 | 有建议 |
-| 本轮 👀 之后的 "You have reached your Codex usage limits" | 这次没审 |
+| "You have reached your Codex usage limits" | 这次没审 |
 
 只有 👀 或什么都没有 = 还在审（或还没轮到），继续等；通常几分钟内出终态。push 新提交会重新开始一轮。
 **等多久**：push 后 30 分钟连 👀 都没有，视为 Codex 这轮没接（实测 #29 审了五轮后第六轮再没来），把这一点告诉用户、由用户决定是否合并，不要无限等。
