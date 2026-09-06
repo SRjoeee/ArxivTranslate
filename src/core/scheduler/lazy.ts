@@ -32,7 +32,12 @@ export const THRESHOLD_STEP = 0.05
 
 export function observerThresholds(threshold: number): number | number[] {
   if (threshold <= 0) return 0
-  return Array.from({ length: Math.round(1 / THRESHOLD_STEP) + 1 }, (_, i) => i * THRESHOLD_STEP)
+  const grid = Array.from({ length: Math.round(1 / THRESHOLD_STEP) + 1 }, (_, i) => i * THRESHOLD_STEP)
+  // 用户配的值本身可能不在网格上（schema 只要求 0–1，设置页也收得下 0.33）。
+  // 不把它一起注册的话，一个上限落在「配置值与下一个网格点之间」的元素同样收不到能过关的回调：
+  // 跨越 0.30 那次报 0.30 < 0.33 被拒，0.35 又够不着（Codex 在 #81 指出）
+  if (!grid.some(g => Math.abs(g - threshold) < 1e-9)) grid.push(threshold)
+  return grid.sort((a, b) => a - b)
 }
 
 /**
@@ -95,7 +100,8 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
   const effectiveThreshold = (elHeight: number, rootHeight: number) => {
     if (elHeight <= 0) return options.threshold
     const reachable = Math.min(1, rootHeight / elHeight)
-    // 够得着配置值就按配置值判；够不着才降到上限，而降下来的那个数要对齐到注册网格
+    // 够得着配置值就按配置值判——它本身也在注册列表里（见 observerThresholds），回调到得了；
+    // 够不着才降到上限，而降下来的那个数要**对齐到网格**，否则同样等不到能过关的回调
     return options.threshold <= reachable ? options.threshold : quantizeThreshold(reachable)
   }
 

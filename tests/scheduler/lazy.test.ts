@@ -269,6 +269,29 @@ describe('判定与注册用同一套刻度（Codex 在 #81 指出）', () => {
     }
   })
 
+  it('不在网格上的配置值也要注册进去（Codex 在 #81 指出）', () => {
+    // 用户可以填 0.33：不注册它的话，上限在 0.33–0.35 之间的块会卡死——
+    // 跨越 0.30 的回调报 0.30 < 0.33 被拒，0.35 又够不着
+    const t = observerThresholds(0.33) as number[]
+    expect(t).toContain(0.33)
+    expect(t).toHaveLength(22)
+    expect([...t].sort((a, b) => a - b)).toEqual(t)
+  })
+
+  it('正好落在网格上的配置值不重复注册', () => {
+    const t = observerThresholds(0.5) as number[]
+    expect(t).toHaveLength(21)
+    expect(t.filter(v => Math.abs(v - 0.5) < 1e-9)).toHaveLength(1)
+  })
+
+  it('配置值不在网格上、但块够得着它：按配置值判，回调也到得了', () => {
+    const { io, entered, el } = oneWith(300, 0.33)
+    io.emit([el], 0.32, 900)
+    expect(entered).toEqual([])
+    io.emit([el], 0.33, 900)
+    expect(entered.flat()).toHaveLength(1)
+  })
+
   it('够得着配置值时不降级：正常大小的块仍按用户配的比例要求', () => {
     const { io, entered, el } = oneWith(300, 0.5)
     io.emit([el], 0.4, 900)

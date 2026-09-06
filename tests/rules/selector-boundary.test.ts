@@ -19,6 +19,15 @@ const RULES_MODULE = join(SRC, 'core/rules/latexml.ts')
  * 正则字面量不必单独处理——把 `/` 当除号读，里面的 `ltx_` 照样留在输出里，正是想要的结果；
  * 而 `/a*​/` 这种也不会被误认成注释开头（`/` 后面不是 `*` 或 `/`）。
  */
+/** `/` 前面是这些的话，它开的是正则而不是除号 */
+const EXPR_KEYWORDS = ['return', 'typeof', 'instanceof', 'in', 'of', 'case', 'do', 'else', 'yield', 'await', 'delete', 'void', 'new', 'throw']
+const endsWithExprKeyword = (out: string): boolean => {
+  const tail = out.trimEnd()
+  if (tail.endsWith('=>')) return true
+  const word = /[A-Za-z$_][A-Za-z0-9$_]*$/.exec(tail)?.[0]
+  return word !== undefined && EXPR_KEYWORDS.includes(word)
+}
+
 function stripComments(text: string): string {
   let out = ''
   let i = 0
@@ -31,10 +40,11 @@ function stripComments(text: string): string {
       while (i < text.length && text[i] !== '\n') i++
       continue
     }
-    // 正则字面量要在块注释判定**之前**认出来（Codex 在 #81 指出）：`/[/*]/` 这样的字符类里
-    // 有 `/*`，当成注释开头的话会一路吞到下一个 `*​/`，守卫又开了同一种天窗。
-    // 判据是标准那条：`/` 出现在期望表达式的位置时才是正则
-    if (c === '/' && next !== '*' && (prev === '' || '(,=:[!&|?+-*%~^{};'.includes(prev))) {
+    // 正则字面量要在块注释判定**之前**认出来（Codex 在 #81 两轮指出）：`/[/*]/` 这样的
+    // 字符类里有 `/*`，当成注释开头的话会一路吞到下一个 `*​/`，守卫又开了同一种天窗。
+    // 判据是标准那条：`/` 出现在**期望表达式**的位置时才是正则——标点之后、箭头之后，
+    // 或者 `return` / `typeof` 这类关键字之后（仓库里 mirror.ts 就写着 `return /\S/.test(…)`）
+    if (c === '/' && next !== '*' && (prev === '' || '(,=:[!&|?+-*%~^{};'.includes(prev) || endsWithExprKeyword(out))) {
       out += c
       i++
       let inClass = false
@@ -133,6 +143,15 @@ describe('剥注释不能吞掉代码（Codex 在 #79 指出）', () => {
     expect(stripComments('const r = /a*/\nconst s = 1')).toContain('const s')
     expect(ltxIn('const r = /ltx_[a-z]+/')).toEqual(['ltx_'])
     expect(stripComments('const q = a / b\nconst t = 2')).toContain('const t')
+  })
+
+  it('return / 箭头之后的正则也要认出来（Codex 在 #81 第二轮指出）', () => {
+    // 仓库里 mirror.ts 就有 `return /\S/.test(…)` 这种写法
+    for (const prefix of ['return', 'const f = () =>', 'if (x) return', 'yield']) {
+      const src = `${prefix} /[/*]/\nconst z = '.ltx_theorem'`
+      expect(stripComments(src)).toContain('const z')
+      expect(ltxIn(src)).toEqual(['ltx_theorem'])
+    }
   })
 
   it('正则的字符类里带 /* 也不会吞掉后面的代码（Codex 在 #81 指出）', () => {
