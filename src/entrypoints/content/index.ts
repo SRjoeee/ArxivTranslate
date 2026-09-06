@@ -6,6 +6,7 @@ import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } 
 import {
   alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, installAnchorFallback,
   localizeNotes, restore, splitFigures,
+  watchFontLoads,
   type Mode, type ModeController,
 } from '@/core/renderer'
 import { decodeText, escapeText } from '@/core/protector/text'
@@ -153,6 +154,8 @@ export default defineContentScript({
         )
       }
     }, { delay: 150, maxWait: 1000 })
+    // 字体加载完成后表格 / 公式的自然宽度会变：清量宽缓存、再整理一趟（Codex 在 #84 指出）
+    watchFontLoads(document, () => prep.schedule())
 
     /** 进入 side 时的准备：右栏补一份公式与图表（§7.2），并把表格缩到能装进一栏 */
     function enterSide(effective: Mode): void {
