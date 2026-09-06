@@ -800,7 +800,8 @@ content script                       background (service worker)          axt-he
 ```
 - `quad` 是归一化四角 `[左上, 右上, 右下, 左下]`，原点左上（Vision 给的是左下原点，helper 翻 y）。用四角而不是 `[x, y, w, h]`：旋转的坐标轴标签四角不是轴对齐的，扩展侧再决定按轴对齐外接框画还是按角度画
 - 另有 `{ "cmd": "ping" }` → `{ "ok": true, "version": "..." }` 用于能力检测
-- 大小限制：helper → 扩展每条不超过 1 MB（文字框远小于此）；扩展 → helper 可以很大（图片方向正好合适）
+- 大小限制：helper → 扩展每条不超过 1 MB（Chrome 的硬上限，超了整条连接被断、排队的活全作废）。helper 序列化后超过 900 KB 就按置信度从低到高丢行直到装得下，回应带 `truncated: true`；正常一张图几 KB，只有极端文字密集的图会撞到，冒烟测试造不出这种图，这条靠读代码守。扩展 → helper 可以很大（图片方向正好合适）
+- 握手回应必须带非空 `version`：它进 OCR 缓存键，没报版本的 helper 不算可用（设置页显示「请重新安装 helper」）
 - 错误：`{ "v":1, "id":"...", "error": { "code": "...", "message": "..." } }`
 
 ### 15.4 helper
