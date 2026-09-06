@@ -47,3 +47,67 @@ describe('createCoalescer', () => {
     expect(run).not.toHaveBeenCalled()
   })
 })
+
+describe('createCoalescer 攒脏集合（issue #46）', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('多次 schedule 的项攒在一起、去重、按加入顺序交给 run', () => {
+    const run = vi.fn()
+    const c = createCoalescer<string>(run, { delay: 150, maxWait: 1000 })
+    c.schedule('a')
+    c.schedule('b')
+    c.schedule('a')
+    vi.advanceTimersByTime(150)
+    expect(run).toHaveBeenCalledWith(['a', 'b'])
+  })
+
+  it('不带参数 = 全量：run 拿到 null，即使这一轮也攒过项', () => {
+    const run = vi.fn()
+    const c = createCoalescer<string>(run, { delay: 150, maxWait: 1000 })
+    c.schedule('a')
+    c.schedule()
+    c.schedule('b')
+    vi.advanceTimersByTime(150)
+    expect(run).toHaveBeenCalledWith(null)
+  })
+
+  it('跑过一次之后集合清空，下一轮从头攒', () => {
+    const run = vi.fn()
+    const c = createCoalescer<string>(run, { delay: 150, maxWait: 1000 })
+    c.schedule('a')
+    vi.advanceTimersByTime(150)
+    c.schedule('b')
+    vi.advanceTimersByTime(150)
+    expect(run.mock.calls).toEqual([[['a']], [['b']]])
+  })
+
+  it('全量标记也只管一轮', () => {
+    const run = vi.fn()
+    const c = createCoalescer<string>(run, { delay: 150, maxWait: 1000 })
+    c.schedule()
+    vi.advanceTimersByTime(150)
+    c.schedule('c')
+    vi.advanceTimersByTime(150)
+    expect(run.mock.calls).toEqual([[null], [['c']]])
+  })
+
+  it('cancel 把攒下的项一起丢掉', () => {
+    const run = vi.fn()
+    const c = createCoalescer<string>(run, { delay: 150, maxWait: 1000 })
+    c.schedule('a')
+    c.cancel()
+    c.schedule('b')
+    vi.advanceTimersByTime(150)
+    expect(run).toHaveBeenCalledWith(['b'])
+  })
+
+  it('不传类型参数、只用无参 schedule 的老用法照旧能用', () => {
+    const run = vi.fn()
+    const c = createCoalescer(run, { delay: 150, maxWait: 1000 })
+    c.schedule()
+    vi.advanceTimersByTime(150)
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+})
+

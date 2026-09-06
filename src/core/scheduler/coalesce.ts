@@ -12,23 +12,39 @@ export interface CoalesceOptions {
   maxWait: number
 }
 
-export interface Coalescer {
-  schedule(): void
+export interface Coalescer<T = never> {
+  /**
+   * 排一次整理。带参数 = 把这个项攒进本轮的脏集合；不带参数 = 本轮**全量**。
+   * 同一轮里出现过一次不带参数的调用，跑的时候就拿到 null，脏集合作废
+   */
+  schedule(item?: T): void
   cancel(): void
 }
 
-export function createCoalescer(run: () => void, { delay, maxWait }: CoalesceOptions): Coalescer {
+/**
+ * `run` 收到的是这一轮攒下的项（去重、按加入顺序），或 null 表示全量（issue #46）。
+ * 攒项而不只是攒"要不要跑"：合并器把几十次进度回调压成一趟，整理步骤得知道这一趟该碰哪些块，
+ * 否则每趟都只能全篇重扫——实测 2312.17141 一次会话 31 趟、累计 1.9 秒，单趟只要 34 ms
+ */
+export function createCoalescer<T = never>(run: (scope: T[] | null) => void, { delay, maxWait }: CoalesceOptions): Coalescer<T> {
   let timer = 0
   let firstPending = 0
+  let items = new Set<T>()
+  let full = false
 
   const fire = () => {
     timer = 0
     firstPending = 0
-    run()
+    const scope = full ? null : Array.from(items)
+    items = new Set()
+    full = false
+    run(scope)
   }
 
   return {
-    schedule() {
+    schedule(item?: T) {
+      if (item === undefined) full = true
+      else items.add(item)
       const now = Date.now()
       if (!firstPending) firstPending = now
       clearTimeout(timer)
@@ -40,6 +56,8 @@ export function createCoalescer(run: () => void, { delay, maxWait }: CoalesceOpt
       clearTimeout(timer)
       timer = 0
       firstPending = 0
+      items = new Set()
+      full = false
     },
   }
 }
