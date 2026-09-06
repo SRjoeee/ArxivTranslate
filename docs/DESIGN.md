@@ -17,8 +17,9 @@
 - 翻译引擎：LLM（OpenAI 兼容；Anthropic / Gemini 见 §8.1 的暂不实现说明）+ 免费引擎（Chrome 内置 Translator API 优先，`google-web` 的 translateHtml 兜底；原定的 gtx 已被它取代，见 §8.1）
 - 本地缓存，同一论文重开秒出
 - 译文样式预设 + 术语表
+- 图片翻译 [决定，2026-09-07]：位图 `img.ltx_graphics` 里的文字，Mac 上经 Native Messaging 调本机 Vision OCR、译文叠在图上（照 Safari 的图片翻译，见 §15）
 
-**非目标 [延后]**：其他站点、PDF、字幕、TTS、生词本、Firefox/Safari 适配、微软免费通道、DeepLX、图片翻译（设计已定，见 §15）。架构上不排斥，但 v1 一律不做。
+**非目标 [延后]**：其他站点、PDF、字幕、TTS、生词本、Firefox/Safari 适配、微软免费通道、DeepLX、非 Mac 平台的图片翻译退化路径（§15.1）。架构上不排斥，但 v1 一律不做。
 
 ---
 
@@ -722,6 +723,8 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 | KISS Translator | 译文样式预设与自定义 CSS；富文本翻译的占位符思路；免费引擎适配器的请求拼装方式 | 站点规则订阅系统；油猴脚本双构建（v1 不需要）|
 | Read Frog | WXT 工程配置；AI SDK provider 抽象；Shadow DOM UI 隔离；批处理与重试流程；仅译文模式的标记处理；语言表与提示词库、提示词管理与 popup 提示词选择的功能形状 | 语言学习、字幕、TTS、生词本 |
 | FluentRead | 渐进式翻译与缓存策略；悬浮球交互 | Vue 技术栈 |
+| macos-vision-ocr（MIT） | Vision OCR 的调用与四角坐标输出（helper 核心，§15） | 命令行参数、批处理与调试画框 |
+| ImageTrans Chrome 扩展 | 图上叠加层的 DOM 渲染（字号适配、底色采样、换行）；视口内自动翻图的调度思路（§15） | 替换 `<img>` src；PaddleOCR / 截图 / 漫画分支；它的缓存与阅读器 |
 
 **边界 [决定，v0.3 修订]**：默认优先移植三个参考项目的成熟实现——它们已迭代多年，能整段拿来用的就拿来用，移植后按本项目命名与目录改造。原创的例外只有三种：(1) arXiv 适配（`rules/latexml.ts`、`extractor` 的 LaTeXML 路径，Phase 1 已完成）；(2) `renderer`——三个项目的译文渲染都改动、包裹或替换原节点（Read Frog 把译文追加进原元素、仅译文模式直接改文本节点；FluentRead 用 host 包裹原节点；KISS `replaceWith` 替换），与 §7.1 的 DOM 不变量冲突；(3) 移植会与不变量冲突或让代码变乱时改写并说明理由。各模块的移植来源见 RESEARCH.md §4。
 
@@ -744,9 +747,9 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 
 ---
 
-## 15. 图片翻译 [延后]
+## 15. 图片翻译 [决定，2026-09-07 进入范围]
 
-v1 不实现，但架构与协议在此定下，将来加功能不改扩展主体。
+目标与 Safari 自带的图片翻译一致：图里的文字识别出来、译文以标签叠在原位，不加别的功能。**范围**：只翻位图 `img.ltx_graphics`（SVG 见 §15.1，v1 仍跳过）；只做 Mac（Vision OCR），非 Mac 退化路径延后；**不做单张图的入口**——用户点整页翻译后，位图与文字块走同一套懒加载调度（看到哪翻到哪，§10），随会话取消；设置页一项「在哪些模式下翻图片」（side / stack / only 多选，默认三种都开），按当前生效模式作闸——切到没开的模式只是隐藏叠加层，切回来再显示，切到开了但还没翻的补调度，与「切模式不重新请求」一致。helper 没检测到（`ping` 失败）时设置项灰掉、整条路径静默不跑，页面翻译不受影响。
 
 ### 15.1 判断
 
@@ -754,6 +757,9 @@ v1 不实现，但架构与协议在此定下，将来加功能不改扩展主�
 - **helper 只做 OCR，翻译和叠加层留在扩展里**。理由：Apple Translation 框架在 macOS 15 上只能通过 SwiftUI `.translationTask` 拿到 session，macOS 26 才有无 UI 的 `TranslationSession(installedSource:target:)`，且要求语言包已安装；而扩展已有完整翻译管线，LLM 还能拿图注做上下文。helper 越薄，平台相关的面越小
 - 非 Mac 平台退化为多模态 LLM 直接读图给文字与坐标（坐标精度较低，可接受）
 - arXiv 的 SVG 图全是 TikZ 输出的 `svg.ltx_picture`（10 篇 fixture 共 164 个，多为画出来的公式），实测没有 `<text>`，文字只以 `foreignObject` 出现且极少（全部 fixture 仅 1 个文本节点），v1 整体跳过（§5.2）；OCR 路线只针对位图 `img.ltx_graphics`（fixture 中 13 个，RESEARCH.md §2.9）
+- **翻译走现有管线，不走 Safari 那种逐行无上下文的翻法**。用户给的对照样本（Safari 翻同一张物理示意图）里 "Dressed sites" 成了「打扮的网站」、"Even sites" 成了「甚至网站」、"String Extension" 成了「特林扩展名」，图里孤零零一个 **B** 也被框成「字母b」——每行单独送、没有图注与章节，就是这个结果。我们每张图的行连同图注、所属章节作为 context 一批送给现有 provider；单个字母、纯数字、标识符按 §6 既有的保留规则跳过不翻
+- **叠加层照 Safari 的样子**：白色圆角半透明框盖住原文字、译文字号随框高、竖直相邻且左缘对齐的行合成一个框（"Pair / Production" 两行一框）；hover 显示原文。底色从图上采样（同源图可读像素）
+- **现成的拿来用**：helper 核心移植 `bytefer/macos-vision-ocr`（MIT，单文件 Swift，Vision revision 3，输出每行文字 + 归一化四角 + 置信度，已经是 §15.3 要的形状），只需套上 Native Messaging 的 stdio 帧；叠加层移植 `xulihang/ImageTrans_chrome_extension`（GPL-3.0）`getImage.js` 里的 DOM 渲染段（字号适配 `fitBoxFontSize`、底色采样 `detectBackgroundColor`、换行、圆角框）与视口调度思路。**不移植**它替换 `<img>` src 的做法——违反 §7.1
 
 ### 15.2 架构
 
@@ -769,8 +775,10 @@ content script                                axt-helper (Swift, 独立仓库)
         └─► renderer 在 <img> 上叠 `.axt-img-overlay` 绝对定位标签层，hover 显示原文
 ```
 
-- 图片翻译结果同样进缓存，键里加 `imageHash`
-- 叠加层遵守 §7.1 不变量：只在 `<img>` 外包一层定位容器或使用兄弟节点，不改 `<img>` 本身；恢复时整层移除
+- 图片翻译结果同样进缓存，键里加 `imageHash`（图片字节的 SHA-256）；OCR 结果另存一份，键是 `imageHash | helper 版本`，识别是确定性的、不用重跑
+- 叠加层遵守 §7.1 不变量：**只用兄弟节点**（`.axt-img-overlay`，`data-axt-for` 指向图），绝不给 `<img>` 包容器——包一层就改了原节点的父子关系；定位祖先由样式表给（`figure:has(> .axt-img-overlay) { position: relative }` 之类，CSS 不算改 DOM）。框的位置与尺寸按归一化坐标写成百分比，图随栏宽缩放时自动跟随；恢复时整层移除
+- side 模式下插图整块拆两份（§7.2）：叠加层属于「只有译文」的那一份，原件那份不叠；拆图副本的重建签名把叠加层算进去，否则译文到齐后副本里没有它
+- helper 放在本仓库 `helper/`（Swift Package，`Package.swift` + `Sources/`），与扩展同 PR 演进；分发要做时再拆独立仓库
 
 ### 15.3 消息协议（Native Messaging）
 
@@ -781,9 +789,9 @@ content script                                axt-helper (Swift, 独立仓库)
 响应（helper → 扩展）：
 ```json
 { "v": 1, "id": "req-1", "width": 1200, "height": 800,
-  "lines": [ { "text": "Accuracy (%)", "bbox": [0.12, 0.05, 0.20, 0.03], "conf": 0.98 } ] }
+  "lines": [ { "text": "Accuracy (%)", "quad": [[0.12, 0.05], [0.32, 0.05], [0.32, 0.08], [0.12, 0.08]], "conf": 0.98 } ] }
 ```
-- `bbox` 为归一化 `[x, y, w, h]`，原点左上
+- `quad` 是归一化四角 `[左上, 右上, 右下, 左下]`，原点左上（Vision 给的是左下原点，helper 翻 y）。用四角而不是 `[x, y, w, h]`：旋转的坐标轴标签四角不是轴对齐的，扩展侧再决定按轴对齐外接框画还是按角度画
 - 另有 `{ "cmd": "ping" }` → `{ "ok": true, "version": "..." }` 用于能力检测
 - 大小限制：helper → 扩展每条不超过 1 MB（文字框远小于此）；扩展 → helper 可以很大（图片方向正好合适）
 - 错误：`{ "v":1, "id":"...", "error": { "code": "...", "message": "..." } }`
@@ -791,8 +799,8 @@ content script                                axt-helper (Swift, 独立仓库)
 ### 15.4 helper
 
 - Swift，~100–200 行：读 stdin 长度前缀 JSON、解码图片、跑 Vision、写 stdout
-- 需要签名与公证；安装时注册 host manifest 到 `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/<name>.json`，`allowed_origins` 绑定扩展 id
-- 分发用 pkg 或 Homebrew；扩展启动时 `ping` 检测，检测不到则不显示图片翻译入口
+- host manifest 注册到 `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/<name>.json`，`allowed_origins` 绑定扩展 id；扩展 manifest 钉 `key`，让未发布的扩展 id 跨机器稳定
+- **分发延后** [决定，2026-09-07]：第一阶段只做开发者安装——`swift build` + 一段注册脚本，在作者的 Mac 上验证价值；签名、公证、pkg / Homebrew 到那时再立项。扩展启动时 `ping` 检测，检测不到则设置项灰掉、图片翻译静默不跑
 - 后话：helper 存在后可顺手加 `apple-translate` provider（`preservesMarkup: false`，Mac 专属、离线），macOS 15 上需用透明窗口承载 SwiftUI 的变通方案（参考 SystemTranslation 库），macOS 26 可直接初始化
 
 ### 15.5 参考

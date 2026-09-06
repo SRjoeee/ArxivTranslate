@@ -9,6 +9,8 @@
 | KISS Translator | https://github.com/fishjar/kiss-translator | `c95bd46`（2026-08-30） |
 | Read Frog | https://github.com/mengxi-ream/read-frog | `9b44f82`（2026-09-02） |
 | FluentRead | https://github.com/Bistutu/FluentRead | `536a819`（2026-09-03） |
+| macos-vision-ocr（MIT，非 GPL；按 MIT 保留版权声明） | https://github.com/bytefer/macos-vision-ocr | `91a236a`（2026-09-07） |
+| ImageTrans Chrome 扩展 | https://github.com/xulihang/ImageTrans_chrome_extension | `ef11ca7`（2026-09-07） |
 
 ## 移植文件
 
