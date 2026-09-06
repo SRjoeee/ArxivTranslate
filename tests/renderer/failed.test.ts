@@ -54,3 +54,27 @@ describe('renderFailed', () => {
     expect(doc.querySelector(`.${SPLIT_CLASS}`)).toBeNull()
   })
 })
+
+describe('重试开始时旧的失败小部件要消失（Codex 在 #36 指出）', () => {
+  it('renderPending 插圆环之前删掉同块的 .axt-error', () => {
+    const doc = docOf(page)
+    const p = extract(doc)[0] as TextBlock
+    renderFailed(p, '网络错误', () => {})
+    expect(doc.querySelectorAll(`.${ERROR_CLASS}`)).toHaveLength(1)
+    // 点"重试"走的就是这条路：run.ts 的 retry 回调调 translate，processBatch 里插 pending
+    renderPending(p)
+    expect(doc.querySelectorAll(`.${ERROR_CLASS}`)).toHaveLength(0)
+    // 圆环紧跟原块，中间没有别的东西——不删的话它会插在原块与小部件之间，两个并存
+    const next = p.el.nextElementSibling!
+    expect(next.classList.contains('axt-pending')).toBe(true)
+    expect(next.getAttribute(FOR_ATTR)).toBe(p.id)
+    expect(p.el.parentElement!.querySelectorAll(`[${FOR_ATTR}="${p.id}"]`)).toHaveLength(1)
+  })
+
+  it('已经有圆环时是幂等的，不会误删别的东西', () => {
+    const doc = docOf(page)
+    const p = extract(doc)[0] as TextBlock
+    const first = renderPending(p)
+    expect(renderPending(p)).toBe(first)
+  })
+})

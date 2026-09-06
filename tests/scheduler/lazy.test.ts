@@ -13,8 +13,15 @@ class FakeIntersectionObserver {
   unobserve(el: Element) { this.observed.delete(el) }
   disconnect() { this.observed.clear() }
   takeRecords() { return [] }
-  emit(targets: Element[]) {
-    this.callback(targets.map(target => ({ target, isIntersecting: true })) as IntersectionObserverEntry[], this as unknown as IntersectionObserver)
+  /** 照真实 entry 的形状给字段：调度器要读 intersectionRatio / rootBounds / boundingClientRect */
+  emit(targets: Element[], ratio = 1, rootHeight = 900 + 2 * DEFAULT_PRELOAD.margin) {
+    this.callback(targets.map(target => ({
+      target,
+      isIntersecting: true,
+      intersectionRatio: ratio,
+      rootBounds: { height: rootHeight } as DOMRectReadOnly,
+      boundingClientRect: target.getBoundingClientRect(),
+    })) as IntersectionObserverEntry[], this as unknown as IntersectionObserver)
   }
 }
 
@@ -157,6 +164,53 @@ describe('播种与观察器用同一个 threshold（Codex 在 #35 指出）', (
 
   it('threshold 0.5：露出 80% 的块照常播种', () => {
     expect(seedWith(0.5, 0.8)).toEqual({ seeded: true, observed: false })
+  })
+})
+
+describe('可见比例阈值真的起作用（Codex 在 #32 / #36 指出）', () => {
+  const g = globalThis as { IntersectionObserver?: unknown; innerHeight?: number }
+  beforeEach(() => { FakeIntersectionObserver.instances = []; g.IntersectionObserver = FakeIntersectionObserver; g.innerHeight = 900 })
+  afterEach(() => { delete g.IntersectionObserver; document.body.innerHTML = '' })
+
+  /** 一个块，高度可控，起始位置在很远处（只能走观察器） */
+  function one(height: number, threshold: number) {
+    document.body.innerHTML = '<article class="ltx_document"><p class="ltx_p" id="a">A.</p></article>'
+    const blocks = extract(document)
+    markBlocks(blocks)
+    layout(blocks[0]!.el, 5000, height)
+    const entered: Block[][] = []
+    createLazyScheduler(blocks, { margin: 0, threshold, onEnter: picked => entered.push(picked) })
+    return { io: FakeIntersectionObserver.instances[0]!, entered, el: blocks[0]!.el }
+  }
+
+  it('比例不够就不翻：threshold 0.5 时露出一成的块不该被触发', () => {
+    const { io, entered, el } = one(200, 0.5)
+    // 初始通知：isIntersecting 为真（定义是"比例 > 0"），但比例只有 0.1
+    io.emit([el], 0.1, 900)
+    expect(entered).toEqual([])
+    io.emit([el], 0.6, 900)
+    expect(entered.flat()).toHaveLength(1)
+  })
+
+  it('比视口还高的块用够得着的阈值：threshold 1 也要能翻，否则那张大表一辈子不翻', () => {
+    // 元素 3000 高、root 只有 900：比例封顶在 0.3，要求 1 的话永远不满足
+    const { io, entered, el } = one(3000, 1)
+    io.emit([el], 0.3, 900)
+    expect(entered.flat()).toHaveLength(1)
+  })
+
+  it('够得着的块仍然按原阈值要求：不是所有块都放行', () => {
+    const { io, entered, el } = one(300, 1)
+    io.emit([el], 0.9, 900)
+    expect(entered).toEqual([])
+    io.emit([el], 1, 900)
+    expect(entered.flat()).toHaveLength(1)
+  })
+
+  it('threshold 0（默认）时行为不变：任何相交都触发', () => {
+    const { io, entered, el } = one(200, 0)
+    io.emit([el], 0.01, 900)
+    expect(entered.flat()).toHaveLength(1)
   })
 })
 

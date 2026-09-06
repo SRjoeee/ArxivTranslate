@@ -361,6 +361,10 @@ interface ProtectedBlock {
 
   切片当初是防「几百个属性写入冻住页面」（Read Frog 的 #1881），那笔账不成立：循环里全是属性写入、不读布局，Chromium 实测 979 块写满 **1.2 ms**、随后强制布局 0 ms。同步写完顺带消掉了 `halted()` 的竞态窗口——中间没有 `await`，restore 插不进来。状态属性（`data-axt-state`，带 pending 的 spinner 样式）仍然切片，它不影响 prep 的判定。
 
+- **可见比例阈值要真的生效，且不能把超大块锁死** [决定，2026-09-06，Codex 在 #32 / #36 指出]：`IntersectionObserver` 的 `isIntersecting` 定义是「相交比例 **> 0**」，不是「≥ threshold」；observe 之后浏览器立刻发一次初始通知，一个刚露出一成的块在 `threshold=0.5` 下照样报 `isIntersecting`，设置等于没配。回调因此要自己比 `intersectionRatio`。
+
+  另一头是反过来的：**比 root（视口 + 上下 margin）还高的块永远达不到高阈值**，比例封顶在 `root 高 ÷ 元素高`；设计上又明确不拆超大表格（§7.2），于是 `threshold=1` 时那张表一辈子不会翻。有效阈值按这个上限钳一下——够得着多少就要求多少。观察器的 `threshold` 传 `[0, 阈值]`：它只决定「在哪些比例上回调」，判定在回调里做，不加 0 的话超大块连回调都收不到。
+
 ### 7.4 only（仅译文）
 
 - 原块 `display: none`（不是删除、不是替换文本节点）；选择器是 `[data-axt-state="translated"]`，所以只隐藏真的有译文的块

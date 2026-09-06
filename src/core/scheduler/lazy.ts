@@ -49,17 +49,36 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
   }
   const enterAnchors = (anchors: Element[]) => fire(anchors.flatMap(anchor => byAnchor.get(anchor) ?? []))
 
+  /**
+   * 这个锚点实际能达到的**有效阈值**。两条修正叠在一起（Codex 在 #32 / #36 指出）：
+   *
+   * 1. `isIntersecting` 的定义是「相交比例 > 0」，**不是**「≥ threshold」。observe 之后浏览器
+   *    立刻发一次初始通知，一个刚露出一成的块在 threshold=0.5 下照样报 isIntersecting，
+   *    于是这个设置根本不生效。所以回调里要自己比 `intersectionRatio`。
+   * 2. 比高不下的块**永远达不到**高阈值：root（视口 + 上下 margin）装不下它，比例封顶在
+   *    `root 高 ÷ 元素高`。设计上又明确不拆超大表格，于是 threshold=1 时那张表一辈子不翻。
+   *    把阈值按这个上限钳一下，够得着多少就要求多少。
+   */
+  const effectiveThreshold = (elHeight: number, rootHeight: number) =>
+    elHeight > 0 ? Math.min(options.threshold, Math.min(1, rootHeight / elHeight)) : options.threshold
+
   const Observer = globalThis.IntersectionObserver
   const observer = typeof Observer === 'function'
     ? new Observer((entries, io) => {
         const anchors: Element[] = []
         for (const entry of entries) {
           if (!entry.isIntersecting) continue
+          // rootBounds 在跨文档场景下可能为 null；拿不到就退回只看 isIntersecting，宁可早翻不可不翻
+          const rootHeight = entry.rootBounds?.height
+          const elHeight = entry.boundingClientRect.height
+          if (rootHeight !== undefined && entry.intersectionRatio < effectiveThreshold(elHeight, rootHeight)) continue
           io.unobserve(entry.target)
           anchors.push(entry.target)
         }
         enterAnchors(anchors)
-      }, { rootMargin: `${options.margin}px 0px`, threshold: options.threshold })
+      // threshold 只是"在哪些比例上回调"，判定在上面自己做：加上 0 才收得到刚进场那一次，
+      // 否则超大块（够不着 options.threshold）连回调都不会有
+      }, { rootMargin: `${options.margin}px 0px`, threshold: options.threshold > 0 ? [0, options.threshold] : 0 })
     : null
 
   // 播种：首屏及边距内的锚点先同步触发一次，其余交给观察器。
@@ -74,7 +93,7 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
     const bottom = Math.min(rect.bottom, height + options.margin)
     const visible = Math.max(0, bottom - top)
     // 与 IntersectionObserver 的 intersectionRatio 同义：相交高度 ÷ 元素自身高度
-    if (visible > 0 && visible / rect.height >= options.threshold) seeded.push(anchor)
+    if (visible > 0 && visible / rect.height >= effectiveThreshold(rect.height, height + 2 * options.margin)) seeded.push(anchor)
     else observer?.observe(anchor)
   }
   enterAnchors(seeded)
