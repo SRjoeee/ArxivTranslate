@@ -5,6 +5,7 @@
 // 这里不引用 ./store：content 侧要算键但不能把 Dexie 打进包（DESIGN §8.0）。
 import { RULES_VERSION } from '@/core/rules/latexml'
 import { PROMPT_VERSION } from '@/providers/prompt'
+import { sha256Hex } from '@/shared/digest'
 export type RenderPath = 'markup' | 'runs'
 
 export interface CacheContext {
@@ -50,8 +51,7 @@ export async function buildCacheKey(identity: CacheIdentity): Promise<string> {
     identity.renderPath,
     normalizeText(identity.text),
   ])
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload))
-  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('')
+  return sha256Hex(payload)
 }
 
 /** 把 PROMPT_VERSION / RULES_VERSION 填进 identity 后算键 */
@@ -63,4 +63,15 @@ export function cacheKeyFor(identity: Omit<CacheIdentity, 'promptVersion' | 'rul
 function contextPayload(context: CacheContext | undefined): unknown[] {
   if (!context) return []
   return [context.paperTitle ?? '', context.abstract ?? '', context.sectionTitle ?? '', (context.glossary ?? []).map(g => [g.term, g.translation])]
+}
+
+/** 改变 OCR 结果的存储形状或行的过滤前提时递增 */
+export const OCR_KEY_VERSION = 1
+
+/**
+ * OCR 结果的缓存键（DESIGN §15.2）：识别是确定性的，只随图片字节与 helper 版本变；
+ * 与译文的键分开算——每行的翻译走普通文字缓存，键里不带 imageHash
+ */
+export function ocrCacheKey(imageHash: string, helperVersion: string): Promise<string> {
+  return sha256Hex(JSON.stringify(['ocr', OCR_KEY_VERSION, imageHash, helperVersion]))
 }

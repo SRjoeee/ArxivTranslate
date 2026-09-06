@@ -4,6 +4,9 @@ import { getConfig, watchConfig } from '@/config/storage'
 import { chainConfigChanged, createLocalTransport, type TranslationTransport } from '@/providers/transport'
 import { toErrorInfo } from '@/providers/translate-service'
 import { isAxtMessage } from '@/shared/messages'
+import { HELPER_HOST } from '@/shared/ocr'
+import { createHelperClient } from './helper'
+import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { handlePing } from '@/shared/ping'
 
@@ -44,7 +47,17 @@ export default defineBackground(() => {
    * 代价是配置恰好在翻译中途变更时新旧两条链短暂并存、跨标签页的并发预算翻倍，直到旧会话结束；
    * 这是有意的取舍——宁可短暂多一套队列，也不能让一轮译文中途换引擎或换语言（Codex 在 #59 指出）
    */
-  const router = createSessionRouter(transportOf)
+  /**
+   * 图片翻译的本机 OCR helper（DESIGN §15）：懒连接，有请求在飞时定时调一个无害 API 保活——
+   * 端口开着不能阻止 worker 被回收。撤会话时排队的识别一起撤（router 的 onDrop）
+   */
+  const helper = createHelperClient({
+    connect: () => browser.runtime.connectNative(HELPER_HOST),
+    lastError: () => browser.runtime.lastError?.message,
+    keepAlive: () => void browser.runtime.getPlatformInfo(),
+  })
+  const ocr = createOcrService({ helper, cache })
+  const router = createSessionRouter(transportOf, { onDrop: scope => ocr.cancel(scope) })
 
   // 两个生命周期钩子都只给 tabId / status，不需要 "tabs" 权限
   const dropTab = (tabId: number, why: string) => {
@@ -106,6 +119,14 @@ export default defineBackground(() => {
         translationCache.clear(message.paper)
           .then(removed => sendResponse({ ok: true, removed }))
           .catch((e: unknown) => sendResponse({ ok: false, message: e instanceof Error ? e.message : String(e) }))
+        return true
+      case 'axt:helper-status':
+        ocr.status().then(sendResponse)
+        return true
+      case 'axt:ocr':
+        ocr.ocr(message)
+          .catch((e: unknown) => ({ ok: false as const, error: { kind: 'unknown' as const, message: e instanceof Error ? e.message : String(e) } }))
+          .then(sendResponse)
         return true
       case 'axt:cache-stats':
         // 与 cache-clear 同一套协议：失败要如实回报，不能把「IndexedDB 用不了」显示成「缓存是空的」。

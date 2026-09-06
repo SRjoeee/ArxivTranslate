@@ -109,4 +109,15 @@ describe('createSessionRouter', () => {
     expect(router.bound()).toEqual(['s'])
     expect(t.cancelled).toEqual([])
   })
+
+  it('onDrop：撤 scope 时连带撤掉别的按 scope 排队的东西（图片 OCR，§15.2），条数计入返回值', async () => {
+    const transport = fakeTransport('链')
+    const dropped: string[] = []
+    const router = createSessionRouter(async () => transport, { onDrop: scope => { dropped.push(scope); return 2 } })
+    await router.forCall('s1', 1)
+    await router.forCall('s2', 2)
+    expect(await router.drop(['s1'])).toBe(3) // transport 撤 1 + onDrop 撤 2
+    expect(await router.dropTab(2)).toBe(3)
+    expect(dropped).toEqual(['s1', 's2'])
+  })
 })

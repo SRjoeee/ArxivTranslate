@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCacheKey, normalizeText, type CacheIdentity } from '@/cache/key'
+import { buildCacheKey, normalizeText, ocrCacheKey, type CacheIdentity } from '@/cache/key'
 
 const base: CacheIdentity = {
   providerId: 'openai-compat', model: 'm', promptVersion: '1', promptKey: 'default', context: { paperTitle: 'P', abstract: 'A' }, rulesVersion: '0.2.0', target: 'zh-CN', renderPath: 'markup',
@@ -64,5 +64,16 @@ describe('buildCacheKey', () => {
     const a = await buildCacheKey({ ...base, context: { paperTitle: '19k04n01vcr73f' } })
     const b = await buildCacheKey({ ...base, context: { paperTitle: '1efm0uaep90s9' } })
     expect(a).not.toBe(b)
+  })
+})
+
+describe('ocrCacheKey（DESIGN §15.2）', () => {
+  it('只随图片字节的 hash 与 helper 版本变；与译文的键空间不重叠', async () => {
+    const key = await ocrCacheKey('abc', '0.1.0')
+    expect(key).toMatch(/^[0-9a-f]{64}$/)
+    expect(await ocrCacheKey('abc', '0.1.0')).toBe(key)
+    expect(await ocrCacheKey('abd', '0.1.0')).not.toBe(key)
+    expect(await ocrCacheKey('abc', '0.2.0')).not.toBe(key)
+    expect(await buildCacheKey({ ...base, text: 'abc' })).not.toBe(key)
   })
 })

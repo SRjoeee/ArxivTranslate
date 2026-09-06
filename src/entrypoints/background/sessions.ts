@@ -27,8 +27,10 @@ export interface SessionRouter {
 
 /**
  * @param current 取「此刻的」链；配置变更后它返回新的一条，已绑定的会话不受影响
+ * @param options.onDrop 每撤掉一个 scope 调一次：翻译队列之外还有别的按 scope 排队的东西（图片 OCR，§15.2），
+ *   撤会话时一起撤；返回它撤掉的条数
  */
-export function createSessionRouter(current: () => Promise<TranslationTransport>): SessionRouter {
+export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string) => number } = {}): SessionRouter {
   const sessions = new Map<string, { transport: TranslationTransport; tabId?: number }>()
 
   const drop = async (scopes: readonly string[]): Promise<number> => {
@@ -39,6 +41,7 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
       // 没绑过也要撤：worker 中途重启过，绑定丢了但队列里可能还有这个 scope 的任务
       const transport = bound?.transport ?? await current()
       cancelled += await transport.cancel(scope)
+      cancelled += options.onDrop?.(scope) ?? 0
     }
     return cancelled
   }
