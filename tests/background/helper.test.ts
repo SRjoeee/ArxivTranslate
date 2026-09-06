@@ -180,6 +180,34 @@ describe('createHelperClient', () => {
     expect(ports).toHaveLength(1)
   })
 
+  it('撤掉的是在飞的请求：端口丢掉，顶上去的请求在新连接上跑（helper 还在处理被撤的那个，Codex 在 #87 指出）', async () => {
+    const { client, port, ports } = setup()
+    const a = client.ocr({ image: 'A' }, 's1')
+    const c = client.ocr({ image: 'C' }, 's2')
+    await flush()
+    await handshake(port())
+    const old = port()
+    expect(client.cancel('s1')).toBe(1)
+    await expect(a).rejects.toMatchObject({ kind: 'aborted' })
+    expect(old.disconnected).toBe(true)
+    await flush()
+    expect(ports).toHaveLength(2)
+    await handshake(port())
+    expect(port().sent.map(m => m.image ?? m.cmd)).toEqual(['ping', 'C'])
+    port().reply({ v: 1, id: port().lastId(), width: 3, height: 3, lines: [] })
+    expect((await c).result.width).toBe(3)
+  })
+
+  it('connectNative 抛错（权限没给）：排队的全拒为 network，只试一次，不会同步死循环（Codex 在 #87 指出）', async () => {
+    let attempts = 0
+    const client = createHelperClient({ connect: () => { attempts++; throw new Error('no nativeMessaging permission') } })
+    const a = client.ocr({ image: 'A' })
+    const b = client.ocr({ image: 'B' })
+    await expect(a).rejects.toMatchObject({ kind: 'network', message: expect.stringContaining('no nativeMessaging') })
+    await expect(b).rejects.toMatchObject({ kind: 'network' })
+    expect(attempts).toBe(2) // 每次调用试一次连接，不多
+  })
+
   it('host 没装（断开原因是 not found）：status 报不可用，之后不再尝试连接', async () => {
     const { client, port, ports } = setup({ lastError: () => 'Specified native messaging host not found.' })
     const status = client.status()
@@ -200,13 +228,15 @@ describe('createHelperClient', () => {
     await flush()
     await handshake(port())
     expect(port().sent).toHaveLength(2) // ping + A 在飞
+    const old = port()
     expect(client.cancel('s1')).toBe(2)
     await expect(a).rejects.toMatchObject({ kind: 'aborted' })
     await expect(b).rejects.toMatchObject({ kind: 'aborted' })
-    // A 的回应到了：已撤，丢弃；C 顶上
-    port().reply({ v: 1, id: port().sent[1]?.id as string, width: 1, height: 1, lines: [] })
+    // 撤的是在飞的 A：旧端口丢掉，A 的晚到回应被忽略；C 在新连接上跑
     await flush()
-    expect(port().sent.map(m => m.image ?? m.cmd)).toEqual(['ping', 'A', 'C'])
+    old.reply({ v: 1, id: old.sent[1]?.id as string, width: 1, height: 1, lines: [] })
+    await handshake(port())
+    expect(port().sent.map(m => m.image ?? m.cmd)).toEqual(['ping', 'C'])
     port().reply({ v: 1, id: port().lastId(), width: 3, height: 3, lines: [] })
     expect((await c).result.width).toBe(3)
   })

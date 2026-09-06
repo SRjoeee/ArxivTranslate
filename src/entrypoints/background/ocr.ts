@@ -49,15 +49,16 @@ export function createOcrService(deps: OcrServiceDeps): OcrService {
       const key = await ocrCacheKey(call.imageHash, status.version ?? 'unknown')
       // IndexedDB 可能挂住而不是拒绝：超预算当未命中，否则 helper 的超时永远开始不了、消息通道一直开着（Codex 在 #87 指出）
       const [hit] = await readWithBudget(deps.cache, [key], deps.cacheReadBudgetMs ?? CACHE_READ_BUDGET_MS)
+      // 查状态 / 读缓存期间被撤：命中也不回结果、更不把活交给 helper（Codex 在 #87 指出）
+      if (call.scope && cancelled.has(call.scope)) return aborted()
       const cached = parseCached(hit)
       if (cached) return { ok: true, result: cached, cached: true }
-      // 读缓存期间被撤：别再把活交给 helper
-      if (call.scope && cancelled.has(call.scope)) return aborted()
       try {
         const { result, version } = await deps.helper.ocr({ image: call.image }, call.scope)
-        // 读缓存期间端口断过、重连的 helper 换了版本：按回应所在连接的版本落缓存，别记在旧键下
+        // 读缓存期间端口断过、重连的 helper 换了版本：按回应所在连接的版本落缓存，别记在旧键下。
+        // 写缓存是优化，不等它：IndexedDB 挂住时识别结果照样回去（Codex 在 #87 指出）
         const storeKey = version === status.version ? key : await ocrCacheKey(call.imageHash, version)
-        await deps.cache.putMany([{ key: storeKey, translation: JSON.stringify(result), paper: call.paper }])
+        deps.cache.putMany([{ key: storeKey, translation: JSON.stringify(result), paper: call.paper }]).catch((e: unknown) => console.warn('[axt] OCR 结果写缓存失败', e))
         return { ok: true, result, cached: false }
       } catch (e) {
         if (e instanceof HelperError) return { ok: false, error: { kind: e.kind, message: e.message } }

@@ -182,7 +182,13 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       try {
         ensurePort().postMessage(item.message)
       } catch (e) {
-        settle(item.id)?.reject(new HelperError('network', e instanceof Error ? e.message : String(e)))
+        // connectNative / postMessage 抛错（权限没给、端口刚断）：端口丢掉、排队的全拒——只拒当前这一条的话，
+        // 内部握手 ping 失败后 while 会立刻再插一个 ping 再抛，同步死循环卡住 worker（Codex 在 #87 指出）
+        const message = e instanceof Error ? e.message : String(e)
+        settle(item.id)?.reject(new HelperError('network', message))
+        dropPort()
+        failAll('network', `helper 连接失败：${message}`)
+        break
       }
     }
     updateKeepAlive()
@@ -232,13 +238,16 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
         item.reject(new HelperError('aborted', '会话已撤销'))
         cancelled++
       }
+      let inFlight = false
       for (const [id, entry] of pending) {
         if (entry.scope !== scope) continue
-        // 已经写进端口的那一个：撤不回来，但到达后按已撤处理（settle 找不到它就丢弃）
         settle(id)?.reject(new HelperError('aborted', '会话已撤销'))
         cancelled++
+        inFlight = true
       }
-      // 在飞的位子腾出来了，别的 scope 排队的请求顶上（helper 是顺序的，它会先处理完被撤的那个再处理这个）
+      // 撤掉的是在飞的那一个：helper 还在处理它，顶上去的请求会排在它后面白等、甚至超时。
+      // 端口丢掉让 helper 退出，顶上去的在新连接上跑（Codex 在 #87 指出）
+      if (inFlight) dropPort()
       pump()
       return cancelled
     },
