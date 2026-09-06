@@ -28,9 +28,24 @@ export interface PreloadOptions {
  * 且命中即 `unobserve`，回调里只做几次比较，代价可忽略。threshold 为 0 时退回单个 0——
  * 那是默认值，任何相交都算进入，没必要多注册 20 个点
  */
+export const THRESHOLD_STEP = 0.05
+
 export function observerThresholds(threshold: number): number | number[] {
   if (threshold <= 0) return 0
-  return Array.from({ length: 21 }, (_, i) => i / 20)
+  return Array.from({ length: Math.round(1 / THRESHOLD_STEP) + 1 }, (_, i) => i * THRESHOLD_STEP)
+}
+
+/**
+ * 把阈值向下对齐到注册网格。**判定必须和注册用同一套刻度**（Codex 在 #81 指出）：
+ * 观察器只在跨越注册点时通知，通知里带的是**当时的真实比例**，所以一个可达上限落在
+ * 两个网格点**之间**的元素，永远拿不到「比例等于上限」的那一次。
+ *
+ * Chromium 实测（元素 2700 px、root 900 px，上限 0.3333，网格 0.30 / 0.35，10 px 一步慢滚）：
+ * 跨越 0.30 的那次报告 0.30000001，此后再没有回调（够不着 0.35）。
+ * 拿精确的 0.3333 去比就永远不通过，块一辈子不翻；对齐到 0.30 才收得下这一次。
+ */
+export function quantizeThreshold(value: number): number {
+  return Math.floor(value / THRESHOLD_STEP + 1e-9) * THRESHOLD_STEP
 }
 
 export const DEFAULT_PRELOAD: PreloadOptions = { margin: 1000, threshold: 0 }
@@ -77,8 +92,12 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
    *    `root 高 ÷ 元素高`。设计上又明确不拆超大表格，于是 threshold=1 时那张表一辈子不翻。
    *    把阈值按这个上限钳一下，够得着多少就要求多少。
    */
-  const effectiveThreshold = (elHeight: number, rootHeight: number) =>
-    elHeight > 0 ? Math.min(options.threshold, Math.min(1, rootHeight / elHeight)) : options.threshold
+  const effectiveThreshold = (elHeight: number, rootHeight: number) => {
+    if (elHeight <= 0) return options.threshold
+    const reachable = Math.min(1, rootHeight / elHeight)
+    // 够得着配置值就按配置值判；够不着才降到上限，而降下来的那个数要对齐到注册网格
+    return options.threshold <= reachable ? options.threshold : quantizeThreshold(reachable)
+  }
 
   const Observer = globalThis.IntersectionObserver
   const observer = typeof Observer === 'function'
@@ -89,7 +108,8 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
           // rootBounds 在跨文档场景下可能为 null；拿不到就退回只看 isIntersecting，宁可早翻不可不翻
           const rootHeight = entry.rootBounds?.height
           const elHeight = entry.boundingClientRect.height
-          if (rootHeight !== undefined && entry.intersectionRatio < effectiveThreshold(elHeight, rootHeight)) continue
+          // 容差：浏览器报的比例是浮点，跨越 0.30 时可能报 0.2999999
+          if (rootHeight !== undefined && entry.intersectionRatio < effectiveThreshold(elHeight, rootHeight) - 1e-6) continue
           io.unobserve(entry.target)
           anchors.push(entry.target)
         }
@@ -109,7 +129,7 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
     const bottom = Math.min(rect.bottom, height + options.margin)
     const visible = Math.max(0, bottom - top)
     // 与 IntersectionObserver 的 intersectionRatio 同义：相交高度 ÷ 元素自身高度
-    if (visible > 0 && visible / rect.height >= effectiveThreshold(rect.height, height + 2 * options.margin)) seeded.push(anchor)
+    if (visible > 0 && visible / rect.height >= effectiveThreshold(rect.height, height + 2 * options.margin) - 1e-6) seeded.push(anchor)
     else observer?.observe(anchor)
   }
   enterAnchors(seeded)

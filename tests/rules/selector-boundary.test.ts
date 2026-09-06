@@ -22,11 +22,33 @@ const RULES_MODULE = join(SRC, 'core/rules/latexml.ts')
 function stripComments(text: string): string {
   let out = ''
   let i = 0
+  /** 上一个有意义的字符：用来判断 `/` 是除号还是正则字面量的开头 */
+  let prev = ''
   while (i < text.length) {
     const c = text[i]!
     const next = text[i + 1]
     if (c === '/' && next === '/') {
       while (i < text.length && text[i] !== '\n') i++
+      continue
+    }
+    // 正则字面量要在块注释判定**之前**认出来（Codex 在 #81 指出）：`/[/*]/` 这样的字符类里
+    // 有 `/*`，当成注释开头的话会一路吞到下一个 `*​/`，守卫又开了同一种天窗。
+    // 判据是标准那条：`/` 出现在期望表达式的位置时才是正则
+    if (c === '/' && next !== '*' && (prev === '' || '(,=:[!&|?+-*%~^{};'.includes(prev))) {
+      out += c
+      i++
+      let inClass = false
+      while (i < text.length) {
+        const r = text[i]!
+        if (r === '\\') { out += r + (text[i + 1] ?? ''); i += 2; continue }
+        out += r
+        i++
+        if (r === '[') inClass = true
+        else if (r === ']') inClass = false
+        else if (r === '/' && !inClass) break
+        else if (r === '\n') break // 没闭合就当它不是正则，别把整份文件吞了
+      }
+      prev = '/'
       continue
     }
     if (c === '/' && next === '*') {
@@ -45,9 +67,11 @@ function stripComments(text: string): string {
         if (text[i] === quote) { i++; break }
         i++
       }
+      prev = quote
       continue
     }
     out += c
+    if (!/\s/.test(c)) prev = c
     i++
   }
   return out
@@ -109,6 +133,18 @@ describe('剥注释不能吞掉代码（Codex 在 #79 指出）', () => {
     expect(stripComments('const r = /a*/\nconst s = 1')).toContain('const s')
     expect(ltxIn('const r = /ltx_[a-z]+/')).toEqual(['ltx_'])
     expect(stripComments('const q = a / b\nconst t = 2')).toContain('const t')
+  })
+
+  it('正则的字符类里带 /* 也不会吞掉后面的代码（Codex 在 #81 指出）', () => {
+    // `/[/*]/` 的字符类里就有 slash-star；当成块注释开头的话，后面没有 */ 就整份文件作废
+    const src = "const re = /[/*]/\nconst z = '.ltx_theorem'"
+    expect(stripComments(src)).toContain('const z')
+    expect(ltxIn(src)).toEqual(['ltx_theorem'])
+  })
+
+  it('没闭合的斜杠不会把整份文件吞掉', () => {
+    const src = "const a = 1 / 2\nconst b = '.ltx_caption'"
+    expect(ltxIn(src)).toEqual(['ltx_caption'])
   })
 
   it('转义引号不会让字符串提前结束', () => {

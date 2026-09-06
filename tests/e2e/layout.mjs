@@ -365,6 +365,30 @@ async function measureFrame(page) {
   check('观察器的比例点覆盖得到超大块的可达上限（细网格，issue #76）',
     coarse < CAP && grid >= CAP,
     `元素 3000px / root 900px，上限 ${CAP}；注册 [0,1] 最大只到 ${coarse}，细网格到 ${grid}`)
+
+  // 上限落在两个网格点之间时（2700px / 900px = 0.3333，网格 0.30 / 0.35），慢滚只会拿到
+  // 跨越 0.30 的那一次；拿精确上限去比就永远不通过，所以判定必须对齐到网格（issue #81）
+  await page.setContent('<style>body{margin:0}#pad{height:2000px}#big{height:2700px}</style>'
+    + '<div id="pad"></div><div id="big">big</div><div style="height:3000px"></div>')
+  const slowMax = await page.evaluate(async () => {
+    const seen = []
+    const io = new IntersectionObserver(es => { for (const e of es) seen.push(e.intersectionRatio) },
+      { threshold: Array.from({ length: 21 }, (_, i) => i / 20) })
+    io.observe(document.getElementById('big'))
+    for (let y = 1900; y <= 4600; y += 10) {
+      scrollTo(0, y)
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+      await new Promise(r => setTimeout(r, 6))
+    }
+    io.disconnect()
+    scrollTo(0, 0)
+    return Math.max(...seen)
+  })
+  const exactCap = 900 / 2700
+  const quantized = Math.floor(exactCap / 0.05 + 1e-9) * 0.05
+  check('上限落在网格点之间时，判定对齐到网格才收得到那次回调（issue #81）',
+    slowMax < exactCap - 1e-6 && slowMax >= quantized - 1e-6,
+    `精确上限 ${exactCap.toFixed(4)}，慢滚拿到的最大 ratio ${slowMax.toFixed(6)}；对齐后的阈值 ${quantized.toFixed(2)}`)
   await page.close()
 }
 
