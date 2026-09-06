@@ -240,6 +240,21 @@ describe('createHelperClient', () => {
     expect(p2().disconnected).toBe(true)
   })
 
+  it('握手没报版本号：不算可用（版本进缓存键，不同构建不能共用一个键空间，Codex 在 #87 指出）', async () => {
+    const { client, port } = setup()
+    const status = client.status()
+    await flush()
+    port().reply({ v: 1, id: port().lastId(), ok: true })
+    const result = await status
+    expect(result.available).toBe(false)
+    expect(result.reason).toContain('版本号')
+    const { client: c2, port: p2 } = setup()
+    const a = c2.ocr({ image: 'A' })
+    await flush()
+    p2().reply({ v: 1, id: p2().sent[0]?.id as string, ok: true, version: '  ' })
+    await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('版本号') })
+  })
+
   it('host 没装（断开原因是 not found）：status 报不可用，之后不再尝试连接', async () => {
     const { client, port, ports } = setup({ lastError: () => 'Specified native messaging host not found.' })
     const status = client.status()

@@ -9,6 +9,8 @@ import Vision
 
 let VERSION = "0.1.0"
 let PROTOCOL = 1
+/// Chrome 对 helper → 扩展的单条消息上限是 1 MB，超了整条连接被断、排队的活全作废。留出余量
+let MAX_REPLY_BYTES = 900_000
 
 enum HelperError: Error {
   case badBase64
@@ -52,8 +54,24 @@ func readFrame() -> Data? {
   return body
 }
 
+/// 序列化；超过上限就按置信度从低到高丢行，直到装得下（正常一张图几 KB，只有极端文字密集的图会撞到）
+func encode(_ object: [String: Any]) -> Data? {
+  guard var json = try? JSONSerialization.data(withJSONObject: object) else { return nil }
+  guard json.count > MAX_REPLY_BYTES, var lines = object["lines"] as? [[String: Any]] else { return json }
+  var reply = object
+  lines.sort { ($0["conf"] as? Double ?? 0) > ($1["conf"] as? Double ?? 0) }
+  while json.count > MAX_REPLY_BYTES && !lines.isEmpty {
+    lines.removeLast(max(1, lines.count / 10))
+    reply["lines"] = lines
+    reply["truncated"] = true
+    guard let again = try? JSONSerialization.data(withJSONObject: reply) else { return nil }
+    json = again
+  }
+  return json
+}
+
 func writeFrame(_ object: [String: Any]) {
-  guard let json = try? JSONSerialization.data(withJSONObject: object) else { return }
+  guard let json = encode(object) else { return }
   var length = UInt32(json.count)
   let header = Data(bytes: &length, count: 4)
   FileHandle.standardOutput.write(header)

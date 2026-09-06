@@ -145,10 +145,12 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
         // ping 的回应：这条连接握过手了，版本记下来（status() 与 pump 插的内部 ping 都走这里）。
         // 握手回的是错误信封（helper 不兼容）或协议版本对不上（装了别的版本的 helper）：排队的活全部拒掉、
         // 断开端口——否则 pump 会一直插 ping、一直收到错误，无限循环（Codex 在 #87 指出）
-        if (reply && !reply.error && reply.v === HELPER_PROTOCOL) known = { available: true, version: typeof reply.version === 'string' ? reply.version : 'unknown' }
+        // 版本进 OCR 缓存键：没报版本的 helper 不能算可用，否则不同构建的结果共用一个键空间（Codex 在 #87 指出）
+        const version = typeof reply?.version === 'string' && reply.version.trim() ? reply.version.trim() : null
+        if (reply && !reply.error && reply.v === HELPER_PROTOCOL && version) known = { available: true, version }
         else {
           dropPort()
-          const why = reply?.error ? errorOf(reply)?.message : `协议版本 ${String(reply?.v)}，扩展要 ${HELPER_PROTOCOL}`
+          const why = reply?.error ? errorOf(reply)?.message : reply?.v !== HELPER_PROTOCOL ? `协议版本 ${String(reply?.v)}，扩展要 ${HELPER_PROTOCOL}` : '回应没有版本号'
           failAll('invalid-response', `helper 握手失败：${why ?? '回应不合法'}`)
         }
       } else if (id.startsWith('ocr-') && reply && !reply.error) warmed = true
@@ -220,8 +222,8 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
         const failure = errorOf(reply)
         if (failure) return { available: false, reason: failure.message }
         if (reply.v !== HELPER_PROTOCOL) return { available: false, reason: `helper 协议版本 ${String(reply.v)}，扩展要 ${HELPER_PROTOCOL}，请重新安装 helper` }
-        // known 已在 onMessage 里按 ping 回应记下；这里只是把它交出去
-        return known ?? { available: true, version: typeof reply.version === 'string' ? reply.version : 'unknown' }
+        // known 由 onMessage 按 ping 回应记下；没记下就是回应缺版本号
+        return known ?? { available: false, reason: 'helper 没有报版本号，请重新安装 helper' }
       } catch (e) {
         return { available: false, reason: e instanceof Error ? e.message : String(e) }
       }
@@ -235,7 +237,9 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       if (reply.v !== HELPER_PROTOCOL || !Array.isArray(lines) || typeof reply.width !== 'number' || typeof reply.height !== 'number') {
         throw new HelperError('invalid-response', 'helper 的回应缺 lines / width / height')
       }
-      return { result: { width: reply.width, height: reply.height, lines: lines as OcrResult['lines'] }, version: known?.version ?? 'unknown' }
+      const version = known?.version
+      if (!version) throw new HelperError('invalid-response', 'helper 的回应到了但这条连接没握过手')
+      return { result: { width: reply.width, height: reply.height, lines: lines as OcrResult['lines'] }, version }
     },
 
     cancel(scope) {
