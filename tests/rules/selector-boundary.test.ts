@@ -19,20 +19,40 @@ const RULES_MODULE = join(SRC, 'core/rules/latexml.ts')
  * 正则字面量不必单独处理——把 `/` 当除号读，里面的 `ltx_` 照样留在输出里，正是想要的结果；
  * 而 `/a*​/` 这种也不会被误认成注释开头（`/` 后面不是 `*` 或 `/`）。
  */
-/** `/` 前面是这些的话，它开的是正则而不是除号 */
+/** `/` 出现在这些词之后开的是正则，不是除号 */
 const EXPR_KEYWORDS = ['return', 'typeof', 'instanceof', 'in', 'of', 'case', 'do', 'else', 'yield', 'await', 'delete', 'void', 'new', 'throw']
-const endsWithExprKeyword = (out: string): boolean => {
-  const tail = out.trimEnd()
-  if (tail.endsWith('=>')) return true
-  const word = /[A-Za-z$_][A-Za-z0-9$_]*$/.exec(tail)?.[0]
-  return word !== undefined && EXPR_KEYWORDS.includes(word)
-}
+/** 这些的括号收尾之后同样期望表达式：`if (ready) /re/.test(x)` */
+const CONTROL_KEYWORDS = ['if', 'while', 'for', 'switch', 'catch', 'with']
 
+const wordBefore = (out: string) => /[A-Za-z$_][A-Za-z0-9$_]*$/.exec(out.trimEnd())?.[0]
+
+/**
+ * 剥掉注释，保留字符串。**不能用正则**（Codex 在 #79 指出）：
+ * `/\/\*[\s\S]*?\*\//` 会把 `'https://arxiv.org/html/*'` 里的 `/*` 当成块注释开头，
+ * 一路吞到下一个 `*​/`——实测 `src/entrypoints/content/index.ts` 240 行里第 18–37 行整段消失，
+ * `defineContentScript` 连同初始化代码全被跳过，守卫自己开了个 20 行的天窗。
+ *
+ * 认出真注释要先认出**正则字面量**，它的字符类里可以有 `/*`（`/[/*]/`）。判据是标准那条：
+ * 斜杠出现在**期望表达式**的位置时才是正则——标点之后、箭头之后、`return` 这类关键字之后
+ * （仓库里 mirror.ts 就写着 `return /\S/.test(…)`），以及 `if (…)` / `while (…)` 的括号收尾之后
+ * （Codex 在 #79 / #81 分三轮各找到一个入口，所以这里跟踪括号属于谁，而不只看前一个字符）。
+ *
+ * 启发式终究可能还有没想到的入口，所以另有两道兜底：块注释找不到收尾就**不吞**（认错时最严重的
+ * 后果正是一路吞到文件末尾），以及一条逐文件核对"末尾的代码还在不在"的断言。
+ * 比例判据试过，没有判别力——这个项目正常文件的注释占比就能到 67%（side-layout.ts）。
+ */
 function stripComments(text: string): string {
   let out = ''
   let i = 0
-  /** 上一个有意义的字符：用来判断 `/` 是除号还是正则字面量的开头 */
+  /** 上一个有意义的字符 */
   let prev = ''
+  /** 每一层括号是不是 if / while / for 这类控制语句开的 */
+  const parens: boolean[] = []
+  /** 上一个 `)` 收的是不是控制语句的括号 */
+  let afterControlParen = false
+  const expectsExpression = () =>
+    prev === '' || '(,=:[!&|?+-*%~^{};'.includes(prev) || out.trimEnd().endsWith('=>')
+    || EXPR_KEYWORDS.includes(wordBefore(out) ?? '') || afterControlParen
   while (i < text.length) {
     const c = text[i]!
     const next = text[i + 1]
@@ -40,11 +60,7 @@ function stripComments(text: string): string {
       while (i < text.length && text[i] !== '\n') i++
       continue
     }
-    // 正则字面量要在块注释判定**之前**认出来（Codex 在 #81 两轮指出）：`/[/*]/` 这样的
-    // 字符类里有 `/*`，当成注释开头的话会一路吞到下一个 `*​/`，守卫又开了同一种天窗。
-    // 判据是标准那条：`/` 出现在**期望表达式**的位置时才是正则——标点之后、箭头之后，
-    // 或者 `return` / `typeof` 这类关键字之后（仓库里 mirror.ts 就写着 `return /\S/.test(…)`）
-    if (c === '/' && next !== '*' && (prev === '' || '(,=:[!&|?+-*%~^{};'.includes(prev) || endsWithExprKeyword(out))) {
+    if (c === '/' && next !== '*' && expectsExpression()) {
       out += c
       i++
       let inClass = false
@@ -59,12 +75,16 @@ function stripComments(text: string): string {
         else if (r === '\n') break // 没闭合就当它不是正则，别把整份文件吞了
       }
       prev = '/'
+      afterControlParen = false
       continue
     }
     if (c === '/' && next === '*') {
-      i += 2
-      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
-      i += 2
+      let j = i + 2
+      while (j < text.length && !(text[j] === '*' && text[j + 1] === '/')) j++
+      // 找不到收尾说明这不是注释——多半是某个没认出来的正则字面量。**不吞**：
+      // 一路吞到文件末尾正是最严重的那种失效（守卫全绿、违规全漏，Codex 在 #79 / #81 反复指出）
+      if (j >= text.length) { out += c; i++; if (!/\s/.test(c)) prev = c; continue }
+      i = j + 2
       continue
     }
     if (c === '"' || c === "'" || c === '`') {
@@ -78,16 +98,21 @@ function stripComments(text: string): string {
         i++
       }
       prev = quote
+      afterControlParen = false
       continue
     }
+    if (c === '(') parens.push(CONTROL_KEYWORDS.includes(wordBefore(out) ?? ''))
     out += c
-    if (!/\s/.test(c)) prev = c
     i++
+    if (c === ')') afterControlParen = parens.pop() ?? false
+    else if (!/\s/.test(c)) afterControlParen = false
+    if (!/\s/.test(c)) prev = c
   }
   return out
 }
 
 const ltxIn = (text: string) => [...new Set(stripComments(text).match(/ltx_[A-Za-z0-9_-]*/g) ?? [])]
+
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap(e => {
@@ -110,6 +135,16 @@ describe('ltx_* 选择器只能出现在规则模块里（CLAUDE.md 硬规则 2�
 
   it('扫到的文件数是合理的——避免走查器自己空转', () => {
     expect(files.length).toBeGreaterThan(30)
+  })
+
+  it('每个文件的最后一行代码都还在——吞到文件末尾就是认错了', () => {
+    // 认错一个 `/*` 最严重的后果是一路吞到文件结尾。逐个文件核对末尾的可执行内容还在不在
+    const truncated = files
+      .map(f => ({ file: f.slice(SRC.length + 1), text: readFileSync(f, 'utf8') }))
+      .map(x => ({ ...x, tail: x.text.trimEnd().split('\n').at(-1)?.trim() ?? '' }))
+      .filter(x => x.tail !== '' && !stripComments(x.text).includes(x.tail))
+      .map(x => `${x.file}: 末尾的 ${JSON.stringify(x.tail.slice(0, 40))} 被吞了`)
+    expect(truncated).toEqual([])
   })
 })
 
@@ -159,6 +194,29 @@ describe('剥注释不能吞掉代码（Codex 在 #79 指出）', () => {
     const src = "const re = /[/*]/\nconst z = '.ltx_theorem'"
     expect(stripComments(src)).toContain('const z')
     expect(ltxIn(src)).toEqual(['ltx_theorem'])
+  })
+
+  it('控制语句的括号之后也是正则位置（Codex 在 #81 第三轮指出）', () => {
+    // 后面**跟一个真注释**，这样"未闭合就不吞"那道兜底救不了：认不出正则的话，
+    // 字符类里的 slash-star 会一路吞到真注释的收尾，中间的代码全没
+    for (const prefix of ['if (ready)', 'while (x)', 'for (;;)', 'if (a && b)']) {
+      const src = `${prefix} /[/*]/.test(v)\nconst z = '.ltx_theorem'\n/* 真注释 */`
+      expect(stripComments(src)).toContain('const z')
+      expect(ltxIn(src)).toEqual(['ltx_theorem'])
+    }
+  })
+
+  it('未闭合的块注释一律不吞：启发式万一还有漏网的入口，也不会整份文件作废', () => {
+    // 正常代码里不存在未闭合的块注释，遇到它基本可以断定是把某个正则认错了。
+    // 宁可把注释文字当代码（顶多误报），也不能静默吞掉后面的违规（Codex 在 #79 / #81 反复指出）
+    const src = "const a = 1\n/* 这里没有收尾\nconst z = '.ltx_p'"
+    expect(stripComments(src)).toContain('const z')
+  })
+
+  it('函数调用的括号之后是除号，不是正则', () => {
+    // `f(x) / 2` 里的斜杠必须当除号，否则会把后面的代码吃进"正则"
+    const src = "const n = f(x) / 2\nconst z = '.ltx_caption'"
+    expect(ltxIn(src)).toEqual(['ltx_caption'])
   })
 
   it('没闭合的斜杠不会把整份文件吞掉', () => {
