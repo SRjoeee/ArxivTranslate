@@ -44,10 +44,13 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
     for (const scope of scopes) {
       const bound = sessions.get(scope)
       sessions.delete(scope)
-      // 没绑过也要撤：worker 中途重启过，绑定丢了但队列里可能还有这个 scope 的任务
+      // 别的按 scope 排队的东西（图片 OCR）先撤，不等建链：建链可能挂在 Translator.availability() 上（Codex 在 #87 指出）
+      cancelled += options.onDrop?.(scope) ?? 0
+      // 只经 bind 绑过、从没翻过字的会话（bound 有值、没 transport）：这个 worker 里没有它的翻译请求，不用为撤它建一条链。
+      // 完全没绑过的也要撤：worker 中途重启过，绑定丢了但队列里可能还有这个 scope 的任务
+      if (bound && !bound.transport) continue
       const transport = bound?.transport ?? await current()
       cancelled += await transport.cancel(scope)
-      cancelled += options.onDrop?.(scope) ?? 0
     }
     return cancelled
   }

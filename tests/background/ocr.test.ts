@@ -137,6 +137,32 @@ describe('createOcrService', () => {
     expect(cache.store.has(await ocrCacheKey('h1', '0.1.0'))).toBe(false)
   })
 
+  it('读缓存期间被撤：命中也回 aborted（Codex 在 #87 指出）', async () => {
+    const { helper, ocr } = fakeHelper()
+    const cache = memoryCache()
+    cache.store.set(await ocrCacheKey('h1', '0.1.0'), JSON.stringify(RESULT))
+    const service = createOcrService({ helper, cache: cache.port })
+    const original = cache.port.getMany
+    let release: () => void = () => {}
+    const reached = new Promise<void>(signal => {
+      cache.port.getMany = keys => new Promise(resolve => { release = () => resolve(original(keys)); signal() })
+    })
+    const pending = service.ocr({ ...call, scope: 's9' })
+    await reached
+    service.cancel('s9')
+    release()
+    expect(await pending).toEqual({ ok: false, error: { kind: 'aborted', message: '会话已撤销' } })
+    expect(ocr).not.toHaveBeenCalled()
+  })
+
+  it('写缓存不阻塞回应：putMany 挂住时识别结果照样回去（Codex 在 #87 指出）', async () => {
+    const { helper } = fakeHelper()
+    const cache = memoryCache()
+    cache.port.putMany = () => new Promise(() => {})
+    const result = await createOcrService({ helper, cache: cache.port }).ocr(call)
+    expect(result).toEqual({ ok: true, result: RESULT, cached: false })
+  })
+
   it('cancel 与 status 直通 helper', async () => {
     const cancel = vi.fn(() => 2)
     const { helper } = fakeHelper({ cancel })

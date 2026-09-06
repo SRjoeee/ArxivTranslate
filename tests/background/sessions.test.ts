@@ -140,4 +140,19 @@ describe('createSessionRouter', () => {
     await Promise.resolve()
     expect(router.bound()).toEqual(['s3'])
   })
+
+  it('drop：onDrop 先于建链；只经 bind 绑过的会话不为撤它建链（建链可能挂在引擎探测上，Codex 在 #87 指出）', async () => {
+    const transport = fakeTransport('链')
+    const order: string[] = []
+    const router = createSessionRouter(async () => { order.push('current'); return transport }, { onDrop: scope => { order.push(`onDrop:${scope}`); return 1 } })
+    router.bind('ocr-only', 3)
+    expect(await router.dropTab(3)).toBe(1)
+    expect(order).toEqual(['onDrop:ocr-only']) // 没有 current
+    // 翻过字的会话：onDrop 仍在前，transport.cancel 在后
+    await router.forCall('s1', 4)
+    order.length = 0
+    await router.dropTab(4)
+    expect(order[0]).toBe('onDrop:s1')
+    expect(transport.cancelled).toContain('链:s1')
+  })
 })
