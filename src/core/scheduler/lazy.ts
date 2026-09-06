@@ -62,13 +62,19 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
       }, { rootMargin: `${options.margin}px 0px`, threshold: options.threshold })
     : null
 
-  // 播种：首屏及边距内的锚点先同步触发一次，其余交给观察器
+  // 播种：首屏及边距内的锚点先同步触发一次，其余交给观察器。
+  // **要和观察器用同一个 threshold**（Codex 在 #35 指出）：只判矩形相交的话，配了 threshold 的用户
+  // 会看到「刚露出一像素的块立刻就翻」，而同一个块要是晚一点才进视口反而得等够比例，两条路径不一致
   const height = globalThis.innerHeight ?? 0
   const seeded: Element[] = []
   for (const anchor of byAnchor.keys()) {
     const rect = anchor.getBoundingClientRect()
     if (!(rect.width || rect.height)) continue
-    if (rect.bottom > -options.margin && rect.top < height + options.margin) seeded.push(anchor)
+    const top = Math.max(rect.top, -options.margin)
+    const bottom = Math.min(rect.bottom, height + options.margin)
+    const visible = Math.max(0, bottom - top)
+    // 与 IntersectionObserver 的 intersectionRatio 同义：相交高度 ÷ 元素自身高度
+    if (visible > 0 && visible / rect.height >= options.threshold) seeded.push(anchor)
     else observer?.observe(anchor)
   }
   enterAnchors(seeded)

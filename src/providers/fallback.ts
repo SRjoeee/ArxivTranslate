@@ -41,8 +41,8 @@ export interface FallbackService extends TranslateService {
  * 会触发降级的错误类型。`aborted` 不在其中——会话取消不是引擎的错，换个引擎重来只会再被取消一次。
  * 队列自己的重试（retry-policy）跑完才会走到这里，所以链上不再叠加重试。
  */
-const FALLBACK_KINDS: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>([
-  'no-key', 'auth', 'network', 'timeout', 'rate-limit', 'invalid-response', 'unknown',
+export const FALLBACK_KINDS: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>([
+  'no-key', 'auth', 'network', 'timeout', 'rate-limit', 'bad-request', 'invalid-response', 'unknown',
 ])
 
 /** 配置问题不会自己好：本会话内永久降级，不再浪费一次请求去试 */

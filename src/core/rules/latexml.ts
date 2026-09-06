@@ -41,8 +41,10 @@ export const UNIT_RULES: readonly Rule[] = [
   { id: 'bibitem', selector: '.ltx_bibitem:not(:has(.ltx_bibblock))', note: '没有分段的参考文献条目，整条一个单元' },
   { id: 'ack', selector: '.ltx_acknowledgements', note: '致谢' },
   { id: 'keywords', selector: '.ltx_keywords', note: '关键词' },
-  // 作者区默认翻译（§5.2 修订）：机构、联系方式、日期都是有信息量的文字；
-  // 姓名与邮箱另由 skip / protect 排除
+  // 作者区默认翻译（§5.2 修订）：机构、联系方式、日期都是有信息量的文字；邮箱另由 protect 的 mailto 排除。
+  // 姓名 2026-09-06 起也翻（§5.2 的决定）：原来挡着的理由是「音译后引用检索会失效」，但双语阅读器里
+  // 原名就在译名旁边，只有 only 模式会藏起原文，那是该模式对所有内容的固有取舍
+  { id: 'personname', selector: '.ltx_personname', note: '作者姓名；.ltx_creator 里的 span，译文作兄弟节点天然行内' },
   { id: 'authorinfo', selector: '.ltx_contact, .ltx_role_affiliation, .ltx_role_address, .ltx_dates, .ltx_date', note: '作者的机构、联系方式、日期' },
   // 以下结构没在抓过的真实论文里出现，靠 tests/fixtures/arxiv/synthetic-structures.html 守护（RESEARCH.md §2.12）
   { id: 'dedicatory', selector: '.ltx_role_dedicatory', note: '献词' },
@@ -76,9 +78,9 @@ export function isTableCell(el: Element): boolean {
 export const SKIP_RULES: readonly Rule[] = [
   { id: 'equation', selector: '.ltx_equation, .ltx_equationgroup', note: '行间公式，含其对齐表格与 .ltx_eqn_cell' },
   { id: 'listing', selector: '.ltx_listing, .ltx_listingline, .ltx_listing_data, .ltx_verbatim, pre, code', note: '代码、算法框内的行、verbatim、隐藏的代码数据' },
-  // 作者区不再整块跳过（§5.2 修订）：只排除翻了会坏事的部分
-  { id: 'personname', selector: '.ltx_personname', note: '作者姓名：音译后引用检索会失效' },
-  { id: 'author-glue', selector: '.ltx_author_before, .ltx_author_after', note: '作者之间的连接词（“ and ”“, ”），单独成块会打断姓名列表' },
+  // 作者区不再整块跳过（§5.2 修订）；姓名 2026-09-06 起也翻（见 UNIT_RULES 的 personname），
+  // 只剩连接词还挡着：它们单独成块会把姓名列表打断成一行一个词
+  { id: 'author-glue', selector: '.ltx_author_before, .ltx_author_after', note: '作者之间的连接词（“ and ”“, ”）' },
   { id: 'classification', selector: '.ltx_classification', note: 'MSC / ACM 分类号，如“Primary: 11L07”' },
   { id: 'pubnotes', selector: '.ltx_pubnotes', note: '出版元数据（ACM 模板的 CCS / DOI / 期刊）' },
   { id: 'picture', selector: 'svg, .ltx_picture', note: 'TikZ 图，实测无可翻译文字（§15.1）' },
@@ -127,6 +129,10 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
   { id: 'note', selector: '.ltx_note', descend: true, note: '脚注容器：对外层段落是 void，内部的 .ltx_note_content 仍要被发现为块' },
   { id: 'note-mark', selector: '.ltx_note_mark, .ltx_note_type', note: '脚注标记与类型标签（容器外层与正文内各一次）' },
   { id: 'mailto', selector: 'a[href^="mailto:"]', note: '邮箱地址原样保留' },
+  // LaTeXML 生成的联系方式标签（"Affiliation: " / "Email: "），arXiv 的样式表把它 display:none。
+  // 不挡住的话，邮箱那条 .ltx_contact 里唯一可翻的就是这个隐藏标签，译文出来是一行看不见的
+  // 「电子邮件：」加一份原样的地址——页面上就是两行一样的邮箱（§5.2 的决定）
+  { id: 'contact-label', selector: '.ltx_contact_name', note: '联系方式标签，模板生成且站点隐藏' },
   { id: 'indexrefs', selector: '.ltx_indexrefs', note: '索引词条后面的页码列表' },
   { id: 'img', selector: 'img', note: '行内图片' },
   { id: 'br', selector: 'br', note: '换行' },
@@ -268,13 +274,23 @@ export const MARGIN_ASIDE = '.ltx_pubnotes, .ltx_note'
 
 /** 文档主标题：靠 text-align:center 居中，不能与译文同行（§7.3） */
 export const DOCUMENT_TITLE = '.ltx_title_document'
+/** 文档副标题（`\subtitle`）：与文档标题同属居中的标题区，同样不作同行候选 */
+export const DOCUMENT_SUBTITLE = '.ltx_subtitle'
 
 /** 摘要块与它自己的标题（"Abstract"）；论文级上下文取正文时要把标题去掉 */
 export const ABSTRACT = { root: '.ltx_abstract', title: '.ltx_title' } as const
 
 /** 短标题同行的候选：title 单元里除文档主标题外的标题（长度另由渲染层判断） */
+/**
+ * 短标题能否与译文同行（§7.3）。排除文档标题**与文档副标题**（Codex 在 #13 指出）：
+ * 它们都是居中的，压成 inline-block 会缩成内容宽度、贴到左边——
+ * 2026-09-06 在真实页面上量过 2609.00246 的 `(Extended Version)`：原本 `display: block`、
+ * `text-align: center`、占满 800px 栏宽，文本居中在 x≈720；改成 inline-block 后盒子只剩 176px、
+ * 落在 l=320，因为父元素 `<article>` 是 `text-align: start`。LaTeXML 的 `.ltx_subtitle` 来自 `\subtitle`，
+ * 只出现在标题区（12 篇 fixture 里两处都紧跟 `.ltx_title_document`），章节的 run-in 标题是 `.ltx_title_*`，不受影响
+ */
 export function isInlineTitleCandidate(el: Element): boolean {
-  return classify(el)?.rule === 'title' && !el.matches(DOCUMENT_TITLE)
+  return classify(el)?.rule === 'title' && !el.matches(`${DOCUMENT_TITLE}, ${DOCUMENT_SUBTITLE}`)
 }
 
 export function documentRoot(doc: Document | Element): Element | null {

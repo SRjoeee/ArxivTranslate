@@ -119,6 +119,7 @@ interface Block {
 | `.ltx_bibblock` | 参考文献条目内的片段（作者 / 标题 / 出处）；没有分段的条目用 `.ltx_bibitem` 兜底，见 5.4 |
 | `.ltx_acknowledgements` | 致谢。正文是容器里的裸文本，容器本身就是单元；它的 run-in 标题**不单独成块**（2026-09-04 修订），否则外层单元会把标题当 void 占位符克隆一份英文，页面上出现两个英文标题加一段中文正文（实测 2609.00095）。不成块时标题是成对占位符，随外层一起翻、原位还原。`.ltx_keywords` 同理 |
 | `.ltx_keywords` | 关键词 |
+| `.ltx_personname` | 作者姓名（2026-09-06 起，见 §5.2 的决定）。是 `.ltx_creator` 里的 `<span>`，译文作为兄弟 span 跟在原名后面，天然行内；名字里的 `<sup>*</sup>` 脚注标记走成对占位符原位还原 |
 | `.ltx_contact`, `.ltx_role_affiliation`, `.ltx_role_address`, `.ltx_dates`, `.ltx_date` | 作者的机构、联系方式、日期。**2026-09-04 修订**：作者区从"整块跳过"改为"默认翻译"，只排除姓名与邮箱。原策略会漏掉致谢性质的作者注（如《Attention Is All You Need》的 “†Equal contribution. Listing order is random…”，它在 `.ltx_creator > .ltx_note` 里）|
 | `.ltx_role_dedicatory`, `.ltx_item`, `.ltx_marginpar`, `.ltx_indexentry`, `.ltx_cv_item_label`, `.ltx_cv_item_content`, `.ltx_cv_entry_date` | 献词、列表项裸文本、边注、索引词条、CV 字段。这些没在抓过的真实论文里出现，由 `tests/fixtures/arxiv/synthetic-structures.html` 守护（RESEARCH.md §2.12）|
 
@@ -131,7 +132,6 @@ interface Block {
 | `.ltx_tag` | 公式编号、章节号、图表号、列表符号、代码行号 |
 | `.ltx_listing`, `.ltx_listingline`, `.ltx_listing_data`, `.ltx_verbatim`, `pre`, `code` | 代码、verbatim、隐藏的代码数据。算法框 `figure.ltx_float.ltx_algorithm` / `.ltx_float_algorithm` 内部即 `.ltx_listingline`，由本条覆盖，框内 `.ltx_caption` 正常翻译 |
 | `.ltx_text.ltx_font_typewriter` | 等宽文本（视为代码）|
-| `.ltx_personname` | 作者姓名：音译后引用检索会失效（2026-09-04 修订：作者区不再整块跳过）|
 | `.ltx_author_before`, `.ltx_author_after` | 作者之间的连接词（“ and ”“, ”），单独成块会打断姓名列表 |
 | `.ltx_classification` | MSC / ACM 分类号，如 “Primary: 11L07” |
 | `.ltx_ERROR`, `.ltx_FATAL`, `.ltx_WARNING`, `.ltx_INFO` | LaTeXML 的转换错误与提示，不是论文内容 |
@@ -139,6 +139,22 @@ interface Block {
 | `svg`, `.ltx_picture` | TikZ 图，实测没有可翻译文字，见 §15.1 |
 | `.ltx_ERROR` | LaTeXML 转换错误块（也会出现在转换失败页 "Untitled Document" 上，扩展须安静处理）|
 | `.ltx_page_navbar`, `.ltx_TOC` | 导航栏与目录。位于翻译根之外，列出仅供渲染层隐藏用 |
+
+- **作者姓名也翻** [决定，2026-09-06，用户拍板]：作者区的其余部分（机构、联系方式、日期、作者注）2026-09-04 就已经放开，只剩姓名还挡着，理由是"音译后引用检索会失效"。这条理由在**双语**阅读器上站不住：stack 与 side 模式里原名就在译名旁边，要复制去检索的人拿得到原文；只有 `only` 模式会把原名藏起来，那是该模式对所有内容的固有取舍，不该由姓名单独承担。放开后 `.ltx_personname` 从跳过规则挪到翻译单元。
+
+  **fixture 实测**（12 篇共 30 个 `.ltx_personname`）：全部位于 `article.ltx_document` 内的 `.ltx_creator` 里，**参考文献里一个都没有**——引文作者段仍由 §5.4 的 `bib-authors` 单独跳过，不受这条影响。结构一致：纯文本，个别带 `<sup>*</sup>` 脚注标记（走成对占位符）；个别模板会把两位作者塞进同一个元素（`Matías Blaña and Marcelo D. Mora`），整体翻也正确。
+
+  **译文质量实测**（google-web，免费引擎里最差的情况）：30 个里 28 个是正常音译，中文名还能还原成汉字（`Yuan Xia` → 袁霞、`Haipeng Cai` → 蔡海鹏、`Fumihiro Imoto` → 井本文宏，具体用字是猜的）。一个翻车：**`Brian Street` → 布莱恩街**，姓氏被当成普通名词。约 3% 的错误率，且错得显眼、原文就在旁边。LLM 有论文标题与摘要作上下文，表现应当更好。**没有为此改 prompt**：为几个姓名给每一批都加一句约束不划算，而 `PROMPT_VERSION` 一升会把所有缓存作废；这条留待有真实反馈再议。
+
+  改这条要升 `RULES_VERSION`（进缓存键），已升到 0.7.0。姓名之间的连接词 `.ltx_author_before` / `.ltx_author_after` 仍然跳过——它们单独成块会打断姓名列表。
+
+- **联系方式的标签 `.ltx_contact_name` 不翻** [决定，2026-09-06，实测撞到]：LaTeXML 给每条 `.ltx_contact` 生成一个标签元素，内容是 `Affiliation: ` / `Email: ` / `E-mail `，**arXiv 的样式表把它 `display: none`**（三篇线上页面实测，计算样式全是 `none`、盒子 0×0）。它是模板生成的，不是作者写的内容，所以作 void 占位符。
+
+  不这么做会有一个**用户看得见的**后果：邮箱那条 `.ltx_contact` 里唯一可翻的文字就是这个隐藏标签（地址本身是受保护的 `mailto`），于是整块被判定"有可翻内容"、翻出一条译文，而译文里的「电子邮件：」同样被站点藏起来——页面上就出现两行一模一样的邮箱地址（用户在 2507.00150 的作者区看到）。机构那条不会重复（它有真内容），但一直在白翻这个看不见的标签，google-web 还把 `Affiliation:` 译成"联系："。
+
+  12 篇 fixture 实测：43 个 `.ltx_contact_name` 全部位于 `.ltx_contact` 内；其中 12 个属于 `ltx_role_email`，去掉标签后**没有任何可翻文字**，这 12 个块随之消失（重复的行没了）；`ltx_role_affiliation` 29 个、`ltx_role_note` 与 `ltx_role_correspondent` 各 1 个都还有真内容，块照旧，只是少翻一个隐藏标签。
+
+  **没有做成"按计算样式跳过隐藏元素"的通用机制**：extractor 是纯 DOM 的，给每个候选元素跑 `getComputedStyle` 会在几百个块的论文上强制大量样式计算，与 §7.2 记的"只读量法"是同一类性能陷阱。已知的隐藏模板标签就这一个，按规则写进 `PROTECT_RULES` 更便宜也更可查。改这条要升 `RULES_VERSION`，已升到 0.7.1。
 
 - **description 列表的术语也要翻** [决定，2026-09-06，Codex 在 #18 指出]：LaTeXML 把 `\item[Compactness]` 的术语放进 `.ltx_tag.ltx_tag_item`，而 tag 是受保护的，于是整个 `.ltx_item` 没有自有文本、**根本不成块**，术语永远不翻。`.ltx_tag_item` 加进 `NAMED_TAGS`，由既有的内容判定分流：12 篇 fixture 共 371 个，含词的只有 8 个（`Markov categories:`、`CD categories:`、`Compactness.`、`RQ1`–`RQ5`），其余 363 个是 `(1)` `•` 这类标记，照旧作 void。google-web 实测把 `RQ1` 原样返回、`Markov categories:` 译成「马尔可夫分类：」，标识符不会被改写。快照增量精确等于这 8 个
 - **参考文献的作者段优先看语义标注** [决定，2026-09-06，Codex 在 #18 指出]：`isBibAuthorBlock` 原来只按位置（多段条目的第一段就是作者段）。12 篇 fixture 里 285 条多段引文，带 `.ltx_bib_author` 的 59 条**全部**符合这个位置假设，所以这条改动今天不改变任何结果；它保的是将来——某个模板把作者放在别的段时，纯位置判断会把标题当作者段跳掉，那条引文的标题就永远不翻。有标注就信标注，没有才回到位置
@@ -194,7 +210,7 @@ interface Block {
 
 | 类型 | 占位符 | 节点 |
 |---|---|---|
-| void | `<x id="n"/>` | 行内 `math`、`.ltx_ref`（含内部 `.ltx_ref_tag`）、`.ltx_cite`、`.ltx_tag`、`code`、`.ltx_font_typewriter`、整个 `.ltx_note`（脚注正文另行成块）、`.ltx_note_mark`、`.ltx_note_type`、行内图片、`svg`、`br`。**必须以 `PROTECT_RULES` 写进 `latexml.ts`**——Phase 0 审计发现仅靠 §5.2 的跳过规则时，`.ltx_ref` / `.ltx_cite` / `.ltx_note_mark` 会被当作段落正文（fixture 中合计 3,500+ 个元素，RESEARCH.md §2.5）|
+| void | `<x id="n"/>` | 行内 `math`、`.ltx_ref`（含内部 `.ltx_ref_tag`）、`.ltx_cite`、`.ltx_tag`、`code`、`.ltx_font_typewriter`、整个 `.ltx_note`（脚注正文另行成块）、`.ltx_note_mark`、`.ltx_note_type`、`.ltx_contact_name`、行内图片、`svg`、`br`。**必须以 `PROTECT_RULES` 写进 `latexml.ts`**——Phase 0 审计发现仅靠 §5.2 的跳过规则时，`.ltx_ref` / `.ltx_cite` / `.ltx_note_mark` 会被当作段落正文（fixture 中合计 3,500+ 个元素，RESEARCH.md §2.5）|
 | paired | `<t id="n">…</t>` | 带文字的 `a`、`.ltx_text.ltx_font_italic/bold/...`、`em`、`strong`、其他带可翻译文字的 `span` |
 | text | 直接出现在文本里 | 文本节点 |
 
@@ -329,6 +345,8 @@ interface ProtectedBlock {
 - **装饰只落到真正的译文上**：`.axt-pending`（加载圆环）与 `.axt-error`（带「重试」按钮的失败控件）也带 `.axt-t`——它们长在译文的位置上，side 模式靠这个 class 配对——但它们不是译文。side 模式的结构性克隆 `.axt-mirror`（镜像的公式 / 插图）与 `.axt-split`（拆到右栏的整张图）同理——它们带 `.axt-t` 只是为了配对，`blur` 会把镜像的公式糊掉、其他预设会给包装层再画一遍。所有预设选择器都写成 `.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)`，克隆里嵌套的真译文仍然匹配；与 `split-figures.ts` 的 `REAL_TRANSLATION` 是同一条界线。不排除的话 `gradient` 的 `color: transparent` 会把重试按钮的字变透明，正好是用户最需要点它的时候（Codex 在 #52 指出）
 - **`custom` 只接受声明块，不接受完整规则**：选择器由扩展补（`html[data-axt-style="custom"] .axt-t { … }`），用户填的内容整段插进花括号中间，因此 `{` `}` `@` `<` 一律拒绝。这不是安全边界（用户本来就能装任何扩展），是防手滑——一个多余的花括号会把整篇论文的排版改掉，而且很难看出原因
 
+- **文档标题与副标题不与译文同行** [决定，2026-09-06，Codex 在 #13 指出]：`.ltx_subtitle` 与 `.ltx_title_document` 同属居中的标题区，压成 `inline-block` 会缩到内容宽度并贴到左边——真实页面实测 2609.00246 的 `(Extended Version)`：原本 `block` + `text-align: center`、占满 800px 栏宽、文本居中在 x≈720，改成 `inline-block` 后盒子只剩 176px、落在 l=320（父元素 `<article>` 是 `text-align: start`）。章节的 run-in 短标题是 `.ltx_title_*`，不受影响
+
 ### 7.6 等待态：加载圆环 [决定，2026-09-05，照搬 Read Frog]
 
 - 请求发出**之前**先在原块后面插一个 pending 译文节点（`.axt-t.axt-pending`，与原块同标签、同 class，`data-axt-for` 指向原块），里面只有一个 6px 的圆环 `<span class="axt-spinner">`。包裹先插、内容后填，与 §7.1 "译文只作为原块的下一个兄弟"完全一致；译文到达后**被真译文替换**（`renderText` / `renderTable` 开头的 `clearTranslation` 删掉同 `data-axt-for` 的兄弟，删前取消圆环动画）——与"填进同一个节点"效果相同、少一条路径。表格块的 pending 是 `div`，整表克隆到了才是 `table`。短标题的 pending 也按 §7.3 同行
@@ -411,6 +429,8 @@ export interface TranslateResult {
 - prompt 带版本号 `PROMPT_VERSION`（提示词库接入升到 2；`{{targetLanguage}}` 改填英文语言名升到 3），写入缓存键；**提示词身份 `promptKey`**（内置用 id，自定义带两段分别编码的全文）与**上下文原文**（标题 / 摘要 / 章节 / 术语表，结构化序列化；免费引擎不看上下文，不带）也进缓存键的 SHA-256 载荷——换了提示词、或同一段文字出现在另一篇论文里，都不能命中旧译文。**不先压成 32 位 hash**：DJB2 撞了外层 SHA-256 也分不开（Codex 在 #28 给出实例 `19k04n01vcr73f` / `1efm0uaep90s9`）；配置 v1→v2 迁移补 `prompts` 字段、保留 API key
 - **`{{targetLanguage}}` 填英文语言名，不填语言码** [决定，2026-09-05，照 Read Frog `translate-text.ts`]："professional zh-CN native translator" 不如 "Simplified Mandarin Chinese"；名字来自 `config/languages.ts`（移植 `@read-frog/definitions` 的表，ISO 639-3 码），不认识的码原样填
 - **提示词与思考模式的入口**（清理期第 3 项，2026-09-05）：设置页有提示词管理（内置只读可"复制并自定义"、自定义可新建 / 编辑 / 删除、变量按钮插到光标处、JSON 导入 / 导出且文件形状与 Read Frog 一致，可互相导入）与思考模式开关（未登记的端点提示不发字段）；popup 有提示词下拉（即时落盘，下次开始翻译生效）。Read Frog 的对应组件依赖 base-ui、jotai、Tailwind 与它的 i18n，为一页十来个字段引整套 UI 栈不值，逻辑按文件搬（`prompt-file.ts`）、UI 用设置页现有的朴素 React 重写。Read Frog 现已把思考开关改成 AI SDK 的 `reasoning` 档位（none…xhigh），我们仍是 KISS 式按端点发开关字段，档位模型待 AI SDK 侧验证后另议
+- **攒批不看引擎种类，只看它一次能装多少** [决定，2026-09-06，实测撞到]：`BatchQueue` 原来只给 `kind: 'llm'` 建，照抄 Read Frog 的 `shouldUseBatchQueue`。但那条判断的前提是**它的免费引擎是单条接口**，我们的不是——`translateHtml` 一次能带 150 条（RESEARCH §6.6），内置引擎声明 20 条。照抄等于把免费引擎最大的优势扔掉。现在每个 provider 都建 `BatchQueue`，`maxItemsPerBatch` 为 1 的 provider 由它自然退化成一条一个请求，不需要第二条路径（`enqueueWhole` 随之删除）
+- **不看上下文的引擎，上下文不进批次键**：`batchKey` 原来无条件带 `request.context`，而 `run.ts` 会往里塞 `sectionTitle`，每换一节就换一次键——免费引擎的批次跨不了章节，攒批等于没开。缓存键早就有同一条判断（`context: provider.promptKey ? request.context : undefined`），批次键漏了，现在对齐
 - 批次按章节切（标题块开启新批次），单批不超过 `maxBatchChars`（默认照 Read Frog：1000 字 / 4 段；速率同样照它的令牌桶默认值 8 请求/秒、突发 20，服务内再按批次键攒 100ms——小批高并发，首屏快）；附带 `sectionTitle` 作上下文；公式密集块单独成批；表格块整表一批（`renderTable` 需要所有单元格一起到）
 - 批次失败：对半拆分重试 → 单块 → 标记失败
 
@@ -418,6 +438,22 @@ export interface TranslateResult {
 
 ### 8.3 免费引擎约定
 
+- **节流分两种闸：并发上限管「同时挂着几个」，令牌桶管「每秒发几个」** [决定，2026-09-06，实测撞到]。`google-web` 原本是 p-queue 的 `concurrency: 2`（同时 2 个在飞，不限速率），2026-09-05 移植 `RequestQueue` 时误写成 `rateLimit: { rate: 2 }`（每秒 2 个）。两者语义不同：Google 的响应中位只有 **63 ms**，却被令牌桶按 500 ms 一个卡着。现在 `TranslationProvider` 单独声明 `maxConcurrent`，`google-web` 回到 `maxConcurrent: 2`，速率放到 `rate: 20 / capacity: 8` **只兜病态突发**——中途试过 `rate: 4`，它立刻又变成新瓶颈（24 个请求跑满 5.3 秒），速率闸不该是常态约束。
+
+  三个缺陷叠在一起的实测（2410.00260，google-web，全新空缓存，逐屏滚到底）：
+
+  | | 修复前 | 修复后 |
+  |---|---|---|
+  | 整篇耗时 | 31 615 ms / 213 块（**148 ms 每块**）| 2 959 ms / 190 块（**15.6 ms 每块**）|
+  | 请求数 | 65 | **21** |
+  | 每请求段数 | 中位 2、平均 4.2 | 中位 11、平均 11.2 |
+  | 相邻请求间隔 | 中位 500 ms（= 1/rate）| — |
+  | HTTP 状态 | 200 | 200（没有被限流）|
+
+  **9.5 倍**，而且请求数降到三分之一——对这个非官方端点反而更客气。`pnpm e2e` 有两条守着：平均 ≥ 5 段/请求、同时在飞 ≤ 2。
+
+- **系统性失败不进批级重试** [决定，2026-09-06，Codex 在 #61 指出]：`BatchQueue` 只对 `BatchCountMismatchError` 做「重试 3 次 + 逐条兜底」，而 `asBatchError` 会把 provider 的 `invalid-response` 转成它——对 LLM 是对的（多半是某一段把输出带偏，拆小能定位到它），对免费引擎「整个响应不是 JSON」这种就是纯浪费：100 段的一批要白打 104 次请求，还打在我们本就想省着用的端点上。`ProviderError` 因此带一个 `isolatable`（默认真），provider 遇到系统性失败显式声明假，`asBatchError` 就不转、错误立刻上报给降级链。google-web 的「不是 JSON」「格式异常」是假，「条数对不上」保持真（逐条发通常就对得上）
+- **HTTP 状态要分清瞬时与永久** [决定，2026-09-06，Codex 在 #17 指出]：原来 `google-web` 把非 429 的失败一律归成 `network`，而 retry-policy 的 `isRetryableRequestErrorMeta` **先看 kind 再看状态码**，`network` 直接判定可重试——一个永远不会成功的 400 会被重试满 3 次、再被 BatchQueue 对半拆分逐条重来，100 段的一批能放大成几十次无用请求。现在按状态码映射：429 → `rate-limit`，401 / 403 → `auth`，其余 4xx（408 / 409 除外，它们照状态码表算瞬时）→ 新增的 `bad-request`（不重试但仍触发降级链——换个引擎可能就成了），5xx 与连接层失败才留给 `network`
 - 视为**随时会断**的东西：独立文件、独立错误类型、失败自动切到 fallback 链的下一个
 - fallback 链默认：用户选定 provider → `chrome-builtin` → `google-web`
 - `google-web` 一次请求多条（默认 100 条 / 8000 字一批），速率压到 2 请求/秒、突发 2（`rateLimit`）——免费端点经不起默认的 8/s；不攒批（Read Frog 的 `shouldUseBatchQueue` 只让 LLM 攒），429 与超时同 §8.2，由 request-queue 统一处理
@@ -457,6 +493,7 @@ export interface TranslateResult {
 - **缓存管理只在设置页做全局清空** [决定，2026-09-05]：`axt:cache-stats` 显示条数与体积，`axt:cache-clear`（不带 paper）清空整库，切回设置页时重读统计（翻译发生在别的标签页，不重读就永远显示打开那一刻的数字）。两条消息的响应都是 `{ ok: true, … } | { ok: false, message }`：**失败不能显示成「缓存是空的」或「已删除 0 条」**，IndexedDB 用不了时那是最不该骗人的地方（Codex 在 #52 指出）。统计前先跑一次 `cleanup()` 清掉过期条目——`get()` 只是把它们当未命中、从不删除，不清的话页面上会一直显示一堆用不了的条数与体积；这也是 `cleanup()` 在运行时唯一的调用点，所以它失败要抛出去而不是吞掉，否则统计会把清不掉的过期条目当成功结果报出去。**不做「只清本篇」**：设置页是独立扩展页面，没有当前论文的概念，为它绕一圈问 content script 不值当；真正需要按篇清的场景（这篇译得不好想重来）在 popup 上更顺手，留作后续。缓存键本来就带引擎、模型、提示词、术语表，换任何一样都不会命中旧译文，手动清是兜底而不是常规操作
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
 - **缓存读取有等待预算，读不到就继续翻** [决定，2026-09-05，issue #45]：服务是"先等缓存再发请求"的，读一旦挂住整页翻译就停在那里——MV3 的 service worker 冷启动、被挂起或消息丢失都会造成这种情况。两道闸：content 侧的消息端口 1.5s（`CACHE_READ_TIMEOUT_MS`），服务层 2s（`CACHE_READ_BUDGET_MS`，换任何 `CachePort` 实现都兜得住）。超时按全部未命中处理，代价只是多花一次请求；两个数都远大于实测的命中往返（36 ms 量级）
+- **取消之后不再写缓存** [决定，2026-09-06，Codex 在 #33 指出]：一次调用会被拆到多个批次，先完成的那些可能在 `cancel(scope)` 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时照样把它们写进库，与「恢复原文之后不再渲染也不写缓存」的承诺不符。写之前再查一次 `cancelledScopes`
 - **坏译文不入库、重发不读库** [决定，2026-09-05]：markup 路径的请求带 `accept` 回调（进程内调用才有，过不了消息边界），translate-service 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）；占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
 - 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、v5 加 `fallback: { enabled }`（默认开，§8.5）、v6 加 `glossary`（默认空表，§8.2）、v7 加 `style`（默认 `none`，§7.5）、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
@@ -469,6 +506,7 @@ export interface TranslateResult {
 **看到哪翻到哪**：只翻视口内与其下方一段距离内的块，没滚到的块不发请求、不占资源。这是 Read Frog 页面翻译**唯一**的模式（`PageTranslationManager`，没有"整篇翻"的开关），做法照搬；它的模块解耦、效果经过验证，能整段搬的整段搬（见 §12 的 `feat/lazy-loading`）。
 
 - 开始翻译时只给所有块打标记（`data-axt-id`、`pending`）并逐块交给一个 `IntersectionObserver`，**不发任何请求**。标记是切片进行的（几百个块一口气写会冻住页面），**每写一个块之前都要检查会话是否还在**：让出主线程期间用户可能已经「恢复原文」，只在循环外检查的话，`restore` 清干净之后循环会继续往 DOM 上写标记，页面留下孤儿 `data-axt-*`，§7.1 的不变量被破坏（issue #45 的实验 1）。参数照 Read Frog 的 `pageTranslation.page.preload` 默认值：`rootMargin` **1000px**、`threshold` **0**；设置页暴露为"预翻译距离"（0–10000px，步进 100）与"可见阈值"（0–1），与 Read Frog 同名同义。原先照 FluentRead 的 600px / 0.01 作废
+- **播种与观察器用同一个可见阈值** [决定，2026-09-06，Codex 在 #35 指出]：启动时同步触发的那批锚点原来只判矩形相交，忽略 `threshold`；配了阈值的用户会看到「刚露出一像素的块立刻就翻」，而同一个块晚一点进视口反而要等够比例，两条路径不一致。现在播种按「相交高度 ÷ 元素高度 ≥ threshold」判，与 `IntersectionObserver` 的 `intersectionRatio` 同义。默认 threshold 为 0，行为不变
 - 块**第一次**进入视口加边距时才发请求，同时 `unobserve`——一次性；视口外的块永远不会被请求。没有"整篇翻完"的后台队列，想整篇就把预翻译距离调大（Read Frog 也是这么做的）
 - 同一次 IO 回调里进入的块**攒成一批**：一次滚动会让几十个块同时进入，按 §8.2 的 1000 字 / 4 条切批发出，表格整表一批不变；`planBatches` 只对"这一批进入视口的块"运行，不再预先规划整篇。IO 首次回调是异步的，创建时仍按 `getBoundingClientRect` 同步播种一次，首屏不等回调
 - 请求期间原块旁边先插带加载圆环的 pending 节点（§7.6），译文到达后填入；失败换错误提示与"重试"；取消则删除

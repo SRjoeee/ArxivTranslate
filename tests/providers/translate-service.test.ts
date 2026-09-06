@@ -168,6 +168,128 @@ describe('createTranslateService', () => {
   })
 })
 
+describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06）', () => {
+  /** 记录 provider 每次真的收到哪些段 */
+  const recorder = (extra: Partial<TranslationProvider> = {}) => {
+    const calls: string[][] = []
+    return {
+      calls,
+      provider: provider(async r => {
+        calls.push(r.segments.map(s => s.id))
+        return { segments: r.segments, provider: 'mock' }
+      }, 'mock', extra),
+    }
+  }
+  const withContext = (ids: string[], sectionTitle: string) => ({
+    request: { segments: ids.map(id => ({ id, text: `text-${id}` })), source: 'en' as const, target: 'zh-CN', context: { paperTitle: 'P', sectionTitle } },
+  })
+
+  it('免费引擎（kind: mt）的多次调用攒进同一个请求：以前只有 LLM 攒批，它一次调用一个请求', async () => {
+    vi.useFakeTimers()
+    const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 100, maxBatchChars: 8000 })
+    const service = createTranslateService({ getProvider: async () => mt })
+    const all = Promise.all([service.translate(req(['a'])), service.translate(req(['b'])), service.translate(req(['c']))])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(calls).toEqual([['a', 'b', 'c']])
+    expect((await all).every(r => r.ok)).toBe(true)
+  })
+
+  it('装得下多少就攒多少：超过 maxBatchItems 的部分另起一批', async () => {
+    vi.useFakeTimers()
+    const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 2, maxBatchChars: 8000 })
+    const service = createTranslateService({ getProvider: async () => mt })
+    const all = Promise.all(['a', 'b', 'c'].map(id => service.translate(req([id]))))
+    await vi.advanceTimersByTimeAsync(200)
+    expect(calls).toEqual([['a', 'b'], ['c']])
+    expect((await all).every(r => r.ok)).toBe(true)
+  })
+
+  it('不看上下文的引擎，章节标题不进批次键：否则每换一节就换一次键，跨不了章节攒批', async () => {
+    vi.useFakeTimers()
+    const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 100, maxBatchChars: 8000 })
+    const service = createTranslateService({ getProvider: async () => mt })
+    const all = Promise.all([service.translate(withContext(['a'], '第一节')), service.translate(withContext(['b'], '第二节'))])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(calls).toEqual([['a', 'b']])
+    expect((await all).every(r => r.ok)).toBe(true)
+  })
+
+  it('有提示词的引擎照旧按上下文分批：章节标题会进 prompt，混批会串味', async () => {
+    vi.useFakeTimers()
+    const { calls, provider: llm } = recorder({ kind: 'llm', maxBatchItems: 100, maxBatchChars: 8000, promptKey: 'default' })
+    const service = createTranslateService({ getProvider: async () => llm })
+    const all = Promise.all([service.translate(withContext(['a'], '第一节')), service.translate(withContext(['b'], '第二节'))])
+    await vi.advanceTimersByTimeAsync(200)
+    expect(calls.map(c => c.join()).sort()).toEqual(['a', 'b'])
+    expect((await all).every(r => r.ok)).toBe(true)
+  })
+
+  it('provider 声明的 maxConcurrent 生效：并发闸与令牌桶是两种闸', async () => {
+    vi.useFakeTimers()
+    let inFlight = 0
+    let peak = 0
+    const release: (() => void)[] = []
+    // 速率放开（20/s、突发 20），只靠并发闸卡住：同时在飞不能超过 2
+    const mt = provider(async r => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise<void>(resolve => release.push(resolve))
+      inFlight--
+      return { segments: r.segments, provider: 'mock' }
+    }, 'mock', { kind: 'mt', maxBatchItems: 1, rateLimit: { rate: 20, capacity: 20 }, maxConcurrent: 2 })
+    const service = createTranslateService({ getProvider: async () => mt })
+    const all = Promise.all(['a', 'b', 'c', 'd'].map(id => service.translate(req([id]))))
+    await vi.advanceTimersByTimeAsync(500)
+    expect(peak).toBe(2)
+    expect(release).toHaveLength(2)
+    for (const fn of [...release]) fn()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(release.length).toBeGreaterThan(2)
+    for (const fn of [...release]) fn()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(peak).toBe(2)
+    expect((await all).every(r => r.ok)).toBe(true)
+  })
+})
+
+describe('系统性失败不该被批级重试放大（Codex 在 #61 指出）', () => {
+  const callOf = (n: number) => ({
+    request: { segments: Array.from({ length: n }, (_, i) => ({ id: `s${i}`, text: `text-${i}` })), source: 'en' as const, target: 'zh-CN' },
+  })
+
+  it('声明 isolatable: false 的 invalid-response 立刻上报，不重试不逐条兜底', async () => {
+    let calls = 0
+    const service = createTranslateService({
+      getProvider: async () => provider(async () => {
+        calls++
+        // 免费引擎返回的整个响应就不是 JSON：拆多小都一样
+        throw new ProviderError('invalid-response', '返回的不是 JSON', { isolatable: false })
+      }, 'mock', { kind: 'mt', maxBatchItems: 100 }),
+    })
+    const res = await service.translate(callOf(8))
+    expect(res).toMatchObject({ ok: false, error: { kind: 'invalid-response' } })
+    // 一次就够：转成批次错误的话是 1 + 3 次重试 + 8 次逐条 = 12 次
+    expect(calls).toBe(1)
+  })
+
+  it('可拆分的 invalid-response 照旧重试并逐条兜底：拆小能定位到闯祸的那一段', async () => {
+    let calls = 0
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => {
+        calls++
+        // 只有多段一起发才坏；单段发就好了
+        if (r.segments.length > 1) throw new ProviderError('invalid-response', 'id 对不上')
+        return { segments: r.segments, provider: 'mock' }
+      }, 'mock', { kind: 'llm', maxBatchItems: 100 }),
+      batch: { maxRetries: 1 },
+    })
+    const res = await service.translate(callOf(3))
+    expect(res.ok).toBe(true)
+    // 首次 + 1 次重试 + 3 次逐条
+    expect(calls).toBe(5)
+  })
+})
+
 describe('createTranslateService：限流、超时、取消（fake timers）', () => {
   const log = () => {
     const calls: { id: string; t: number }[] = []

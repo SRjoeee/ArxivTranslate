@@ -87,3 +87,35 @@ describe('createGoogleWebProvider', () => {
     expect(await createGoogleWebProvider().isAvailable()).toBe(true)
   })
 })
+
+describe('HTTP 状态到错误类型（Codex 在 #17 指出）', () => {
+  const respond = (status: number) => createGoogleWebProvider({
+    fetch: async () => new Response('{}', { status, statusText: 'x' }),
+  }).translate({ segments: [{ id: 'a', text: 'A' }], source: 'en', target: 'cmn' })
+
+  it('4xx 不能归成 network：retry-policy 先看 kind 再看状态码，network 会被判定可重试', async () => {
+    // 400 归 bad-request，元数据里 isRetryable 为假；归 network 的话一次必败的请求要重试满 3 次再逐条拆分
+    await expect(respond(400)).rejects.toMatchObject({ kind: 'bad-request' })
+    await expect(respond(404)).rejects.toMatchObject({ kind: 'bad-request' })
+  })
+
+  it('401 / 403 归 auth，429 归 rate-limit', async () => {
+    await expect(respond(401)).rejects.toMatchObject({ kind: 'auth' })
+    await expect(respond(403)).rejects.toMatchObject({ kind: 'auth' })
+    await expect(respond(429)).rejects.toMatchObject({ kind: 'rate-limit' })
+  })
+
+  it('408 / 409 与 5xx 仍是瞬时的，照旧重试', async () => {
+    for (const status of [408, 409, 500, 502, 503]) {
+      await expect(respond(status)).rejects.toMatchObject({ kind: 'network' })
+    }
+  })
+
+  it('bad-request 不可重试，但仍触发降级链：换个引擎可能就成了', async () => {
+    const { getRequestErrorMeta } = await import('@/providers/request/retry-policy')
+    const error = await respond(400).catch(e => e as Error)
+    expect(getRequestErrorMeta(error).isRetryable).toBe(false)
+    const { FALLBACK_KINDS } = await import('@/providers/fallback')
+    expect(FALLBACK_KINDS.has('bad-request')).toBe(true)
+  })
+})

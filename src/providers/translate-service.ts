@@ -114,8 +114,13 @@ interface QueueItem {
 
 interface ProviderQueues {
   requestQueue: RequestQueue
-  /** 只有 LLM 才攒批（Read Frog 的 shouldUseBatchQueue）；免费引擎一次调用一个任务 */
-  batchQueue: BatchQueue<QueueItem, string> | null
+  /**
+   * 每个 provider 都攒批。Read Frog 的 `shouldUseBatchQueue` 只给 LLM 攒，因为它的免费引擎是**单条接口**；
+   * 我们的不是——`translateHtml` 一次能带 150 条（RESEARCH §6.6），内置引擎声明 20 条。照抄那条判断
+   * 等于把免费引擎最大的优势扔掉：实测 216 块发了 61 个请求、中位每个只装 2 条（上限 100 条 / 8000 字，§8.3）。
+   * `maxItemsPerBatch` 为 1 的 provider 由 BatchQueue 自然退化成一条一个请求，不需要另一条路径
+   */
+  batchQueue: BatchQueue<QueueItem, string>
 }
 
 /** provider 看到的 id 必须唯一：不同调用的段可能同 id（同一段落重发、连接测试连发三次）混进一批 */
@@ -147,12 +152,15 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
   const timeoutFor = (chars: number) => Math.min(baseTimeoutMs + chars * BATCH_TIMEOUT_PER_CHAR_MS, MAX_BATCH_TIMEOUT_MS)
 
   /**
-   * 把 provider 报的"id 对不上 / 结构坏了"换成 BatchQueue 认的批次错误，并标成不可重试：
+   * 把 provider 报的"id 对不上 / 结构坏了"换成 BatchQueue 认的批次错误，并标成不可重试。
+   * **声明 `isolatable: false` 的不转**（Codex 在 #61 指出）：BatchQueue 只对 `BatchCountMismatchError`
+   * 重试与逐条兜底，转过去就等于给系统性失败叠上 3 次批级重试 + 每段一次请求——
+   * 100 段的一批白打 104 次。免费引擎返回的不是 JSON 就属于这种，拆多小都一样。
    * RequestQueue 不再按未知错误重试，BatchQueue 重试 3 次后逐条兜底。不标的话逐条兜底前要先打 3 × 4 = 12 次；
    * 标了 kind 也免得消息里带的模型原始输出被 "429" / "timeout" 的正则误判
    */
   const asBatchError = (e: unknown, expected: number): unknown =>
-    e instanceof ProviderError && e.kind === 'invalid-response'
+    e instanceof ProviderError && e.kind === 'invalid-response' && e.isolatable
       ? attachRequestErrorMeta(new BatchCountMismatchError(expected, 0, [e.message]), { kind: 'bad-request', isRetryable: false })
       : e
 
@@ -172,7 +180,9 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     if (existing) return existing
     const rate = provider.rateLimit?.rate ?? deps.queue?.rate ?? DEFAULT_RATE_LIMIT.rate
     const capacity = provider.rateLimit?.capacity ?? deps.queue?.capacity ?? DEFAULT_RATE_LIMIT.capacity
-    const queueOptions = { ...DEFAULT_QUEUE_OPTIONS, ...deps.queue, rate, capacity }
+    // 并发上限与令牌桶是两种闸（§8.3）：响应快的端点靠并发就够，用速率限反而让快响应白等令牌
+    const maxConcurrent = provider.maxConcurrent ?? deps.queue?.maxConcurrent ?? DEFAULT_QUEUE_OPTIONS.maxConcurrent
+    const queueOptions = { ...DEFAULT_QUEUE_OPTIONS, ...deps.queue, rate, capacity, maxConcurrent }
     const maxTotalMs = queueOptions.maxTotalMs
     /**
      * 期限按**整批**算，不按每次入队算：批级重试与逐条兜底都带着同一个 meta 再来，
@@ -180,58 +190,42 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
      */
     const deadlineOf = (meta: { startedAt: number }) => maxTotalMs === undefined ? undefined : meta.startedAt + maxTotalMs
     const requestQueue = new RequestQueue(queueOptions)
-    const batchQueue = provider.kind === 'llm'
-      ? new BatchQueue<QueueItem, string>({
-          maxCharactersPerBatch: provider.maxBatchChars,
-          maxItemsPerBatch: provider.maxBatchItems,
-          batchDelay: deps.batch?.batchDelay ?? BATCH_DELAY_MS,
-          maxRetries: deps.batch?.maxRetries ?? BATCH_MAX_RETRIES,
-          maxTotalMs,
-          enableFallbackToIndividual: deps.batch?.enableFallbackToIndividual ?? true,
-          // 派发闸：限流期间没有空位时批次继续攒到上限，而不是每 100ms 刷出一小批排在队里冻着
-          dispatchGate: { nextDispatchEtaMs: () => requestQueue.nextDispatchEtaMs() },
-          getBatchKey: item => item.batchKey,
-          getCharacters: item => item.text.length,
-          getDedupKey: item => item.dedupKey,
-          getScope: item => item.scope,
-          isScopeCancelled: scope => cancelledScopes.has(scope),
-          executeBatch: (items, meta) => {
-            const ids = uniqueIds(items)
-            const chars = items.reduce((n, item) => n + item.text.length, 0)
-            const hash = items.map(item => item.dedupKey ?? item.uid).join('|')
-            const scheduleAt = Math.min(...items.map(item => item.scheduleAt))
-            return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
-          },
-          executeIndividual: (item, meta) => requestQueue.enqueue(
-            async signal => (await translateItems([item], [item.id], signal))[0]!,
-            item.scheduleAt,
-            item.dedupKey ?? item.uid,
-            item.scope ? [item.scope] : undefined,
-            // 逐条兜底是同一批文本的最后一程，不能再拿一份完整预算（Codex 在 #56 指出）
-            { timeoutMs: timeoutFor(item.text.length), deadlineAt: deadlineOf(meta) },
-          ),
-          onError: (error, context) => {
-            console.warn(`[axt] 批次失败（${context.isFallback ? '逐条兜底' : `第 ${context.retryCount} 次重试前`}）：${error.message}`)
-          },
-        })
-      : null
+    const batchQueue = new BatchQueue<QueueItem, string>({
+      maxCharactersPerBatch: provider.maxBatchChars,
+      maxItemsPerBatch: provider.maxBatchItems,
+      batchDelay: deps.batch?.batchDelay ?? BATCH_DELAY_MS,
+      maxRetries: deps.batch?.maxRetries ?? BATCH_MAX_RETRIES,
+      maxTotalMs,
+      enableFallbackToIndividual: deps.batch?.enableFallbackToIndividual ?? true,
+      // 派发闸：限流期间没有空位时批次继续攒到上限，而不是每 100ms 刷出一小批排在队里冻着
+      dispatchGate: { nextDispatchEtaMs: () => requestQueue.nextDispatchEtaMs() },
+      getBatchKey: item => item.batchKey,
+      getCharacters: item => item.text.length,
+      getDedupKey: item => item.dedupKey,
+      getScope: item => item.scope,
+      isScopeCancelled: scope => cancelledScopes.has(scope),
+      executeBatch: (items, meta) => {
+        const ids = uniqueIds(items)
+        const chars = items.reduce((n, item) => n + item.text.length, 0)
+        const hash = items.map(item => item.dedupKey ?? item.uid).join('|')
+        const scheduleAt = Math.min(...items.map(item => item.scheduleAt))
+        return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
+      },
+      executeIndividual: (item, meta) => requestQueue.enqueue(
+        async signal => (await translateItems([item], [item.id], signal))[0]!,
+        item.scheduleAt,
+        item.dedupKey ?? item.uid,
+        item.scope ? [item.scope] : undefined,
+        // 逐条兜底是同一批文本的最后一程，不能再拿一份完整预算（Codex 在 #56 指出）
+        { timeoutMs: timeoutFor(item.text.length), deadlineAt: deadlineOf(meta) },
+      ),
+      onError: (error, context) => {
+        console.warn(`[axt] 批次失败（${context.isFallback ? '逐条兜底' : `第 ${context.retryCount} 次重试前`}）：${error.message}`)
+      },
+    })
     const pair = { requestQueue, batchQueue }
     queues.set(provider.id, pair)
     return pair
-  }
-
-  /** 免费引擎：一次调用的未命中段落作一个任务，不攒批 */
-  const enqueueWhole = ({ requestQueue }: ProviderQueues, items: QueueItem[]): Promise<string>[] => {
-    const first = items[0]!
-    const chars = items.reduce((n, item) => n + item.text.length, 0)
-    const all = requestQueue.enqueue(
-      signal => translateItems(items, items.map(item => item.id), signal),
-      first.scheduleAt,
-      items.map(item => item.dedupKey ?? item.uid).join('|'),
-      first.scope ? [first.scope] : undefined,
-      { timeoutMs: timeoutFor(chars) },
-    )
-    return items.map((_, i) => all.then(texts => texts[i]!))
   }
 
   const translate = async ({ request, providerId, cache, accept, scope }: TranslateCall): Promise<TranslateMessageResponse> => {
@@ -268,7 +262,11 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       if (misses.length > 0) {
         const pair = queuesFor(provider)
         const now = Date.now()
-        const batchKey = JSON.stringify([provider.id, model, provider.promptKey ?? '', request.target, cache?.renderPath ?? '', request.context ?? null])
+        // 上下文只对有提示词的引擎有意义，和缓存键同一条判断（见上面的 cacheKeyFor）。
+        // 不加这道判断的话，run.ts 往 context 里塞的 sectionTitle 每换一节就变一次键，
+        // 免费引擎的批次永远跨不了章节——攒批等于没开（§8.3）
+        const batchContext = provider.promptKey ? request.context : undefined
+        const batchKey = JSON.stringify([provider.id, model, provider.promptKey ?? '', request.target, cache?.renderPath ?? '', batchContext ?? null])
         const items: QueueItem[] = misses.map(segment => ({
           uid: getRandomUUID(),
           id: segment.id,
@@ -280,8 +278,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           provider,
           request: { source: request.source, target: request.target, context: request.context },
         }))
-        const batchQueue = pair.batchQueue
-        const settled = await Promise.allSettled(batchQueue ? items.map(item => batchQueue.enqueue(item)) : enqueueWhole(pair, items))
+        const settled = await Promise.allSettled(items.map(item => pair.batchQueue.enqueue(item)))
 
         // 3. 先把成功且放行的写缓存：一次调用的段可能横跨两批，一批失败另一批的成果不能丢，
         //    否则 run.ts 对半拆分重发是白花钱
@@ -297,7 +294,10 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           const key = keys.get(item.id)
           if (store && cache && key && (!accept || accept(item.id, outcome.value))) writes.push({ key, translation: outcome.value, paper: cache.paper })
         })
-        if (store && writes.length > 0) await store.putMany(writes)
+        // 写之前再查一次取消（Codex 在 #33 指出）：一次调用会被拆到多个批次，先完成的那些
+        // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，
+        // 与「恢复原文之后不再写缓存」的承诺不符
+        if (store && writes.length > 0 && !(scope && cancelledScopes.has(scope))) await store.putMany(writes)
         if (failures.length > 0) return { ok: false, error: toErrorInfo(pickError(failures)) }
       }
 
@@ -315,7 +315,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     cancelledScopes.markScope(scope)
     let cancelled = 0
     for (const { requestQueue, batchQueue } of queues.values()) {
-      cancelled += batchQueue?.cancelByScope(scope) ?? 0
+      cancelled += batchQueue.cancelByScope(scope)
       cancelled += requestQueue.cancelByScope(scope)
     }
     return cancelled
