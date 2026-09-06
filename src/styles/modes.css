@@ -41,6 +41,15 @@ html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption,
   box-shadow: inset 3px 0 0 var(--axt-failed-color, rgba(220, 38, 38, 0.6));
 }
 
+/* 高度为 0 的分页标记（`\newpage` 的产物，屏幕上没有任何内容）：块布局里它那 32px 上边距会与
+   相邻的边距**折叠**，只占一段；side 模式下 .ltx_document 是网格容器（列线只在它身上定义一次，见下），
+   网格禁用子元素间的外边距折叠，于是摘要与正文之间那两个标记各自贡献 32px。
+   实测 2609.03001v1：摘要块底到第一节顶，未翻译 32px、side 96px（用户反馈"间距被拉大"）。
+   把它们的块向外边距归零——它们本来就只靠折叠存在 */
+html[data-axt-mode="side"] .ltx_pagination {
+  margin-block: 0;
+}
+
 /* ── side：左右对照（§7.2）────────────────────────────────────────────────
    两条列线**只在 .ltx_document 上定义一次**，其余容器用 subgrid 继承同一组线。
    否则每个容器按自己的宽度各切一半，列表里缩进的段落、参考文献条目的分界线会和正文错开
@@ -116,6 +125,14 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
 
   & > .axt-t {
     grid-column: 2;
+  }
+
+  /* 网格不与子元素折叠外边距：块布局里**最后一行**的下边距会并进容器自己的下边距，
+     网格里它变成实打实的一段空白（实测摘要块因此高出 24px）。最后一行 = 最后一个子元素，
+     加上"译文正好是最后一个"时它前面的那个原文 */
+  & > :last-child,
+  & > :nth-last-child(2):has(+ .axt-t) {
+    margin-block-end: 0;
   }
 
   /* 只有同行短标题需要清掉那 0.5em；对其余译文清零会压掉 .ltx_centering 的 auto 边距，
@@ -310,23 +327,34 @@ html[data-axt-mode="side"] body {
     var(--axt-side-w) 1fr;
 }
 
-/* 没有沟槽的那一档（side 在 ≥ 1280px 生效，沟槽规则在 ≥ 96rem = 1536px，中间这段 1280–1535px 两头不着）：
-   ar5iv 把 frontmatter 的致谢 / 通讯作者注留在正文流里，并给 `.ltx_note_outer` 写死 800px 宽。
-   原页面的文章正好也是 800px 所以看不出问题；side 模式下文章列在 1280px 时只有 652px，
-   于是这条注**横着溢出文章右缘 156px**，而它的译文只能堆在原文正下方——旁边的姓名、机构都是左右配对的，
-   看上去就像译文掉进了原文那一栏（用户反馈，2026-09-06 复现于 2609.04169v1）。
-   这一档把它收进文章列，并让原文与译文按同样的两栏排。frontmatter 的注**永远可见**，
-   不存在折叠状态，所以不受「.ltx_note 整棵子树排除在配对之外」那条的顾虑（那是给正文脚注的）。 */
-@media (width < 96rem) {
-  html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer {
-    inline-size: 100%;
-  }
-  html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer:has(> .axt-t) {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: var(--axt-gap);
-    align-items: start;
-  }
+/* frontmatter 的致谢 / 通讯作者注：**有译文的一律留在文章列里按两栏排**，不进右侧沟槽。
+   两个宽度档各有一个坏法，成因不同但都指向同一个结论：
+
+   - 1280–1535px（side 已生效、沟槽规则还没生效）：ar5iv 把它留在正文流里并给 `.ltx_note_outer`
+     写死 800px 宽。原页面的文章正好也是 800px 所以看不出问题；side 模式下文章列在 1280px 时只有 652px，
+     这条注**横着溢出文章右缘 156px**，译文只能堆在原文正下方，旁边的姓名与机构却是左右配对的，
+     看上去就像译文掉进了左栏（用户反馈，2026-09-06 复现于 2609.04169v1）。
+   - ≥ 1536px（沟槽档）：ar5iv 按每位作者 160px 的固定节奏把这些注绝对定位在沟槽里，
+     **高度是按只有原文算的**。塞进译文后每条从 26–50px 涨到 148–194px，第一条就压到第二条
+     （实测 1800px：原始页面 5 条 0 对重叠，装扩展后同样 5 条 1 对重叠）。沟槽只有 192px 宽，
+     换行也断得很难看（`giangnh@huce.e-du.vn` 被拦腰折断）。
+
+   所以带译文的一律回到文章列、按两栏排；**没有译文的保持沟槽原样**（译文还没到、或翻译失败时
+   不去动 arXiv 自己的版式）。frontmatter 的注永远可见、没有折叠态，所以不受
+   「`.ltx_note` 整棵子树排除在配对之外」那条的顾虑——那条是给正文脚注的。 */
+html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter:has(.axt-t) {
+  /* ar5iv 在 ≥96rem 时把它绝对定位到页边；带译文的要回到正文流里参与配对 */
+  position: static;
+  inline-size: auto;
+}
+html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter:has(.axt-t) > .ltx_note_outer {
+  inline-size: 100%;
+}
+html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer:has(> .axt-t) {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: var(--axt-gap);
+  align-items: start;
 }
 
 /* 右侧沟槽（≥ 96rem，与 ar5iv 显示边注的断点一致）：ar5iv 的四组规则都用 (100vw - --main-width) / 2 当沟槽宽、
@@ -352,7 +380,9 @@ html[data-axt-mode="side"] body {
     width: calc(var(--axt-side-w) - 2rem);
     margin-inline-end: calc(1rem - var(--axt-side-w));
   }
-  html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter.ltx_role_thanks {
+  /* 只给**没有译文**的那些：带译文的已经回到文章列按两栏排（见上），
+     这里再给个沟槽宽度会把它压成 192px（实测原文与译文各剩 76px） */
+  html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter.ltx_role_thanks:not(:has(.axt-t)) {
     width: calc(var(--axt-side-w) - 2rem);
     inset-inline-end: calc(1rem - var(--axt-side-w));
   }
