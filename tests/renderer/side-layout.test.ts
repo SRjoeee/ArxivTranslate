@@ -16,12 +16,20 @@ const CSS = readFileSync(join(import.meta.dirname, '../../src/styles/modes.css')
 /** 注释里也写着选择器（讲取舍用的），做文本断言前先去掉 */
 const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
 
-/** 从样式表里取出容器判定，样式表是唯一事实来源，改了这里测试自动跟上 */
-function selectorsFromCss(): { container: string; deny: string } {
-  const match = /:where\(:has\(\.axt-t, \[data-axt-id\]\):not\(:is\(([\s\S]*?)\)\)\)/.exec(CSS)
-  if (!match) throw new Error('modes.css 里找不到容器判定选择器')
-  const deny = match[1]!.replace(/\s+/g, ' ').trim()
-  return { container: `:has(.${T_CLASS}, [data-axt-id]):not(:is(${deny}))`, deny }
+/**
+ * 样式表里**每一处**容器判定的排除清单。同一份清单在 modes.css 里写了不止一次（网格声明与配对规则各一份），
+ * 以前只取第一处核对，第二份可以静默漂移（issue #46 指出）。空白按单个空格归一，跨行的那份才好比
+ */
+function denyListsFromCss(): string[] {
+  const re = /:where\(:has\(\.axt-t, \[data-axt-id\]\):not\(:is\(([\s\S]*?)\)\)\)/g
+  const lists = [...RULES.matchAll(re)].map(m => m[1]!.replace(/\s+/g, ' ').trim())
+  if (lists.length === 0) throw new Error('modes.css 里找不到容器判定选择器')
+  return lists
+}
+
+/** 容器选择器取样式表里的第一份；每一份都与 TS 一致由下面的测试守着 */
+function containerFromCss(): string {
+  return `:has(.${T_CLASS}, [data-axt-id]):not(:is(${denyListsFromCss()[0]!}))`
 }
 
 /** 模拟渲染：给每个块插一个译文兄弟，形状与 renderText 一致 */
@@ -39,16 +47,21 @@ function fakeTranslate(doc: Document): number {
 }
 
 describe('side 模式的容器覆盖', () => {
-  const { container, deny } = selectorsFromCss()
+  const container = containerFromCss()
   const files = readdirSync(FIXTURE_DIR).filter(f => f.endsWith('.html')).sort()
 
-  it('样式表里的排除清单与 side-layout.ts 保持一致（TS 是事实来源）', () => {
+  it('样式表里每一处排除清单都与 side-layout.ts 一致（TS 是事实来源；清单在样式表里写了两份）', () => {
     const parts = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean)
     const normalize = (v: string[]) => [...new Set(v)].sort().join(',')
     // 子树排除在样式表里写成 `X, X *` 两条；TS 侧由 isSideContainer 用 closest 实现
     //（happy-dom 的 :is(X *) 恒为 false，并进 SIDE_CONTAINER 会让测试与线上行为不一致）
     const subtrees = parts(SIDE_DENY_SUBTREE).flatMap(x => [x, `${x} *`])
-    expect(normalize(parts(deny))).toBe(normalize([...parts(SIDE_DENY), ...subtrees]))
+    const expected = normalize([...parts(SIDE_DENY), ...subtrees])
+    const lists = denyListsFromCss()
+    // 数目钉死：今天是两份（网格声明 + 配对规则各一份）。变成 1 要么是合并了（更新这里），
+    // 要么是有一份写坏了、从上面的正则里溜走——没有这一条，溜走的那份就等于没核
+    expect(lists).toHaveLength(2)
+    for (const [i, list] of lists.entries()) expect({ copy: i + 1, deny: normalize(parts(list)) }).toEqual({ copy: i + 1, deny: expected })
   })
 
   it('排除项只允许是本身不成网格的元素：ar5iv 自己的网格必须接管而不是排除', () => {
