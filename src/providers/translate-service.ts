@@ -152,12 +152,15 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
   const timeoutFor = (chars: number) => Math.min(baseTimeoutMs + chars * BATCH_TIMEOUT_PER_CHAR_MS, MAX_BATCH_TIMEOUT_MS)
 
   /**
-   * 把 provider 报的"id 对不上 / 结构坏了"换成 BatchQueue 认的批次错误，并标成不可重试：
+   * 把 provider 报的"id 对不上 / 结构坏了"换成 BatchQueue 认的批次错误，并标成不可重试。
+   * **声明 `isolatable: false` 的不转**（Codex 在 #61 指出）：BatchQueue 只对 `BatchCountMismatchError`
+   * 重试与逐条兜底，转过去就等于给系统性失败叠上 3 次批级重试 + 每段一次请求——
+   * 100 段的一批白打 104 次。免费引擎返回的不是 JSON 就属于这种，拆多小都一样。
    * RequestQueue 不再按未知错误重试，BatchQueue 重试 3 次后逐条兜底。不标的话逐条兜底前要先打 3 × 4 = 12 次；
    * 标了 kind 也免得消息里带的模型原始输出被 "429" / "timeout" 的正则误判
    */
   const asBatchError = (e: unknown, expected: number): unknown =>
-    e instanceof ProviderError && e.kind === 'invalid-response'
+    e instanceof ProviderError && e.kind === 'invalid-response' && e.isolatable
       ? attachRequestErrorMeta(new BatchCountMismatchError(expected, 0, [e.message]), { kind: 'bad-request', isRetryable: false })
       : e
 

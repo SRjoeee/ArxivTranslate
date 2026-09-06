@@ -252,6 +252,44 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
   })
 })
 
+describe('系统性失败不该被批级重试放大（Codex 在 #61 指出）', () => {
+  const callOf = (n: number) => ({
+    request: { segments: Array.from({ length: n }, (_, i) => ({ id: `s${i}`, text: `text-${i}` })), source: 'en' as const, target: 'zh-CN' },
+  })
+
+  it('声明 isolatable: false 的 invalid-response 立刻上报，不重试不逐条兜底', async () => {
+    let calls = 0
+    const service = createTranslateService({
+      getProvider: async () => provider(async () => {
+        calls++
+        // 免费引擎返回的整个响应就不是 JSON：拆多小都一样
+        throw new ProviderError('invalid-response', '返回的不是 JSON', { isolatable: false })
+      }, 'mock', { kind: 'mt', maxBatchItems: 100 }),
+    })
+    const res = await service.translate(callOf(8))
+    expect(res).toMatchObject({ ok: false, error: { kind: 'invalid-response' } })
+    // 一次就够：转成批次错误的话是 1 + 3 次重试 + 8 次逐条 = 12 次
+    expect(calls).toBe(1)
+  })
+
+  it('可拆分的 invalid-response 照旧重试并逐条兜底：拆小能定位到闯祸的那一段', async () => {
+    let calls = 0
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => {
+        calls++
+        // 只有多段一起发才坏；单段发就好了
+        if (r.segments.length > 1) throw new ProviderError('invalid-response', 'id 对不上')
+        return { segments: r.segments, provider: 'mock' }
+      }, 'mock', { kind: 'llm', maxBatchItems: 100 }),
+      batch: { maxRetries: 1 },
+    })
+    const res = await service.translate(callOf(3))
+    expect(res.ok).toBe(true)
+    // 首次 + 1 次重试 + 3 次逐条
+    expect(calls).toBe(5)
+  })
+})
+
 describe('createTranslateService：限流、超时、取消（fake timers）', () => {
   const log = () => {
     const calls: { id: string; t: number }[] = []

@@ -60,12 +60,13 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
   try {
     payload = await response.json()
   } catch (error) {
-    throw new ProviderError('invalid-response', 'translateHtml 返回的不是 JSON', { cause: error })
+    // 整个响应就不是 JSON：拆小批次重来也是一样的结果（§8.3）
+    throw new ProviderError('invalid-response', 'translateHtml 返回的不是 JSON', { cause: error, isolatable: false })
   }
 
   const translated = Array.isArray(payload) ? payload[0] : undefined
   if (!Array.isArray(translated) || translated.some(item => typeof item !== 'string')) {
-    throw new ProviderError('invalid-response', `translateHtml 响应格式异常：${JSON.stringify(payload).slice(0, 200)}`)
+    throw new ProviderError('invalid-response', `translateHtml 响应格式异常：${JSON.stringify(payload).slice(0, 200)}`, { isolatable: false })
   }
   if (translated.length !== items.length) {
     throw new ProviderError('invalid-response', `translateHtml 返回 ${translated.length} 条，期望 ${items.length} 条`)

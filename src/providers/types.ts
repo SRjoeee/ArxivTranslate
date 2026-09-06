@@ -87,9 +87,19 @@ const META_BY_KIND: Record<ProviderErrorKind, RequestErrorMeta> = {
 }
 
 export class ProviderError extends Error {
-  constructor(readonly kind: ProviderErrorKind, message: string, options?: { cause?: unknown }) {
+  /**
+   * 这次失败**换更小的批次重试有没有可能成功**（Codex 在 #61 指出）。默认认为有：
+   * LLM 的 `invalid-response` 多半是某一段把输出带偏了，拆小能定位到它，所以 BatchQueue 会
+   * 重试 3 次再逐条兜底。但服务端整个返回坏了（不是 JSON、格式不对）属于**系统性**失败，
+   * 拆多小都一样——100 段的一批会白打 104 次请求，而且打在我们本就想省着用的免费端点上。
+   * provider 遇到这种情况显式声明 false，`asBatchError` 就不把它转成批次错误
+   */
+  readonly isolatable: boolean
+
+  constructor(readonly kind: ProviderErrorKind, message: string, options?: { cause?: unknown; isolatable?: boolean }) {
     super(message, options)
     this.name = 'ProviderError'
+    this.isolatable = options?.isolatable ?? true
     attachRequestErrorMeta(this, META_BY_KIND[kind])
   }
 }

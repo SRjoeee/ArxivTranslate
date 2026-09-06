@@ -432,6 +432,7 @@ export interface TranslateResult {
 
   **9.5 倍**，而且请求数降到三分之一——对这个非官方端点反而更客气。`pnpm e2e` 有两条守着：平均 ≥ 5 段/请求、同时在飞 ≤ 2。
 
+- **系统性失败不进批级重试** [决定，2026-09-06，Codex 在 #61 指出]：`BatchQueue` 只对 `BatchCountMismatchError` 做「重试 3 次 + 逐条兜底」，而 `asBatchError` 会把 provider 的 `invalid-response` 转成它——对 LLM 是对的（多半是某一段把输出带偏，拆小能定位到它），对免费引擎「整个响应不是 JSON」这种就是纯浪费：100 段的一批要白打 104 次请求，还打在我们本就想省着用的端点上。`ProviderError` 因此带一个 `isolatable`（默认真），provider 遇到系统性失败显式声明假，`asBatchError` 就不转、错误立刻上报给降级链。google-web 的「不是 JSON」「格式异常」是假，「条数对不上」保持真（逐条发通常就对得上）
 - **HTTP 状态要分清瞬时与永久** [决定，2026-09-06，Codex 在 #17 指出]：原来 `google-web` 把非 429 的失败一律归成 `network`，而 retry-policy 的 `isRetryableRequestErrorMeta` **先看 kind 再看状态码**，`network` 直接判定可重试——一个永远不会成功的 400 会被重试满 3 次、再被 BatchQueue 对半拆分逐条重来，100 段的一批能放大成几十次无用请求。现在按状态码映射：429 → `rate-limit`，401 / 403 → `auth`，其余 4xx（408 / 409 除外，它们照状态码表算瞬时）→ 新增的 `bad-request`（不重试但仍触发降级链——换个引擎可能就成了），5xx 与连接层失败才留给 `network`
 - 视为**随时会断**的东西：独立文件、独立错误类型、失败自动切到 fallback 链的下一个
 - fallback 链默认：用户选定 provider → `chrome-builtin` → `google-web`
