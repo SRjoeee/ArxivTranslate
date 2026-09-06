@@ -13,6 +13,8 @@ const PROFILE = `${HERE}.profile`
 const SHOTS = `${HERE}.shots`
 const PAPER = process.env.AXT_PAPER ?? '2410.00260'
 const PAPER2 = process.env.AXT_PAPER2 ?? '2312.17527'
+/** 第三篇：前面的用例都没碰过它，缓存是冷的——导航那条要靠真实积压才测得出东西 */
+const PAPER3 = process.env.AXT_PAPER3 ?? '2312.17141'
 const GOOGLE = 'translate-pa.googleapis.com'
 
 const results = []
@@ -306,6 +308,33 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   context.off('request', onRequest)
   check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）', before >= 5 && pending > 0 && late === 0,
     `关闭前 ${before} 个请求、${pending} 个块还在等；关闭 0.5 s 后新增 ${late} 个`)
+}
+
+// ── 导航离开：tabs.onRemoved 不覆盖这种情况（Codex 在 #59 指出）──────────
+{
+  const seen = []
+  const onRequest = request => { if (request.url().includes(GOOGLE)) seen.push(Date.now()) }
+  context.on('request', onRequest)
+  const page = await context.newPage()
+  await page.goto(`https://arxiv.org/html/${PAPER3}#axt-translate`, { waitUntil: 'domcontentloaded' })
+  const height = await page.evaluate(() => document.documentElement.scrollHeight)
+  for (let y = 0; y < height; y += 700) {
+    await page.evaluate(top => window.scrollTo(0, top), y)
+    await sleep(40)
+  }
+  const t0 = Date.now()
+  while (Date.now() - t0 < 40_000 && seen.length < 5) await sleep(200)
+  const before = seen.length
+  const pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
+  const tLeave = Date.now()
+  // 跳到非 arXiv 页面：content script 没了，也永远不会再发新的 scope 过来
+  await page.goto('https://example.com/', { waitUntil: 'domcontentloaded' })
+  await sleep(8_000)
+  const late = seen.filter(t => t > tLeave + 500).length
+  context.off('request', onRequest)
+  await page.close()
+  check('导航离开后 background 不再发新请求（会话随导航撤掉）', before >= 5 && pending > 0 && late === 0,
+    `离开前 ${before} 个请求、${pending} 个块还在等；离开 0.5 s 后新增 ${late} 个`)
 }
 
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────

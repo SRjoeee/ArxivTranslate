@@ -16,6 +16,11 @@ export interface SessionRouter {
   drop(scopes: readonly string[]): Promise<number>
   /** 标签页关闭 / 导航：撤掉挂在它上面的会话 */
   dropTab(tabId: number): Promise<number>
+  /**
+   * 把所有进行中的会话迁到新链上。**只给用户的显式动作用**（下载完语言包后的 `axt:engine-ready`）：
+   * 被动的配置变更故意不迁，见本文件开头
+   */
+  rebindAll(transport: TranslationTransport): void
   /** 当前还绑着的 scope，按绑定顺序 */
   bound(): string[]
 }
@@ -57,6 +62,9 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
     },
     drop,
     dropTab: tabId => drop(scopesOfTab(tabId)),
+    rebindAll(transport) {
+      for (const [scope, session] of sessions) sessions.set(scope, { ...session, transport })
+    },
     bound: () => [...sessions.keys()],
   }
 }

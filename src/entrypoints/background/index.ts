@@ -46,11 +46,20 @@ export default defineBackground(() => {
    */
   const router = createSessionRouter(transportOf)
 
-  // tabs.onRemoved 只给 tabId，不需要 "tabs" 权限
-  browser.tabs.onRemoved.addListener(tabId => {
+  // 两个生命周期钩子都只给 tabId / status，不需要 "tabs" 权限
+  const dropTab = (tabId: number, why: string) => {
     void router.dropTab(tabId).then(n => {
-      if (n > 0) console.debug(`[axt] 标签页 ${tabId} 关闭，撤掉 ${n} 个排队 / 在飞的请求`)
+      if (n > 0) console.debug(`[axt] 标签页 ${tabId} ${why}，撤掉 ${n} 个排队 / 在飞的请求`)
     })
+  }
+  browser.tabs.onRemoved.addListener(tabId => dropTab(tabId, '关闭'))
+  /**
+   * 导航离开也要撤（Codex 在 #59 指出）：`onRemoved` 只管关闭，标签页跳到别的网址时不触发。
+   * 而「同一标签页出现新 scope 就撤掉旧的」那条只在**新页面也是 arXiv 论文**时才会发生——
+   * 跳到任何别的站点，旧队列就一直跑到批次耗尽预算为止
+   */
+  browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+    if (changeInfo.status === 'loading') dropTab(tabId, '导航离开')
   })
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -79,9 +88,15 @@ export default defineBackground(() => {
         return true
       case 'axt:engine-ready':
         // 语言包下载完之前建的链里没有这个引擎（buildChain 会把 isAvailable 为假的剔掉），
-        // 或者它已被永久降级。重建一条新链，让它重新参与（§8.5，Codex 在 #50 指出）
+        // 或者它已被永久降级。重建一条新链，让它重新参与（§8.5，Codex 在 #50 指出）。
+        // **进行中的会话也要迁过去**（Codex 在 #59 指出）：popup 明说「接下来的段落会用离线引擎」，
+        // 不迁的话那一页会一直用着旧的兜底链，承诺落空。这是用户显式动作，与被动的配置变更不同——
+        // 后者故意不迁（见 sessions.ts）
         activate()
-          .then(a => a.transport.status())
+          .then(async a => {
+            router.rebindAll(a.transport)
+            return a.transport.status()
+          })
           .then(status => sendResponse({ reset: status.chain.includes(message.id) }))
           .catch(() => sendResponse({ reset: false }))
         return true

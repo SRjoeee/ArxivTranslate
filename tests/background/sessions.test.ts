@@ -84,6 +84,23 @@ describe('createSessionRouter', () => {
     expect(router.bound()).toEqual(['session-2'])
   })
 
+  it('rebindAll 把进行中的会话迁到新链：只给用户显式动作用（下载完语言包）', async () => {
+    const first = fakeTransport('旧链')
+    const second = fakeTransport('新链')
+    let current = first
+    const router = createSessionRouter(async () => current)
+    await router.forCall('session-1', 1)
+    await router.forCall('session-2', 2)
+    current = second
+    // 不迁的话，popup 承诺的「接下来的段落会用离线引擎」落空
+    router.rebindAll(second)
+    expect(nameOf(await router.forCall('session-1', 1))).toBe('新链')
+    expect(nameOf(await router.forCall('session-2', 2))).toBe('新链')
+    // 绑定关系（含 tabId）保留：迁完之后关标签页照样撤得掉
+    expect(await router.dropTab(1)).toBe(1)
+    expect(second.cancelled).toEqual(['新链:session-1'])
+  })
+
   it('不同标签页的同名 scope 互不影响（会话 id 本来就唯一，这条是护栏）', async () => {
     const t = fakeTransport('链')
     const router = createSessionRouter(async () => t)

@@ -141,8 +141,10 @@ export function App() {
     try {
       const res = await sendMessage({
         type: 'axt:translate',
-        // 指名当前配置的引擎：测试连接问的是「这个端点通不通」，走降级链的话端点坏了也会显示成功
-        providerId: config.provider,
+        // 指名引擎：测试连接问的是「这个端点通不通」，走降级链的话端点坏了也会显示成功。
+        // 用**已保存的**那个而不是表单里的——按钮上写着「用已保存的配置」，而 background 也是从
+        // storage 读配置建链；拿未保存的下拉值去指名，轻则测错引擎，重则报「不在当前链上」（Codex 在 #59 指出）
+        providerId: (await getConfig()).provider,
         request: { segments: [{ id: 'sample', text: SAMPLE }], source: 'en', target: config.targetLanguage, context: { sectionTitle: '连接测试' } },
       })
       const ms = Math.round(performance.now() - t0)
