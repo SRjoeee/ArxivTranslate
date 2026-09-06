@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import {
   PROTECT_RULES, RULES_VERSION, SKIP_RULES, TABLE_RULES, UNIT_RULES,
-  classify, documentRoot, hasTranslatableText, isBibAuthorBlock, isNamedTag, isNumericCell, visibleText,
+  classify, documentRoot, hasTranslatableText, isNamedTag, isNumericCell, visibleText,
 } from '@/core/rules/latexml'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
@@ -33,7 +33,7 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.8.0')
+    expect(RULES_VERSION).toBe('0.9.0')
   })
 })
 
@@ -49,7 +49,7 @@ describe('classify：逐规则命中', () => {
     ['参考文献条目（分段）', '<li class="ltx_bibitem"><span class="ltx_tag ltx_tag_bibitem">[1]</span><span class="ltx_bibblock">A. Title.</span></li>', 'li', null],
     ['参考文献片段', '<li class="ltx_bibitem"><span class="ltx_bibblock">A. Title.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
     // 多段条目的第一段是作者列表，按位置判断（部分模板才有 .ltx_bib_author）
-    ['参考文献的作者段', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span><span class="ltx_bibblock">B. P. Abbott et al.</span><span class="ltx_bibblock">Title.</span></li>', '.ltx_bibblock', { kind: 'skip', rule: 'bib-authors', descend: false }],
+    ['参考文献的作者段（2026-09-06 起也翻，§5.4）', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span><span class="ltx_bibblock">B. P. Abbott et al.</span><span class="ltx_bibblock">Title.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
     ['只有一段的条目不当作者段', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span><span class="ltx_bibblock">B. P. Abbott et al. Title. 2024.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
     ['未分段的参考文献条目', '<li class="ltx_bibitem"><span class="ltx_tag ltx_tag_bibitem">[1]</span>A. Title, 2024.</li>', 'li', { kind: 'unit', rule: 'bibitem', descend: true }],
     ['致谢', '<div class="ltx_acknowledgements">Thanks.</div>', undefined, { kind: 'unit', rule: 'ack', descend: true }],
@@ -298,27 +298,22 @@ describe('description 列表的术语（Codex 在 #18 指出）', () => {
   })
 })
 
-describe('参考文献的作者段优先看语义标注（Codex 在 #18 指出）', () => {
+describe('参考文献条目的每一段都翻，作者段不再例外（§5.4，2026-09-06）', () => {
   const entry = (inner: string) => new DOMParser()
     .parseFromString(`<!doctype html><html><body><article class="ltx_document"><ul class="ltx_biblist"><li class="ltx_bibitem">${inner}</li></ul></article></body></html>`, 'text/html')
 
-  it('有 .ltx_bib_author 就按它判，不按位置', () => {
-    // 作者段排在第二段的假想模板：位置判断会把标题当作者段跳掉
-    const d = entry('<span class="ltx_bibblock">A Manual of Style.</span><span class="ltx_bibblock"><span class="ltx_bib_author">Doe, J.</span></span>')
-    const [title, author] = [...d.querySelectorAll('.ltx_bibblock')]
-    expect(isBibAuthorBlock(title!)).toBe(false)
-    expect(isBibAuthorBlock(author!)).toBe(true)
+  it('带 .ltx_bib_author 标注的作者段是翻译单元', () => {
+    const d = entry('<span class="ltx_bibblock"><span class="ltx_bib_author">Doe, J.</span></span><span class="ltx_bibblock">A Title.</span>')
+    for (const el of d.querySelectorAll('.ltx_bibblock')) expect(classify(el)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
   })
 
-  it('没有标注时回到位置判断：12 篇 fixture 里 285 条多段引文都是这种', () => {
+  it('没有标注、只靠位置认出来的第一段也是翻译单元', () => {
     const d = entry('<span class="ltx_bibblock">Doe, J., and Roe, R.</span><span class="ltx_bibblock">A Title.</span>')
-    const [first, second] = [...d.querySelectorAll('.ltx_bibblock')]
-    expect(isBibAuthorBlock(first!)).toBe(true)
-    expect(isBibAuthorBlock(second!)).toBe(false)
+    for (const el of d.querySelectorAll('.ltx_bibblock')) expect(classify(el)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
   })
 
-  it('只有一段的条目整条就是引文，不跳过', () => {
+  it('只有一段的条目仍然整条一个单元，行为没变', () => {
     const d = entry('<span class="ltx_bibblock">Doe, J. A Title. Journal, 2020.</span>')
-    expect(isBibAuthorBlock(d.querySelector('.ltx_bibblock')!)).toBe(false)
+    expect(classify(d.querySelector('.ltx_bibblock')!)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
   })
 })

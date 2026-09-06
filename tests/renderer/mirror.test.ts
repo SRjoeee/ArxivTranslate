@@ -57,16 +57,22 @@ describe('createMirrors', () => {
     expect(mirror.getAttribute(FOR_ATTR)).toMatch(/^mirror:/)
   })
 
-  it('参考文献的序号与作者段也镜像——它们同样没有译文，右栏空着就断了对照', () => {
-    const doc = withTranslation('<ul class="ltx_biblist"><li class="ltx_bibitem" id="b1">'
+  it('参考文献只镜像序号：作者段 2026-09-06 起自己会翻，不再需要副本（§5.4）', () => {
+    const doc = docOf('<ul class="ltx_biblist"><li class="ltx_bibitem" id="b1">'
       + '<span class="ltx_tag ltx_tag_bibitem">[1]</span>'
       + '<span class="ltx_bibblock">A. Author, B. Author.</span>'
       + '<span class="ltx_bibblock">Some title.</span></li></ul>')
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    // 两段都是翻译单元，都拿到译文——作者段还被跳过时，它没有译文、要靠副本占住左栏
+    expect(blocks.filter(b => b.kind === 'text')).toHaveLength(2)
+    for (const b of blocks) renderText(b as TextBlock, frag(doc, '译文'))
     createMirrors(doc)
-    const item = doc.getElementById('b1')!
-    const kinds = Array.from(item.children).map(c => `${Array.from(c.classList).filter(x => x.startsWith('ltx_'))[0]}${c.classList.contains(MIRROR_CLASS) ? '(镜像)' : c.classList.contains(T_CLASS) ? '(译文)' : ''}`)
+    const kinds = Array.from(doc.getElementById('b1')!.children)
+      .map(c => `${Array.from(c.classList).filter(x => x.startsWith('ltx_'))[0]}${c.classList.contains(MIRROR_CLASS) ? '(镜像)' : c.classList.contains(T_CLASS) ? '(译文)' : ''}`)
     expect(kinds).toContain('ltx_tag(镜像)')
-    expect(kinds.filter(k => k === 'ltx_bibblock(镜像)').length).toBe(1)
+    expect(kinds.filter(k => k === 'ltx_bibblock(镜像)')).toHaveLength(0)
+    expect(kinds.filter(k => k === 'ltx_bibblock(译文)')).toHaveLength(2)
   })
 
   it('等待翻译的块不镜像：否则译文到达后会同时存在副本与译文', () => {

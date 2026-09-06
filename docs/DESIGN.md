@@ -142,7 +142,7 @@ interface Block {
 
 - **作者姓名也翻** [决定，2026-09-06，用户拍板]：作者区的其余部分（机构、联系方式、日期、作者注）2026-09-04 就已经放开，只剩姓名还挡着，理由是"音译后引用检索会失效"。这条理由在**双语**阅读器上站不住：stack 与 side 模式里原名就在译名旁边，要复制去检索的人拿得到原文；只有 `only` 模式会把原名藏起来，那是该模式对所有内容的固有取舍，不该由姓名单独承担。放开后 `.ltx_personname` 从跳过规则挪到翻译单元。
 
-  **fixture 实测**（12 篇共 30 个 `.ltx_personname`）：全部位于 `article.ltx_document` 内的 `.ltx_creator` 里，**参考文献里一个都没有**——引文作者段仍由 §5.4 的 `bib-authors` 单独跳过，不受这条影响。结构一致：纯文本，个别带 `<sup>*</sup>` 脚注标记（走成对占位符）；个别模板会把两位作者塞进同一个元素（`Matías Blaña and Marcelo D. Mora`），整体翻也正确。
+  **fixture 实测**（12 篇共 30 个 `.ltx_personname`）：全部位于 `article.ltx_document` 内的 `.ltx_creator` 里，**参考文献里一个都没有**——引文作者段是 `.ltx_bibblock`，当天稍晚由 §5.4 一并放开。结构一致：纯文本，个别带 `<sup>*</sup>` 脚注标记（走成对占位符）；个别模板会把两位作者塞进同一个元素（`Matías Blaña and Marcelo D. Mora`），整体翻也正确。
 
   **译文质量实测**（google-web，免费引擎里最差的情况）：30 个里 28 个是正常音译，中文名还能还原成汉字（`Yuan Xia` → 袁霞、`Haipeng Cai` → 蔡海鹏、`Fumihiro Imoto` → 井本文宏，具体用字是猜的）。一个翻车：**`Brian Street` → 布莱恩街**，姓氏被当成普通名词。约 3% 的错误率，且错得显眼、原文就在旁边。LLM 有论文标题与摘要作上下文，表现应当更好。**没有为此改 prompt**：为几个姓名给每一批都加一句约束不划算，而 `PROMPT_VERSION` 一升会把所有缓存作废；这条留待有真实反馈再议。
 
@@ -157,7 +157,7 @@ interface Block {
   **没有做成"按计算样式跳过隐藏元素"的通用机制**：extractor 是纯 DOM 的，给每个候选元素跑 `getComputedStyle` 会在几百个块的论文上强制大量样式计算，与 §7.2 记的"只读量法"是同一类性能陷阱。已知的隐藏模板标签就这一个，按规则写进 `PROTECT_RULES` 更便宜也更可查。改这条要升 `RULES_VERSION`，已升到 0.7.1。
 
 - **description 列表的术语也要翻** [决定，2026-09-06，Codex 在 #18 指出]：LaTeXML 把 `\item[Compactness]` 的术语放进 `.ltx_tag.ltx_tag_item`，而 tag 是受保护的，于是整个 `.ltx_item` 没有自有文本、**根本不成块**，术语永远不翻。`.ltx_tag_item` 加进 `NAMED_TAGS`，由既有的内容判定分流：12 篇 fixture 共 371 个，含词的只有 8 个（`Markov categories:`、`CD categories:`、`Compactness.`、`RQ1`–`RQ5`），其余 363 个是 `(1)` `•` 这类标记，照旧作 void。google-web 实测把 `RQ1` 原样返回、`Markov categories:` 译成「马尔可夫分类：」，标识符不会被改写。快照增量精确等于这 8 个
-- **参考文献的作者段优先看语义标注** [决定，2026-09-06，Codex 在 #18 指出]：`isBibAuthorBlock` 原来只按位置（多段条目的第一段就是作者段）。12 篇 fixture 里 285 条多段引文，带 `.ltx_bib_author` 的 59 条**全部**符合这个位置假设，所以这条改动今天不改变任何结果；它保的是将来——某个模板把作者放在别的段时，纯位置判断会把标题当作者段跳掉，那条引文的标题就永远不翻。有标注就信标注，没有才回到位置
+- ~~**参考文献的作者段优先看语义标注**（2026-09-06，Codex 在 #18 指出）~~ **已废止，2026-09-06**：作者段不再跳过（§5.4），`isBibAuthorBlock` 连同这条判定一起删除。它当初解决的是「哪一段是作者段」，现在这个问题不存在了——每一段都翻
 - **带环境名的 `.ltx_tag` 要翻译** [决定，2026-09-05，用户反馈]：LaTeXML 把定理环境、图表、算法、附录的**名字**也放进 `.ltx_tag`，`Definition 1.1.` 整体被当编号保护，中文读者看到的还是英文。按细分类名区分：`ltx_tag_theorem` / `ltx_tag_figure` / `ltx_tag_table` / `ltx_tag_float` / `ltx_tag_appendix` / `ltx_tag_part` / `ltx_tag_chapter` 参与翻译，其余（equation、section、subsection、ref、item、note）仍作 void。**光看类名不够**：LaTeXML 给子图面板的标签也用 `.ltx_tag_figure`，内容是纯标识符 `(a)` `(b)` `(c)`（387 个带名 tag 里有 5 个，Codex 在 #53 指出），翻了会被模型改写、与面板的对应关系断掉。所以再加一道内容判定 `isNamedTag`：类名在清单里，**去掉只含标识符的括号段之后**仍含连续两个及以上字母才翻（括号里有非罗马数字的词就保留：`(Figure 1)` 整体带括号的标签不能连环境名一起丢掉；Codex 在 #53 指出）。只数字母不够——面板标识符可以是 `(ii)` `(iii)` 这种多字母罗马数字；而括号本来就是 LaTeXML 给标识符的形状，环境名从不带括号（`Definition 1.2 (Hall set)` 去掉括号后仍有 Definition，照样要翻）。依据是全部 12 篇 fixture 里 1241 个 `.ltx_tag` 的实测分布：theorem 的 246 个全部形如 "Definition 1"、table 的 43 个全是 "Table 1:"、figure 的 63 个里 58 个是 "Figure 1."、appendix 20 个全是 "Appendix A"、float 13 个全是 "Algorithm 1"；反过来 equation 的 344 个里只有 13 个带字母（`(let.lin)` 这类 LaTeX 标签，动不得），section / subsection / ref 的 439 个里带字母的全是罗马数字（II、III.1），note 的 54 个是脚注标记。**罗马数字编号的一律不翻**：2026-09-05 用 google-gtx 实测（Codex 在 #53 指出），`Table IV:` → `表四：`、`Table X:` → `表十：`、`Part I` → `第一部分`，而指向它的 `.ltx_ref` 是受保护的原文，一翻正文与交叉引用就对不上；阿拉伯数字（`Table 4:` → `表 4：`）、字母编号（`Appendix A` → `附录A`）、括号面板（`Figure 1(a)`）实测都原样保留。Google 自己也只把 I / V / X / L / M 当数字，单个 C、D 当字母，`ROMAN_ID` 照此判定；复合编号看首段（`Table IV.1` 实测 → 表四.1，`IV.1` / `IV-A` 都算罗马编号），大小写都算（LaTeX `\roman` 给出的 `Table iv:` 实测 → 表四：）。审计脚本 `fixtures-stats.ts` 的规则命中数同样走 `classify()`，不按选择器数，否则会把这些放行的 tag 记成 protect/tag。同一篇论文的编号风格是一致的，读者不会同时看到「表 4」与「Table IV」。fixture 上的结果：387 个带名 tag 中 368 个翻、19 个保护（5 个面板标签 + 13 张罗马编号的表 + `Part I`）。改这条要升 `RULES_VERSION`（进缓存键），已升到 0.6.2。实测 2609.04056v1：定理标题块从 34 个增加到 75 个，`Definition 1.2 (Hall set).` → `定义 1.2（大厅布置）。`
 
 ### 5.3 表格 [决定]
@@ -179,7 +179,11 @@ interface Block {
 
 - 默认翻译，可在设置里关闭
 - **按条目内的片段翻**（2026-09-04 修订）：LaTeXML 把一条参考文献拆成若干 `.ltx_bibblock`（作者 / 标题 / 出处各一段，页面上各占一行），翻译单元是 `.ltx_bibblock` 而不是整条 `.ltx_bibitem`，译文因此只跟在对应的那一行下面，不再整条重复
-- **多段条目的第一段是作者列表，跳过**：只有部分模板会标 `.ltx_bib_author`（20 篇实测 13 篇有），所以按位置判断（`isBibAuthorBlock`）。只有一段的条目（natbib 等样式）整段就是引文，不跳过
+- **作者段也翻，条目内每一段一视同仁** [决定，2026-09-06，用户拍板]：原来多段条目的第一段（作者列表）由 `isBibAuthorBlock` 单独跳过。这条规则制造了一个**用户能直接看到的不一致**——只有一段的条目（natbib、AMS、AAS 等样式）整段就是引文，作者名混在里面**本来就在翻**；12 篇 fixture 里 7 篇是这种，另 5 篇是多段，于是同一个扩展在不同论文上表现相反。§5.2 已在同一天放开正文作者姓名，这里再挡着就更没有依据了。删掉跳过后 `.ltx_bibblock` 的单元规则自然接管，`isBibAuthorBlock` 与 `bib-authors` 规则 id 一并删除。
+
+  **代价实测**（12 篇 fixture）：新增 285 个块、25609 字，占全部翻译单元的 **+5.7% 块 / +2.2% 字符**。side 模式下新增的块**全部连通**到翻译根（快照里分子分母同幅增加，`blockedBy` 一个没变），不需要额外的容器覆盖。
+
+  **译文质量实测**（google-web，免费引擎里最差的情况）：单独送作者段比混在整条里**更容易被音译**——整条送时 Google 倾向保留（`W. Arendt 和 AFM ter Elst`、`Agha, G., Palmskog, K.:`），单独送则音译（`史蒂文·阿兹特、齐格弗里德·拉斯托弗…`）。两个具体缺陷：机构作者被当普通词（`Anthropic.` → `人类学。`），首字母缩写的点号被吃掉（`V. I.` → `VI`、`M. D.` → `MD`，看着像罗马数字）。**LLM 路径没有这个问题**：默认提示词里那条 “Keep author names, journal names, conference names, dataset names, code identifiers and URLs in the original language” 会让作者段原样返回。这是免费引擎的固有短板，不为它改规则；双语模式下原文就在旁边
 - only 模式不再整条豁免（见 §7.4）：作者段不翻、自然保留，标题与出处段只显示译文
 - DOI / URL 本身是 `<a>`，走占位符自动保留
 - LLM prompt 固定加一条：人名、期刊名、会议名保留原文
@@ -348,7 +352,8 @@ interface ProtectedBlock {
 ### 7.4 only（仅译文）
 
 - 原块 `display: none`（不是删除、不是替换文本节点）；选择器是 `[data-axt-state="translated"]`，所以只隐藏真的有译文的块
-- 参考文献条目**不再豁免**（2026-09-04 修订）：条目改为按 `.ltx_bibblock` 分段翻译后（§5.4），作者段本来就不翻、没有 `data-axt-state`，只译文模式下自然保留，条目仍完整可读。旧豁免是整条翻译时代的遗留
+- 参考文献条目**不再豁免**（2026-09-04 修订）：条目改为按 `.ltx_bibblock` 分段翻译后（§5.4），译文跟在对应的那一行下面，只译文模式下条目仍逐行完整可读。旧豁免是整条翻译时代的遗留
+- only 模式下引文作者名只剩译名（2026-09-06）：作者段放开翻译后（§5.4）它也有了 `data-axt-state`，英文原名会被隐藏。免费引擎音译出来的姓名对**引用检索**没有价值，这是 only 模式对所有内容的固有取舍——要检索就用 side / stack，原名一直在旁边
 - 未翻译成功的块保持原文可见：隐藏规则只匹配 `data-axt-state="translated"`，`pending` / `failed` 不被匹配即可，失败块旁的重试小部件（§7.6）也跟着可见。**不要**写 `display: revert`——revert 会把站点的 display 一并撤销（`.ltx_bibblock` 从 block 变回 inline），2026-09-05 已删（Codex 在 #19 指出）
 
 ### 7.4b 无障碍：我们负责的那部分 [决定，2026-09-06]
