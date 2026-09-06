@@ -1,4 +1,6 @@
+import { SIDE_LAYOUT } from '@/core/rules/latexml'
 // side 模式的结构判定（DESIGN §7.2）。这里是唯一事实来源，modes.css 里的同名清单由测试守着。
+// `ltx_*` 字面量全部来自 rules 模块的 SIDE_LAYOUT（CLAUDE.md 硬规则 2），这里只做组合。
 //
 // 参与配对的容器 = 内部含有译文的元素，减去下面这一小撮。
 // flex 是可以排除的：后代要 subgrid 得先是网格项，父级是 flex 就够不着外面的轨道。
@@ -15,13 +17,13 @@
  * 按普通容器接管，表格与脚注左右配对。以前按类名整类排除，单列的也被堆叠规则误伤成上下排。
  * happy-dom 对 `:not(:is(带 :has 的复杂选择器))` 判定有误，所以这条走 closest()，与其他子树排除一样
  */
-export const MULTI_PANEL_FLEX = '.ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1))'
+export const MULTI_PANEL_FLEX = SIDE_LAYOUT.multiPanelFlex
 
 export const SIDE_DENY = [
   '.axt-t',                                            // 译文自身不是容器
   'table', 'thead', 'tbody', 'tr', 'td', 'th',         // 表格内部结构，改成网格会毁掉表格
-  '.ltx_inline-block', '.ltx_note', '.ltx_listing',    // 行内与预格式化上下文
-  '.ltx_p', '.ltx_title', '.ltx_caption', '.ltx_bibblock', // 配对成员本身，内部的译文是脚注那种嵌套
+  SIDE_LAYOUT.atomicContext,                           // 行内与预格式化上下文
+  SIDE_LAYOUT.pairMember,                              // 配对成员本身，内部的译文是脚注那种嵌套
 ].join(', ')
 
 /**
@@ -34,7 +36,7 @@ export const SIDE_DENY = [
  * 运行时改用 isSideContainer() 判定。
  */
 export const SIDE_DENY_SUBTREE = [
-  '.ltx_note', // 脚注（上面那段）
+  SIDE_LAYOUT.note, // 脚注（上面那段）
   // 整块拆开的插图：两份都不参与配对网格，内部一律交给 ar5iv 自己排（DESIGN §7.2）
   '[data-axt-split]', '.axt-split',
   MULTI_PANEL_FLEX, // 多面板插图（上面那段）
@@ -70,5 +72,5 @@ export function isMirrorContainer(el: Element): boolean {
 // 在堆叠区只会变成同一列里上下两份（实测 2312.17141 的三面板图：每个面板的公式重复了一遍）。
 // 多面板 flex 图不在这里：它整棵子树都不是容器（SIDE_DENY_SUBTREE），里面的配对本来就是块级上下排，镜像也进不去
 export const SIDE_STACK = [
-  '.ltx_td', '.ltx_inline-block', // 段内嵌套的容器
+  SIDE_LAYOUT.stack, // 段内嵌套的容器
 ].join(', ')
