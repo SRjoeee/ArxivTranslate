@@ -5,10 +5,11 @@
 // 用法：pnpm build && pnpm e2e        （首次先 npx playwright install chromium）
 // 环境变量：AXT_PAPER / AXT_PAPER2 换论文；AXT_HEADED=1 看着跑。
 import { mkdirSync, rmSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
-const HERE = new URL('.', import.meta.url).pathname
-const EXT = process.env.AXT_EXT_DIR ?? new URL('../../.output/chrome-mv3', import.meta.url).pathname
+const HERE = fileURLToPath(new URL('.', import.meta.url))
+const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
 const PROFILE = `${HERE}.profile`
 const SHOTS = `${HERE}.shots`
 const PAPER = process.env.AXT_PAPER ?? '2410.00260'
@@ -131,7 +132,13 @@ const countDom = page => page.evaluate(() => ({
   pendingNodes: document.querySelectorAll('.axt-pending').length,
   failed: document.querySelectorAll('[data-axt-state="failed"]').length,
   pending: document.querySelectorAll('[data-axt-state="pending"]').length,
-  marked: document.querySelectorAll('[data-axt-id], [data-axt-state]').length,
+  // 恢复原文那条断言靠这个数字。**不能只列举几个属性**：渲染层还会注入 data-axt-mode /
+  // -inline / -partial / -note / -fit / -split / -for / -on，漏掉任何一个，残留就检查不出来
+  // （Codex 在 #34 指出）。这里扫每个元素的属性名前缀，连 <html> 一起数
+  marked: [document.documentElement, ...document.querySelectorAll('*')]
+    .reduce((n, el) => n + el.getAttributeNames().filter(a => a.startsWith('data-axt-')).length, 0),
+  markedNames: [...new Set([document.documentElement, ...document.querySelectorAll('*')]
+    .flatMap(el => el.getAttributeNames().filter(a => a.startsWith('data-axt-'))))].sort(),
   on: document.documentElement.hasAttribute('data-axt-on'),
 }))
 
@@ -258,7 +265,13 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     last = idle
   }
   const dom = await countDom(page)
-  check('逐屏滚到底：进入视口的块都翻了，没滚到的不请求', !!last && last.requested > first.requested && last.done === last.requested && last.failed === 0 && dom.pendingNodes === 0, `${last?.text ?? '(no idle after scroll)'}; DOM ${JSON.stringify(dom)}`)
+  // 条件里必须带上 dom.translations：只信管线自己的计数的话，渲染层空转、
+  // 或者译文节点被谁删掉了，这条依然会通过（Codex 在 #34 指出）。
+  // 一个块可能产出多个译文节点（表格克隆、脚注副本），所以只要求"不少于已完成数"
+  check('逐屏滚到底：进入视口的块都翻了、译文真的在 DOM 里，没滚到的不请求',
+    !!last && last.requested > first.requested && last.done === last.requested && last.failed === 0
+    && dom.pendingNodes === 0 && dom.translations >= last.done,
+    `${last?.text ?? '(no idle after scroll)'}; DOM ${JSON.stringify(dom)}`)
   const peak = peakPerSecond(requests)
   // 攒批（§8.3）：整篇的段落要攒成大请求。2026-09-06 之前只有 LLM 攒批，google-web 一次调用一个请求，
   // 实测 213 块发了 65 个请求、平均 4.2 段/请求；修好后 190 块只用 21 个、平均 11.2 段
@@ -302,7 +315,9 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await sleep(4_000)
   const after = await countDom(page)
   const late = requests.filter(r => r.t > tCancel + 500).length
-  check('恢复原文后没有译文残留、没有 data-axt-*', after.translations === 0 && after.marked === 0 && !after.on, `${JSON.stringify(after)}；恢复前已有 ${partial} 段译文`)
+  check('恢复原文后没有译文残留、没有 data-axt-*（扫全部属性名，不是只查两个）',
+    after.translations === 0 && after.marked === 0 && !after.on,
+    `${JSON.stringify(after)}；恢复前已有 ${partial} 段译文`)
   check('恢复原文后不再发新请求（排队的批次被撤）', late === 0, `恢复前 ${requestsBefore} 个请求，恢复 0.5 s 后新增 ${late} 个`)
   check('恢复原文后标签页标题变回原文', (await page.title()) === originalTitle, `${await page.title()}；日志：${logs.find(l => /translation stopped/.test(l.text))?.text ?? '(no stopped line)'}`)
   await popup.screenshot({ path: `${SHOTS}/popup-after-restore.png` })
