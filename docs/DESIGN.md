@@ -276,7 +276,7 @@ interface ProtectedBlock {
 1. 译文节点是原块的**下一个兄弟**，标签名与原块相同，class 是**原块的 class 加 `axt-t`**（`p.ltx_p` → `p.ltx_p.axt-t`），带 `data-axt-for="<blockId>"`。复制 class 是为了沿用站点样式：主标题居中与字号、参考文献条目的 grid 列、各级标题字号都由 `ltx_*` 类决定，不复制就全丢（2026-09-03 实测：主标题左对齐错位、`li.axt-t` 落进参考文献 12em 宽的第一列还带圆点）。克隆进译文的任何元素（表格整体、占位符回填的 `.ltx_note` 等）都要剥掉 `id` 与全部 `data-axt-*`
 2. 原节点只允许追加 `data-axt-id`、`data-axt-state`、`data-axt-inline` 属性，**不改子树**
 3. 全局状态只在 `<html>` 上：`data-axt-on`、`data-axt-mode="side|stack|only"`
-4. 恢复原文 = 删除所有 `.axt-t`、删除所有 `data-axt-*` 属性、移除注入的 `<style>`；恢复后 DOM 必须与翻译前逐节点相等（测试守护）
+4. 恢复原文 = 删除所有 `.axt-t` **与 `.axt-img`**（图片叠加层，§15.2）、删除所有 `data-axt-*` 属性、移除注入的 `<style>`；恢复后 DOM 必须与翻译前逐节点相等（测试守护）
 
 ### 7.2 side（左右对照）
 
@@ -758,27 +758,30 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 - 非 Mac 平台退化为多模态 LLM 直接读图给文字与坐标（坐标精度较低，可接受）
 - arXiv 的 SVG 图全是 TikZ 输出的 `svg.ltx_picture`（10 篇 fixture 共 164 个，多为画出来的公式），实测没有 `<text>`，文字只以 `foreignObject` 出现且极少（全部 fixture 仅 1 个文本节点），v1 整体跳过（§5.2）；OCR 路线只针对位图 `img.ltx_graphics`（fixture 中 13 个，RESEARCH.md §2.9）
 - **翻译走现有管线，不走 Safari 那种逐行无上下文的翻法**。用户给的对照样本（Safari 翻同一张物理示意图）里 "Dressed sites" 成了「打扮的网站」、"Even sites" 成了「甚至网站」、"String Extension" 成了「特林扩展名」，图里孤零零一个 **B** 也被框成「字母b」——每行单独送、没有图注与章节，就是这个结果。我们每张图的行连同图注、所属章节作为 context 一批送给现有 provider；单个字母、纯数字、标识符按 §6 既有的保留规则跳过不翻
-- **叠加层照 Safari 的样子**：白色圆角半透明框盖住原文字、译文字号随框高、竖直相邻且左缘对齐的行合成一个框（"Pair / Production" 两行一框）；hover 显示原文。底色从图上采样（同源图可读像素）
+- **叠加层照 Safari 的样子**：白色圆角半透明框盖住原文字、译文字号随框高、竖直相邻且左缘对齐的行合成一个框（"Pair / Production" 两行一框）；hover 显示原文。底色先用固定的半透明白，实测遇到深色底的图再加采样（ImageTrans 的 `detectBackgroundColor` 思路）
 - **现成的拿来用**：helper 核心移植 `bytefer/macos-vision-ocr`（MIT，单文件 Swift，Vision revision 3，输出每行文字 + 归一化四角 + 置信度，已经是 §15.3 要的形状），只需套上 Native Messaging 的 stdio 帧；叠加层移植 `xulihang/ImageTrans_chrome_extension`（GPL-3.0）`getImage.js` 里的 DOM 渲染段（字号适配 `fitBoxFontSize`、底色采样 `detectBackgroundColor`、换行、圆角框）与视口调度思路。**不移植**它替换 `<img>` src 的做法——违反 §7.1
 
 ### 15.2 架构
 
 ```
-content script                                axt-helper (Swift, 独立仓库)
-  fetch <img> → blob → base64                    Vision VNRecognizeTextRequest
-        │                                              │
-        ├──(chrome.runtime.connectNative)──► stdio JSON ┤
-        │                                              │
-        ◄── {lines:[{text, bbox, conf}]} ──────────────┘
-        │
-        ├─► 文字走现有 provider（context 带图注与所属章节）
-        └─► renderer 在 <img> 上叠 `.axt-img-overlay` 绝对定位标签层，hover 显示原文
+content script                       background (service worker)          axt-helper (Swift, helper/)
+  fetch <img>（同源、走 HTTP 缓存）      axt:ocr {imageHash, image, scope}     Vision VNRecognizeTextRequest
+  → SHA-256 → base64 ─────────────►   缓存查 imageHash|helper 版本 ──────►  stdio 长度前缀 JSON
+                                       未命中才 connectNative            ◄── {lines:[{text, quad, conf}]}
+  ◄── {lines} ──────────────────────  写回缓存
+  行 → 框（合并相邻行、过滤数字 / 单字母）
+  → 现有 axt:translate（纯文本路径，同批带图注）
+  → <img> 后插 `.axt-img` 兄弟节点，标签按归一化坐标定位
 ```
 
-- 图片翻译结果同样进缓存，键里加 `imageHash`（图片字节的 SHA-256）；OCR 结果另存一份，键是 `imageHash | helper 版本`，识别是确定性的、不用重跑
-- 叠加层遵守 §7.1 不变量：**只用兄弟节点**（`.axt-img-overlay`，`data-axt-for` 指向图），绝不给 `<img>` 包容器——包一层就改了原节点的父子关系；定位祖先由样式表给（`figure:has(> .axt-img-overlay) { position: relative }` 之类，CSS 不算改 DOM）。框的位置与尺寸按归一化坐标写成百分比，图随栏宽缩放时自动跟随；恢复时整层移除
-- side 模式下插图整块拆两份（§7.2）：叠加层属于「只有译文」的那一份，原件那份不叠；拆图副本的重建签名把叠加层算进去，否则译文到齐后副本里没有它
-- helper 放在本仓库 `helper/`（Swift Package，`Package.swift` + `Sources/`），与扩展同 PR 演进；分发要做时再拆独立仓库
+- **缓存分两层**：OCR 结果按 `imageHash | helper 版本` 存进同一个 Dexie 库（识别是确定性的，helper 换版本才重跑）；每行的**翻译走普通文字缓存**——键里**不加** imageHash，"Dynamical charge" 的译文与它在哪张图无关，跨图共享
+- 叠加层遵守 §7.1 不变量：**只用兄弟节点**（`.axt-img`，`data-axt-for` 指向图的 id），绝不给 `<img>` 包容器——包一层就改了原节点的父子关系。**它不带 `.axt-t`，`<img>` 也不带 `data-axt-id`** [决定，2026-09-07，plan 阶段核出]：带了会被 side 的配对网格排到右栏而不是盖在图上、拆图时 `<img>` 被当"配对原件"从副本里删掉、镜像被抑制、二十个样式预设全砸上去、边距对齐给它写内联样式。它是第三种注入标记：`marks.ts` 的 `isInjected` / `stripInjected`、`restore()`、`splitFigures` 的"真译文"判定都认它
+- **定位用 CSS 锚点定位**（Chrome ≥131，为了 `anchor-scope`；内置翻译 API 已要求 138+）：`img:has(+ .axt-img)` 声明锚点名，`.axt-img` 用 `anchor()` / `anchor-size()` 贴到图的盒子上，父元素 `position: relative; anchor-scope` 限定作用域，`grid-column: auto` 脱离配对网格。零 JS 几何读取、零 ResizeObserver；拆图副本结构相同，锚点自动成立。标签字号用容器查询单位（`cqh` / `cqw`）按框高与字数算成一个字符串写一次，不读布局——ImageTrans 那种 JS 二分量字号每框要 12 次强制布局，不用
+- **等待 / 失败态不建 DOM 节点**：pending 叠加层会被拆图克隆进副本、`stripIds` 又剥掉它的状态属性。只在成功时插叠加层（Safari 也是翻完才出现）；失败记在 image run 里，popup 显示计数、重试按钮管。可见性 CSS 只看结构与 `<html>` 属性（`data-axt-img-modes`），不看叠加层自己的属性
+- side 模式下插图整块拆两份（§7.2）：叠加层属于「只有译文」的那一份，原件那份由样式隐藏（**只限 side**——stack 显示原件、only 显示副本，叠加层跟着显示的那份走）；拆图副本的重建签名把叠加层算进去，否则译文到齐后副本里没有它。镜像每会话一次、跑在 OCR 之前，会插在 `<img>` 与叠加层之间：`mirror.ts` 的闸认 `isInjected`，插叠加层时顺手删掉紧跟的镜像；side → only 之后 OCR 才到时叠加层进了被隐藏的原件、副本签名过期，非 side 分支的整理对脏根删掉过期副本，回 side 时重建
+- **块内图片不翻**：目标 = `img.ltx_graphics` 且不在任何翻译块内（与拆图的"游离媒体"同一判定）。块内的图会随占位符克隆进译文、only 模式下原块整个隐藏，叠加层无处可挂；12 篇 fixture 的 16 张位图全在 figure / flex cell 里，无一在块内
+- **取消**：`axt:ocr` 带会话 `scope`；helper 客户端区分排队与在飞（在飞上限 1，helper 本就是顺序的，这样撤才真能撤掉活），撤 scope 时拒掉排队的、在飞的到达后丢弃；`axt:cancel-scope` 与标签页关闭都经 sessions 的 `onDrop` 钩子调它。DOM 安全仍由 content 侧每个 `await` 之后重查会话 id 保证（与文字管线同一模式）
+- helper 放在本仓库 `helper/`（Swift Package，无第三方依赖），与扩展同 PR 演进；分发要做时再拆独立仓库
 
 ### 15.3 消息协议（Native Messaging）
 
@@ -799,9 +802,16 @@ content script                                axt-helper (Swift, 独立仓库)
 ### 15.4 helper
 
 - Swift，~100–200 行：读 stdin 长度前缀 JSON、解码图片、跑 Vision、写 stdout
-- host manifest 注册到 `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/<name>.json`，`allowed_origins` 绑定扩展 id；扩展 manifest 钉 `key`，让未发布的扩展 id 跨机器稳定
+- host manifest 的用户级目录是 **`<用户数据目录>/NativeMessagingHosts/<name>.json`**（2026-09-07 实测：不是固定的 `Google/Chrome/…`，那只是默认用户数据目录恰好在那里；Dia 的在 `Dia/User Data/NativeMessagingHosts`）。安装脚本写 Chrome 与 Chromium 的默认目录；Playwright 用 `--user-data-dir` 指向临时 profile，e2e 得把 manifest 复制进 `<profile>/NativeMessagingHosts/`，放在系统级 `Google/Chrome` 目录里 Chrome for Testing 也找不到。`allowed_origins` 绑定扩展 id。**不钉 `key`** [决定，2026-09-07]：钉了 id 会变、本机存储的配置全丢；未打包扩展的 id 由路径推出，本机稳定，Playwright 从同一路径 `.output/chrome-mv3` 加载得到同一个 id。安装脚本接收 id 参数，分发阶段再议
 - **分发延后** [决定，2026-09-07]：第一阶段只做开发者安装——`swift build` + 一段注册脚本，在作者的 Mac 上验证价值；签名、公证、pkg / Homebrew 到那时再立项。扩展启动时 `ping` 检测，检测不到则设置项灰掉、图片翻译静默不跑
 - 后话：helper 存在后可顺手加 `apple-translate` provider（`preservesMarkup: false`，Mac 专属、离线），macOS 15 上需用透明窗口承载 SwiftUI 的变通方案（参考 SystemTranslation 库），macOS 26 可直接初始化
+
+### 15.4b helper 实测（2026-09-07，用户给的参考图 579×699，Apple Silicon，macOS 27）
+
+- 扩展 → background → 原生端口 → helper 整条链（Playwright 起 Chrome for Testing 153，manifest 放在 profile 目录里）：`axt:helper-status` 可用；一张 579×699 的图 `axt:ocr` **160 ms** 未命中、第二次命中缓存 **6 ms**
+- 稳态：同一进程里第二次识别 **55 ms**，首次 147 ms（进程内加载模型）；机器上**第一次**跑 Vision 要 26.6 s（系统级模型准备，一次性）。helper 是常驻进程（端口开着就活着），一次会话内只付一次进程级首次成本
+- 参考图识别出 27 行，十个关键词全在。图里换行的标签（"Dynamical / charge"、"Tree tensor / networks"）Vision 按行返回；"E=+1"、"B"、"(a)" 这类置信度 0.5 或单字母的行由扩展侧过滤。原始结果存在 `tests/fixtures/ocr/qed3d-string-breaking.json`，合并 / 过滤规则的单测对着它写
+- Chrome 断开端口的原因（`chrome.runtime.lastError`）区分"host 没注册"与"helper 退出"：前者本 worker 生命周期内不再重连
 
 ### 15.5 参考
 
