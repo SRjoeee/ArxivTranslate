@@ -158,6 +158,18 @@ describe('账面（totals）的正确性（Codex 在 #14 指出）', () => {
     expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
   })
 
+  it('同一条过期记录被并发读到：账面只减一次（Codex 在 #63 指出）', async () => {
+    // 一批里出现重复的键时 getMany 会并发 get 同一条；Dexie 对已删的行照样算删除成功，
+    // 按「delete 有没有 resolve」减账就会减多次，账面少算、后续写入突破上限
+    const c = make({ ttlMs: 1000, memoryEntries: 0 })
+    await c.set('old', 'v', 'p', 0)
+    await c.set('keep', 'v', 'p', 0)
+    const before = totalsOf(c)!.count
+    await Promise.all([c.get('old', 2000), c.get('old', 2000), c.get('old', 2000)])
+    expect(totalsOf(c)!.count).toBe(before - 1)
+    expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
+  })
+
   it('账面不多算时不会误淘汰没过期的条目', async () => {
     // 上限 2 条：写满 → 让第一条过期并读掉它 → 再写一条，不该把没过期的那条也淘汰掉
     const c = make({ maxEntries: 2, ttlMs: 1000, memoryEntries: 0 })

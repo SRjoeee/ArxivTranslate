@@ -133,9 +133,18 @@ export class TranslationCache {
   }
 
   /**
-   * 惰性删掉一条过期记录后同步账面（Codex 在 #14 指出）。不减的话 `totals` 会一直多算这一条，
-   * 接近上限时 `evictIfNeeded` 会为一条其实已经不存在的记录多淘汰一条**没过期的**
+   * 惰性删掉一条过期记录，并**只在真的删掉时**同步账面（Codex 在 #14 与 #63 指出）。
+   *
+   * 不减账的话 `totals` 会一直多算这一条，接近上限时 `evictIfNeeded` 会为一条其实已经不存在的记录
+   * 多淘汰一条**没过期的**。而按 `delete(key)` 是否 resolve 来减又会减多次——一批里出现重复的键时
+   * `getMany` 会并发读同一条过期记录，Dexie 对**已经被删掉**的行照样算删除成功，于是每个调用方都减一次，
+   * 账面少算、后续写入突破上限。`where(':id').equals(key).delete()` 返回真实删除条数，按它判断
    */
+  private async dropExpired(key: string, byteSize: number): Promise<void> {
+    const removed = await this.db.entries.where(':id').equals(key).delete()
+    if (removed > 0) this.forgetTotals(byteSize)
+  }
+
   private forgetTotals(byteSize: number): void {
     if (!this.totals) return
     this.totals.count = Math.max(0, this.totals.count - 1)
@@ -173,8 +182,7 @@ export class TranslationCache {
     if (hot) {
       if (this.isExpired(hot, now)) {
         this.forget(key)
-        // 删成功才减账面：删失败的话记录还在，减了反而少算
-        void this.db.entries.delete(key).then(() => this.forgetTotals(hot.byteSize)).catch(() => undefined)
+        void this.dropExpired(key, hot.byteSize).catch(() => undefined)
         return null
       }
       hot.lastAccessedAt = now
@@ -187,8 +195,7 @@ export class TranslationCache {
       const record = await this.db.entries.get(key)
       if (!record) return null
       if (this.isExpired(record, now)) {
-        await this.db.entries.delete(key)
-        this.forgetTotals(record.byteSize)
+        await this.dropExpired(key, record.byteSize)
         return null
       }
       record.lastAccessedAt = now
