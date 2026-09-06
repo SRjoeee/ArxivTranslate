@@ -120,4 +120,24 @@ describe('createSessionRouter', () => {
     expect(await router.dropTab(2)).toBe(3)
     expect(dropped).toEqual(['s1', 's2'])
   })
+
+  it('bind：只记 tab 关联、同步返回、不建链；之后 dropTab 撤得到，forCall 再填链并保留 tab', async () => {
+    const transport = fakeTransport('链')
+    let built = 0
+    const dropped: string[] = []
+    const router = createSessionRouter(async () => { built++; return transport }, { onDrop: scope => { dropped.push(scope); return 1 } })
+    router.bind('s1', 7)
+    expect(built).toBe(0)
+    expect(router.bound()).toEqual(['s1'])
+    expect(nameOf(await router.forCall('s1', 7))).toBe('链')
+    expect(built).toBe(1)
+    expect(await router.dropTab(7)).toBe(2) // transport 撤 1 + onDrop 撤 1
+    expect(dropped).toEqual(['s1'])
+    expect(router.bound()).toEqual([])
+    // 同一标签页出现新 scope：bind 也撤旧的
+    router.bind('s2', 8)
+    router.bind('s3', 8)
+    await Promise.resolve()
+    expect(router.bound()).toEqual(['s3'])
+  })
 })

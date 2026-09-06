@@ -12,6 +12,11 @@ import type { TranslationTransport } from '@/providers/transport'
 export interface SessionRouter {
   /** 取这次调用该用的链：带 scope 的绑定到它开始时的那条，不带的（设置页连接测试）用当前那条 */
   forCall(scope: string | undefined, tabId: number | undefined): Promise<TranslationTransport>
+  /**
+   * 只记下 scope 属于哪个标签页，不建链、不等待：图片 OCR 的第一条请求要绑 tab 才撤得到，
+   * 但不能让它等翻译链构造（Codex 在 #87 指出）。同一标签页的旧 scope 顺手撤掉
+   */
+  bind(scope: string, tabId: number | undefined): void
   /** 撤掉这些 scope 并解绑，返回撤掉的条数 */
   drop(scopes: readonly string[]): Promise<number>
   /** 标签页关闭 / 导航：撤掉挂在它上面的会话 */
@@ -31,7 +36,8 @@ export interface SessionRouter {
  *   撤会话时一起撤；返回它撤掉的条数
  */
 export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string) => number } = {}): SessionRouter {
-  const sessions = new Map<string, { transport: TranslationTransport; tabId?: number }>()
+  /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
+  const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number }>()
 
   const drop = async (scopes: readonly string[]): Promise<number> => {
     let cancelled = 0
@@ -53,15 +59,24 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
     async forCall(scope, tabId) {
       if (scope === undefined) return current()
       const bound = sessions.get(scope)
-      if (bound) return bound.transport
-      // 一个标签页同时只有一个会话：出现新 scope 说明上一轮没走 endRun（导航、刷新），把它撤掉
-      if (tabId !== undefined) {
+      if (bound?.transport) return bound.transport
+      // 一个标签页同时只有一个会话：出现新 scope 说明上一轮没走 endRun（导航、刷新），把它撤掉。
+      // bind 过的（bound 有值、没 transport）已经在 bind 里撤过了
+      if (!bound && tabId !== undefined) {
         const stale = scopesOfTab(tabId)
         if (stale.length > 0) await drop(stale)
       }
       const transport = await current()
-      sessions.set(scope, { transport, ...(tabId !== undefined ? { tabId } : {}) })
+      sessions.set(scope, { ...bound, transport, ...(tabId !== undefined ? { tabId } : {}) })
       return transport
+    },
+    bind(scope, tabId) {
+      if (sessions.has(scope)) return
+      if (tabId !== undefined) {
+        const stale = scopesOfTab(tabId)
+        if (stale.length > 0) void drop(stale)
+      }
+      sessions.set(scope, tabId !== undefined ? { tabId } : {})
     },
     drop,
     dropTab: tabId => drop(scopesOfTab(tabId)),

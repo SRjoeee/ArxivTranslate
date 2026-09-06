@@ -80,17 +80,20 @@ describe('createHelperClient', () => {
     expect((await b).result.width).toBe(30)
   })
 
-  it('超时：到点拒绝为 timeout，晚到的回应丢弃，队列继续', async () => {
-    const { client, port } = setup({ timeoutMs: 1000 })
+  it('超时：到点拒绝为 timeout；旧端口上晚到的回应丢弃，排队的 B 在新连接上继续', async () => {
+    const { client, port, ports } = setup({ timeoutMs: 1000 })
     const a = client.ocr({ image: 'A' })
     const b = client.ocr({ image: 'B' })
     await flush()
     await handshake(port())
+    const old = port()
     vi.advanceTimersByTime(1001)
     await expect(a).rejects.toMatchObject({ kind: 'timeout' })
     await flush()
-    expect(port().sent).toHaveLength(3) // B 顶上
-    port().reply({ v: 1, id: port().sent[1]?.id as string, width: 1, height: 1, lines: [] }) // A 的晚到回应
+    expect(ports).toHaveLength(2)
+    old.reply({ v: 1, id: old.sent[1]?.id as string, width: 1, height: 1, lines: [] }) // A 的晚到回应：丢弃
+    await handshake(port())
+    expect(port().sent.map(m => m.image ?? m.cmd)).toEqual(['ping', 'B'])
     port().reply({ v: 1, id: port().lastId(), width: 2, height: 2, lines: [] })
     expect((await b).result.width).toBe(2)
   })
@@ -133,6 +136,48 @@ describe('createHelperClient', () => {
     port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
     expect((await a).version).toBe('0.2.0')
     expect(await client.status()).toEqual({ available: true, version: '0.2.0' })
+  })
+
+  it('超时后断开端口：helper 是同步循环，超时的请求还在它手里；下一条请求起新连接、重新握手（Codex 在 #87 指出）', async () => {
+    const { client, port, ports } = setup({ timeoutMs: 1000 })
+    const a = client.ocr({ image: 'A' })
+    await flush()
+    await handshake(port())
+    vi.advanceTimersByTime(1001)
+    await expect(a).rejects.toMatchObject({ kind: 'timeout' })
+    expect(port().disconnected).toBe(true)
+    const b = client.ocr({ image: 'B' })
+    await flush()
+    expect(ports).toHaveLength(2)
+    expect(port().sent.map(m => m.cmd)).toEqual(['ping']) // 新连接先握手
+    await handshake(port())
+    port().reply({ v: 1, id: port().lastId(), width: 2, height: 2, lines: [] })
+    expect((await b).result.width).toBe(2)
+  })
+
+  it('握手回错误信封（helper 不兼容）：排队的 OCR 拒绝为 invalid-response、端口断开，不会无限重 ping（Codex 在 #87 指出）', async () => {
+    const { client, port } = setup()
+    const a = client.ocr({ image: 'A' })
+    const b = client.ocr({ image: 'B' })
+    await flush()
+    expect(port().sent.map(m => m.cmd)).toEqual(['ping'])
+    port().reply({ v: 1, id: port().sent[0]?.id as string, error: { code: 'bad-request', message: '协议版本不对' } })
+    await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('握手失败') })
+    await expect(b).rejects.toMatchObject({ kind: 'invalid-response' })
+    await flush()
+    expect(port().sent).toHaveLength(1) // 没有第二个 ping
+    expect(port().disconnected).toBe(true)
+  })
+
+  it('握手超时：排队的 OCR 一起拒绝，不会每 30 秒重连一次永远排着', async () => {
+    const { client, port, ports } = setup({ timeoutMs: 1000 })
+    const a = client.ocr({ image: 'A' })
+    await flush()
+    expect(port().sent.map(m => m.cmd)).toEqual(['ping'])
+    vi.advanceTimersByTime(1001)
+    await expect(a).rejects.toMatchObject({ kind: 'timeout' })
+    await flush()
+    expect(ports).toHaveLength(1)
   })
 
   it('host 没装（断开原因是 not found）：status 报不可用，之后不再尝试连接', async () => {

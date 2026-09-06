@@ -96,10 +96,33 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
     return entry
   }
 
+  const errorOf = (reply: Record<string, unknown>): HelperError | null => {
+    const error = reply.error as { code?: unknown; message?: unknown } | undefined
+    if (!error) return null
+    const kind: ProviderErrorKind = error.code === 'bad-request' || error.code === 'bad-base64' || error.code === 'undecodable-image' ? 'bad-request' : 'invalid-response'
+    return new HelperError(kind, `helper：${typeof error.message === 'string' ? error.message : String(error.code)}`)
+  }
+
   const failAll = (kind: ProviderErrorKind, message: string) => {
     for (const id of Array.from(pending.keys())) settle(id)?.reject(new HelperError(kind, message))
     for (const item of queue.splice(0)) item.reject(new HelperError(kind, message))
     updateKeepAlive()
+  }
+
+  /**
+   * 丢掉当前端口：helper 收到 EOF 退出，下一条请求起新进程、重新握手。自己调 disconnect() 不触发 onDisconnect，
+   * 状态在这里清。用在超时（helper 是同步循环，超时的那个请求还在它手里，不断开的话后面的全排在后面，
+   * Codex 在 #87 指出）与握手失败
+   */
+  const dropPort = () => {
+    const stale = port
+    port = null
+    known = null
+    try {
+      stale?.disconnect()
+    } catch {
+      // 端口可能已经断了
+    }
   }
 
   const ensurePort = (): NativePort => {
@@ -110,10 +133,18 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       const reply = raw as Record<string, unknown> | null
       const id = typeof reply?.id === 'string' ? reply.id : ''
       const entry = settle(id)
-      // ping 的回应：这条连接握过手了，版本记下来（status() 与 pump 插的内部 ping 都走这里）
-      if (id.startsWith('ping-') && reply && !reply.error) known = { available: true, version: typeof reply.version === 'string' ? reply.version : 'unknown' }
       // 对不上号（已撤、已超时）的回应丢弃；但队列照样往前走——在飞的位子早在撤销时就腾出来了
       entry?.resolve(reply as Record<string, unknown>)
+      if (id.startsWith('ping-')) {
+        // ping 的回应：这条连接握过手了，版本记下来（status() 与 pump 插的内部 ping 都走这里）。
+        // 握手回的是错误信封（helper 不兼容）：排队的活全部拒掉、断开端口——否则 pump 会一直插 ping、
+        // 一直收到错误，无限循环（Codex 在 #87 指出）
+        if (reply && !reply.error) known = { available: true, version: typeof reply.version === 'string' ? reply.version : 'unknown' }
+        else {
+          dropPort()
+          failAll('invalid-response', `helper 握手失败：${errorOf(reply ?? {})?.message ?? '回应不合法'}`)
+        }
+      }
       pump()
     })
     opened.onDisconnect.addListener(() => {
@@ -143,6 +174,9 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       pending.set(item.id, item)
       item.timer = setTimeout(() => {
         settle(item.id)?.reject(new HelperError('timeout', `helper ${timeoutMs} ms 没有回应`))
+        // 超时的请求 helper 还在处理：断开端口，下一条起新进程。握手本身超时说明 helper 起不来，排队的一起拒掉
+        dropPort()
+        if (item.id.startsWith('ping-')) failAll('timeout', `helper ${timeoutMs} ms 没有回应握手`)
         pump()
       }, timeoutMs)
       try {
@@ -161,13 +195,6 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       queue.push({ id, message: { v: HELPER_PROTOCOL, cmd, id, ...payload }, scope, resolve, reject })
       pump()
     })
-  }
-
-  const errorOf = (reply: Record<string, unknown>): HelperError | null => {
-    const error = reply.error as { code?: unknown; message?: unknown } | undefined
-    if (!error) return null
-    const kind: ProviderErrorKind = error.code === 'bad-request' || error.code === 'bad-base64' || error.code === 'undecodable-image' ? 'bad-request' : 'invalid-response'
-    return new HelperError(kind, `helper：${typeof error.message === 'string' ? error.message : String(error.code)}`)
   }
 
   return {
