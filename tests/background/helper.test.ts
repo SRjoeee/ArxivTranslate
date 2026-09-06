@@ -23,7 +23,7 @@ class FakePort implements NativePort {
   lastId(): string { return this.sent.at(-1)?.id as string }
 }
 
-function setup(opts: { lastError?: () => string | undefined; timeoutMs?: number; keepAlive?: () => void; keepAliveMs?: number } = {}) {
+function setup(opts: { lastError?: () => string | undefined; timeoutMs?: number; firstOcrTimeoutMs?: number; keepAlive?: () => void; keepAliveMs?: number } = {}) {
   const ports: FakePort[] = []
   const client = createHelperClient({
     connect: () => { const p = new FakePort(); ports.push(p); return p },
@@ -81,7 +81,7 @@ describe('createHelperClient', () => {
   })
 
   it('超时：到点拒绝为 timeout；旧端口上晚到的回应丢弃，排队的 B 在新连接上继续', async () => {
-    const { client, port, ports } = setup({ timeoutMs: 1000 })
+    const { client, port, ports } = setup({ timeoutMs: 1000, firstOcrTimeoutMs: 1000 })
     const a = client.ocr({ image: 'A' })
     const b = client.ocr({ image: 'B' })
     await flush()
@@ -139,7 +139,7 @@ describe('createHelperClient', () => {
   })
 
   it('超时后断开端口：helper 是同步循环，超时的请求还在它手里；下一条请求起新连接、重新握手（Codex 在 #87 指出）', async () => {
-    const { client, port, ports } = setup({ timeoutMs: 1000 })
+    const { client, port, ports } = setup({ timeoutMs: 1000, firstOcrTimeoutMs: 1000 })
     const a = client.ocr({ image: 'A' })
     await flush()
     await handshake(port())
@@ -206,6 +206,38 @@ describe('createHelperClient', () => {
     await expect(a).rejects.toMatchObject({ kind: 'network', message: expect.stringContaining('no nativeMessaging') })
     await expect(b).rejects.toMatchObject({ kind: 'network' })
     expect(attempts).toBe(2) // 每次调用试一次连接，不多
+  })
+
+  it('本 worker 里第一次 OCR 用更长的超时（Vision 一次性准备实测 26.6 s），识别成功过一次之后按正常超时', async () => {
+    const { client, port } = setup({ timeoutMs: 1000, firstOcrTimeoutMs: 5000 })
+    const a = client.ocr({ image: 'A' })
+    await flush()
+    await handshake(port())
+    vi.advanceTimersByTime(1500) // 超过普通超时，首次不算
+    expect(port().disconnected).toBe(false)
+    port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
+    await a
+    const b = client.ocr({ image: 'B' })
+    await flush()
+    vi.advanceTimersByTime(1001) // 之后按 1000 ms
+    await expect(b).rejects.toMatchObject({ kind: 'timeout' })
+  })
+
+  it('协议版本对不上：握手回的 v 不是扩展要的，status 不可用并说明；OCR 回应缺 v 视为不合法（Codex 在 #87 指出）', async () => {
+    const { client, port } = setup()
+    const status = client.status()
+    await flush()
+    port().reply({ v: 2, id: port().lastId(), ok: true, version: '9.9.9' })
+    const result = await status
+    expect(result.available).toBe(false)
+    expect(result.reason).toContain('协议版本 2')
+    // 内部握手也一样：排队的 OCR 拒掉、端口断开
+    const { client: c2, port: p2 } = setup()
+    const a = c2.ocr({ image: 'A' })
+    await flush()
+    p2().reply({ v: 2, id: p2().sent[0]?.id as string, ok: true, version: '9.9.9' })
+    await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('协议版本') })
+    expect(p2().disconnected).toBe(true)
   })
 
   it('host 没装（断开原因是 not found）：status 报不可用，之后不再尝试连接', async () => {

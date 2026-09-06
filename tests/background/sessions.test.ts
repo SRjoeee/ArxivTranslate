@@ -155,4 +155,25 @@ describe('createSessionRouter', () => {
     expect(order[0]).toBe('onDrop:s1')
     expect(transport.cancelled).toContain('链:s1')
   })
+
+  it('bind → forCall 建链期间被撤：forCall 回来不复活会话，补撤这条链上的 scope；撤过的 scope 再 bind / forCall 都当已撤（Codex 在 #87 指出）', async () => {
+    const transport = fakeTransport('链')
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    const router = createSessionRouter(async () => { await held; return transport }, { onDrop: () => 1 })
+    router.bind('s1', 5)
+    const pending = router.forCall('s1', 5) // 正在 await current()
+    await Promise.resolve()
+    expect(await router.dropTab(5)).toBe(1) // 只有 onDrop：这时没链可撤
+    release()
+    await pending
+    expect(router.bound()).toEqual([]) // 没复活
+    expect(transport.cancelled).toEqual(['链:s1']) // forCall 回来补撤
+    // 之后再来：bind 无效、forCall 给链但先撤
+    router.bind('s1', 5)
+    expect(router.bound()).toEqual([])
+    await router.forCall('s1', 5)
+    expect(router.bound()).toEqual([])
+    expect(transport.cancelled).toEqual(['链:s1', '链:s1'])
+  })
 })
