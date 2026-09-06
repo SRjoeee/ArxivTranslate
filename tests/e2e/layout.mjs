@@ -5,10 +5,11 @@
 // 用法：pnpm build && pnpm e2e:layout        （首次先 npx playwright install chromium）
 // 环境变量：AXT_HEADED=1 看着跑。
 import { mkdirSync, rmSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
-const HERE = new URL('.', import.meta.url).pathname
-const EXT = process.env.AXT_EXT_DIR ?? new URL('../../.output/chrome-mv3', import.meta.url).pathname
+const HERE = fileURLToPath(new URL('.', import.meta.url))
+const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
 const PROFILE = `${HERE}.profile-layout`
 const SHOTS = `${HERE}.shots`
 const REM = 16

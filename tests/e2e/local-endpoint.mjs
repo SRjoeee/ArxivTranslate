@@ -12,10 +12,11 @@
 // 环境变量：AXT_PAPER 换论文；AXT_HEADED=1 看着跑。
 import { createServer } from 'node:http'
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
-const HERE = new URL('.', import.meta.url).pathname
-const SRC = process.env.AXT_EXT_DIR ?? new URL('../../.output/chrome-mv3', import.meta.url).pathname
+const HERE = fileURLToPath(new URL('.', import.meta.url))
+const SRC = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
 const EXT = `${HERE}.ext-local`
 const PROFILE = `${HERE}.profile-local`
 const SHOTS = `${HERE}.shots`
