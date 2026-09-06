@@ -79,9 +79,13 @@ html[data-axt-mode="side"] .ltx_document {
      那个 auto 下限是轨道内容的 min-content 宽度。英文列的下限是最长单词（还有宽表格、长公式），
      中文可以逐字换行、下限接近 0，于是空间不够时英文列守住下限、中文列被单方面压窄
      （实测文章列 600px 时两栏变成 317 / 227）。归零下限后两栏恒等宽，实测 272 / 272 */
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* 两栏比例由变量给（实验：拖动分栏，issue #83）。默认各一半，与原来的 1fr 1fr 等价；
+     拖动时只改这两个值，几百个 subgrid 容器自动跟随——列线本来就只在这里定义一次 */
+  grid-template-columns: minmax(0, var(--axt-split-l, 1fr)) minmax(0, var(--axt-split-r, 1fr));
   column-gap: var(--axt-gap);
   align-items: start;
+  /* 手柄绝对定位在中缝上，靠它做包含块；绝对定位的子元素不参与网格 */
+  position: relative;
 }
 
 /* 参与配对的容器 = **内部含有译文或块标记（data-axt-id）的元素**，减去一小撮明确排除的。
@@ -449,4 +453,55 @@ html[data-axt-mode="only"] [data-axt-state="translated"] {
 /* 同行显示的短标题在 only 模式下译文要顶回行首 */
 html[data-axt-mode="only"] .axt-t[data-axt-inline] {
   margin-inline-start: 0;
+}
+
+/* ── 拖动分栏的手柄（实验，issue #83）──────────────────────────────────────
+   只在 side 模式出现，绝对定位在中缝上、不参与网格。拖动期间 <html> 上挂 data-axt-dragging，
+   用它把视口外的顶层区块从布局里摘出去：实测 2312.17141（880 块 / 392 张公式表）
+   逐帧改列宽的中位帧 51 ms → 16.7 ms。`content-visibility: auto` 不影响
+   getClientRects / getBoundingClientRect / scrollIntoView（规范要求查询时强制布局），
+   所以 §7.4 的锚点兜底照常работа——这一点专门实测过。 */
+html[data-axt-mode="side"] .axt-split-handle {
+  position: absolute;
+  inset-block: 0;
+  inline-size: var(--axt-gap);
+  /* 中缝中心：左栏占比由 --axt-split-pct 给，与上面两个 fr 由 JS 一起写 */
+  inset-inline-start: calc(var(--axt-split-pct, 50) * 1% - var(--axt-gap) / 2);
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+/* 其他模式下没有两栏，手柄不该出现 */
+html:not([data-axt-mode="side"]) .axt-split-handle {
+  display: none;
+}
+
+.axt-split-handle::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 50%;
+  inline-size: 2px;
+  transform: translateX(-50%);
+  background: var(--axt-muted);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.axt-split-handle:hover::before,
+.axt-split-handle:focus-visible::before,
+html[data-axt-dragging] .axt-split-handle::before {
+  opacity: 0.55;
+}
+
+/* 拖动期间：视口外的顶层区块不参与布局，改一次列宽就不必重排整篇。
+   contain-intrinsic-size 的 auto 让浏览器记住上次的真实高度，滚动条不跳 */
+html[data-axt-dragging] .ltx_document > section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1200px;
+}
+
+html[data-axt-dragging] {
+  user-select: none;
 }

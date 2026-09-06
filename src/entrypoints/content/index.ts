@@ -5,7 +5,7 @@ import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
 import {
   alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, installAnchorFallback,
-  localizeNotes, restore, splitFigures,
+  installSplitHandle, localizeNotes, restore, splitFigures,
   type Mode, type ModeController,
 } from '@/core/renderer'
 import { decodeText, escapeText } from '@/core/protector/text'
@@ -36,6 +36,8 @@ export default defineContentScript({
     let modes: ModeController | null = null
     /** 页内锚点兜底的卸载函数（issue #44）：会话开始时装、恢复原文时拆 */
     let uninstallAnchors: (() => void) | null = null
+    /** 拖动分栏的手柄（实验，issue #83）：同样随会话装拆 */
+    let uninstallSplit: (() => void) | null = null
     let savedMode: Mode = 'stack'
     /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性；开始翻译时从配置读一次 */
     let style: Config['style'] = { preset: 'none', customCss: '' }
@@ -83,6 +85,12 @@ export default defineContentScript({
       // 页内锚点兜底（issue #44）：only 模式下目标块被隐藏，交叉引用点了不动窝
       uninstallAnchors?.()
       uninstallAnchors = installAnchorFallback(document)
+      // 拖动分栏（实验，issue #83）：手柄只在 side 模式可见，由 CSS 管
+      uninstallSplit?.()
+      uninstallSplit = installSplitHandle(document, {
+        initial: config.splitRatio,
+        onCommit: pct => { void getConfig().then(latest => setConfig({ ...latest, splitRatio: pct })) },
+      })
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
       enterSide(modes.effective())
@@ -200,6 +208,8 @@ export default defineContentScript({
       prep.cancel()
       uninstallAnchors?.()
       uninstallAnchors = null
+      uninstallSplit?.()
+      uninstallSplit = null
       const result = restore(document)
       progress = idle()
       console.debug(`[axt] translation stopped: ${result.removedNodes} nodes removed`)

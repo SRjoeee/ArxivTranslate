@@ -71,6 +71,8 @@ export const configSchema = z.object({
     preset: z.enum(STYLE_PRESETS),
     customCss: z.string().max(2000),
   }).default({ preset: 'none', customCss: '' }),
+  /** 左右对照时左栏的占比（实验：拖动分栏，issue #83）。15–85，默认各一半 */
+  splitRatio: z.number().min(15).max(85).default(50),
   /** 引擎降级链（§8.5）：首选引擎失败时自动切到免费引擎，别让整页翻译停死 */
   fallback: z.object({ enabled: z.boolean() }).default({ enabled: true }),
   /** 按视口翻译的范围（§10，Read Frog 的 preload）：视口下方多少像素算临近（0–10000）、露出多少比例算进入（0–1） */
@@ -96,6 +98,7 @@ export const DEFAULT_CONFIG: Config = {
   mode: 'stack',
   glossary: [],
   style: { preset: 'none', customCss: '' },
+  splitRatio: 50,
   fallback: { enabled: true },
   prompts: DEFAULT_PROMPTS_CONFIG,
   preload: { ...DEFAULT_PRELOAD },
