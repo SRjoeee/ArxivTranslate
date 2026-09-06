@@ -306,6 +306,35 @@ async function measureFrame(page) {
   await translated.close()
 }
 
+// issue #67：镜像（右栏的视觉配平副本）不能落在翻译单元上。createMirrors 分辨不出
+// "还没轮到标记的块"与"永远没有译文的静态内容"，标记若不完整，整个 .ltx_para / .ltx_proof
+// 会被克隆到右栏，等里面的块翻出来就多一整段英文。
+//
+// **这条断言当前撼不动**：把标记改回切片它照样通过。实测 828 块的标记只要 2 ms，
+// 而第一趟 prep 在 1140 ms 后才跑（150 ms 去抖），窗口差 570 倍，那条路径够不着。
+// 留着它守的是结果而不是路径——不论哪天因为什么原因右栏出现整块克隆，它都会说话。
+// 真正对标记方式敏感的是 tests/pipeline/marking.test.ts
+{
+  const page = await openSide('2312.17141')
+  await quiesce(page, '镜像与译文不重叠')
+  const dup = await page.evaluate(() => {
+    const sourceOf = m => { let p = m.previousElementSibling; while (p?.classList.contains('axt-t')) p = p.previousElementSibling; return p }
+    const bad = [...document.querySelectorAll('.axt-mirror')]
+      .map(sourceOf)
+      .filter(src => src && (src.hasAttribute('data-axt-id') || src.querySelector('[data-axt-id]')))
+    return {
+      mirrors: document.querySelectorAll('.axt-mirror').length,
+      translations: document.querySelectorAll('.axt-t:not(.axt-mirror)').length,
+      cloned: bad.slice(0, 4).map(el => `${el.tagName}.${[...el.classList].join('.')}`),
+      clonedCount: bad.length,
+    }
+  })
+  check('side 模式的镜像没有落在翻译单元上（右栏没有整块克隆的原文）',
+    dup.mirrors > 0 && dup.translations > 0 && dup.clonedCount === 0,
+    `${dup.mirrors} 个镜像、${dup.translations} 个译文，整块克隆 ${dup.clonedCount} 个${dup.cloned.length ? `：${dup.cloned.join('、')}` : ''}`)
+  await page.close()
+}
+
 await context.close()
 const failed = results.filter(r => !r.ok)
 console.log(`\n${results.length - failed.length}/${results.length} passed; screenshots in ${SHOTS}`)
