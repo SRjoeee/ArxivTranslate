@@ -5,7 +5,7 @@ exports[`fixture > 2312.17141.html 1`] = `
   "byUnit": {
     "ack": 1,
     "authorinfo": 2,
-    "bibblock": 99,
+    "bibblock": 151,
     "caption": 11,
     "footnote": 2,
     "item": 2,
@@ -26,8 +26,8 @@ exports[`fixture > 2312.17141.html 1`] = `
   ],
   "numericCells": 0,
   "table": 0,
-  "text": 828,
-  "total": 828,
+  "text": 880,
+  "total": 880,
 }
 `;
 
@@ -65,7 +65,7 @@ exports[`fixture > 2401.00418.html 1`] = `
 {
   "byUnit": {
     "authorinfo": 1,
-    "bibblock": 72,
+    "bibblock": 107,
     "caption": 3,
     "footnote": 2,
     "p": 140,
@@ -79,14 +79,14 @@ exports[`fixture > 2401.00418.html 1`] = `
     "axt-b3",
   ],
   "lastIds": [
-    "axt-b292",
-    "axt-b293",
-    "axt-b294",
+    "axt-b327",
+    "axt-b328",
+    "axt-b329",
   ],
   "numericCells": 0,
   "table": 0,
-  "text": 294,
-  "total": 294,
+  "text": 329,
+  "total": 329,
 }
 `;
 
@@ -124,7 +124,7 @@ exports[`fixture > 2410.00260.html 1`] = `
 {
   "byUnit": {
     "authorinfo": 2,
-    "bibblock": 103,
+    "bibblock": 173,
     "caption": 17,
     "footnote": 2,
     "p": 63,
@@ -140,13 +140,13 @@ exports[`fixture > 2410.00260.html 1`] = `
   ],
   "lastIds": [
     "A3.T8.2",
-    "axt-b221",
+    "axt-b291",
     "A3.T9.2",
   ],
   "numericCells": 77,
   "table": 9,
-  "text": 213,
-  "total": 222,
+  "text": 283,
+  "total": 292,
 }
 `;
 
@@ -186,7 +186,7 @@ exports[`fixture > 2608.29808.html 1`] = `
 {
   "byUnit": {
     "authorinfo": 4,
-    "bibblock": 137,
+    "bibblock": 206,
     "caption": 25,
     "item": 5,
     "p": 134,
@@ -201,14 +201,14 @@ exports[`fixture > 2608.29808.html 1`] = `
     "axt-b3",
   ],
   "lastIds": [
-    "axt-b366",
-    "axt-b367",
+    "axt-b435",
+    "axt-b436",
     "A3.SS1.SSS0.Px2.p1.1",
   ],
   "numericCells": 1537,
   "table": 13,
-  "text": 355,
-  "total": 368,
+  "text": 424,
+  "total": 437,
 }
 `;
 
@@ -264,7 +264,7 @@ exports[`fixture > 2609.00246.html 1`] = `
 {
   "byUnit": {
     "authorinfo": 4,
-    "bibblock": 172,
+    "bibblock": 209,
     "caption": 18,
     "footnote": 9,
     "keywords": 1,
@@ -281,13 +281,13 @@ exports[`fixture > 2609.00246.html 1`] = `
   ],
   "lastIds": [
     "Pt0.A7.T6.13",
-    "axt-b542",
+    "axt-b579",
     "Pt0.A7.SS6.SSSx2.p1.1",
   ],
   "numericCells": 1010,
   "table": 8,
-  "text": 535,
-  "total": 543,
+  "text": 572,
+  "total": 580,
 }
 `;
 
@@ -324,7 +324,7 @@ exports[`fixture > 2609.03768.html 1`] = `
 exports[`fixture > 2609.04056.html 1`] = `
 {
   "byUnit": {
-    "bibblock": 89,
+    "bibblock": 111,
     "footnote": 2,
     "p": 457,
     "personname": 2,
@@ -337,14 +337,14 @@ exports[`fixture > 2609.04056.html 1`] = `
     "axt-b3",
   ],
   "lastIds": [
-    "axt-b745",
-    "axt-b746",
-    "axt-b747",
+    "axt-b767",
+    "axt-b768",
+    "axt-b769",
   ],
   "numericCells": 0,
   "table": 0,
-  "text": 747,
-  "total": 747,
+  "text": 769,
+  "total": 769,
 }
 `;
 

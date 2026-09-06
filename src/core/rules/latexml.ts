@@ -7,7 +7,7 @@
  * 0.6.2：带环境名的 tag 改为可翻，纯标识符（`(a)`、`(ii)`）仍保护——分类语义变了，
  * 旧缓存不该跨过去（Codex 在 #53 指出）
  */
-export const RULES_VERSION = '0.8.0'
+export const RULES_VERSION = '0.9.0'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -35,7 +35,8 @@ export const UNIT_RULES: readonly Rule[] = [
   { id: 'title', selector: '.ltx_title:not(.ltx_title_acknowledgements):not(.ltx_title_keywords), .ltx_subtitle', note: '各级标题、副标题、定理 run-in 标题；内含 .ltx_tag 作 void' },
   { id: 'caption', selector: '.ltx_caption', note: '图表说明；内含 .ltx_tag 作 void' },
   { id: 'footnote', selector: '.ltx_note_content', note: '脚注正文，独立成块；位于 .ltx_note 容器内部' },
-  // 参考文献：条目内按 .ltx_bibblock 分段翻，作者段由 skip 规则排除，译文只跟在标题段下面（§5.4）；
+  // 参考文献：条目内按 .ltx_bibblock 分段翻，译文只跟在对应的那一行下面（§5.4）；作者段 2026-09-06 起
+  // 不再单独跳过——单段条目里的作者名本来就随整条翻，跳过只让两种模板表现不一致（§5.4）；
   // 没有分段的条目（natbib 等样式）整条作一个单元兜底
   { id: 'bibblock', selector: '.ltx_bibblock', note: '参考文献条目内的片段（作者 / 标题 / 出处），见 §5.4' },
   { id: 'bibitem', selector: '.ltx_bibitem:not(:has(.ltx_bibblock))', note: '没有分段的参考文献条目，整条一个单元' },
@@ -161,25 +162,6 @@ export interface Classification {
 const TABLE_CLASSIFICATION: Classification = { kind: 'table', rule: 'table', descend: false }
 
 /** §5.6：同一元素命中多类时取 skip > table > unit > protect；都不命中返回 null */
-/**
- * 参考文献条目里的作者段（§5.4）：分成多段的条目，第一段固定是作者列表。
- * 只有部分模板会标 .ltx_bib_author（20 篇实测 13 篇有），所以按位置判断而不是按类名；
- * 只有一段的条目（natbib 等样式）整条就是引文，不能跳过。
- */
-/** classify() 动态返回的规则 id：不在三张表里，审计脚本要单独列（Codex 在 #18 指出） */
-export const BIB_AUTHORS_RULE = 'bib-authors'
-
-export function isBibAuthorBlock(el: Element): boolean {
-  if (!el.matches('.ltx_bibblock')) return false
-  const siblings = Array.from(el.parentElement?.children ?? []).filter(child => child.matches('.ltx_bibblock'))
-  if (siblings.length <= 1) return false
-  // 有语义标注就信它，别只看位置（Codex 在 #18 指出）。12 篇 fixture 里 285 条多段引文，
-  // 带 .ltx_bib_author 的 59 条**全部**是「作者段就是第一段」，所以这条改动今天不改变任何结果；
-  // 它保的是将来：某个模板把作者放在别的段时，位置判断会把标题当作者段跳掉
-  const marked = el.parentElement?.querySelector('.ltx_bib_author')
-  if (marked) return marked.closest('.ltx_bibblock') === el
-  return siblings[0] === el
-}
 
 /** 括号里的整段标识符：子图面板的 `(a)` `(ii)` `(iii)`、公式标签的 `(let.lin)` 都是这个形状 */
 const PARENTHESIZED = /[(（][^)）]*[)）]/g
@@ -231,7 +213,6 @@ export function isNamedTag(el: Element): boolean {
 }
 
 export function classify(el: Element): Classification | null {
-  if (isBibAuthorBlock(el)) return { kind: 'skip', rule: BIB_AUTHORS_RULE, descend: false }
   const skip = SKIP_RULES.find(r => el.matches(r.selector))
   if (skip) return { kind: 'skip', rule: skip.id, descend: false }
   if (el.matches(TABLE_RULES.root)) return TABLE_CLASSIFICATION
