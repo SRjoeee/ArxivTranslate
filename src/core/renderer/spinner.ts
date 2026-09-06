@@ -41,6 +41,8 @@ export function cancelSpinnerAnimation(spinner: HTMLElement): void {
 export function createLightweightSpinner(ownerDoc: Document): HTMLElement {
   const spinner = ownerDoc.createElement('span')
   spinner.className = SPINNER_CLASS
+  // 纯装饰：等待状态由 popup 的进度显示承担，逐块的圆环不该被逐个念出来
+  spinner.setAttribute('aria-hidden', 'true')
   spinner.style.cssText = `
     display: inline-block !important;
     width: 6px !important;

@@ -1,6 +1,7 @@
 // 翻译运行（DESIGN §4 数据流、§10 调度、§6.3 / §8.2 降级链）。content 侧的纯逻辑，通过 transport 与翻译服务通信。
 // 会话式（照 Read Frog 的加载模式）：开始只打标记、把块交给一次性观察器；块进入视口（加预翻译距离）
 // 才攒批发请求，请求前先插带圆环的 pending 节点（§7.6）。没有"整篇翻完"的终点，滚到哪翻到哪。
+import { toBcp47 } from '@/config/languages'
 import { ID_ATTR, type Block, type TextBlock } from '@/core/extractor'
 import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate } from '@/core/protector'
@@ -99,7 +100,9 @@ export function startTranslation(options: RunOptions): TranslationRun {
   }
   const halted = () => stopped || fatal !== undefined
 
-  enable(doc, options.mode, options.style)
+  // 译文语言进 <html>，renderText 逐个写到译文节点上：页面的 lang 说的是原文（arXiv 上是 en），
+  // 不标的话屏幕阅读器会用英文语音念中文
+  enable(doc, options.mode, options.style, toBcp47(options.target))
   const sectionOf = sectionTitles(blocks)
 
   // 标记切片进行：几百个块的属性写入一口气做会冻住页面（Read Frog 的 #1881）

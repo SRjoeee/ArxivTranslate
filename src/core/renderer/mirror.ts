@@ -62,6 +62,9 @@ export function createMirrors(root: Document | Element): number {
       const clone = child.cloneNode(true) as Element
       strip(clone)
       clone.classList.add(T_CLASS, MIRROR_CLASS)
+      // 镜像是右栏的视觉配平副本，内容与左栏完全相同、没有译文。不藏起来的话屏幕阅读器
+      // 会把同一张图、同一个公式念两遍
+      clone.setAttribute('aria-hidden', 'true')
       clone.setAttribute(FOR_ATTR, `${MIRROR_ID_PREFIX}${made}`)
       child.after(clone)
       made++
