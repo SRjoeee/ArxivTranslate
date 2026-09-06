@@ -268,6 +268,44 @@ async function measureFrame(page) {
   await page.close()
 }
 
+// ── 网格禁用外边距折叠：块间距不能因为开了 side 就被撑大（用户反馈，2026-09-06）──────
+// .ltx_document 在 side 模式下是网格容器（两条列线只在它身上定义一次），而网格禁用子元素间的
+// 外边距折叠。arXiv 在摘要与正文之间放了两个高度为 0 的 .ltx_pagination，各带 32px 上边距：
+// 块布局里它们与摘要的下边距折叠成一段，网格里各自累加。实测 2609.03001v1：32px → 96px
+{
+  const page = await context.newPage()
+  await page.setViewportSize({ width: 1800, height: 900 })
+  await page.goto('https://arxiv.org/html/2609.03001v1', { waitUntil: 'domcontentloaded' })
+  await sleep(1200)
+  const gapOf = () => page.evaluate(() => {
+    const abs = document.querySelector('.ltx_abstract')
+    const sec = document.querySelector('article.ltx_document > section')
+    return Math.round(sec.getBoundingClientRect().top - abs.getBoundingClientRect().bottom)
+  })
+  const before = await gapOf()
+  await page.close()
+
+  const translated = await openSide('2609.03001v1')
+  await quiesce(translated, '摘要与正文的间距')
+  await translated.setViewportSize({ width: 1800, height: 900 })
+  await sleep(800)
+  const after = await translated.evaluate(() => {
+    const abs = document.querySelector('.ltx_abstract')
+    const sec = document.querySelector('article.ltx_document > section')
+    return {
+      gap: Math.round(sec.getBoundingClientRect().top - abs.getBoundingClientRect().bottom),
+      // 摘要块的底边应当贴着**最后一行里较高的那个**：网格不与子元素折叠外边距，
+      // 最后一行的下边距会露成实打实的空白（中文比英文短，所以不能只看译文那一列）
+      tail: Math.round(abs.getBoundingClientRect().bottom - Math.max(...[...abs.children].map(el => el.getBoundingClientRect().bottom))),
+      translated: document.querySelectorAll('.ltx_abstract .axt-t').length,
+    }
+  })
+  check('side 模式没有把摘要与正文之间的间距撑大（网格禁用了外边距折叠）',
+    after.translated > 0 && after.gap === before && after.tail <= 1,
+    `未翻译 ${before}px，side ${after.gap}px；摘要块底与末段底相差 ${after.tail}px；摘要里有 ${after.translated} 个译文节点`)
+  await translated.close()
+}
+
 await context.close()
 const failed = results.filter(r => !r.ok)
 console.log(`\n${results.length - failed.length}/${results.length} passed; screenshots in ${SHOTS}`)

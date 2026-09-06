@@ -41,6 +41,15 @@ html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption,
   box-shadow: inset 3px 0 0 var(--axt-failed-color, rgba(220, 38, 38, 0.6));
 }
 
+/* 高度为 0 的分页标记（`\newpage` 的产物，屏幕上没有任何内容）：块布局里它那 32px 上边距会与
+   相邻的边距**折叠**，只占一段；side 模式下 .ltx_document 是网格容器（列线只在它身上定义一次，见下），
+   网格禁用子元素间的外边距折叠，于是摘要与正文之间那两个标记各自贡献 32px。
+   实测 2609.03001v1：摘要块底到第一节顶，未翻译 32px、side 96px（用户反馈"间距被拉大"）。
+   把它们的块向外边距归零——它们本来就只靠折叠存在 */
+html[data-axt-mode="side"] .ltx_pagination {
+  margin-block: 0;
+}
+
 /* ── side：左右对照（§7.2）────────────────────────────────────────────────
    两条列线**只在 .ltx_document 上定义一次**，其余容器用 subgrid 继承同一组线。
    否则每个容器按自己的宽度各切一半，列表里缩进的段落、参考文献条目的分界线会和正文错开
@@ -116,6 +125,14 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
 
   & > .axt-t {
     grid-column: 2;
+  }
+
+  /* 网格不与子元素折叠外边距：块布局里**最后一行**的下边距会并进容器自己的下边距，
+     网格里它变成实打实的一段空白（实测摘要块因此高出 24px）。最后一行 = 最后一个子元素，
+     加上"译文正好是最后一个"时它前面的那个原文 */
+  & > :last-child,
+  & > :nth-last-child(2):has(+ .axt-t) {
+    margin-block-end: 0;
   }
 
   /* 只有同行短标题需要清掉那 0.5em；对其余译文清零会压掉 .ltx_centering 的 auto 边距，
