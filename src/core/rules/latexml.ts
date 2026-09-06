@@ -254,6 +254,25 @@ export const FIGURE_MEDIA = 'img, svg, object, math, canvas, video, .ltx_picture
 export const MARGIN_ASIDE = '.ltx_pubnotes, .ltx_note'
 
 /** 文档主标题：靠 text-align:center 居中，不能与译文同行（§7.3） */
+/**
+ * side 模式的结构判定要用到的 LaTeXML 选择器（DESIGN §7.2）。规则表回答的是「哪些内容要翻译」，
+ * 这几条回答的是「这些内容长成什么结构」——同样是 LaTeXML 的知识，按 CLAUDE.md 硬规则 2 一并放这里，
+ * 渲染层（`renderer/side-layout.ts`）只做组合、不写 `ltx_`（Codex 在 #22 指出）。
+ * `styles/modes.css` 里有同一份清单（那是硬规则允许的唯一例外），测试守着两边一致。
+ */
+export const SIDE_LAYOUT = {
+  /** 多面板 flex 图：有任何一个格子不是整栏（`ltx_flex_size_1`）的 `.ltx_flex_figure` */
+  multiPanelFlex: '.ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1))',
+  /** 行内与预格式化上下文：改成网格会毁掉它们 */
+  atomicContext: '.ltx_inline-block, .ltx_note, .ltx_listing',
+  /** 配对成员本身：内部出现的译文是脚注那种嵌套，不是它自己的对照 */
+  pairMember: '.ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock',
+  /** 脚注：折叠状态写在 `.ltx_note_outer` 的 display 上，整棵子树排除 */
+  note: '.ltx_note',
+  /** 堆叠区：这些格子里没有右栏，配对降级为上下堆叠 */
+  stack: '.ltx_td, .ltx_inline-block',
+} as const
+
 export const DOCUMENT_TITLE = '.ltx_title_document'
 /** 文档副标题（`\subtitle`）：与文档标题同属居中的标题区，同样不作同行候选 */
 export const DOCUMENT_SUBTITLE = '.ltx_subtitle'
