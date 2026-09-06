@@ -4,7 +4,7 @@
 // 我们送的是占位符标记文本，走 html 格式原样发送；去掉 escapeText 依赖（protector 已做转义）。
 import { toBcp47 } from '@/config/languages'
 import { attachRequestErrorMeta } from './request/retry-policy'
-import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
+import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 
 const ENDPOINT = 'https://translate-pa.googleapis.com/v1/translateHtml'
 /** 公开常量，来自 Google 翻译网页版；不是用户凭据 */
@@ -13,6 +13,20 @@ const CLIENT = 'wt_lib'
 
 export interface GoogleWebDeps {
   fetch?: typeof globalThis.fetch
+}
+
+/**
+ * HTTP 状态到错误类型（Codex 在 #17 指出）。**不能把 4xx 一律归成 `network`**：
+ * retry-policy 的 `isRetryableRequestErrorMeta` 会**先看 kind 再看状态码**，`network` 直接判定可重试，
+ * 于是一个永远不会成功的 400 会被重试满 3 次、再被 BatchQueue 对半拆分逐条重来——
+ * 100 段的一批能放大成几十次无用请求。只有 5xx 与连接层失败才是瞬时的。
+ */
+function kindOfStatus(status: number): ProviderErrorKind {
+  if (status === 429) return 'rate-limit'
+  if (status === 401 || status === 403) return 'auth'
+  // 408 超时、409 冲突照 retry-policy 的状态码表算瞬时，交给它按状态码判定
+  if (status >= 400 && status < 500 && status !== 408 && status !== 409) return 'bad-request'
+  return 'network'
 }
 
 /** 端点按 items 数组返回同长度的译文数组 */
@@ -36,9 +50,8 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
 
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
-    const kind = response.status === 429 ? 'rate-limit' : 'network'
     throw attachRequestErrorMeta(
-      new ProviderError(kind, `translateHtml ${response.status} ${response.statusText}${detail ? `：${detail.slice(0, 200)}` : ''}`),
+      new ProviderError(kindOfStatus(response.status), `translateHtml ${response.status} ${response.statusText}${detail ? `：${detail.slice(0, 200)}` : ''}`),
       { statusCode: response.status, responseHeaders: response.headers },
     )
   }

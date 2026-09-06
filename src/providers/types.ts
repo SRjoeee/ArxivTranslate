@@ -65,7 +65,7 @@ export interface TranslationProvider {
   cacheId?: string
 }
 
-export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'invalid-response' | 'timeout' | 'aborted' | 'unknown'
+export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'bad-request' | 'invalid-response' | 'timeout' | 'aborted' | 'unknown'
 
 /**
  * 每种 kind 对应的重试元数据，构造时就挂上：移植的 retry-policy 只认它自己的 kind，
@@ -78,6 +78,8 @@ const META_BY_KIND: Record<ProviderErrorKind, RequestErrorMeta> = {
   'auth': { kind: 'access-denied', isRetryable: false },
   'aborted': { isRetryable: false },
   'invalid-response': { isRetryable: false },
+  // 请求本身不对（4xx，非 401/403/429）：重试多少次都一样，交给降级链换个引擎（Codex 在 #17 指出）
+  'bad-request': { kind: 'bad-request', isRetryable: false },
   'rate-limit': { kind: 'rate-limit' },
   'timeout': { kind: 'timeout', isRetryable: true },
   'network': { kind: 'network', isRetryable: true },

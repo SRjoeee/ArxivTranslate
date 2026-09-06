@@ -432,6 +432,7 @@ export interface TranslateResult {
 
   **9.5 倍**，而且请求数降到三分之一——对这个非官方端点反而更客气。`pnpm e2e` 有两条守着：平均 ≥ 5 段/请求、同时在飞 ≤ 2。
 
+- **HTTP 状态要分清瞬时与永久** [决定，2026-09-06，Codex 在 #17 指出]：原来 `google-web` 把非 429 的失败一律归成 `network`，而 retry-policy 的 `isRetryableRequestErrorMeta` **先看 kind 再看状态码**，`network` 直接判定可重试——一个永远不会成功的 400 会被重试满 3 次、再被 BatchQueue 对半拆分逐条重来，100 段的一批能放大成几十次无用请求。现在按状态码映射：429 → `rate-limit`，401 / 403 → `auth`，其余 4xx（408 / 409 除外，它们照状态码表算瞬时）→ 新增的 `bad-request`（不重试但仍触发降级链——换个引擎可能就成了），5xx 与连接层失败才留给 `network`
 - 视为**随时会断**的东西：独立文件、独立错误类型、失败自动切到 fallback 链的下一个
 - fallback 链默认：用户选定 provider → `chrome-builtin` → `google-web`
 - `google-web` 一次请求多条（默认 100 条 / 8000 字一批），速率压到 2 请求/秒、突发 2（`rateLimit`）——免费端点经不起默认的 8/s；不攒批（Read Frog 的 `shouldUseBatchQueue` 只让 LLM 攒），429 与超时同 §8.2，由 request-queue 统一处理
