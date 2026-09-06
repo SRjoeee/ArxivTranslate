@@ -310,6 +310,25 @@ html[data-axt-mode="side"] body {
     var(--axt-side-w) 1fr;
 }
 
+/* 没有沟槽的那一档（side 在 ≥ 1280px 生效，沟槽规则在 ≥ 96rem = 1536px，中间这段 1280–1535px 两头不着）：
+   ar5iv 把 frontmatter 的致谢 / 通讯作者注留在正文流里，并给 `.ltx_note_outer` 写死 800px 宽。
+   原页面的文章正好也是 800px 所以看不出问题；side 模式下文章列在 1280px 时只有 652px，
+   于是这条注**横着溢出文章右缘 156px**，而它的译文只能堆在原文正下方——旁边的姓名、机构都是左右配对的，
+   看上去就像译文掉进了原文那一栏（用户反馈，2026-09-06 复现于 2609.04169v1）。
+   这一档把它收进文章列，并让原文与译文按同样的两栏排。frontmatter 的注**永远可见**，
+   不存在折叠状态，所以不受「.ltx_note 整棵子树排除在配对之外」那条的顾虑（那是给正文脚注的）。 */
+@media (width < 96rem) {
+  html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer {
+    inline-size: 100%;
+  }
+  html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer:has(> .axt-t) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: var(--axt-gap);
+    align-items: start;
+  }
+}
+
 /* 右侧沟槽（≥ 96rem，与 ar5iv 显示边注的断点一致）：ar5iv 的四组规则都用 (100vw - --main-width) / 2 当沟槽宽、
    边注宽度按 96 / 109rem 写死 20 / 27rem——那是给 52rem 文章配的，我们的沟槽在 1600px 只有 19rem，照写会溢出视口。
    这些几何改成跟 --axt-side-w 走，显隐与 hover / focus 交互原样不动。盒子一律占 [文章右缘 + 1rem, 文章右缘 + side - 1rem]。

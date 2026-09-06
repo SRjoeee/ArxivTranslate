@@ -223,6 +223,46 @@ async function measureFrame(page) {
   await page.close()
 }
 
+// ── 沟槽以下那一档（1280–1535px）：frontmatter 的致谢 / 通讯作者注也要左右配对 ──────────
+// side 在 ≥1280px 生效，沟槽规则在 ≥96rem(1536px)，中间这段两头不着：ar5iv 把这条注留在正文流里
+// 并写死 800px 宽，于是它横着溢出文章、译文堆在原文正下方，看上去像掉进了左栏（用户反馈，2026-09-06）
+{
+  const page = await openSide('2609.04169v1')
+  await quiesce(page, '沟槽以下的 frontmatter 脚注')
+  for (const vw of [1400, 1500]) {
+    await page.setViewportSize({ width: vw, height: 900 })
+    await sleep(800)
+    const m = await page.evaluate(() => {
+      const art = document.querySelector('article.ltx_document').getBoundingClientRect()
+      const note = document.querySelector('.ltx_note.ltx_note_frontmatter')
+      if (!note) return null
+      const outer = note.querySelector('.ltx_note_outer')
+      const orig = outer?.querySelector('.ltx_note_content:not(.axt-t)')
+      const trans = outer?.querySelector('.ltx_note_content.axt-t')
+      if (!orig || !trans) return null
+      const b = el => { const r = el.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right) } }
+      return { art: { l: Math.round(art.left), r: Math.round(art.right) }, outer: b(outer), orig: b(orig), trans: b(trans), mid: Math.round((art.left + art.right) / 2) }
+    })
+    check(`${vw}px（沟槽以下）：frontmatter 脚注的原文与译文分居两栏、不溢出文章`,
+      !!m && m.orig.r <= m.mid && m.trans.l >= m.mid && m.outer.r <= m.art.r + 1,
+      m ? `原文 ${m.orig.l}–${m.orig.r}，译文 ${m.trans.l}–${m.trans.r}，中线 ${m.mid}，文章右缘 ${m.art.r}，注框右缘 ${m.outer.r}` : '没找到 frontmatter 脚注或它的译文')
+  }
+  // 沟槽那一档不受影响：注整条浮到文章右缘之外
+  await page.setViewportSize({ width: 1800, height: 900 })
+  await sleep(800)
+  const wide = await page.evaluate(() => {
+    const art = document.querySelector('article.ltx_document').getBoundingClientRect()
+    const note = document.querySelector('.ltx_note.ltx_note_frontmatter')
+    const r = note.getBoundingClientRect()
+    return { l: Math.round(r.left), r: Math.round(r.right), artR: Math.round(art.right), vw: innerWidth }
+  })
+  check('1800px（沟槽档）：frontmatter 脚注仍整条落在右侧沟槽里，这次改动没动它',
+    wide.l >= wide.artR - 4 && wide.r <= wide.vw + 1,
+    `${wide.l}–${wide.r}，文章右缘 ${wide.artR}，视口 ${wide.vw}`)
+  await page.screenshot({ path: `${SHOTS}/layout-frontmatter-note.png` })
+  await page.close()
+}
+
 await context.close()
 const failed = results.filter(r => !r.ok)
 console.log(`\n${results.length - failed.length}/${results.length} passed; screenshots in ${SHOTS}`)
