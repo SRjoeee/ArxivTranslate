@@ -1,9 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { extract } from '@/core/extractor'
 import {
   PROTECT_RULES, RULES_VERSION, SKIP_RULES, TABLE_RULES, UNIT_RULES,
-  classify, documentRoot, hasTranslatableText, isNamedTag, isNumericCell, visibleText,
+  classify, documentRoot, hasTranslatableText, isBibAuthorBlock, isNamedTag, isNumericCell, visibleText,
 } from '@/core/rules/latexml'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
@@ -32,7 +33,7 @@ describe('规则表完整性', () => {
   })
 
   it('版本号随本次规则变化升级', () => {
-    expect(RULES_VERSION).toBe('0.6.2')
+    expect(RULES_VERSION).toBe('0.8.0')
   })
 })
 
@@ -271,5 +272,51 @@ describe('fixture 不变量', () => {
     const article = doc.querySelector('article')!
     expect(documentRoot(article)).toBe(article)
     expect(documentRoot(doc.querySelector('p')!)).toBeNull()
+  })
+})
+
+describe('description 列表的术语（Codex 在 #18 指出）', () => {
+  const doc = (html: string) => new DOMParser().parseFromString(`<!doctype html><html><body><article class="ltx_document">${html}</article></body></html>`, 'text/html')
+  const item = (tagText: string) =>
+    `<dl class="ltx_description"><dt class="ltx_item"><span class="ltx_tag ltx_tag_item">${tagText}</span></dt></dl>`
+
+  it('含词的术语要翻：不放开的话整个 .ltx_item 没有自有文本、根本不成块', () => {
+    const d = doc(item('Compactness.'))
+    const blocks = extract(d)
+    expect(blocks.map(b => b.unit)).toEqual(['item'])
+    expect(classify(d.querySelector('.ltx_tag_item')!)).toBeNull()
+  })
+
+  it('纯标记仍作 void：项目符号与编号不能翻', () => {
+    for (const marker of ['•', '(1)', '2.', '(ii)']) {
+      const d = doc(item(marker))
+      expect([marker, extract(d).length]).toEqual([marker, 0])
+      expect([marker, classify(d.querySelector('.ltx_tag_item')!)?.rule]).toEqual([marker, 'tag'])
+    }
+  })
+})
+
+describe('参考文献的作者段优先看语义标注（Codex 在 #18 指出）', () => {
+  const entry = (inner: string) => new DOMParser()
+    .parseFromString(`<!doctype html><html><body><article class="ltx_document"><ul class="ltx_biblist"><li class="ltx_bibitem">${inner}</li></ul></article></body></html>`, 'text/html')
+
+  it('有 .ltx_bib_author 就按它判，不按位置', () => {
+    // 作者段排在第二段的假想模板：位置判断会把标题当作者段跳掉
+    const d = entry('<span class="ltx_bibblock">A Manual of Style.</span><span class="ltx_bibblock"><span class="ltx_bib_author">Doe, J.</span></span>')
+    const [title, author] = [...d.querySelectorAll('.ltx_bibblock')]
+    expect(isBibAuthorBlock(title!)).toBe(false)
+    expect(isBibAuthorBlock(author!)).toBe(true)
+  })
+
+  it('没有标注时回到位置判断：12 篇 fixture 里 285 条多段引文都是这种', () => {
+    const d = entry('<span class="ltx_bibblock">Doe, J., and Roe, R.</span><span class="ltx_bibblock">A Title.</span>')
+    const [first, second] = [...d.querySelectorAll('.ltx_bibblock')]
+    expect(isBibAuthorBlock(first!)).toBe(true)
+    expect(isBibAuthorBlock(second!)).toBe(false)
+  })
+
+  it('只有一段的条目整条就是引文，不跳过', () => {
+    const d = entry('<span class="ltx_bibblock">Doe, J. A Title. Journal, 2020.</span>')
+    expect(isBibAuthorBlock(d.querySelector('.ltx_bibblock')!)).toBe(false)
   })
 })

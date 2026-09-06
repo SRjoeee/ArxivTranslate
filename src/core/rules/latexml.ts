@@ -7,7 +7,7 @@
  * 0.6.2：带环境名的 tag 改为可翻，纯标识符（`(a)`、`(ii)`）仍保护——分类语义变了，
  * 旧缓存不该跨过去（Codex 在 #53 指出）
  */
-export const RULES_VERSION = '0.6.2'
+export const RULES_VERSION = '0.8.0'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -108,6 +108,12 @@ export const NAMED_TAGS = [
   '.ltx_tag_float', // Algorithm 1
   '.ltx_tag_appendix', // Appendix A
   '.ltx_tag_part', // Part I
+  // description 列表的术语（`\item[Compactness]`）也放在 tag 里，是真正的正文（Codex 在 #18 指出）：
+  // 不放开的话整个 `.ltx_item` 没有自有文本、根本不成块，术语永远不翻。12 篇 fixture 共 371 个
+  // `.ltx_tag_item`，含词的只有 8 个（Markov categories: / CD categories: / Compactness. / RQ1–RQ5），
+  // 其余 363 个是 `(1)` `•` 这类标记，由下面的内容判定挡住。google-web 实测把 RQ1 原样返回，
+  // 标识符不会被改写
+  '.ltx_tag_item', // Compactness. / Markov categories:
   '.ltx_tag_chapter', // Chapter 1
 ].join(', ')
 
@@ -154,10 +160,19 @@ const TABLE_CLASSIFICATION: Classification = { kind: 'table', rule: 'table', des
  * 只有部分模板会标 .ltx_bib_author（20 篇实测 13 篇有），所以按位置判断而不是按类名；
  * 只有一段的条目（natbib 等样式）整条就是引文，不能跳过。
  */
+/** classify() 动态返回的规则 id：不在三张表里，审计脚本要单独列（Codex 在 #18 指出） */
+export const BIB_AUTHORS_RULE = 'bib-authors'
+
 export function isBibAuthorBlock(el: Element): boolean {
   if (!el.matches('.ltx_bibblock')) return false
   const siblings = Array.from(el.parentElement?.children ?? []).filter(child => child.matches('.ltx_bibblock'))
-  return siblings.length > 1 && siblings[0] === el
+  if (siblings.length <= 1) return false
+  // 有语义标注就信它，别只看位置（Codex 在 #18 指出）。12 篇 fixture 里 285 条多段引文，
+  // 带 .ltx_bib_author 的 59 条**全部**是「作者段就是第一段」，所以这条改动今天不改变任何结果；
+  // 它保的是将来：某个模板把作者放在别的段时，位置判断会把标题当作者段跳掉
+  const marked = el.parentElement?.querySelector('.ltx_bib_author')
+  if (marked) return marked.closest('.ltx_bibblock') === el
+  return siblings[0] === el
 }
 
 /** 括号里的整段标识符：子图面板的 `(a)` `(ii)` `(iii)`、公式标签的 `(let.lin)` 都是这个形状 */
@@ -210,7 +225,7 @@ export function isNamedTag(el: Element): boolean {
 }
 
 export function classify(el: Element): Classification | null {
-  if (isBibAuthorBlock(el)) return { kind: 'skip', rule: 'bib-authors', descend: false }
+  if (isBibAuthorBlock(el)) return { kind: 'skip', rule: BIB_AUTHORS_RULE, descend: false }
   const skip = SKIP_RULES.find(r => el.matches(r.selector))
   if (skip) return { kind: 'skip', rule: skip.id, descend: false }
   if (el.matches(TABLE_RULES.root)) return TABLE_CLASSIFICATION
