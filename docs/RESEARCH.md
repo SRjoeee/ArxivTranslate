@@ -267,7 +267,9 @@ Codex 在 #50 断言 MV3 的 background service worker 不暴露 `Translator`，
 
 worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在 background 判断 chrome-builtin 是否可用是准确的。仍然成立的边界：worker 里没有用户手势，语言包为 `downloadable` 时 `create()` 抛 `NotAllowedError`，所以下载入口只能放在 popup 的点击处理函数里（DESIGN §8.4）。
 
-## 6.5 MV3 service worker 是当前延迟的根因（2026-09-04）
+## 6.5 ~~MV3 service worker 是当前延迟的根因~~（2026-09-04）——**结论已推翻，见 §6.7 / §6.8**
+
+> **本节的延迟结论不再成立**（2026-09-06）。6.7–77 s 在当前代码上重现不出来（§6.7），一次在飞的请求本身就让 worker 存活（§6.8），「Read Frog 在 content 发请求」是误读（§6.7）。方法与原始数据留档，**结论与由它推出的建议一律以 §6.7 / §6.8 为准**。
 
 页面加载后要等几十秒才开始翻译，逐层测下来结论如下（日志见 content 的 `[axt] start:`）：
 
@@ -312,7 +314,18 @@ worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在
 | content script（隔离世界） | 200（先发 `OPTIONS` 预检） | **`TypeError: Failed to fetch`** | 页面 origin（`http://localhost:8898`），预检发出、响应缺 CORS 头即失败 |
 | 页面主世界 | 同 content script | 同 content script | 同上 |
 
-再把页面换成真实的 `https://arxiv.org/html/...`、端点保持 `http://127.0.0.1`：页面里的 fetch 直接 `Failed to fetch`，**请求根本没有离开浏览器**（服务端日志为空），background 照常 200。这是混合内容拦截，在 CORS 之前生效，与端点有没有 CORS 头无关。
+再把页面换成真实的 `https://arxiv.org/html/...`、端点保持 `http://127.0.0.1`：页面里的 fetch 直接 `Failed to fetch`，**请求根本没有离开浏览器**（服务端日志为空），background 照常 200。
+
+**这里原先写的是「混合内容拦截」，归因错了**（Codex 在 #57 指出，2026-09-06 补测更正）：loopback 是规范里的 *potentially trustworthy origin*，`https` 页面调 `http://127.0.0.1` **不属于**混合内容。补的对照实验——同一个 loopback 主机上同时起 `http:8901` 与 `https:8902`（自签证书，`--ignore-certificate-errors`），两个端点都带 `Access-Control-Allow-Origin: *`：
+
+| 发起页面 | → `http://127.0.0.1:8901` | → `https://127.0.0.1:8902` | 服务端收到 |
+|---|---|---|---|
+| `http://127.0.0.1:8901`（同为本地） | **200** | **200** | 预检 + POST 都到了 |
+| `https://arxiv.org/html/...` | `Failed to fetch` | **`Failed to fetch`** | **一条都没有** |
+
+第一行排除了证书、端点与 CORS 三种解释；第二行里 `https` → `https` 不可能是混合内容，却同样被拦。**真正生效的是 Chrome 从公网站点访问本地地址的门禁（Local Network Access）**，与端点用什么 scheme 无关。
+
+实际影响：**给本地端点配一张 https 证书绕不过去**。想从页面侧直连 Ollama 这条路是堵死的，只有 background 走得通——扩展 origin 加 `host_permissions` 不受这道门禁约束（同一次实测里 background 两个端点都是 200）。
 
 **结论**：
 1. MV3 下 `host_permissions` **不会**解除 content script 的 CORS 约束：content 的请求带页面 origin、走预检，与页面主世界完全一致（Chrome 85 起的行为，官方文档 developer.chrome.com/docs/extensions/develop/concepts/network-requests）。
@@ -338,7 +351,9 @@ worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在
 | 闲置 40 s #2 | 22 ms | 81 ms | 无 |
 | 闲置 40 s #3 | 21 ms | 77 ms | 无 |
 
-三轮冷启动的 background 往返都在 80 ms 以内，1.5 s 的读缓存预算一次没触发。**§6.5 记录的 6.7–77 s 在当前代码上重现不出来**——那次测量发生在缓存写入还会扫全库的版本（§9 已修），而且当时 `provider-status` 走的是 background，现在启动路径根本不经过它。结论：worker 冷启动本身不是延迟来源，§8.0「把请求移到 content」的**延迟**理由不成立；它的 **CORS / 混合内容**代价则已被本节实测坐实。popup 那条路径由用户手动确认（2026-09-06）：冷启动后点扩展图标，「翻译」按钮**立刻可点**，没有出现灰几秒的情况——`axt:provider-status` 这条唯一还走 background 的启动期消息同样不受 worker 冷启动影响。至此 §6.5 的延迟结论在当前代码上全部推翻。
+**这张表的局限**（Codex 在 #57 指出）：它没有在每轮重载前直接观测 worker 是否真的已被回收——40 s 空闲**超过** MV3 的 30 s 阈值，但 Chrome 可以推迟回收，扩展 API 活动也会重置空闲计时，所以这几个 77–81 ms 有可能是热 worker 的数字。补强的证据在 §6.8：那次实验记录了 worker 年龄，45 s 与 90 s 两轮的年龄分别是 45 013 ms 与 90 007 ms，等于请求时长——worker 确实是在请求开始时才新建的，说明这台机器上的回收确实在发生。即便退一步只当热 worker 看，结论方向不变：热 worker 的往返是 80 ms，冷 worker 只会更慢一点，与 §6.5 记的 6.7–77 s 差三个数量级。
+
+三轮冷启动的 background 往返都在 80 ms 以内，1.5 s 的读缓存预算一次没触发。**§6.5 记录的 6.7–77 s 在当前代码上重现不出来**——那次测量发生在缓存写入还会扫全库的版本（§9 已修），而且当时 `provider-status` 走的是 background，现在启动路径根本不经过它。结论：worker 冷启动本身不是延迟来源，§8.0「把请求移到 content」的**延迟**理由不成立；它的 **CORS / 混合内容**代价则已被本节实测坐实。popup 那条路径由用户手动确认（2026-09-06）：冷启动后点扩展图标，「翻译」按钮**立刻可点**，没有出现灰几秒的情况——`axt:provider-status` 这条唯一还走 background 的启动期消息同样不受 worker 冷启动影响。至此 §6.5 的延迟结论在当前代码上全部推翻。**注意本节只量了「启动」往返**，没有回答「请求正在等待时 worker 会不会被回收」——那是另一种失效模式，DESIGN §8.2 给一批 1000 字预算 35 s、单次尝试上限 120 s，正落在这个问题上（Codex 在 #57 指出）。§6.8 专门测了它。
 
 **顺带发现（同一次实测）**：用户的 Chrome 里存着 v7 配置（之前试过设置页分支的构建），而加载的构建是 v6 的，`@wxt-dev/storage` 报 `Version downgrade detected (v7 -> v6)` 拒绝迁移，`getConfig()` 校验失败回退默认值——API key 被静默忽略，链落到 google-web，用户看不出区别。这是 Codex 在 #52 指出的「一条术语让整份配置回退」的同一类问题，只是触发条件换成了「装了旧构建」。值得在 DESIGN §9 记一条：回退默认值时至少要在 popup 上显式提示，不能静默。
 
@@ -399,7 +414,7 @@ worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在
 | 21 | §8.3 fallback 链默认顺序 | `chrome-builtin` 单句 10–20 ms 且离线，建议在模型已就绪时把它排在用户选定的 LLM 之前作为视口首屏的即时引擎，LLM 结果到达后替换（缓存键含 provider，两者不冲突）；是否采纳取决于对译文质量的取舍 | §6.2 |
 | 18 | §11 fixture 覆盖多年份 | 改为"覆盖多领域与多结构"，年份不再是版本代理 | §1 |
 | 19 | §14 arXiv 自身 JS 冲突 | 实测无冲突面（无 MutationObserver / MathJax / 脚注 JS，脚注弹出纯 CSS），风险可降为低 | §3.3 |
-| 22 | §8 / §10 provider 请求跑在 background | 实测 MV3 的 service worker 会在等待中被挂起，一条无 I/O 的 `provider-status` 冷启动要 6.7–77 s，翻译中途出现"消息通道关闭"报错。建议照 Read Frog 把 provider 的 fetch 移到 content script，background 只保留缓存与配置 | §6.5 |
+| 22 | ~~§8 / §10 provider 请求跑在 background~~ | ~~建议把 provider 的 fetch 移到 content script~~ **已废止（2026-09-06）**：依据的 §6.5 三条结论全部推翻（§6.7 / §6.8），且「Read Frog 在 content 发请求」是误读。**与第 24 行方向相反，以第 24 行为准**；实际实现是移到 background（issue #42，已合并） | ~~§6.5~~ → §6.7 / §6.8 |
 | 23 | §8 `google-gtx` 用 `translate_a/single`、`preservesMarkup: false` | 改用 Read Frog 的 `translate-pa.googleapis.com/v1/translateHtml`：实测保留占位符，`preservesMarkup: true`，批量 150 条 556 ms | §6.6 |
 | 20 | §15.1 SVG 图文字按普通块翻译 | 实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics` | §2.9 |
-| 24 | §8.0 请求跑在 content script | 实测 content 侧 fetch 受 CORS 与混合内容约束（§6.7）：不带 CORS 头的端点、`http` 的本地端点（Ollama）从 content 不可达，从 background 可达；连接测试走 background、正式翻译走 content，两条路径行为不一致。且 §8.0 引用的「Read Frog 在 content 发请求」核对为误读。建议：抽离 transport，默认在 background 执行请求（无 CORS、无混合内容、key 不进页面世界），content 只保留调度；先按 issue #42 要求重测冷启动延迟的三段分布，确认 §6.5 的 6.7–77 s 不是我们自己的 storage / 初始化开销，再定 | §6.7 |
+| 24 | §8.0 请求跑在 content script | 实测 content 侧 fetch 受 CORS 与混合内容约束（§6.7）：不带 CORS 头的端点、`http` 的本地端点（Ollama）从 content 不可达，从 background 可达；连接测试走 background、正式翻译走 content，两条路径行为不一致。且 §8.0 引用的「Read Frog 在 content 发请求」核对为误读。建议：抽离 transport，默认在 background 执行请求（无 CORS、无混合内容、key 不进页面世界），content 只保留调度；~~先按 issue #42 要求重测冷启动延迟，再定~~ **重测已完成**（§6.7 真实 Chrome 三轮 77–81 ms、§6.8 长请求 45 / 90 s 均存活），**已按本条实现并合并**（issue #42） | §6.7 / §6.8 |
