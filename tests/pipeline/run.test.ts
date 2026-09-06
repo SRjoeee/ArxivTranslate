@@ -294,3 +294,55 @@ describe('startTranslation', () => {
     expect(doc.querySelectorAll(`.${T_CLASS}[${FOR_ATTR}="p3"]`)).toHaveLength(1)
   })
 })
+
+describe('onRendered：每批交出刚动过 DOM 的块（issue #46）', () => {
+  it('每批两次：插圆环后一次、渲染结果后一次，两次都是这批的块', async () => {
+    const doc = docOf()
+    const blocks = extract(doc)
+    const { transport } = makeTransport()
+    const seen: Block[][] = []
+    const run = await start(doc, blocks, transport, { onRendered: b => seen.push(b) })
+    expect(seen).toEqual([]) // 标记阶段不算"渲染"
+    const p1 = byId(blocks, blocks[1]!.id)
+    await run.translate([p1])
+    expect(seen).toHaveLength(2)
+    expect(seen[0]).toEqual([p1])
+    expect(seen[1]).toEqual([p1])
+  })
+
+  it('stop() 之后不再交出', async () => {
+    const doc = docOf()
+    const blocks = extract(doc)
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    const transport: Transport = async req => {
+      await gate
+      return { ok: true, result: { segments: req.request.segments.map(s => ({ id: s.id, text: s.text })), provider: 'mock' }, cached: 0 }
+    }
+    const seen: Block[][] = []
+    const run = await start(doc, blocks, transport, { onRendered: b => seen.push(b) })
+    const pending = run.translate([blocks[1]!])
+    expect(seen).toHaveLength(1) // 圆环那一次已经发出
+    run.stop()
+    release()
+    await pending
+    expect(seen).toHaveLength(1) // 结果那一次没有
+  })
+
+  it('重试路径同样交出', async () => {
+    const doc = docOf()
+    const blocks = extract(doc)
+    let calls = 0
+    const { transport } = makeTransport((_, seg) => (++calls === 1 ? { error: 'network' } : seg.text))
+    const seen: Block[][] = []
+    const run = await start(doc, blocks, transport, { onRendered: b => seen.push(b) })
+    const p1 = blocks[1]!
+    await run.translate([p1])
+    expect(run.progress().failed).toBe(1)
+    expect(seen).toHaveLength(2)
+    await run.translate([p1]) // 失败的块可以再交
+    expect(seen).toHaveLength(4)
+    expect(seen[3]).toEqual([p1])
+  })
+})
+

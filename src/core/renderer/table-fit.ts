@@ -85,7 +85,7 @@ function measureNatural(table: Element, column: number): NaturalWidth {
  * 栏宽以翻译根的第一条网格轨道为准：所有容器都是它的 subgrid，栏宽处处相同（§7.2）。
  * 直接读轨道比"父容器宽度减间距再除二"更可靠——表格的父级不一定是我们设的网格容器。
  */
-function measureColumn(table: Element): number {
+export function measureColumn(table: Element): number {
   const view = table.ownerDocument.defaultView
   const root = table.closest(DOCUMENT_ROOT)
   if (view && root) {

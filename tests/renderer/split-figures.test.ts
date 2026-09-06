@@ -150,3 +150,16 @@ describe('splitFigures', () => {
     expect(mixed.querySelector(`.${SPLIT_CLASS}`)!.textContent).toContain('说明 B')
   })
 })
+
+describe('镜像不是译文（issue #46 实测 2312.17141）', () => {
+  it('图里唯一的 .axt-t 是镜像时不拆：那是说明还没翻完、媒体先被镜像顶位的正常状态', () => {
+    // 基线每趟全量，镜像一进图下一趟就把它当"有译文"假拆——删掉镜像、克隆一份没有译文的图
+    const doc = docOf('<figure class="ltx_figure" id="f"><img class="ltx_graphics" src="a.png" alt="">'
+      + '<img class="ltx_graphics axt-t axt-mirror" data-axt-for="mirror:0" src="a.png" alt="">'
+      + '<figcaption class="ltx_caption" data-axt-id="c" data-axt-state="pending">Figure.</figcaption></figure>')
+    expect(splitFigures(doc)).toBe(0)
+    expect(doc.querySelector('.axt-split')).toBeNull()
+    expect(doc.querySelectorAll('.axt-mirror')).toHaveLength(1) // 镜像留着
+  })
+})
+

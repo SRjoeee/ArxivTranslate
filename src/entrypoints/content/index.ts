@@ -4,14 +4,13 @@ import { extract, paperContext, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
 import {
-  alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, installAnchorFallback,
-  localizeNotes, restore, splitFigures,
-  watchFontLoads,
+  clearPairMargins, createModeController, createPrep, installAnchorFallback,
+  restore,
   type Mode, type ModeController,
 } from '@/core/renderer'
 import { decodeText, escapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { beginSession, createCoalescer, endSession, getSessionId, translateTitle, type TitleTranslator } from '@/core/scheduler'
+import { beginSession, endSession, getSessionId, translateTitle, type TitleTranslator } from '@/core/scheduler'
 import { isAxtMessage } from '@/shared/messages'
 import { createMessageTransport } from '@/shared/transport'
 import { enableDebug } from './debug'
@@ -86,6 +85,7 @@ export default defineContentScript({
       uninstallAnchors = installAnchorFallback(document)
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
+      prep.reset() // 新会话：镜像允许再跑一次、量宽缓存清空、栏宽重读
       enterSide(modes.effective())
       const t1 = performance.now()
       let wasBusy = false
@@ -102,11 +102,15 @@ export default defineContentScript({
         transport: request => backend.translate(request),
         scope: session,
         preload: config.preload,
+        // 这一批刚动过 DOM 的块交给整理层：只碰它们所在的容器，不再每趟全篇重扫（issue #46）
+        onRendered: blocks => {
+          if (getSessionId() !== session) return
+          prep.touch(blocks)
+        },
         onProgress: p => {
           // 会话已结束（恢复原文 / 重开）：旧运行的回调一律忽略
           if (getSessionId() !== session) return
           progress = p
-          prep.schedule()
           // 翻译是"开着"的状态，没有终点；每次从忙到闲打一条日志，e2e 与手测靠它
           const busy = p.inFlight > 0
           if (wasBusy && !busy) {
@@ -134,28 +138,14 @@ export default defineContentScript({
     let fitObserver: ResizeObserver | null = null
 
     /**
-     * 译文到达后的整理：脚注译文搬进副本（三种模式都要），side 模式再补镜像、拆图、缩表、对齐边距。
-     * 译文是逐块到达的，随进度合并执行；纯去抖会被连续的进度回调饿死，直到整篇翻完才跑
-     * （实测 413 个镜像在最后一刻同时出现），所以用带最长等待的合并器。
+     * 译文到达后的整理（DESIGN §7.2 / §10，issue #46）：脚注归位、拆图、镜像、缩表、对齐边距。
+     * 由 pipeline 每批交出的脏块驱动，每趟只碰它们所在的容器；镜像整个会话只跑一次；
+     * 栏宽在每趟开头、写任何东西之前读。全部在 renderer/prep.ts，这里只接线
      */
-    const prep = createCoalescer(() => {
-      localizeNotes(document)
-      if (modes?.effective() !== 'side') return
-      // 先整块拆插图，再补镜像：拆过的插图不再参与镜像（两套方案会重复一份）
-      const split = splitFigures(document)
-      const made = createMirrors(document)
-      const fit = fitTables(document)
-      // 边距对齐要在镜像之后：镜像也是译文节点，同样会被站点的相邻兄弟规则影响
-      const aligned = alignPairMargins(document)
-      if (split || made || fit.fitted || fit.scrolled || aligned) {
-        console.debug(
-          `[axt] side prep: +${split} figures split, +${made} mirrors, `
-          + `${fit.fitted} tables scaled, ${fit.scrolled} scrollable, ${aligned} margins aligned`,
-        )
-      }
-    }, { delay: 150, maxWait: 1000 })
-    // 字体加载完成后表格 / 公式的自然宽度会变：清量宽缓存、再整理一趟（Codex 在 #84 指出）
-    watchFontLoads(document, () => prep.schedule())
+    const prep = createPrep(document, {
+      isSide: () => modes?.effective() === 'side',
+      trace: line => console.debug(`[axt] ${line}`),
+    })
 
     /** 进入 side 时的准备：右栏补一份公式与图表（§7.2），并把表格缩到能装进一栏 */
     function enterSide(effective: Mode): void {
@@ -167,7 +157,9 @@ export default defineContentScript({
         clearPairMargins(document)
         return
       }
-      prep.schedule()
+      // 进 side：栏宽重读、全量整理一趟（stack / only 回来时对齐边距已被清掉，得从头算）
+      prep.refreshColumn()
+      prep.touchAll()
       // 栏宽随窗口变化，缩放比例要跟着重算。只在宽度真的变了才重算——
       // 缩放表格本身也会让观察目标报告一次尺寸变化，不设这道闸就会自激振荡
       if (!fitObserver && typeof ResizeObserver === 'function') {
@@ -176,7 +168,8 @@ export default defineContentScript({
           const width = Math.round(entries[0]?.contentRect.width ?? 0)
           if (width === lastWidth) return
           lastWidth = width
-          prep.schedule()
+          prep.refreshColumn()
+          prep.touchAll()
         })
         const target = document.querySelector(DOCUMENT_ROOT)
         if (target) fitObserver.observe(target)
@@ -200,7 +193,7 @@ export default defineContentScript({
       modes = null
       fitObserver?.disconnect()
       fitObserver = null
-      prep.cancel()
+      prep.reset()
       uninstallAnchors?.()
       uninstallAnchors = null
       const result = restore(document)

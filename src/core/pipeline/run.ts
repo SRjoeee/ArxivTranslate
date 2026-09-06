@@ -43,6 +43,11 @@ export interface RunOptions {
   capabilities: { maxBatchChars: number; maxBatchItems: number; preservesMarkup: boolean }
   transport: Transport
   onProgress?: (progress: Progress) => void
+  /**
+   * 这一批块刚在 DOM 上动过（插了圆环 / 译文 / 失败小部件），每批两次、与 onProgress 同步（issue #46）。
+   * 单独一个回调而不塞进 Progress：Progress 要发给 popup，必须可序列化，Block 带着 DOM 节点
+   */
+  onRendered?: (blocks: Block[]) => void
   /** 论文级上下文（标题、摘要、术语表），每批都带；章节标题由批次自己补 */
   context?: TranslateContext
   /** 取消范围 = 会话 id：每次调用都带，stop 时由调用方撤销排队与在飞的请求（§10） */
@@ -98,6 +103,9 @@ export function startTranslation(options: RunOptions): TranslationRun {
   const report = () => {
     if (!stopped) options.onProgress?.(progress())
   }
+  // 不另设 stopped 守卫：第一次调用在 translate() 的 halted() 检查与本批之间没有让出主线程，
+  // 第二次在 `if (stopped) return` 之后——那条 return 就是守卫，这里再判一次是测不到的死代码
+  const rendered = (blocks: Block[]) => options.onRendered?.(blocks)
   const halted = () => stopped || fatal !== undefined
 
   // 译文语言进 <html>，renderText 逐个写到译文节点上：页面的 lang 说的是原文（arXiv 上是 en），
@@ -221,6 +229,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
       outcome.set(block, 'requested')
       renderPending(block)
     }
+    rendered(targets)
     report()
     const out: BatchResult = new Map()
     await translateSegments(batch.segments, batch.sectionTitle, out)
@@ -259,6 +268,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
         }
       }
     }
+    rendered(targets)
     report()
   }
 

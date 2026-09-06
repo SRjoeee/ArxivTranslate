@@ -17,12 +17,18 @@ import { PENDING_CLASS } from './pending'
 import { FOR_ATTR, T_CLASS } from './index'
 
 /** 真正的译文：等待态的 pending 节点与失败态的小部件（§7.6）都不算 */
-const REAL_TRANSLATION = `.${T_CLASS}:not(.${PENDING_CLASS}):not(.axt-error)`
 
 /** 原件上的标记（原节点只允许追加 data-axt-*，§7.1） */
 export const SPLIT_ATTR = 'data-axt-split'
 /** 克隆件的 class；它同时带 T_CLASS，所以配对规则会把它放进右栏 */
 export const SPLIT_CLASS = 'axt-split'
+
+/**
+ * 真译文：与 §7.5 预设选择器同一条界线——圆环、失败小部件、**镜像、拆分克隆**都带 .axt-t 只是为了配对，不是译文。
+ * 漏掉 .axt-mirror 时（issue #46 实测 2312.17141）：说明还 pending 的图被镜像了媒体，下一趟全量把镜像当成"有译文"，
+ * 删掉镜像、克隆一份没有任何译文的图——右栏是一份原文副本。基线每趟全量，7 张拆图里 2 张是这种假拆
+ */
+const REAL_TRANSLATION = `.${T_CLASS}:not(.${PENDING_CLASS}, .axt-error, .${MIRROR_CLASS}, .${SPLIT_CLASS})`
 /** 克隆时译文内容的签名，用来判断译文有没有增加或改变、要不要重建 */
 const KEY_ATTR = 'data-axt-split-key'
 
@@ -39,6 +45,17 @@ function translationKey(fig: Element): string {
  */
 function hasLooseMedia(fig: Element): boolean {
   return Array.from(fig.querySelectorAll(FIGURE_MEDIA)).some(m => m.closest(`[${ID_ATTR}], .${T_CLASS}`) === null)
+}
+
+/** 元素所在的最外层 figure（嵌套分图交给最外层一起复制）；不在图里返回 null */
+export function outermostFigure(el: Element): Element | null {
+  let fig = el.closest('figure')
+  while (fig?.parentElement) {
+    const outer = fig.parentElement.closest('figure')
+    if (!outer) break
+    fig = outer
+  }
+  return fig
 }
 
 function needsSplit(fig: Element): boolean {
