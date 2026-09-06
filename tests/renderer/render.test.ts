@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { extract, type TextBlock } from '@/core/extractor'
-import { FOR_ATTR, INLINE_ATTR, STATE_ATTR, T_CLASS, renderText, setState, shouldInline } from '@/core/renderer'
+import { FOR_ATTR, IDENTITY_ATTR, INLINE_ATTR, STATE_ATTR, T_CLASS, renderText, setState, shouldInline } from '@/core/renderer'
 import { docOf, frag } from './helpers'
 
 describe('renderText', () => {
@@ -110,3 +110,29 @@ describe('文档标题与副标题不作同行候选（Codex 在 #13 指出）',
     expect(inlineOf(html, '.ltx_title_section')).toEqual({ 成块: true, 行内: true })
   })
 })
+
+describe('译文与原文相同就标出来（Codex 在 #74 指出）', () => {
+  const render = (original: string, translated: string) => {
+    const doc = docOf(`<p class="ltx_p" id="p">${original}</p>`)
+    const block = extract(doc)[0] as TextBlock
+    return renderText(block, frag(doc, translated))
+  }
+
+  it('逐字相同：打上 data-axt-identity', () => {
+    // 默认提示词让模型保留人名，纯人名的引文作者段就是这样原样回来的
+    expect(render('Doe, J., and Roe, R.', 'Doe, J., and Roe, R.').hasAttribute(IDENTITY_ATTR)).toBe(true)
+  })
+
+  it('只有空白不同也算相同：rehydrate 回填时标签边界的空白与原文未必一一对应', () => {
+    expect(render('Doe,  J.\n and Roe, R.', 'Doe, J. and Roe, R.').hasAttribute(IDENTITY_ATTR)).toBe(true)
+  })
+
+  it('真的翻了就不打标记', () => {
+    expect(render('The quick brown fox.', '敏捷的棕色狐狸。').hasAttribute(IDENTITY_ATTR)).toBe(false)
+  })
+
+  it('只差一个字也不算相同', () => {
+    expect(render('Doe, J., and Roe, R.', 'Doe, J., and Roe, S.').hasAttribute(IDENTITY_ATTR)).toBe(false)
+  })
+})
+

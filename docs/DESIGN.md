@@ -369,6 +369,10 @@ interface ProtectedBlock {
 
   另一头是反过来的：**比 root（视口 + 上下 margin）还高的块永远达不到高阈值**，比例封顶在 `root 高 ÷ 元素高`；设计上又明确不拆超大表格（§7.2），于是 `threshold=1` 时那张表一辈子不会翻。有效阈值按这个上限钳一下——够得着多少就要求多少。观察器的 `threshold` 传 `[0, 阈值]`：它只决定「在哪些比例上回调」，判定在回调里做，不加 0 的话超大块连回调都收不到。
 
+- **译文与原文逐字相同就不重复显示** [决定，2026-09-06，Codex 在 #74 指出]：默认提示词里那条 “Keep author names, journal names, conference names … in the original language” 会让纯人名的引文作者段**原样返回**，而 `renderText` 无条件插入兄弟节点——stack 模式下每一行作者就出现两遍。这不限于人名：任何译文等于原文的块都一样。`renderText` 归一化空白后比较，相同就打 `data-axt-identity`，**stack 模式的 CSS 藏掉那一份**；side 要靠它撑住右栏、only 把原块藏了，两边都保留。
+
+- **可见比例阈值：注册的比例点必须覆盖钳过的阈值** [修订，2026-09-06，Codex 在 #76 指出]：上一版只注册 `[0, threshold]`，而观察器**只在跨越注册值时**回调——一个比例上限低于 threshold 的超大块跨过 0 之后就再没有通知，钳到上限的判定永远等不到能通过的那一次，块**永远不翻译**。Chromium 实测（元素 3000 px、root 900 px、上限 0.3、threshold 1）：注册 `[0, 1]` 全程只回调一次、ratio 0.267；换成 5 % 一档的细网格后拿到了 ratio 0.3。假观察器直接调回调，复现不了这条浏览器语义，所以守在 `pnpm e2e:layout` 里。
+
 ### 7.4 only（仅译文）
 
 - 原块 `display: none`（不是删除、不是替换文本节点）；选择器是 `[data-axt-state="translated"]`，所以只隐藏真的有译文的块

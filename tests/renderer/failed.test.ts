@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { extract, type TextBlock } from '@/core/extractor'
-import { ERROR_CLASS, FOR_ATTR, SPLIT_CLASS, STATE_ATTR, T_CLASS, clearTranslation, renderFailed, renderPending, restore, splitFigures } from '@/core/renderer'
+import { ERROR_CLASS, FOR_ATTR, PARTIAL_ATTR, SPLIT_CLASS, STATE_ATTR, T_CLASS, clearTranslation, markPartial, renderFailed, renderPending, restore, splitFigures } from '@/core/renderer'
 import { docOf } from './helpers'
 
 const page = '<p class="ltx_p" id="p1">Text.</p>'
@@ -69,6 +69,26 @@ describe('重试开始时旧的失败小部件要消失（Codex 在 #36 指出�
     expect(next.classList.contains('axt-pending')).toBe(true)
     expect(next.getAttribute(FOR_ATTR)).toBe(p.id)
     expect(p.el.parentElement!.querySelectorAll(`[${FOR_ATTR}="${p.id}"]`)).toHaveLength(1)
+  })
+
+  it('重试时状态回到 pending，红线与半翻标记一起消失（Codex 在 #76 指出）', () => {
+    const doc = docOf(page)
+    const p = extract(doc)[0] as TextBlock
+    markPartial(p)
+    renderFailed(p, '网络错误', () => {})
+    expect(p.el.getAttribute(STATE_ATTR)).toBe('failed')
+    renderPending(p)
+    // modes.css 按 data-axt-state="failed" 画红线、按 data-axt-partial 画半翻标记，两个都得清掉
+    expect(p.el.getAttribute(STATE_ATTR)).toBe('pending')
+    expect(p.el.hasAttribute(PARTIAL_ATTR)).toBe(false)
+  })
+
+  it('首次翻译（没有失败小部件）时不碰状态：标记循环已经设过 pending 了', () => {
+    const doc = docOf(page)
+    const p = extract(doc)[0] as TextBlock
+    p.el.setAttribute(STATE_ATTR, 'pending')
+    renderPending(p)
+    expect(p.el.getAttribute(STATE_ATTR)).toBe('pending')
   })
 
   it('已经有圆环时是幂等的，不会误删别的东西', () => {

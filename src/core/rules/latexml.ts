@@ -7,7 +7,7 @@
  * 0.6.2：带环境名的 tag 改为可翻，纯标识符（`(a)`、`(ii)`）仍保护——分类语义变了，
  * 旧缓存不该跨过去（Codex 在 #53 指出）
  */
-export const RULES_VERSION = '0.9.0'
+export const RULES_VERSION = '0.10.0'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -134,6 +134,12 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
   // 不挡住的话，邮箱那条 .ltx_contact 里唯一可翻的就是这个隐藏标签，译文出来是一行看不见的
   // 「电子邮件：」加一份原样的地址——页面上就是两行一样的邮箱（§5.2 的决定）
   { id: 'contact-label', selector: '.ltx_contact_name', note: '联系方式标签，模板生成且站点隐藏' },
+  // 引文年份（Codex 在 #74 指出）：`.ltx_bibblock` 放开作者段之后（§5.4），年份跟着一起被送去翻。
+  // 它在序列化里本来是**成对**占位符，协议保的是标签、**内容照样可翻**——`(2024)` 可以被
+  // 换成全角括号或加上「年」，而校验只看占位符包装，一个字都不会拦。only 模式下原块隐藏，
+  // 剩下的就是被改写过的引文元数据。59 个实测形状都是 `<span class="ltx_text ltx_bib_year"> (2024)</span>`，
+  // 纯数字没有可翻的词，作 void 保留最省事
+  { id: 'bib-year', selector: '.ltx_bib_year', note: '引文年份，原样保留（§5.4）' },
   { id: 'indexrefs', selector: '.ltx_indexrefs', note: '索引词条后面的页码列表' },
   { id: 'img', selector: 'img', note: '行内图片' },
   { id: 'br', selector: 'br', note: '换行' },

@@ -2,7 +2,7 @@
 // 译文到达后被真译文替换——renderText / renderTable 开头的 clearTranslation 会删掉同 data-axt-for 的兄弟。
 // 与 §7.1 一致：它只是原块的下一个兄弟，原节点不动。
 import type { Block, TextBlock } from '@/core/extractor'
-import { FOR_ATTR, INLINE_ATTR, shouldInline, translationClass } from './index'
+import { FOR_ATTR, INLINE_ATTR, setState, shouldInline, translationClass } from './index'
 import { clearFailed } from './failed'
 import { cancelSpinnersIn, createSpinnerInside } from './spinner'
 
@@ -22,8 +22,11 @@ export function renderPending(block: Block): Element {
   if (existing) return existing
   // 重试路径：上一轮的失败小部件还挂在原块旁边，`pendingOf` 认不出它（class 是 axt-error），
   // 于是圆环插在原块与它之间——读者同时看到"正在翻"和"！重试"，side 模式下右栏还多一项，
-  // 而且整个请求期间都在报一个已经不成立的失败（Codex 在 #36 指出）
-  clearFailed(block)
+  // 而且整个请求期间都在报一个已经不成立的失败（Codex 在 #36 指出）。
+  // 删小部件还不够，**状态也要跟着回到 pending**（Codex 在 #76 指出）：renderFailed 把块标成
+  // failed，modes.css 按这个属性画红线；只删部件的话重试期间圆环在转、红线还在，
+  // 半翻的表格连 data-axt-partial 都留着。setState 会一并清掉 partial
+  if (clearFailed(block)) setState(block, 'pending')
   const doc = block.el.ownerDocument
   const node = doc.createElement(block.kind === 'table' ? 'div' : block.el.tagName)
   node.className = `${translationClass(block.el)} ${PENDING_CLASS}`

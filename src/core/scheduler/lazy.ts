@@ -15,6 +15,24 @@ export interface PreloadOptions {
   threshold: number
 }
 
+/**
+ * 注册给 IntersectionObserver 的比例点。**判定不在这里做**（回调里按逐元素的有效阈值判），
+ * 这串数字只决定「在哪些比例上把回调发给我们」——而这一点是硬约束：观察器**只在跨越注册值时**回调。
+ *
+ * 只注册 `[0, threshold]` 会让钳过阈值的超大块永远收不到够用的那次通知（Codex 在 #76 指出）。
+ * Chromium 实测（元素 3000 px、root 900 px，比例上限 0.3，threshold 1）：
+ * 注册 `[0, 1]` 全程只回调一次、ratio 0.267，之后一路滚到底再无回调，钳到 0.3 的判定永不通过；
+ * 换成 5% 一档的细网格后拿到了 ratio 0.3 的那一次。
+ *
+ * 步长 5%：任何元素的可达上限与某个注册点相差不超过 5%，够精细；一个元素最多 21 次回调，
+ * 且命中即 `unobserve`，回调里只做几次比较，代价可忽略。threshold 为 0 时退回单个 0——
+ * 那是默认值，任何相交都算进入，没必要多注册 20 个点
+ */
+export function observerThresholds(threshold: number): number | number[] {
+  if (threshold <= 0) return 0
+  return Array.from({ length: 21 }, (_, i) => i / 20)
+}
+
 export const DEFAULT_PRELOAD: PreloadOptions = { margin: 1000, threshold: 0 }
 
 export interface LazyScheduler {
@@ -76,9 +94,7 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
           anchors.push(entry.target)
         }
         enterAnchors(anchors)
-      // threshold 只是"在哪些比例上回调"，判定在上面自己做：加上 0 才收得到刚进场那一次，
-      // 否则超大块（够不着 options.threshold）连回调都不会有
-      }, { rootMargin: `${options.margin}px 0px`, threshold: options.threshold > 0 ? [0, options.threshold] : 0 })
+      }, { rootMargin: `${options.margin}px 0px`, threshold: observerThresholds(options.threshold) })
     : null
 
   // 播种：首屏及边距内的锚点先同步触发一次，其余交给观察器。

@@ -265,13 +265,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     last = idle
   }
   const dom = await countDom(page)
-  // 条件里必须带上 dom.translations：只信管线自己的计数的话，渲染层空转、
-  // 或者译文节点被谁删掉了，这条依然会通过（Codex 在 #34 指出）。
-  // 一个块可能产出多个译文节点（表格克隆、脚注副本），所以只要求"不少于已完成数"
-  check('逐屏滚到底：进入视口的块都翻了、译文真的在 DOM 里，没滚到的不请求',
+  // 光信管线自己的计数不行：渲染层空转、或者译文节点被谁删掉了，这条照样会通过（Codex 在 #34 指出）。
+  // 也不能只比总数——`localizeNotes` 的脚注副本保留了 axt-t（只剥了 data-axt-*），
+  // 于是译文总数会超过完成数，一个丢失的普通译文正好被一个无关的脚注副本抵消掉（Codex 在 #77 指出）。
+  // 改成**逐块**验证：每个标成 translated 的原块，都要能按它的 id 找到一个真译文
+  const orphans = await page.evaluate(() => [...document.querySelectorAll('[data-axt-state="translated"]')]
+    .filter(el => {
+      const id = el.getAttribute('data-axt-id')
+      return !id || !document.querySelector(`.axt-t[data-axt-for="${CSS.escape(id)}"]:not(.axt-mirror, .axt-pending, .axt-error)`)
+    })
+    .map(el => `${el.tagName}.${[...el.classList].filter(c => c.startsWith('ltx_'))[0] ?? ''}`)
+    .slice(0, 5))
+  check('逐屏滚到底：每个翻完的块都能找到自己的译文节点，没滚到的不请求',
     !!last && last.requested > first.requested && last.done === last.requested && last.failed === 0
-    && dom.pendingNodes === 0 && dom.translations >= last.done,
-    `${last?.text ?? '(no idle after scroll)'}; DOM ${JSON.stringify(dom)}`)
+    && dom.pendingNodes === 0 && orphans.length === 0,
+    `${last?.text ?? '(no idle after scroll)'}; 没有译文的已完成块 ${JSON.stringify(orphans)}; DOM ${JSON.stringify(dom)}`)
   const peak = peakPerSecond(requests)
   // 攒批（§8.3）：整篇的段落要攒成大请求。2026-09-06 之前只有 LLM 攒批，google-web 一次调用一个请求，
   // 实测 213 块发了 65 个请求、平均 4.2 段/请求；修好后 190 块只用 21 个、平均 11.2 段

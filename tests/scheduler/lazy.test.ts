@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { extract, markBlocks, type Block } from '@/core/extractor'
-import { DEFAULT_PRELOAD, createLazyScheduler } from '@/core/scheduler/lazy'
+import { DEFAULT_PRELOAD, createLazyScheduler, observerThresholds } from '@/core/scheduler/lazy'
 
 /** happy-dom 没有 IntersectionObserver：用假的记录 observe / unobserve，测试里手动 emit */
 class FakeIntersectionObserver {
@@ -211,6 +211,34 @@ describe('可见比例阈值真的起作用（Codex 在 #32 / #36 指出）', ()
     const { io, entered, el } = one(200, 0)
     io.emit([el], 0.01, 900)
     expect(entered.flat()).toHaveLength(1)
+  })
+})
+
+describe('注册给观察器的比例点要覆盖钳过的阈值（Codex 在 #76 指出）', () => {
+  // 观察器**只在跨越注册值时**回调。只注册 [0, threshold] 的话，一个比例上限低于 threshold 的
+  // 超大块跨过 0 之后就再没有通知，钳到上限的判定永远等不到能通过的那一次。
+  // Chromium 实测（3000 px 元素 / 900 px root / threshold 1）：注册 [0,1] 全程一次回调、ratio 0.267；
+  // 换成 5% 细网格后拿到了 ratio 0.3。tests/e2e/layout.mjs 里有一条守着真实浏览器的那一面
+  it('threshold 为 0（默认）时仍是单个 0：任何相交都算进入', () => {
+    expect(observerThresholds(0)).toBe(0)
+  })
+
+  it('threshold 大于 0 时是 5% 一档的细网格，含 0 与 1', () => {
+    const t = observerThresholds(0.5) as number[]
+    expect(Array.isArray(t)).toBe(true)
+    expect(t).toHaveLength(21)
+    expect(t[0]).toBe(0)
+    expect(t.at(-1)).toBe(1)
+  })
+
+  it('任何可达上限都能找到一个不高于它的注册点，差距不超过 5%', () => {
+    const grid = observerThresholds(1) as number[]
+    // 元素高 / root 高 的各种比值：上限 = root / 元素
+    for (const ratio of [0.3, 0.07, 0.42, 0.99, 0.5, 0.13]) {
+      const usable = grid.filter(g => g <= ratio + 1e-9)
+      expect(usable.length).toBeGreaterThan(0)
+      expect(ratio - usable.at(-1)!).toBeLessThanOrEqual(0.05 + 1e-9)
+    }
   })
 })
 

@@ -23,6 +23,14 @@ export const INLINE_ATTR = 'data-axt-inline'
 /** 译文语言（BCP-47），由 enable 写在 <html> 上供 renderText 读取 */
 export const LANG_ATTR = 'data-axt-lang'
 /**
+ * 「译文与原文逐字相同」的标记（Codex 在 #74 指出）。默认提示词里那条
+ * 「Keep author names, journal names, conference names … in the original language」
+ * 会让纯人名的引文作者段原样返回，`renderText` 又无条件插入兄弟节点——
+ * stack 模式下每一行作者就出现两遍。这不限于人名：任何译文等于原文的块都一样。
+ * 标出来交给 CSS：stack 藏掉重复的那份，side 要靠它撑住右栏、only 原块本来就隐藏，都保留
+ */
+export const IDENTITY_ATTR = 'data-axt-identity'
+/**
  * 表翻了一半（§5.3）：原表仍是 translated（only 模式照常只显示克隆），另加此标记画失败提示线、计入失败数。
  * 不能直接标 failed——only 模式只隐藏 translated，原表与半份克隆会一起露出来（Codex 在 #30 指出）
  */
@@ -142,10 +150,15 @@ export function renderText(block: TextBlock, content: DocumentFragment): Element
     block.el.setAttribute(INLINE_ATTR, '')
     node.setAttribute(INLINE_ATTR, '')
   }
+  // 归一化后逐字相同 = 这一块其实没被翻译。空白差异不算数：rehydrate 回填时
+  // 标签边界处的空白与原文未必一一对应
+  if (squash(node.textContent) === squash(block.el.textContent)) node.setAttribute(IDENTITY_ATTR, '')
   block.el.after(node)
   setState(block, 'translated')
   return node
 }
+
+const squash = (text: string | null) => (text ?? '').replace(/\s+/g, ' ').trim()
 
 /**
  * 表格块（§5.3）：整表克隆置于原表之后，克隆保留原有类名以沿用页面的表格样式；
