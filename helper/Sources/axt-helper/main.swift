@@ -1,6 +1,7 @@
 // 移植自 reference/macos-vision-ocr/Sources/ocr.swift@91a236a（MIT，Copyright (c) 2024 bytefer），2026-09-07 移植、有修改：
 // 去掉命令行参数、批处理与调试画框，改成 Chrome Native Messaging 的 stdio 帧循环（4 字节本机字节序长度前缀 + JSON）；
 // 图片从 base64 解码而不是读文件（走 ImageIO，不依赖 AppKit）；四角输出改成 [[x, y] × 4]；加 ping 与错误信封。
+// 上游的 MIT 许可与免责声明全文在 helper/LICENSE-macos-vision-ocr.txt，随源码与二进制一起分发（MIT 的条件）。
 // 协议见 docs/DESIGN.md §15.3。
 import Foundation
 import ImageIO

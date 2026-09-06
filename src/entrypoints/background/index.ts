@@ -125,9 +125,9 @@ export default defineBackground(() => {
         return true
       case 'axt:ocr':
         // 先把 scope 绑到 sender 的标签页：它可能是这个标签页第一条带 scope 的消息，不绑的话关标签页时 dropTab 撤不到
-        // 排队的识别（Codex 在 #87 指出）。绑定失败（建链抛错）不影响识别
-        ;(message.scope ? router.forCall(message.scope, sender.tab?.id).catch(() => undefined) : Promise.resolve())
-          .then(() => ocr.ocr(message))
+        // 排队的识别。只记关联、不建链：OCR 不能等翻译链构造（Codex 在 #87 两轮指出）
+        if (message.scope) router.bind(message.scope, sender.tab?.id)
+        ocr.ocr(message)
           .catch((e: unknown) => ({ ok: false as const, error: { kind: 'unknown' as const, message: e instanceof Error ? e.message : String(e) } }))
           .then(sendResponse)
         return true
