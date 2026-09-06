@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { FIT_ATTR, FIT_SCROLL, T_CLASS, fitTables, resetFitCache } from '@/core/renderer'
+import { FIT_ATTR, FIT_SCROLL, T_CLASS, fitTables, resetFitCache, watchFontLoads } from '@/core/renderer'
 import { docOf } from './helpers'
 
 /** 一对表格：原表 + 译文克隆（renderTable 的结果形状） */
@@ -217,6 +217,49 @@ describe('读写分批与缓存（issue #46）', () => {
     // 两张都该落到 85 档——但量第二张的时候第一张还是干净的
     expect(originals(doc).map(fitOf)).toEqual(['85', '85'])
     expect(seen).toEqual([null])
+  })
+})
+
+describe('字体加载完成要让缓存失效（Codex 在 #84 指出）', () => {
+  beforeEach(() => resetFitCache())
+
+  /** happy-dom 没有 FontFaceSet：造一个只有事件的 */
+  const withFonts = (doc: Document) => {
+    const fonts = new EventTarget()
+    Object.defineProperty(doc, 'fonts', { value: fonts, configurable: true })
+    return fonts
+  }
+
+  it('loadingdone 之后再整理会重量，档位随新的自然宽度走', () => {
+    const doc = pairDoc()
+    const fonts = withFonts(doc)
+    const scheduled = vi.fn()
+    const off = watchFontLoads(doc, scheduled)
+    const widths = [551, 700]
+    const natural = vi.fn(() => widths.shift() ?? 700)
+    fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
+    expect(fitOf(originals(doc)[0]!)).toBe('85')
+    // 字体到了：自然宽度变成 700，但译文节点、栏宽都没变——不清缓存就永远停在 85
+    fonts.dispatchEvent(new Event('loadingdone'))
+    expect(scheduled).toHaveBeenCalledTimes(1)
+    fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
+    expect(natural).toHaveBeenCalledTimes(2)
+    expect(fitOf(originals(doc)[0]!)).toBe(FIT_SCROLL) // 484/700 = 0.69 < 0.7
+    off()
+  })
+
+  it('卸载后不再响应', () => {
+    const doc = pairDoc()
+    const fonts = withFonts(doc)
+    const scheduled = vi.fn()
+    watchFontLoads(doc, scheduled)()
+    fonts.dispatchEvent(new Event('loadingdone'))
+    expect(scheduled).not.toHaveBeenCalled()
+  })
+
+  it('没有 FontFaceSet 的环境什么都不做', () => {
+    const doc = pairDoc()
+    expect(() => watchFontLoads(doc, () => {})()).not.toThrow()
   })
 })
 

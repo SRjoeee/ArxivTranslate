@@ -126,9 +126,22 @@ interface FitEntry {
 
 let cache = new WeakMap<Element, FitEntry>()
 
-/** 清掉量宽缓存。会话重开时调；将来字号 / 预设变化的钩子也从这里进 */
+/** 清掉量宽缓存。会话重开、字体加载完成时调 */
 export function resetFitCache(): void {
   cache = new WeakMap()
+}
+
+/**
+ * 网页字体加载完成后自然宽度会变，可译文节点与栏宽都没变、缓存照样命中，档位就停在字体没到时的
+ * 那一档（Codex 在 #84 指出）。`document.fonts` 的 `loadingdone` 是这类变化唯一的事件源：
+ * 清缓存并让调用方排一趟整理。返回卸载函数；没有 FontFaceSet 的环境什么都不做
+ */
+export function watchFontLoads(doc: Document, onDone: () => void): () => void {
+  const fonts = (doc as Document & { fonts?: EventTarget }).fonts
+  if (!fonts?.addEventListener) return () => {}
+  const handler = () => { resetFitCache(); onDone() }
+  fonts.addEventListener('loadingdone', handler)
+  return () => fonts.removeEventListener('loadingdone', handler)
 }
 
 /**
