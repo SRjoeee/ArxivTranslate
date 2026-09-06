@@ -20,6 +20,8 @@ export const ON_ATTR = 'data-axt-on'
 export const MODE_ATTR = 'data-axt-mode'
 /** 短标题同行（§7.3）：原标题与译文都带此属性 */
 export const INLINE_ATTR = 'data-axt-inline'
+/** 译文语言（BCP-47），由 enable 写在 <html> 上供 renderText 读取 */
+export const LANG_ATTR = 'data-axt-lang'
 /**
  * 表翻了一半（§5.3）：原表仍是 translated（only 模式照常只显示克隆），另加此标记画失败提示线、计入失败数。
  * 不能直接标 failed——only 模式只隐藏 translated，原表与半份克隆会一起露出来（Codex 在 #30 指出）
@@ -38,9 +40,12 @@ const AXT_ATTR_PREFIX = 'data-axt-'
  * 打开翻译态：<html> 上写状态属性，注入模式与预设样式（幂等）。
  * 样式预设与模式一样只是 <html> 上的一个属性（§7.5），切换不动 DOM；自定义 CSS 每次注入时重算
  */
-export function enable(doc: Document, mode: Mode, style?: { preset: StylePreset; customCss?: string }): void {
+export function enable(doc: Document, mode: Mode, style?: { preset: StylePreset; customCss?: string }, lang?: string): void {
   doc.documentElement.setAttribute(ON_ATTR, '')
   doc.documentElement.setAttribute(MODE_ATTR, mode)
+  // 译文的语言记在 <html> 上（§7.1：全局状态只在这里），renderText 逐个写到译文节点的 lang 上。
+  // 不能直接改 <html lang>：那会把原文也说成中文
+  if (lang) doc.documentElement.setAttribute(LANG_ATTR, lang)
   if (style) setStylePreset(doc, style)
   const existing = doc.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)
   const css = `${modesCss}\n${presetsCss}\n${style ? customStyleRule(style.customCss ?? '') : ''}`
@@ -129,6 +134,10 @@ export function renderText(block: TextBlock, content: DocumentFragment): Element
   stripCloned(node, false)
   node.className = translationClass(block.el)
   node.setAttribute(FOR_ATTR, block.id)
+  // 译文是另一种语言，页面的 <html lang> 说的是原文（arXiv 上是 en）。不标的话屏幕阅读器会用英文
+  // 语音去念中文（实测：14 个译文节点全部继承 lang="en"，Codex 的同行审计没查到这条）
+  const lang = block.el.ownerDocument.documentElement.getAttribute(LANG_ATTR)
+  if (lang) node.setAttribute('lang', lang)
   if (shouldInline(block)) {
     block.el.setAttribute(INLINE_ATTR, '')
     node.setAttribute(INLINE_ATTR, '')
