@@ -31,17 +31,24 @@ function targetOf(doc: Document, href: string): Element | null {
 }
 
 /**
- * 目标不可见时的替身：目标自身或最近的祖先块，取它那条译文。
+ * 目标不可见时的替身：从目标所在的块起，**逐层向外**找第一条看得见的译文。
+ *
+ * 不能只看最近的那个块（Codex 在 #80 指出）：翻译单元是可以嵌套的（段落里的脚注正文、
+ * 致谢里的标题——12 篇 fixture 里有 55 个这样的块），而嵌套单元的译文是插在**外层原块内部**的。
+ * only 模式把外层原块整个藏起来时，里层的译文跟着一起没了，可外层自己的译文就在旁边看得见。
+ * 停在 `closest()` 会返回 null，链接照样点不动。
+ *
  * 挑的是**真译文**——镜像是右栏的配平副本、pending 是圆环、error 是失败小部件，
  * 滚到它们等于滚到一个空盒子
  */
 function standIn(doc: Document, target: Element): Element | null {
-  const block = target.closest(`[${ID_ATTR}]`)
-  const id = block?.getAttribute(ID_ATTR)
-  if (!id) return null
-  for (const node of Array.from(doc.querySelectorAll(`.${T_CLASS}[${FOR_ATTR}="${CSS.escape(id)}"]`))) {
-    if (node.classList.contains(MIRROR_CLASS) || node.classList.contains(PENDING_CLASS) || node.classList.contains(ERROR_CLASS)) continue
-    if (visible(node)) return node
+  for (let block = target.closest(`[${ID_ATTR}]`); block; block = block.parentElement?.closest(`[${ID_ATTR}]`) ?? null) {
+    const id = block.getAttribute(ID_ATTR)
+    if (!id) continue
+    for (const node of Array.from(doc.querySelectorAll(`.${T_CLASS}[${FOR_ATTR}="${CSS.escape(id)}"]`))) {
+      if (node.classList.contains(MIRROR_CLASS) || node.classList.contains(PENDING_CLASS) || node.classList.contains(ERROR_CLASS)) continue
+      if (visible(node)) return node
+    }
   }
   return null
 }

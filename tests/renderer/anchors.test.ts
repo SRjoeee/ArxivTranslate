@@ -160,6 +160,30 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off()
   })
 
+  it('嵌套单元的译文也被藏了，就往外层块找（Codex 在 #80 指出）', () => {
+    // 致谢块里嵌一个标题块：内层的译文插在**外层原块内部**，外层一藏，它跟着没
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="src">See <a href="#inner" id="link">it</a>.</p></div>'
+      + '<div class="ltx_acknowledgements" id="outer">Thanks.<h6 class="ltx_title" id="inner">Acknowledgements</h6></div>')
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    const outer = doc.getElementById('outer')!
+    const inner = doc.getElementById('inner')!
+    // 两个都是块，且 inner 嵌在 outer 里
+    expect(blocks.map(b => b.el)).toContain(outer)
+    expect(blocks.map(b => b.el)).toContain(inner)
+    for (const b of blocks) renderText(b as TextBlock, frag(doc, '译文'))
+    const outerT = outer.nextElementSibling!
+    const innerT = inner.nextElementSibling!
+    // only 模式：outer 连同它内部的 inner 与 inner 的译文一起隐藏；outer 自己的译文可见
+    layout(doc, [outer, inner, innerT])
+    const scrolled: Element[] = []
+    for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }
+    const off = installAnchorFallback(doc)
+    doc.getElementById('link')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+    expect(scrolled).toEqual([outerT])
+    off()
+  })
+
   it('hashchange 也走同一条兜底：地址栏输入、前进后退都算', () => {
     const { doc, translation, scrolled } = setup()
     const off = installAnchorFallback(doc)
