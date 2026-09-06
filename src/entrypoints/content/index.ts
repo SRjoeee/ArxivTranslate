@@ -4,8 +4,8 @@ import { extract, paperContext, type Block } from '@/core/extractor'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
 import {
-  alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, localizeNotes, restore,
-  splitFigures,
+  alignPairMargins, clearPairMargins, createMirrors, createModeController, fitTables, installAnchorFallback,
+  localizeNotes, restore, splitFigures,
   type Mode, type ModeController,
 } from '@/core/renderer'
 import { decodeText, escapeText } from '@/core/protector/text'
@@ -34,6 +34,8 @@ export default defineContentScript({
     // 而且 https 页面够不着 http 端点（本地 Ollama），实测见 RESEARCH §6.7。这里只留一条消息代理
     const backend = createMessageTransport()
     let modes: ModeController | null = null
+    /** 页内锚点兜底的卸载函数（issue #44）：会话开始时装、恢复原文时拆 */
+    let uninstallAnchors: (() => void) | null = null
     let savedMode: Mode = 'stack'
     /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性；开始翻译时从配置读一次 */
     let style: Config['style'] = { preset: 'none', customCss: '' }
@@ -78,6 +80,9 @@ export default defineContentScript({
       modes = createModeController(document, requested ?? config.mode, { onChange: enterSide })
       style = config.style
       endRun() // 上一轮停下但没恢复原文的会话（致命错误后重试）
+      // 页内锚点兜底（issue #44）：only 模式下目标块被隐藏，交叉引用点了不动窝
+      uninstallAnchors?.()
+      uninstallAnchors = installAnchorFallback(document)
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
       enterSide(modes.effective())
@@ -193,6 +198,8 @@ export default defineContentScript({
       fitObserver?.disconnect()
       fitObserver = null
       prep.cancel()
+      uninstallAnchors?.()
+      uninstallAnchors = null
       const result = restore(document)
       progress = idle()
       console.debug(`[axt] translation stopped: ${result.removedNodes} nodes removed`)

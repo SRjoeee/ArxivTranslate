@@ -48,11 +48,22 @@ function needsSplit(fig: Element): boolean {
   return hasLooseMedia(fig) // 没有游离媒体的浮动体（如表格）不必整块复制，它的表本来就有译文克隆
 }
 
-/** 克隆件不能带原件的 id 与块标记 */
+/** 克隆件里记着自己对应原件的哪个 id：页内锚点靠它找到克隆中对应的那一处（issue #44） */
+export const SPLIT_OF_ATTR = 'data-axt-split-of'
+
+/**
+ * 克隆件不能带原件的 id 与块标记（会造成重复 id）。但**对应关系不能一起丢**：
+ * only 模式下原件整个被藏，指向图内某一行的锚点（实测 2312.17141 有 21 个，
+ * `#S3.Ex73`–`#S3.Ex79` 都是 Figure 6 里的公式行）只能落到克隆上，
+ * 没有对应关系就只能滚到整张图的顶部，要找的那行可能还在视口外（Codex 在 #80 指出）。
+ * 所以把原 id 挪进 `data-axt-split-of`——不是 id，不会重复，克隆整个被删时一起消失
+ */
 function stripIds(root: Element): void {
   for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+    const id = el.getAttribute('id')
     el.removeAttribute('id')
     for (const name of el.getAttributeNames()) if (name.startsWith('data-axt-')) el.removeAttribute(name)
+    if (id) el.setAttribute(SPLIT_OF_ATTR, id)
   }
 }
 

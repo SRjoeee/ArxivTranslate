@@ -16,6 +16,8 @@ const PAPER = process.env.AXT_PAPER ?? '2410.00260'
 const PAPER2 = process.env.AXT_PAPER2 ?? '2312.17527'
 /** 第三篇：前面的用例都没碰过它，缓存是冷的——导航那条要靠真实积压才测得出东西 */
 const PAPER3 = process.env.AXT_PAPER3 ?? '2312.17141'
+/** 第四篇：12 篇 fixture 里指向翻译块的锚点最多的一篇（64 个），只译文模式的锚点用例靠它 */
+const PAPER4 = process.env.AXT_PAPER4 ?? '2609.00246'
 const GOOGLE = 'translate-pa.googleapis.com'
 
 const results = []
@@ -450,6 +452,66 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
   const idle = idleOf(done)
   check('失败块旁有重试 / 原因小部件（§7.6）', !!idle && widgets > 0 && widgets === idle.failed, `${widgets} 个小部件，${idle?.failed ?? '?'} 个失败块`)
+  await page.close()
+}
+
+// ── only 模式的页内锚点（issue #44）─────────────────────────────────
+// only 把有译文的原块 display:none，指向它们的交叉引用就没了落点。实测修复前
+// 点「§7」（目标是隐藏的 p.ltx_p）scrollY 从 0 到 0，一动不动。12 篇 fixture 里
+// 3374 个页内锚点有 118 个（3.5%）的目标落在翻译块内
+{
+  // 前面的错 key 段把 provider 改成了带假 key 的 openai-compat 且关了降级：先切回免费引擎
+  await options.bringToFront()
+  await options.selectOption('select >> nth=0', 'google-web')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
+  const { page, logs } = await openPaper(PAPER4, 'translate-pa.googleapis.com')
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await page.bringToFront()
+  // openPaper 用 #axt-translate 自动开翻，这里只切模式——切换只改 <html> 上的属性，不重翻
+  await popup.getByRole('button', { name: '仅译文', exact: true }).waitFor({ timeout: 10_000 })
+  await popup.getByRole('button', { name: '仅译文', exact: true }).click()
+  await sleep(500)
+  await popup.close()
+  await scrollThrough(page)
+  await waitForLog(logs, IDLE, 60_000)
+  await page.evaluate(() => scrollTo(0, 0))
+  await sleep(1500)
+
+  const r = await page.evaluate(() => {
+    const vis = el => el.getClientRects().length > 0
+    const hidden = [...document.querySelectorAll('a[href^="#"]')].map(a => {
+      const t = document.getElementById(decodeURIComponent(a.getAttribute('href').slice(1)))
+      return t && !vis(t) ? { a, t } : null
+    }).filter(Boolean)
+    if (hidden.length === 0) return { candidates: 0 }
+    const { a, t } = hidden[0]
+    const before = scrollY
+    a.click()
+    const id = t.getAttribute('data-axt-id') ?? t.closest('[data-axt-id]')?.getAttribute('data-axt-id')
+    const node = document.querySelector(`.axt-t[data-axt-for="${id}"]:not(.axt-mirror):not(.axt-pending):not(.axt-error)`)
+    const rect = node?.getBoundingClientRect()
+    return {
+      candidates: hidden.length,
+      href: a.getAttribute('href'),
+      moved: scrollY - before,
+      // 落点必须是那条译文，且落在视口里——只看"滚动了"会把滚到任意位置也算通过
+      landedOnTranslation: !!rect && rect.top >= -2 && rect.top < innerHeight,
+      hash: location.hash,
+      // 克隆节点剥了 id：整页不该出现重复 id（issue #44 的第四条验收）
+      duplicateIds: (() => {
+        const seen = new Set(); const dupes = new Set()
+        for (const el of document.querySelectorAll('[id]')) { if (seen.has(el.id)) dupes.add(el.id); seen.add(el.id) }
+        return [...dupes].slice(0, 5)
+      })(),
+    }
+  })
+  check('only 模式下指向隐藏块的锚点落到它的译文上（issue #44）',
+    r.candidates > 0 && r.moved > 0 && r.landedOnTranslation && r.hash === r.href,
+    `${r.candidates} 个目标不可见的锚点；点 ${r.href} 滚了 ${r.moved}px，落在译文上 ${r.landedOnTranslation}，hash ${r.hash}`)
+  check('译文克隆没有制造重复 id（issue #44）', Array.isArray(r.duplicateIds) && r.duplicateIds.length === 0, `重复 id: ${JSON.stringify(r.duplicateIds)}`)
   await page.close()
 }
 
