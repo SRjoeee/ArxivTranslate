@@ -241,6 +241,91 @@ describe('startImageTranslation', () => {
     expect(run.progress().done).toBe(5)
   })
 
+  it('并发上限对整个 run 生效：两次 translate() 各带一批，同时在飞的仍不超过 maxConcurrent（Codex 在 #89 指出）', async () => {
+    const doc = docOf([1, 2, 3, 4, 5].map(i => FIGURE.replace(/F1/g, `F${i}`)).join(''))
+    markBlocks(extract(doc))
+    const targets = collectImageTargets(doc)
+    let inFlight = 0
+    let peak = 0
+    const release: (() => void)[] = []
+    const ocr = vi.fn(async (_call: OcrCall) => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise<void>(resolve => release.push(resolve))
+      inFlight--
+      return { ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false }
+    })
+    const run = startImageTranslation({
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr, maxConcurrent: 2,
+      translate: async (call: { request: { segments: { id: string; text: string }[] } }) => ({ ok: true as const, result: { segments: call.request.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' }, cached: 0 }),
+      isEnabled: () => true, isCurrent: () => true,
+    })
+    const first = run.translate(targets.slice(0, 3))
+    const second = run.translate(targets.slice(3)) // 观察器的第二次回调
+    await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(2))
+    expect(inFlight).toBe(2)
+    const releaseAll = () => { for (const r of release.splice(0)) r() }
+    releaseAll()
+    await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(4))
+    releaseAll()
+    await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(5))
+    releaseAll()
+    await Promise.all([first, second])
+    expect(peak).toBe(2)
+    expect(run.progress().done).toBe(5)
+  })
+
+  it('致命错误时并发中与排队的目标一并记失败，进度对得上、failed() 全给出（Codex 在 #89 指出）', async () => {
+    const doc = docOf([1, 2, 3].map(i => FIGURE.replace(/F1/g, `F${i}`)).join(''))
+    markBlocks(extract(doc))
+    const targets = collectImageTargets(doc)
+    const release: (() => void)[] = []
+    const ocr = vi.fn(async (_call: OcrCall) => {
+      await new Promise<void>(resolve => release.push(resolve))
+      return { ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false }
+    })
+    const run = startImageTranslation({
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr, maxConcurrent: 2,
+      translate: async () => ({ ok: false, error: { kind: 'no-key', message: '未配置 key' } }),
+      isEnabled: () => true, isCurrent: () => true,
+    })
+    const all = run.translate(targets) // 2 在飞、1 排队
+    await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(2))
+    release.shift()?.() // 第一张回来 → 翻译 no-key → 致命
+    await vi.waitFor(() => expect(run.fatal()).toBeDefined())
+    release.shift()?.() // 第二张这时才回来：会话已致命，丢弃
+    await all
+    expect(ocr).toHaveBeenCalledTimes(2) // 排队的第三张没开始
+    expect(run.progress()).toEqual({ total: 3, requested: 3, done: 0, failed: 3, fatal: expect.stringContaining('no-key') })
+    expect(run.failed()).toHaveLength(3)
+  })
+
+  it('stop() 结清排队没开始的：等它们的 translate() 也会返回', async () => {
+    const doc = docOf([1, 2, 3].map(i => FIGURE.replace(/F1/g, `F${i}`)).join(''))
+    markBlocks(extract(doc))
+    const targets = collectImageTargets(doc)
+    let release: () => void = () => {}
+    const ocr = vi.fn(async (_call: OcrCall) => { await new Promise<void>(resolve => { release = resolve }); return { ok: true as const, result: { width: 1, height: 1, lines: [] }, cached: false } })
+    const fetchBytes = vi.fn(async () => ({ bytes: PNG, mime: 'image/png' }))
+    const run = startImageTranslation({
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      fetchBytes, ocr, maxConcurrent: 1,
+      translate: async () => ({ ok: false, error: { kind: 'network', message: 'x' } }),
+      isEnabled: () => true, isCurrent: () => true,
+    })
+    const all = run.translate(targets) // 1 在飞、2 排队
+    await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(1))
+    run.stop()
+    release() // 在飞的回来了：会话已停，丢弃；排队的两张要是没被结清，all 永远不返回
+    const outcome = await Promise.race([all.then(() => 'settled'), new Promise(resolve => setTimeout(() => resolve('hung'), 500))])
+    expect(outcome).toBe('settled')
+    // 排队的两张连字节都不取：不结清的话它们会被 worker 依次拿起、先 fetch 再发现会话已停
+    expect(fetchBytes).toHaveBeenCalledTimes(1)
+    expect(ocr).toHaveBeenCalledTimes(1)
+  })
+
   it('已在请求中的目标不重复请求', async () => {
     let release: () => void = () => {}
     const held = new Promise<void>(resolve => { release = resolve })

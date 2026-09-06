@@ -137,6 +137,13 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
   let stopped = false
   let fatal: string | undefined
   const alive = () => !stopped && fatal === undefined && options.isCurrent()
+  /**
+   * run 级的队列与 worker 池：并发上限对整个 run 生效，不是对每次 translate() 调用各算一份——
+   * 观察器每次回调、每次重试都会调 translate()，各开一池的话上限形同虚设（Codex 在 #89 指出）
+   */
+  const maxConcurrent = options.maxConcurrent ?? MAX_CONCURRENT
+  const queue: { target: ImageTarget; done: () => void }[] = []
+  let active = 0
 
   const progress = (): ImageProgress => {
     let requested = 0
@@ -147,7 +154,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       if (state === 'done') done++
       if (state === 'failed') failed++
     }
-    return { total: outcome.size, requested, done, failed }
+    return { total: outcome.size, requested, done, failed, ...(fatal !== undefined ? { fatal } : {}) }
   }
   const report = () => {
     if (!stopped) options.onProgress?.(progress())
@@ -192,6 +199,9 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
           fatal = `${res.error.kind}: ${res.error.message}`
           scheduler?.disconnect()
           parked.clear()
+          // 已认领但没完成的（并发中的、排队的）一并记失败，进度与 failed() 才对得上；排队的直接结清
+          for (const [other, state] of outcome) if (state === 'requested' && other !== target) fail(other, `停在配置错误：${res.error.message}`)
+          for (const entry of queue.splice(0)) entry.done()
         }
         return fail(target, `翻译失败：${res.error.message}`)
       }
@@ -230,13 +240,23 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       outcome.set(t, 'requested')
     }
     report()
-    // 有上限地并发：同一时刻最多处理几张，其余排队（fetch → hash → base64 → OCR 一条龙，别一次全开）
-    const queue = fresh.slice()
-    const workers = Array.from({ length: Math.min(options.maxConcurrent ?? MAX_CONCURRENT, queue.length) }, async () => {
-      for (let next = queue.shift(); next; next = queue.shift()) await process(next)
-    })
-    await Promise.all(workers)
+    // 进 run 级队列，worker 池按上限取（fetch → hash → base64 → OCR 一条龙，别一次全开）
+    const settled = fresh.map(target => new Promise<void>(done => queue.push({ target, done })))
+    pump()
+    await Promise.all(settled)
     report()
+  }
+
+  const pump = () => {
+    while (active < maxConcurrent && queue.length > 0) {
+      const entry = queue.shift() as { target: ImageTarget; done: () => void }
+      active++
+      void process(entry.target).finally(() => {
+        active--
+        entry.done()
+        pump()
+      })
+    }
   }
 
   // 首屏在这里同步播种，回调会在 translate 就绪之前触发，所以 translate 得先定义
@@ -256,6 +276,8 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       stopped = true
       scheduler?.disconnect()
       parked.clear()
+      // 排队没开始的直接结清，等它们的 translate() 才会返回
+      for (const entry of queue.splice(0)) entry.done()
     },
     failed: () => options.targets.filter(t => outcome.get(t) === 'failed'),
     fatal: () => fatal,
