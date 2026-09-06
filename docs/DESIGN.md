@@ -412,7 +412,7 @@ provider 的 `fetch`、引擎链、队列与缓存**全部在 background**。con
 2026-09-04 把请求移到 content 的两条理由，2026-09-05 / 06 的实测把两条都推翻了：
 
 - **「worker 会在等待中被挂起，冷启动一条消息要几十秒」不成立**。RESEARCH §6.7：真实 Chrome 里三轮闲置 40 s（超过 MV3 的 30 s 空闲回收）后重载，content → background 的往返 77–81 ms，1.5 s 的读缓存预算一次没触发，popup 的「翻译」按钮冷启动后立刻可点；§6.5 记录的 6.7–77 s 在当前代码上重现不出来（那次测量发生在缓存写入还会扫全库的版本）。RESEARCH §6.8 另测了「等待期间的存活」——这是 §6.5 真正担心的失效模式：一条经 background 转发、延迟 90 s 才应答的请求照常返回，**不需要任何保活**（Port、心跳都不需要）
-- **「content 侧能发跨源请求」只在对方肯给 CORS 头时成立**。RESEARCH §6.7：content script 的 fetch 带**页面 origin**、要走预检，端点不返 CORS 头就直接 `TypeError: Failed to fetch`；background 的 fetch 带扩展 origin、不走预检，两种端点都通。`host_permissions` 不解除这条约束（Chrome 85 起的行为）。更硬的一条是混合内容：`https://arxiv.org` 的页面**根本够不着 `http://` 端点**，请求没离开浏览器——CLAUDE.md 明确支持的本地 Ollama（`http://localhost:11434`）在 content 侧完全不可达
+- **「content 侧能发跨源请求」只在对方肯给 CORS 头时成立**。RESEARCH §6.7：content script 的 fetch 带**页面 origin**、要走预检，端点不返 CORS 头就直接 `TypeError: Failed to fetch`；background 的 fetch 带扩展 origin、不走预检，两种端点都通。`host_permissions` 不解除这条约束（Chrome 85 起的行为）。更硬的一条是**本地网络门禁**（Local Network Access）：`https://arxiv.org` 的页面**根本够不着本机端点**，请求没离开浏览器——CLAUDE.md 明确支持的本地 Ollama（`http://localhost:11434`）在 content 侧完全不可达。这里原先写的是「混合内容」，归因错了（Codex 在 #57 指出）：loopback 是规范里的 potentially trustworthy origin，`https` 页面调它不算混合内容；RESEARCH §6.7 的对照实验里 `https://127.0.0.1` 同样被拦，所以**给本地端点配证书绕不过去**，只有 background 走得通
 - 顺带纠正 §6.5 引用参考项目时的一处错误：Read Frog 的请求**也在 background 执行**（`entrypoints/background/translation-queues.ts` 排队并调用模型），当时写的「它把 fetch 放在 content」核对参考快照后不成立
 
 搬回来之后：
@@ -424,7 +424,7 @@ provider 的 `fetch`、引擎链、队列与缓存**全部在 background**。con
 
   | | 设置页测试连接 | 页面译文来自本机端点 | 端点收到页面翻译的请求 | 页面自己发出的请求 |
   |---|---|---|---|---|
-  | 搬迁前（main） | 通过 | **0 / 12 段** | **0 个** | **21 个**（全被混合内容拦掉）|
+  | 搬迁前（main） | 通过 | **0 / 12 段** | **0 个** | **21 个**（全被本地网络门禁拦掉）|
   | 搬迁后 | 通过 | 12 / 12 段 | 7 个 | 0 个 |
 
   搬迁前那一栏正是 issue #42 的标题诉求：**同一个端点测试通过、翻译失败**，而且失败是**静默**的——链降级到 google-web，页面上照样出现通顺的中文译文，用户看不出自己配的端点根本没被用到。所以这条 e2e 断言的是「译文带本机端点的前缀」，不是「翻出了中文」
