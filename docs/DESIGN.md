@@ -183,7 +183,11 @@ interface Block {
 
   **代价实测**（12 篇 fixture）：新增 285 个块、25609 字，占全部翻译单元的 **+5.7% 块 / +2.2% 字符**。side 模式下新增的块**全部连通**到翻译根（快照里分子分母同幅增加，`blockedBy` 一个没变），不需要额外的容器覆盖。
 
-  **译文质量实测**（google-web，免费引擎里最差的情况）：单独送作者段比混在整条里**更容易被音译**——整条送时 Google 倾向保留（`W. Arendt 和 AFM ter Elst`、`Agha, G., Palmskog, K.:`），单独送则音译（`史蒂文·阿兹特、齐格弗里德·拉斯托弗…`）。两个具体缺陷：机构作者被当普通词（`Anthropic.` → `人类学。`），首字母缩写的点号被吃掉（`V. I.` → `VI`、`M. D.` → `MD`，看着像罗马数字）。**LLM 路径没有这个问题**：默认提示词里那条 “Keep author names, journal names, conference names, dataset names, code identifiers and URLs in the original language” 会让作者段原样返回。这是免费引擎的固有短板，不为它改规则；双语模式下原文就在旁边
+  **译文质量实测**（google-web，免费引擎里最差的情况）：单独送作者段比混在整条里**更容易被音译**——整条送时 Google 倾向保留（`W. Arendt 和 AFM ter Elst`、`Agha, G., Palmskog, K.:`），单独送则音译（`史蒂文·阿兹特、齐格弗里德·拉斯托弗…`）。两个具体缺陷：机构作者被当普通词（`Anthropic.` → `人类学。`），首字母缩写的点号被吃掉（`V. I.` → `VI`、`M. D.` → `MD`，看着像罗马数字）。**LLM 路径没有这个问题**：默认提示词里那条 “Keep author names, journal names, conference names, dataset names, code identifiers and URLs in the original language” 会让作者段原样返回。
+
+  **这些缺陷已知、已接受，不许为它们加规则** [决定，2026-09-06，用户拍板]：人名一旦翻译就必然损失准确性，这是翻译本身的性质，不是可以靠规则修好的 bug。想修就会滑向姓名词典、引擎特判、专用 prompt——为参考文献里一行字背上长期维护成本，不划算。**判据是"整体上是那么回事"，不是"准"**：音译或大意对得上即可，读者要定位原文靠的是另一套东西。
+
+  **可追溯性由占位符保障，与人名译得准不准无关**（真实管线实测，2609.03001v1）：作者段送给引擎的形状是 `<t id="1">L. A. Anchordoqui, …, and A. Westphal</t><t id="2"> (2026)</t>`——年份是 `.ltx_bib_year`，**装在自己的成对占位符里**；DOI / arXiv 链接（`.ltx_bib_external`）与交叉引用是 void 占位符（`Cited by: <x id="1"/>.`）。占位符协议要求原样返回，校验不过的译文连缓存都进不去（§8.2）。所以编号、年份、链接在任何引擎下都不会被改写，双语模式里原名还一直在旁边——读者定位原文的两条路都不依赖人名
 - only 模式不再整条豁免（见 §7.4）：作者段不翻、自然保留，标题与出处段只显示译文
 - DOI / URL 本身是 `<a>`，走占位符自动保留
 - LLM prompt 固定加一条：人名、期刊名、会议名保留原文
