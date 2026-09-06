@@ -87,10 +87,7 @@ async function measureFrame(page) {
     const paragraphs = [...document.querySelectorAll('.ltx_document .ltx_para > .ltx_p[data-axt-state="translated"]')]
     const p = paragraphs[2] ?? paragraphs[0]
     const t = p?.nextElementSibling?.classList.contains('axt-t') ? p.nextElementSibling : null
-    const asides = [...document.querySelectorAll('.ltx_note_outer, .ltx_pubnotes_content, .ltx_role_thanks')]
-      .filter(el => { const b = el.getBoundingClientRect(); const c = getComputedStyle(el); return b.width > 0 && c.display !== 'none' && c.opacity !== '0' })
-      .map(el => ({ ...rectOf(el), inGutter: el.getBoundingClientRect().left >= art.r - 4 && el.getBoundingClientRect().right <= innerWidth + 1 }))
-    return { vw: innerWidth, scrollW: document.documentElement.scrollWidth, nav, art, col: p && t ? [rectOf(p).w, rectOf(t).w] : null, asides }
+    return { vw: innerWidth, scrollW: document.documentElement.scrollWidth, nav, art, col: p && t ? [rectOf(p).w, rectOf(t).w] : null }
   }, rectOf.toString())
 }
 
@@ -108,10 +105,10 @@ async function measureFrame(page) {
       m.scrollW <= m.vw && centered && m.nav.w >= 13 * REM && m.art.w <= 96 * REM + 2 && m.art.w >= Math.min(96 * REM, m.vw - 2 * 25 * REM)
       && m.col !== null && Math.abs(m.col[0] - m.col[1]) <= 2,
       `scrollW ${m.scrollW}/${m.vw}，左 ${m.art.l} / 右 ${m.vw - m.art.r}，导航 ${m.nav.w}，文章 ${m.art.w}，两栏 ${m.col?.join(' / ')}`)
-    if (vw >= 96 * REM) {
-      check(`${vw}px：右侧沟槽元素落在 [文章右缘, 视口] 内`, m.asides.length > 0 && m.asides.every(a => a.inGutter),
-        `${m.asides.length} 个：${m.asides.slice(0, 3).map(a => `${a.l}–${a.r}`).join('，')}；文章右缘 ${m.art.r}`)
-    }
+    // 这里原有一条「右侧沟槽元素落在 [文章右缘, 视口] 内」：本篇的 4 个沟槽元素**全是致谢注**，
+    // 而带译文的致谢注 2026-09-06 起按设计回到文章列两栏排（沟槽只有 192px，塞进双语会互相压字），
+    // 于是这一篇的沟槽空了、断言没有了对象。沟槽几何改由 2312.17141 那一篇的
+    // 「正文脚注：译文副本从右栏起浮、落在右侧沟槽里」断言覆盖——那里有真实的沟槽元素与坐标。
     // 行间公式不能换行，宽过一栏的要按档缩放或栏内滚动（§7.2）：量所有配对了镜像的公式表，没有一张比栏宽
     await page.evaluate(() => document.getElementById('S1.SS4')?.scrollIntoView({ block: 'start' }))
     await quiesce(page)
@@ -247,18 +244,26 @@ async function measureFrame(page) {
       !!m && m.orig.r <= m.mid && m.trans.l >= m.mid && m.outer.r <= m.art.r + 1,
       m ? `原文 ${m.orig.l}–${m.orig.r}，译文 ${m.trans.l}–${m.trans.r}，中线 ${m.mid}，文章右缘 ${m.art.r}，注框右缘 ${m.outer.r}` : '没找到 frontmatter 脚注或它的译文')
   }
-  // 沟槽那一档不受影响：注整条浮到文章右缘之外
+  // 沟槽档（≥96rem）：带译文的 frontmatter 注也回到文章列按两栏排，不再挤进 192px 的沟槽。
+  // 沟槽里 ar5iv 按每位作者 160px 的固定节奏绝对定位它们，高度却是按只有原文算的——
+  // 塞进译文后每条从 26–50px 涨到 148–194px，相邻两条互相压字（实测 1800px 有 1 对重叠）
   await page.setViewportSize({ width: 1800, height: 900 })
   await sleep(800)
   const wide = await page.evaluate(() => {
     const art = document.querySelector('article.ltx_document').getBoundingClientRect()
-    const note = document.querySelector('.ltx_note.ltx_note_frontmatter')
-    const r = note.getBoundingClientRect()
-    return { l: Math.round(r.left), r: Math.round(r.right), artR: Math.round(art.right), vw: innerWidth }
+    const notes = [...document.querySelectorAll('.ltx_note.ltx_note_frontmatter')]
+    const rects = notes.map(n => n.getBoundingClientRect())
+    let overlaps = 0
+    for (let i = 0; i < rects.length; i++) for (let j = i + 1; j < rects.length; j++) if (rects[i].top < rects[j].bottom && rects[j].top < rects[i].bottom) overlaps++
+    const outer = notes[0].querySelector('.ltx_note_outer')
+    const orig = outer.querySelector('.ltx_note_content:not(.axt-t)')
+    const trans = outer.querySelector('.ltx_note_content.axt-t')
+    const b = el => { const r = el.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right) } }
+    return { 条数: notes.length, overlaps, orig: b(orig), trans: b(trans), mid: Math.round((art.left + art.right) / 2), artR: Math.round(art.right) }
   })
-  check('1800px（沟槽档）：frontmatter 脚注仍整条落在右侧沟槽里，这次改动没动它',
-    wide.l >= wide.artR - 4 && wide.r <= wide.vw + 1,
-    `${wide.l}–${wide.r}，文章右缘 ${wide.artR}，视口 ${wide.vw}`)
+  check('1800px（沟槽档）：frontmatter 脚注也左右配对，且彼此不重叠',
+    wide.overlaps === 0 && wide.orig.r <= wide.mid && wide.trans.l >= wide.mid,
+    `${wide.条数} 条、重叠 ${wide.overlaps} 对；原文 ${wide.orig.l}–${wide.orig.r}，译文 ${wide.trans.l}–${wide.trans.r}，中线 ${wide.mid}`)
   await page.screenshot({ path: `${SHOTS}/layout-frontmatter-note.png` })
   await page.close()
 }
