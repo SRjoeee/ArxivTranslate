@@ -234,7 +234,7 @@ async function measureFrame(page) {
   // 含真译文且有游离媒体的插图都已拆开。只碰变动区域的失效表若有洞，这里会露出来——
   // 那就记录它，不用"兜底跑一次全量"糊过去
   const converge = () => page.evaluate(() => {
-    const REAL = '.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
+    const REAL = '.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split), .axt-img'
     const deny = '.ltx_note, [data-axt-split], .axt-split, .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1))'
     let pairs = 0, misaligned = 0
     for (const t of document.querySelectorAll('.axt-t')) {

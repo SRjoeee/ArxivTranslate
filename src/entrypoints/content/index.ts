@@ -1,17 +1,19 @@
 import type { Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { extract, paperContext, type Block } from '@/core/extractor'
+import { collectImageTargets, startImageTranslation, type ImageRun } from '@/core/image'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
 import {
   clearPairMargins, createModeController, createPrep, installAnchorFallback,
-  restore,
+  restore, setImageModes,
   type Mode, type ModeController,
 } from '@/core/renderer'
 import { decodeText, escapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { beginSession, endSession, getSessionId, translateTitle, type TitleTranslator } from '@/core/scheduler'
-import { isAxtMessage } from '@/shared/messages'
+import { isAxtMessage, sendMessage } from '@/shared/messages'
+import type { ImageProgress } from '@/shared/ocr'
 import { createMessageTransport } from '@/shared/transport'
 import { enableDebug } from './debug'
 
@@ -43,6 +45,9 @@ export default defineContentScript({
     // 一次会话 = 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
     let run: TranslationRun | null = null
     let title: TitleTranslator | null = null
+    /** 图片翻译（§15）：helper 可用且设置里至少勾了一种模式时才有 */
+    let images: ImageRun | null = null
+    let imageProgress: ImageProgress | null = null
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
     let progress: Progress = idle()
 
@@ -52,6 +57,9 @@ export default defineContentScript({
       title = null
       run?.stop()
       run = null
+      images?.stop()
+      images = null
+      imageProgress = null
       const session = endSession()
       // 撤请求是尽力而为：排队的批次不再发出、在飞的 fetch 被 abort，撤不掉的由下面的会话 id 比对挡住
       if (session) void backend.cancel(session)
@@ -132,7 +140,50 @@ export default defineContentScript({
           return res.ok ? decodeText(res.result.segments[0]?.text ?? '') || null : null
         },
       })
+      startImages(session, config, context)
       return { started: true }
+    }
+
+    /**
+     * 图片翻译（§15）：先问 background 本机 helper 在不在，不在就整条路径不跑，页面翻译不受影响。
+     * 位图与文字块一样按视口懒加载；当前模式不在用户勾选的集合里时进入视口的图先停着，切回来再翻
+     */
+    function startImages(session: string, config: Config, context: Parameters<typeof startTranslation>[0]['context']): void {
+      if (config.image.modes.length === 0) return
+      sendMessage({ type: 'axt:helper-status' }).then(status => {
+        if (!status.available || getSessionId() !== session || !paper) return
+        setImageModes(document, config.image.modes)
+        const targets = collectImageTargets(document)
+        if (targets.length === 0) return
+        const t1 = performance.now()
+        let wasBusy = false
+        images = startImageTranslation({
+          doc: document,
+          targets,
+          paper,
+          target: config.targetLanguage,
+          scope: session,
+          preload: config.preload,
+          context,
+          ocr: call => sendMessage({ type: 'axt:ocr', ...call }),
+          translate: request => backend.translate(request),
+          isEnabled: () => config.image.modes.includes(modes?.effective() ?? config.mode),
+          isCurrent: () => getSessionId() === session,
+          onProgress: p => {
+            if (getSessionId() !== session) return
+            imageProgress = p
+            const busy = p.requested - p.done - p.failed > 0
+            if (wasBusy && !busy) console.debug(`[axt] images idle: ${p.done}/${p.requested} of ${p.total}, ${p.failed} failed, ${Math.round(performance.now() - t1)} ms`)
+            wasBusy = busy
+          },
+          // 叠加层插好了：side 模式下所在插图要拆两份（§7.2），交给整理层
+          onRendered: rendered => {
+            if (getSessionId() !== session) return
+            prep.touch(rendered)
+          },
+        })
+        console.debug(`[axt] images: ${targets.length} bitmaps, helper ${status.version ?? ''}, modes ${config.image.modes.join('/')}`)
+      }).catch(e => console.debug('[axt] helper-status 失败', e))
     }
 
     let fitObserver: ResizeObserver | null = null
@@ -149,6 +200,8 @@ export default defineContentScript({
 
     /** 进入 side 时的准备：右栏补一份公式与图表（§7.2），并把表格缩到能装进一栏 */
     function enterSide(effective: Mode): void {
+      // 模式闸可能刚打开：停着的图放出去（§15）
+      images?.resume()
       if (effective !== 'side') {
         fitObserver?.disconnect()
         fitObserver = null
@@ -220,11 +273,13 @@ export default defineContentScript({
         case 'axt:retry-failed': {
           const failed = run?.failed() ?? []
           void run?.translate(failed)
-          sendResponse({ retried: failed.length })
+          const failedImages = images?.failed() ?? []
+          void images?.translate(failedImages)
+          sendResponse({ retried: failed.length + failedImages.length })
           return true
         }
         case 'axt:page-status':
-          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress })
+          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, ...(imageProgress ? { images: imageProgress } : {}) })
           return true
       }
     })

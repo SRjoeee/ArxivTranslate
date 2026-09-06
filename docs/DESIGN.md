@@ -813,6 +813,15 @@ content script                       background (service worker)          axt-he
 - 参考图识别出 27 行，十个关键词全在。图里换行的标签（"Dynamical / charge"、"Tree tensor / networks"）Vision 按行返回；"E=+1"、"B"、"(a)" 这类置信度 0.5 或单字母的行由扩展侧过滤。原始结果存在 `tests/fixtures/ocr/qed3d-string-breaking.json`，合并 / 过滤规则的单测对着它写
 - Chrome 断开端口的原因（`chrome.runtime.lastError`）区分"host 没注册"与"helper 退出"：前者本 worker 生命周期内不再重连
 
+### 15.4c 叠加层实测（2026-09-07，2507.00150v1 的 6 张曲线图，Chrome for Testing 153，1440px，google-web）
+
+- **锚点定位成立**：stack 下 5 张有叠加层的图，叠加层矩形与图的矩形偏差 **(0.0, 0.0, 0.0, 0.0)**；切 side 后插图拆两份，副本里的叠加层与副本的图同样偏差 0.0，原件里的隐藏；only 下可见。零 JS 几何读取、零 ResizeObserver，靠结构自动成立——plan 里的停止条件（偏差 > 2px 就退回 JS 方案）没触发
+- **每张图的标签数**：F1 0、F2 3、F3 7、F4 3、F5 5、F6 2。F1 为 0 是对的——它只有刻度、"N"、"P=75%" 与 x 轴标签 "V_T [km s⁻¹]"，前三类被过滤，最后一个 Vision 读成 "Vr [km s-]"、google-web 原样返回：**译文与原文相同的标签不画**（折叠空白、忽略大小写与首尾标点比较），白框盖住原图只会把排版好的下标换成 OCR 读歪的字
+- **字号随框高**：解出来 3.6–17.7 px；宽扁的 F2（476×149）标签 3.6 px，与原图上的字一样小。不设下限——设了要么裁字要么溢出白框，读者缩放页面时一起放大
+- 6 张图 OCR + 翻译 + 叠加 **5.7 s**（stack，含滚动触发；OCR 未命中缓存）；模式闸关着时进入视口的图停着不请求，切到勾选的模式后 `resume` 放出去，6 张 9.0 s
+- 恢复原文后叠加层、注入节点、`data-axt-*` 属性全部为零；关掉图片翻译的 `e2e:layout` 20/20、`e2e` 27/27 与 main 一致
+- e2e 抓到的一处脚本问题：逐屏滚动要每步重读页面高度，译文插进来页面会变长，按初始高度滚会漏掉最后一张图
+
 ### 15.5 参考
 
 - Native Messaging 范本：KeePassXC-Browser + keepassxc-proxy
