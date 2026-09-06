@@ -120,7 +120,7 @@ describe('startTranslation', () => {
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)?.querySelector('math')).not.toBeNull()
   })
 
-  it('占位符始终破坏：走 runs 兜底；markup 请求带校验回调，runs 请求不带', async () => {
+  it('占位符始终破坏：走 runs 兜底；请求里不再带校验回调（issue #42 改由服务端从请求文本反推）', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport, requests } = makeTransport((req, seg) => {
@@ -133,9 +133,8 @@ describe('startTranslation', () => {
     const runsReq = requests.find(r => r.cache?.renderPath === 'runs')
     expect(runsReq?.request.segments.map(s => s.id)).toEqual(['p2#r0', 'p2#r1'])
     const markup = requests.find(r => r.cache?.renderPath === 'markup')!
-    expect(markup.accept?.('p2', '坏了')).toBe(false)
-    expect(markup.accept?.('p2', markup.request.segments.find(s => s.id === 'p2')!.text)).toBe(true)
-    expect(runsReq?.accept).toBeUndefined()
+    // 请求只带得走的东西：段落、缓存参数、scope。校验回调过不了消息边界，也不再需要
+    expect(Object.keys(markup).sort()).toEqual(['cache', 'request'])
     const node = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)
     expect(node?.querySelector('math')).not.toBeNull()
     expect(node?.textContent).toContain('Two')

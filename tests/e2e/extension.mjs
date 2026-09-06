@@ -13,6 +13,8 @@ const PROFILE = `${HERE}.profile`
 const SHOTS = `${HERE}.shots`
 const PAPER = process.env.AXT_PAPER ?? '2410.00260'
 const PAPER2 = process.env.AXT_PAPER2 ?? '2312.17527'
+/** 第三篇：前面的用例都没碰过它，缓存是冷的——导航那条要靠真实积压才测得出东西 */
+const PAPER3 = process.env.AXT_PAPER3 ?? '2312.17141'
 const GOOGLE = 'translate-pa.googleapis.com'
 
 const results = []
@@ -36,7 +38,13 @@ if (!worker) worker = await context.waitForEvent('serviceworker')
 const extId = worker.url().split('/')[2]
 console.log(`extension ${extId} loaded from ${EXT}`)
 
-/** 打开一篇论文并自动开始翻译（#axt-translate），收集 [axt] 日志与发往 host 的请求 */
+/**
+ * 打开一篇论文并自动开始翻译（#axt-translate），收集 [axt] 日志与发往 host 的请求。
+ *
+ * 请求听在 **context** 上而不是 page 上：2026-09-06 起翻译的 fetch 由 background service worker 发出
+ *（DESIGN §8.0），page 级事件一个都看不到。圆环同理不能靠轮询——首屏全命中缓存时 38 ms 就结束了，
+ * 200 ms 的轮询必然扑空；改成页面里挂一个 MutationObserver 记录峰值。
+ */
 async function openPaper(id, host) {
   const page = await context.newPage()
   const logs = []
@@ -46,7 +54,9 @@ async function openPaper(id, host) {
     if (text.includes('[axt]')) logs.push({ t: Date.now(), text })
   })
   const inFlight = new Map()
-  page.on('request', request => {
+  // 监听挂在 **context** 上：2026-09-06 起翻译的 fetch 由 background service worker 发出（DESIGN §8.0），
+  // page 级事件一个都看不到。页面关闭时摘掉，免得多篇论文互相串
+  const onRequest = request => {
     if (!request.url().includes(host)) return
     // translateHtml 的请求体是 [[items, from, to], client]：数出这一发装了多少段（攒批的直接证据）
     let items = 0
@@ -59,13 +69,17 @@ async function openPaper(id, host) {
     const entry = { t: Date.now(), url: request.url(), items, end: Number.POSITIVE_INFINITY }
     inFlight.set(request, entry)
     requests.push(entry)
-  })
-  for (const event of ['requestfinished', 'requestfailed']) {
-    page.on(event, request => {
-      const entry = inFlight.get(request)
-      if (entry) { entry.end = Date.now(); inFlight.delete(request) }
-    })
   }
+  const onSettled = request => {
+    const entry = inFlight.get(request)
+    if (entry) { entry.end = Date.now(); inFlight.delete(request) }
+  }
+  context.on('request', onRequest)
+  for (const event of ['requestfinished', 'requestfailed']) context.on(event, onSettled)
+  page.once('close', () => {
+    context.off('request', onRequest)
+    for (const event of ['requestfinished', 'requestfailed']) context.off(event, onSettled)
+  })
   // 圆环不能靠轮询：首屏全命中缓存时 36 ms 就结束了，200 ms 的轮询必然扑空。挂个 MutationObserver 记峰值
   await page.addInitScript(() => {
     window.__axtSpinnerPeak = 0
@@ -296,6 +310,63 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.close()
 }
 
+// ── 关掉标签页：background 的队列跟着撤（Codex 在 #59 指出）──────────────
+// 请求搬回 background 之后，销毁 content script 不再销毁这些工作。不撤的话，关掉的标签页还会
+// 继续发付费请求，直到批次耗尽预算（单批最长 180 秒）。
+{
+  const seen = []
+  // 监听器挂在 context 上且**不随页面关闭移除**：要观察的正是页面消失之后还有没有请求
+  const onRequest = request => { if (request.url().includes(GOOGLE)) seen.push(Date.now()) }
+  context.on('request', onRequest)
+  const page = await context.newPage()
+  await page.goto(`https://arxiv.org/html/${PAPER2}#axt-translate`, { waitUntil: 'domcontentloaded' })
+  // 先把整篇滚一遍：不这么做队列里没积压，关掉之后本来就不会有请求，断言等于空转
+  // （首次写这条时首屏正好全命中缓存，只发出 2 个请求，测不出任何东西）
+  const height = await page.evaluate(() => document.documentElement.scrollHeight)
+  for (let y = 0; y < height; y += 700) {
+    await page.evaluate(top => window.scrollTo(0, top), y)
+    await sleep(40)
+  }
+  const t0 = Date.now()
+  while (Date.now() - t0 < 40_000 && seen.length < 5) await sleep(200)
+  const before = seen.length
+  const pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
+  const tClose = Date.now()
+  await page.close()
+  await sleep(8_000)
+  const late = seen.filter(t => t > tClose + 500).length
+  context.off('request', onRequest)
+  check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）', before >= 5 && pending > 0 && late === 0,
+    `关闭前 ${before} 个请求、${pending} 个块还在等；关闭 0.5 s 后新增 ${late} 个`)
+}
+
+// ── 导航离开：tabs.onRemoved 不覆盖这种情况（Codex 在 #59 指出）──────────
+{
+  const seen = []
+  const onRequest = request => { if (request.url().includes(GOOGLE)) seen.push(Date.now()) }
+  context.on('request', onRequest)
+  const page = await context.newPage()
+  await page.goto(`https://arxiv.org/html/${PAPER3}#axt-translate`, { waitUntil: 'domcontentloaded' })
+  const height = await page.evaluate(() => document.documentElement.scrollHeight)
+  for (let y = 0; y < height; y += 700) {
+    await page.evaluate(top => window.scrollTo(0, top), y)
+    await sleep(40)
+  }
+  const t0 = Date.now()
+  while (Date.now() - t0 < 40_000 && seen.length < 5) await sleep(200)
+  const before = seen.length
+  const pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
+  const tLeave = Date.now()
+  // 跳到非 arXiv 页面：content script 没了，也永远不会再发新的 scope 过来
+  await page.goto('https://example.com/', { waitUntil: 'domcontentloaded' })
+  await sleep(8_000)
+  const late = seen.filter(t => t > tLeave + 500).length
+  context.off('request', onRequest)
+  await page.close()
+  check('导航离开后 background 不再发新请求（会话随导航撤掉）', before >= 5 && pending > 0 && late === 0,
+    `离开前 ${before} 个请求、${pending} 个块还在等；离开 0.5 s 后新增 ${late} 个`)
+}
+
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
 {
   await options.bringToFront()
@@ -322,14 +393,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await options.getByRole('button', { name: '保存', exact: true }).click()
   await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 
+  // 「测试连接」问的是配置的那个端点通不通，必须如实报 auth：走降级链的话免费引擎会把它显示成成功，
+  // 用户以为 key 没问题、整页却都在用 Google 翻（issue #42 的同一类不一致，方向相反）
+  await options.getByRole('button', { name: /测试连接/ }).click()
+  const bogusTest = await (await options.waitForSelector('main p[style*="background"]', { timeout: 30_000 })).textContent()
+  check('错 key 时设置页测试连接如实报失败，不被降级链掩盖', /失败/.test(bogusTest ?? '') && /auth/.test(bogusTest ?? ''), bogusTest)
+
   const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
   const done = await waitForLog(logs, IDLE, 90_000)
   await sleep(2_000)
   const idle = idleOf(done)
-  const demoted = logs.some(l => /降级/.test(l.text))
+  // 降级那条 console.warn 现在打在 background 的控制台里，页面上看不到（§8.0）；
+  // 「确实试过首选引擎」改由 OpenRouter 的请求数作证，「用户看得见」由下面的 popup 检查作证
   check('错 key + 降级开启：切到免费引擎，整页照常翻完、没有致命错误',
-    !!idle && idle.failed === 0 && idle.done > 0 && !/fatal:/.test(done?.text ?? '') && demoted,
-    `${done?.text ?? '(no idle line)'}；OpenRouter 请求 ${requests.length} 个；日志里有降级提示 ${demoted}`)
+    !!idle && idle.failed === 0 && idle.done > 0 && !/fatal:/.test(done?.text ?? '') && requests.length > 0,
+    `${done?.text ?? '(no idle line)'}；OpenRouter 请求 ${requests.length} 个`)
 
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)

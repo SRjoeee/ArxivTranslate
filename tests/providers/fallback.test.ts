@@ -120,16 +120,15 @@ describe('createFallbackService', () => {
     expect(second.cancelled).toEqual(['session-1'])
   })
 
-  it('reset 撤销永久降级：用户把配置修好（语言包下载完）后链要回到首选（Codex 在 #50 指出）', async () => {
+  it('永久降级不会自己恢复：撤销由 background 重建整条链负责，这一层不提供 reset（issue #42）', async () => {
     const first = step('chrome-builtin', [fail('no-key', '语言包未下载'), ok('chrome-builtin')])
     const second = step('google-web', [ok('google-web')])
     const service = createFallbackService([first, second])
     await service.translate(call)
     expect(service.status().activeId).toBe('google-web')
-    service.reset()
-    expect(service.status()).toEqual({ configuredId: 'chrome-builtin', activeId: 'chrome-builtin' })
-    const back = await service.translate(call)
-    expect(back.ok && back.result.provider).toBe('chrome-builtin')
+    await service.translate(call)
+    expect(first.calls).toBe(1)
+    expect('reset' in service).toBe(false)
   })
 
   it('只有一个引擎时原样返回错误，不吞不改', async () => {

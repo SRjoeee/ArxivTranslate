@@ -342,6 +342,37 @@ worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在
 
 **顺带发现（同一次实测）**：用户的 Chrome 里存着 v7 配置（之前试过设置页分支的构建），而加载的构建是 v6 的，`@wxt-dev/storage` 报 `Version downgrade detected (v7 -> v6)` 拒绝迁移，`getConfig()` 校验失败回退默认值——API key 被静默忽略，链落到 google-web，用户看不出区别。这是 Codex 在 #52 指出的「一条术语让整份配置回退」的同一类问题，只是触发条件换成了「装了旧构建」。值得在 DESIGN §9 记一条：回退默认值时至少要在 popup 上显式提示，不能静默。
 
+## 6.8 MV3 worker 扛得住长时间在飞的请求，不需要保活（2026-09-06，Chrome 153，用户的浏览器）
+
+**为什么要单独测**：§6.7 只量了**启动**往返（77–81 ms），而 §6.5 记录的 `A listener indicated an asynchronous response by returning true, but the message channel closed` 是另一种失效模式——请求**已经发出、正在等**的时候 worker 被回收。两者不能互相作证，而把翻译搬回 background（issue #42）成不成立全看后者。Playwright 里 worker 被调试器钉住、永不回收（§6.7 已记），只能在真实 Chrome 里测。
+
+**方法**：一个只有 12 行的探针扩展（会话临时目录，不进仓库），`host_permissions` 覆盖本机端点。本地起一个 `/slow?ms=N` 延迟 N 毫秒才应答的 HTTP 服务；content script 用一次性 `chrome.runtime.sendMessage` 请 background 去 fetch 它，**不做任何保活**，先静置让 worker 进入空闲再发。调试器只附在页面上，不附在 worker 上。
+
+| 延迟 | 结果 | 用时 | worker 年龄 |
+|---|---|---|---|
+| 45 s | OK | 45 063 ms | 45 013 ms |
+| 90 s | OK | 90 052 ms | 90 007 ms |
+
+两轮都远超 MV3 的 30 s 空闲回收阈值，响应照常回到 content。**结论：一次在飞的请求本身就让 worker 保持存活，不需要 Port、不需要心跳**。预备的另外两个变体（会话期持 `chrome.runtime.connect`、每 20 s ping）没有必要启用。§6.5 那条报错的成因没有再现，可能来自当时缓存写入扫全库造成的长阻塞（§9 已修）。
+
+**顺带一测：background 里的 `Translator.create()`**。§6.4 已测得 worker 里有 `Translator` 且 `availability()` 与 popup 一致，`create()` 这步没测过。这次探针在 worker 里读到的是 `downloadable`（该 Chrome 配置里语言包未就绪），**因此 `create()` 没测成**，这一条仍是未知。不阻塞搬迁：`buildChain` 本来就会把 `isAvailable()` 为假的引擎剔出链，语言包没下载时 `chrome-builtin` 自动不参与；真要下载也只能由 popup 的点击手势发起（§6.1）。等哪次语言包就绪时补测。
+
+## 6.9 可选主机权限的授权弹窗在 Playwright 里点不到（2026-09-06）
+
+写 `pnpm e2e:local-endpoint` 时撞到：设置页保存自定义端点会调 `chrome.permissions.request({ origins })`，Chrome 弹的是**原生对话框**，Playwright 既看不到也点不了，`evaluate` 会一直挂住（实测两次，进程要手动杀）。加不加用户手势都一样。
+
+绕法：e2e **复制**一份 `.output/chrome-mv3`，只往副本的 `manifest.json` 里加 `http://127.0.0.1/*`，再 `--load-extension` 那份副本；仓库里的 `wxt.config.ts` 不动。授权流程不是那条 e2e 的被测对象。
+
+顺带确认了两件与 Ollama 支持直接相关的事（探针在扩展页里调 `chrome.permissions.contains`）：
+
+| 模式 | manifest 里有 `http://127.0.0.1/*` 时 `contains` |
+|---|---|
+| `http://127.0.0.1/*` | true |
+| `http://127.0.0.1:8899/*` | **true**（带端口的模式合法，且被不带端口的覆盖）|
+| `http://localhost:11434/*` | false（`localhost` 与 `127.0.0.1` 是不同的主机）|
+
+所以设置页用 `${new URL(url).origin}/*` 生成的带端口模式是合法的，Chrome 能正确判定包含关系。
+
 ## 7. DESIGN.md 修订清单
 
 按章节排列。每条只提建议，是否采纳由设计文档决定。

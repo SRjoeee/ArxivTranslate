@@ -121,15 +121,38 @@ describe('createTranslateService', () => {
     expect(third.ok && third.result.segments[0]?.text).toBe('译2:text-a')
   })
 
-  it('accept 回调：没放行的译文照常返回，但不写缓存（Codex 在 #30 指出）', async () => {
+  it('占位符校验不过的译文照常返回，但不写缓存（Codex 在 #30 指出）', async () => {
+    // 期望从请求文本反推，不再靠调用方传 accept 回调（issue #42）：a 的译文丢了 <x id="1"/>
     const { port, writes } = fakePort()
     const service = createTranslateService({
-      getProvider: async () => provider(async r => ({ segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' })),
+      getProvider: async () => provider(async r => ({
+        segments: r.segments.map(s => ({ ...s, text: s.id === 'a' ? '译文丢了占位符' : `译:${s.text}` })),
+        provider: 'mock',
+      })),
       cache: port,
     })
-    const res = await service.translate({ ...req(['a', 'b']), accept: (id: string) => id !== 'a' })
-    expect(res.ok && res.result.segments.map(s => s.text)).toEqual(['译:text-a', '译:text-b'])
+    const call = req(['a', 'b'])
+    call.request.segments = [
+      { id: 'a', text: '公式 <x id="1"/> 见 <t id="2">此处</t>。' },
+      { id: 'b', text: '公式 <x id="1"/>。' },
+    ]
+    const res = await service.translate(call)
+    expect(res.ok && res.result.segments.map(s => s.id)).toEqual(['a', 'b'])
     expect(writes).toHaveLength(1)
+    expect(writes[0]!.map(w => w.translation)).toEqual(['译:公式 <x id="1"/>。'])
+  })
+
+  it('反推的期望对纯文本同样生效：runs 路径的译文凭空多出标签也不入库', async () => {
+    const { port, writes } = fakePort()
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => ({
+        segments: r.segments.map(s => ({ ...s, text: s.id === 'a' ? '译文 <x id="7"/>' : `译:${s.text}` })),
+        provider: 'mock',
+      })),
+      cache: port,
+    })
+    const res = await service.translate({ ...req(['a', 'b']), cache: { paper: '2410.00260', renderPath: 'runs' } })
+    expect(res.ok && res.result.segments.map(s => s.text)).toEqual(['译文 <x id="7"/>', '译:text-b'])
     expect(writes[0]!.map(w => w.translation)).toEqual(['译:text-b'])
   })
 
