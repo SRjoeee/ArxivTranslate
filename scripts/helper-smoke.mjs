@@ -30,11 +30,15 @@ child.stdout.on('data', chunk => {
   }
 })
 
-function send(message) {
+function send(message, { split = false } = {}) {
   const json = Buffer.from(JSON.stringify(message), 'utf8')
   const header = Buffer.alloc(4)
   header.writeUInt32LE(json.length, 0)
-  child.stdin.write(Buffer.concat([header, json]))
+  if (split) {
+    // 模拟管道的短读：长度前缀分两次写、中间隔一拍（Codex 在 #87 指出的情况）
+    child.stdin.write(header.subarray(0, 1))
+    setTimeout(() => { child.stdin.write(header.subarray(1)); child.stdin.write(json) }, 30)
+  } else child.stdin.write(Buffer.concat([header, json]))
   return new Promise(resolve => waiters.push(resolve))
 }
 
@@ -46,7 +50,7 @@ const check = (name, ok, detail = '') => {
 
 const t0 = performance.now()
 const ping = await send({ v: 1, cmd: 'ping', id: 'p1' })
-check('ping 回版本', ping.ok === true && typeof ping.version === 'string' && ping.id === 'p1', JSON.stringify(ping))
+check('ping 回版本，带 Vision revision', ping.ok === true && /^\d+\.\d+\.\d+\+vision\d+$/.test(ping.version ?? '') && ping.id === 'p1', JSON.stringify(ping))
 
 const image = readFileSync(FIXTURE).toString('base64')
 const t1 = performance.now()
@@ -90,6 +94,9 @@ const near = (a, b) => Math.abs(a - b) < 0.02
 const pairs = ['Processes', 'Static charge', 'Odd sites'].map(word => [lines.find(l => l.text.includes(word)), (exif.lines ?? []).find(l => l.text.includes(word))])
 const aligned = pairs.every(([a, b]) => a && b && near(a.quad[0][0], b.quad[0][0]) && near(a.quad[0][1], b.quad[0][1]) && near(a.quad[2][0], b.quad[2][0]) && near(a.quad[2][1], b.quad[2][1]))
 check('EXIF 方向 6 的 JPEG：坐标与 PNG 一致（±0.02）', aligned, pairs.map(([a, b]) => `${a?.text}: png (${a?.quad[0].map(v => v.toFixed(3))}) jpg (${b?.quad[0].map(v => v.toFixed(3)) ?? '缺'})`).join('; '))
+
+const shortRead = await send({ v: 1, cmd: 'ping', id: 'p2' }, { split: true })
+check('长度前缀分两次到达（短读）也能读满', shortRead.ok === true && shortRead.id === 'p2')
 
 const bad = await send({ v: 1, cmd: 'ocr', id: 'o2', image: '!!!' })
 check('坏 base64 回错误信封而不是崩', bad.error?.code === 'bad-base64' && bad.id === 'o2', JSON.stringify(bad.error))
