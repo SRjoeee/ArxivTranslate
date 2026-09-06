@@ -495,9 +495,17 @@ html[data-axt-dragging] .axt-split-handle::before {
   opacity: 0.55;
 }
 
-/* 拖动期间：视口外的顶层区块不参与布局，改一次列宽就不必重排整篇。
-   contain-intrinsic-size 的 auto 让浏览器记住上次的真实高度，滚动条不跳 */
-html[data-axt-dragging] .ltx_document > section {
+/* 拖动期间：**视口外**的顶层区块不参与布局，改一次列宽就不必重排整篇。
+   contain-intrinsic-size 的 auto 让浏览器记住上次的真实高度，滚动条不跳。
+
+   **只能给视口外的加**（用户反馈，2026-09-06）：`content-visibility` 让元素成为布局包含边界，
+   里面的 subgrid 就继承不到 .ltx_document 的列线了——实测同一个 .ltx_para 从
+   `subgrid [] [] []`（两栏）塌成 `subgrid [] []`（一栏），原文与译文都变成 681 宽、
+   译文掉到原文下方。所以拖动中摘要（不在 section 里）跟着走、正文却纹丝不动，
+   松手才复位。哪些在视口外由 split-handle.ts **每一帧**重标：改列宽会让段落变高变矮、
+   整篇内容上下移动，按下那一刻在视口外的区块可能已经挪进眼前了。视口内的一个都不标，
+   配对照常跟随——实测每帧重标只多花不到 1 ms（15.9 vs 16.7 中位帧） */
+[data-axt-drag-skip] {
   content-visibility: auto;
   contain-intrinsic-size: auto 1200px;
 }

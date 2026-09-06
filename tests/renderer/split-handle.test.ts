@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_PCT, DRAGGING_ATTR, HANDLE_CLASS, SPLIT_PCT_VAR, applySplit, installSplitHandle, readSplit } from '@/core/renderer'
+import { DEFAULT_PCT, DRAGGING_ATTR, DRAG_SKIP_ATTR, HANDLE_CLASS, SPLIT_PCT_VAR, applySplit, installSplitHandle, readSplit } from '@/core/renderer'
 import { docOf } from './helpers'
 
 const page = '<div class="ltx_para"><p class="ltx_p" id="p1">One.</p></div>'
@@ -94,3 +94,89 @@ describe('拖动分栏的手柄（实验，issue #83）', () => {
     expect((handle as HTMLElement).tabIndex).toBe(0)
   })
 })
+
+describe('拖动时只跳过视口外的区块（用户反馈，2026-09-06）', () => {
+  // content-visibility 会让元素成为布局包含边界，里面的 subgrid 继承不到 .ltx_document 的列线：
+  // 实测同一个 .ltx_para 从 `subgrid [] [] []` 塌成 `subgrid [] []`，原文与译文都变 681 宽、
+  // 译文掉到原文下方。所以视口内的区块一个都不能标
+  const page = '<section id="s1">A</section><section id="s2">B</section><section id="s3">C</section>'
+  /** happy-dom 没有布局：手动给三个区块摆位置，只有 s2 在视口里 */
+  function layout(doc: Document) {
+    const box = (top: number, height: number) => () => ({ top, bottom: top + height, left: 0, right: 100, width: 100, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+    doc.getElementById('s1')!.getBoundingClientRect = box(-3000, 800)
+    doc.getElementById('s2')!.getBoundingClientRect = box(100, 500)
+    doc.getElementById('s3')!.getBoundingClientRect = box(4000, 800)
+    ;(globalThis as { innerHeight?: number }).innerHeight = 900
+  }
+
+  const down = (handle: Element) => handle.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }))
+
+  it('按下时标记视口外的，视口内的不动', () => {
+    const doc = docOf(page)
+    layout(doc)
+    installSplitHandle(doc)
+    const handle = doc.querySelector(`.${HANDLE_CLASS}`)! as HTMLElement
+    handle.setPointerCapture = () => {}
+    handle.releasePointerCapture = () => {}
+    down(handle)
+    expect(doc.getElementById('s1')!.hasAttribute(DRAG_SKIP_ATTR)).toBe(true)
+    expect(doc.getElementById('s2')!.hasAttribute(DRAG_SKIP_ATTR)).toBe(false)
+    expect(doc.getElementById('s3')!.hasAttribute(DRAG_SKIP_ATTR)).toBe(true)
+    expect(doc.documentElement.hasAttribute(DRAGGING_ATTR)).toBe(true)
+  })
+
+  it('手柄自己不会被标记——它是我们插进去的，不是内容', () => {
+    const doc = docOf(page)
+    layout(doc)
+    installSplitHandle(doc)
+    const handle = doc.querySelector(`.${HANDLE_CLASS}`)! as HTMLElement
+    handle.setPointerCapture = () => {}
+    handle.getBoundingClientRect = () => ({ top: -5000, bottom: -4000 }) as DOMRect
+    down(handle)
+    expect(handle.hasAttribute(DRAG_SKIP_ATTR)).toBe(false)
+  })
+
+  it('拖动中跟着重标：内容移动后，挪进视口的区块要摘掉标记（用户反馈的正是这个）', () => {
+    const doc = docOf(page)
+    layout(doc)
+    installSplitHandle(doc)
+    const handle = doc.querySelector(`.${HANDLE_CLASS}`)! as HTMLElement
+    handle.setPointerCapture = () => {}
+    down(handle)
+    expect(doc.getElementById('s3')!.hasAttribute(DRAG_SKIP_ATTR)).toBe(true)
+    // 拖动改变了列宽，段落变矮，s3 上移进了视口
+    const box = (top: number, height: number) => () => ({ top, bottom: top + height, left: 0, right: 100, width: 100, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+    doc.getElementById('s3')!.getBoundingClientRect = box(300, 500)
+    handle.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, clientX: 60 }))
+    expect(doc.getElementById('s3')!.hasAttribute(DRAG_SKIP_ATTR)).toBe(false)
+    // 仍在视口外的照旧跳过
+    expect(doc.getElementById('s1')!.hasAttribute(DRAG_SKIP_ATTR)).toBe(true)
+  })
+
+  it('松手清干净', () => {
+    const doc = docOf(page)
+    layout(doc)
+    installSplitHandle(doc)
+    const handle = doc.querySelector(`.${HANDLE_CLASS}`)! as HTMLElement
+    handle.setPointerCapture = () => {}
+    handle.releasePointerCapture = () => {}
+    down(handle)
+    expect(doc.querySelectorAll(`[${DRAG_SKIP_ATTR}]`).length).toBeGreaterThan(0)
+    handle.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true }))
+    expect(doc.querySelectorAll(`[${DRAG_SKIP_ATTR}]`)).toHaveLength(0)
+    expect(doc.documentElement.hasAttribute(DRAGGING_ATTR)).toBe(false)
+  })
+
+  it('拖到一半卸载也清干净（恢复原文）', () => {
+    const doc = docOf(page)
+    layout(doc)
+    const off = installSplitHandle(doc)
+    const handle = doc.querySelector(`.${HANDLE_CLASS}`)! as HTMLElement
+    handle.setPointerCapture = () => {}
+    down(handle)
+    off()
+    expect(doc.querySelectorAll(`[${DRAG_SKIP_ATTR}]`)).toHaveLength(0)
+    expect(doc.documentElement.hasAttribute(DRAGGING_ATTR)).toBe(false)
+  })
+})
+

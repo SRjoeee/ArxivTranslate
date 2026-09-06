@@ -15,6 +15,10 @@ export const HANDLE_CLASS = 'axt-split-handle'
 export const DRAGGING_ATTR = 'data-axt-dragging'
 /** 左栏占比（百分数）。CSS 里 `--axt-split-pct` 定位手柄，`--axt-split-l/r` 给网格轨道 */
 export const SPLIT_PCT_VAR = '--axt-split-pct'
+/** 拖动期间打在**视口外**顶层区块上：CSS 用它跳过那部分的布局 */
+export const DRAG_SKIP_ATTR = 'data-axt-drag-skip'
+/** 视口上下各留一屏的余量：拖动会改变高度，边缘处的区块别一动就闪 */
+const SKIP_MARGIN = 200
 
 /** 两栏都要留得住内容：压到 15% 以下已经没法读了 */
 const MIN_PCT = 15
@@ -72,6 +76,29 @@ export function installSplitHandle(doc: Document, options: SplitHandleOptions = 
   const html = doc.documentElement
   let pointerId: number | null = null
 
+  /**
+   * 标出视口外的顶层区块。`content-visibility` 会让元素成为布局包含边界，
+   * 里面的 subgrid 就继承不到 `.ltx_document` 的列线（实测 `subgrid [] [] []` 塌成 `subgrid [] []`，
+   * 两栏并排变成上下堆叠）——所以**只能给看不见的那些加**，视口内的必须保持原样跟着拖动走。
+   * 实测 2609.04114v1：14 个区块跳掉 13 个，视口内那个仍是两栏，中位帧仍是 16.7 ms
+   */
+  const markOffscreen = (): number => {
+    const view = doc.defaultView
+    const height = view?.innerHeight ?? 0
+    let skipped = 0
+    for (const section of Array.from(root.children)) {
+      if (section.classList.contains(HANDLE_CLASS)) continue
+      const box = section.getBoundingClientRect()
+      if (box.bottom > -SKIP_MARGIN && box.top < height + SKIP_MARGIN) section.removeAttribute(DRAG_SKIP_ATTR)
+      else { section.setAttribute(DRAG_SKIP_ATTR, ''); skipped++ }
+    }
+    return skipped
+  }
+
+  const clearSkips = () => {
+    for (const section of Array.from(root.querySelectorAll(`[${DRAG_SKIP_ATTR}]`))) section.removeAttribute(DRAG_SKIP_ATTR)
+  }
+
   const pctFromClientX = (clientX: number) => {
     const box = root.getBoundingClientRect()
     if (box.width === 0) return readSplit(root)
@@ -85,6 +112,8 @@ export function installSplitHandle(doc: Document, options: SplitHandleOptions = 
     if (pointer.button !== 0) return
     pointerId = pointer.pointerId
     handle.setPointerCapture(pointerId)
+    // 先标记再挂属性：标记要读几何，挂上 dragging 之后再读就已经受 content-visibility 影响了
+    markOffscreen()
     html.setAttribute(DRAGGING_ATTR, '')
     event.preventDefault()
   }
@@ -93,6 +122,10 @@ export function installSplitHandle(doc: Document, options: SplitHandleOptions = 
     const pointer = event as PointerEvent
     if (pointerId === null || pointer.pointerId !== pointerId) return
     applySplit(root, pctFromClientX(pointer.clientX))
+    // 每一帧都重标：改列宽会让段落变高变矮，整篇内容跟着上下移动，按下那一刻在视口外的区块
+    // 可能已经挪进来了——标记不跟着走的话，它就带着 content-visibility 出现在眼前，
+    // 两栏塌成一栏（用户 2026-09-06 反馈的正是这个：摘要跟着动，正文纹丝不动）
+    markOffscreen()
   }
 
   const endDrag = (event: Event) => {
@@ -101,6 +134,7 @@ export function installSplitHandle(doc: Document, options: SplitHandleOptions = 
     handle.releasePointerCapture(pointerId)
     pointerId = null
     html.removeAttribute(DRAGGING_ATTR)
+    clearSkips()
     options.onCommit?.(readSplit(root))
   }
 
@@ -129,6 +163,7 @@ export function installSplitHandle(doc: Document, options: SplitHandleOptions = 
 
   return () => {
     html.removeAttribute(DRAGGING_ATTR)
+    clearSkips()
     handle.remove()
     const style = (root as HTMLElement).style
     for (const name of [SPLIT_PCT_VAR, '--axt-split-l', '--axt-split-r']) style.removeProperty(name)
