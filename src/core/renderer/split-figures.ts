@@ -11,6 +11,7 @@
 // 实测更糟：面板缩成 160px 还溢出 555px，所以那个变量保持不动。
 import { DOCUMENT_ROOT, FIGURE_MEDIA } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
+import { IMG_CLASS } from '@/core/marks'
 import { hashText } from '@/shared/hash'
 import { MIRROR_CLASS } from './mirror'
 import { PENDING_CLASS } from './pending'
@@ -29,12 +30,14 @@ export const SPLIT_CLASS = 'axt-split'
  * 删掉镜像、克隆一份没有任何译文的图——右栏是一份原文副本。基线每趟全量，7 张拆图里 2 张是这种假拆
  */
 const REAL_TRANSLATION = `.${T_CLASS}:not(.${PENDING_CLASS}, .axt-error, .${MIRROR_CLASS}, .${SPLIT_CLASS})`
+/** 图片叠加层（§15.2）也算真译文：只有它的插图同样要拆，且它到达时签名要变、副本要重建 */
+const REAL_OR_IMAGE = `${REAL_TRANSLATION}, .${IMG_CLASS}`
 /** 克隆时译文内容的签名，用来判断译文有没有增加或改变、要不要重建 */
 const KEY_ATTR = 'data-axt-split-key'
 
 /** 译文的签名：数量相同但内容变了（换目标语言重翻）也要重建，只数个数会一直用陈旧的副本（Codex 在 #26 指出） */
 function translationKey(fig: Element): string {
-  const texts = Array.from(fig.querySelectorAll(REAL_TRANSLATION), t => t.textContent ?? '')
+  const texts = Array.from(fig.querySelectorAll(REAL_OR_IMAGE), t => t.textContent ?? '')
   return `${texts.length}:${hashText(JSON.stringify(texts))}`
 }
 
@@ -61,7 +64,7 @@ export function outermostFigure(el: Element): Element | null {
 function needsSplit(fig: Element): boolean {
   if (fig.classList.contains(T_CLASS)) return false // 克隆件自己
   if (fig.parentElement?.closest('figure')) return false // 嵌套的分图交给最外层一起复制
-  if (!fig.querySelector(REAL_TRANSLATION)) return false // 内部没有译文（pending 不算）：整块没配对，交给镜像
+  if (!fig.querySelector(REAL_OR_IMAGE)) return false // 内部没有译文（pending 不算）：整块没配对，交给镜像
   return hasLooseMedia(fig) // 没有游离媒体的浮动体（如表格）不必整块复制，它的表本来就有译文克隆
 }
 
@@ -100,8 +103,11 @@ export function splitFigures(root: Document | Element): number {
     if (existing && existing.getAttribute(KEY_ATTR) === key) continue
     existing?.remove()
 
-    // 镜像与整块复制是两套方案，图里留着镜像会重复一份（都是我们自己的节点，可以删）
+    // 镜像与整块复制是两套方案，图里留着镜像会重复一份（都是我们自己的节点，可以删）。
+    // 没有图注的插图在会话开始时会被整张镜像（figure 级的下一个兄弟），叠加层到达后拆图时一并删掉，否则右栏三份
     for (const stale of Array.from(fig.querySelectorAll(`.${MIRROR_CLASS}`))) stale.remove()
+    const figureMirror = fig.nextElementSibling
+    if (figureMirror?.classList.contains(MIRROR_CLASS)) figureMirror.remove()
 
     const clone = fig.cloneNode(true) as Element
     // 还在等译文 / 翻失败的对：副本里去掉圆环与小部件、留原文，译文到了 key 变化会重建
@@ -121,4 +127,25 @@ export function splitFigures(root: Document | Element): number {
     made++
   }
   return made
+}
+
+/**
+ * 非 side 模式下丢掉签名过期的副本（§15.2）：side → only 之后 OCR 才到，叠加层进了被隐藏的原件，
+ * 副本里没有它；只在 side 才重建的话叠加层要等回到 side 才可见。删掉副本、摘掉原件的标记，
+ * 只显示原件（stack 本来就显示原件；only 下原件的译文照常可见），回 side 时全量整理再重建。
+ * 返回丢掉的副本数
+ */
+export function dropStaleSplits(root: Document | Element): number {
+  const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))
+  if (!scope) return 0
+  let dropped = 0
+  for (const fig of Array.from(scope.querySelectorAll(`[${SPLIT_ATTR}]`))) {
+    const sibling = fig.nextElementSibling
+    const existing = sibling?.classList.contains(SPLIT_CLASS) ? sibling : null
+    if (existing && existing.getAttribute(KEY_ATTR) === translationKey(fig)) continue
+    existing?.remove()
+    fig.removeAttribute(SPLIT_ATTR)
+    dropped++
+  }
+  return dropped
 }

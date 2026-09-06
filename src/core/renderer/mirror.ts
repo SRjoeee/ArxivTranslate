@@ -9,7 +9,7 @@
 // 所以模式切换仍然只改 <html> 上的一个属性。
 import { DOCUMENT_ROOT, MARGIN_ASIDE } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
-import { stripInjected } from '@/core/marks'
+import { INJECTED_SELECTOR, isInjected, stripInjected } from '@/core/marks'
 import { FOR_ATTR, T_CLASS } from './index'
 import { MIRROR_CONTAINER, SIDE_STACK, isMirrorContainer } from './side-layout'
 
@@ -20,14 +20,17 @@ const MIRROR_ID_PREFIX = 'mirror:'
 const MEDIA = 'img, svg, object, math, table, canvas, video'
 
 function needsMirror(child: Element): boolean {
-  if (child.classList.contains(T_CLASS)) return false
+  // 我们自己的节点（译文、镜像、图片叠加层）不镜像
+  if (isInjected(child)) return false
   // ar5iv 浮到页面外缘的边注与出版元数据：镜像只会多一份重复（§7.2）
   if (child.matches(MARGIN_ASIDE)) return false
   // 翻译单元：已经有译文，或译文还在路上，都不该再来一份副本
   if (child.hasAttribute(ID_ATTR)) return false
-  if (child.nextElementSibling?.classList.contains(T_CLASS)) return false
+  // 后面紧跟译文或图片叠加层（§15.2）：已经配对，右栏不空
+  const next = child.nextElementSibling
+  if (next && isInjected(next)) return false
   // 内部含译文的元素本身是容器，它的子元素各自处理
-  if (child.querySelector(`.${T_CLASS}`)) return false
+  if (child.querySelector(INJECTED_SELECTOR)) return false
   // 内部还有等待翻译的块：整块复制过去，译文到达后就会既有副本又有译文。
   // **这道闸只在块标记完整时有效**——它分辨不出"还没轮到标记的翻译单元"与"永远没有译文的静态内容"。
   // 安全由 run.ts 提供：块标记在 startTranslation 里同步写完，第一趟 side prep 看到的一定是全集（issue #67）

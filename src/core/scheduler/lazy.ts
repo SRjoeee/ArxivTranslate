@@ -55,11 +55,11 @@ export function quantizeThreshold(value: number): number {
 
 export const DEFAULT_PRELOAD: PreloadOptions = { margin: 1000, threshold: 0 }
 
-export interface LazyScheduler {
+export interface LazyScheduler<T extends { el: Element } = Block> {
   /** 手动把块交出去（无 IntersectionObserver 的环境、重试）；已交过的不再交 */
-  trigger(blocks: Block[]): void
+  trigger(blocks: T[]): void
   /** 只认领不回调：调用方自己去翻这些块，观察器不再管它们 */
-  claim(blocks: Block[]): void
+  claim(blocks: T[]): void
   /** 还没进入视口的块数 */
   waiting(): number
   disconnect(): void
@@ -70,10 +70,11 @@ function hasLayoutBox(el: Element): boolean {
   return rect.width > 0 || rect.height > 0
 }
 
-export function createLazyScheduler(blocks: Block[], options: PreloadOptions & { onEnter: (blocks: Block[]) => void }): LazyScheduler {
-  const waiting = new Set<Block>(blocks)
+/** 调度的对象只要有 `el`：文字块（Block）与图片目标（§15）共用同一套观察器 */
+export function createLazyScheduler<T extends { el: Element } = Block>(blocks: T[], options: PreloadOptions & { onEnter: (blocks: T[]) => void }): LazyScheduler<T> {
+  const waiting = new Set<T>(blocks)
   // 锚点 → 它带着的块。有布局盒的块观察自己；没有的挂到最近的祖先块上
-  const byAnchor = new Map<Element, Block[]>()
+  const byAnchor = new Map<Element, T[]>()
   for (const block of blocks) {
     const anchor = hasLayoutBox(block.el) ? block.el : block.el.parentElement?.closest(`[${ID_ATTR}]`) ?? block.el
     const carried = byAnchor.get(anchor)
@@ -81,7 +82,7 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
     else byAnchor.set(anchor, [block])
   }
 
-  const fire = (entered: Block[]) => {
+  const fire = (entered: T[]) => {
     const fresh = entered.filter(block => waiting.delete(block))
     if (fresh.length > 0) options.onEnter(fresh)
   }
@@ -140,7 +141,7 @@ export function createLazyScheduler(blocks: Block[], options: PreloadOptions & {
   }
   enterAnchors(seeded)
 
-  const release = (picked: Block[]) => {
+  const release = (picked: T[]) => {
     for (const block of picked) {
       for (const [anchor, carried] of byAnchor) if (carried.includes(block)) observer?.unobserve(anchor)
     }
