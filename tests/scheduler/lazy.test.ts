@@ -117,3 +117,46 @@ describe('createLazyScheduler', () => {
     expect(scheduler.waiting()).toBe(0)
   })
 })
+
+describe('播种与观察器用同一个 threshold（Codex 在 #35 指出）', () => {
+  const g = globalThis as { IntersectionObserver?: unknown; innerHeight?: number }
+  beforeEach(() => {
+    FakeIntersectionObserver.instances = []
+    g.IntersectionObserver = FakeIntersectionObserver
+    g.innerHeight = 800
+  })
+  afterEach(() => {
+    delete g.IntersectionObserver
+    document.body.innerHTML = ''
+  })
+
+  /** 造一个块，让它按给定的可见比例卡在边距边界上 */
+  function seedWith(threshold: number, visibleRatio: number) {
+    document.body.innerHTML = PAGE
+    const blocks = extract(document)
+    markBlocks(blocks)
+    const by = Object.fromEntries(blocks.map(b => [b.id, b]))
+    const height = 200
+    // 边距下沿是 innerHeight + margin = 800 + 1000 = 1800；让块只露出 visibleRatio 的高度
+    const top = 1800 - height * visibleRatio
+    layout(by.a!.el, top, height)
+    for (const id of ['b', 'c', 'd']) layout(by[id]!.el, 9000)
+    const entered: Block[][] = []
+    createLazyScheduler(blocks, { margin: 1000, threshold, onEnter: picked => entered.push(picked) })
+    const io = FakeIntersectionObserver.instances[0]!
+    return { seeded: entered.flat().some(b => b.id === 'a'), observed: io.observed.has(by.a!.el) }
+  }
+
+  it('threshold 0：擦到边就播种（默认行为不变）', () => {
+    expect(seedWith(0, 0.05)).toEqual({ seeded: true, observed: false })
+  })
+
+  it('threshold 0.5：只露出 20% 的块不播种，交给观察器按比例判', () => {
+    expect(seedWith(0.5, 0.2)).toEqual({ seeded: false, observed: true })
+  })
+
+  it('threshold 0.5：露出 80% 的块照常播种', () => {
+    expect(seedWith(0.5, 0.8)).toEqual({ seeded: true, observed: false })
+  })
+})
+

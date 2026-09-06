@@ -343,6 +343,8 @@ interface ProtectedBlock {
 - **装饰只落到真正的译文上**：`.axt-pending`（加载圆环）与 `.axt-error`（带「重试」按钮的失败控件）也带 `.axt-t`——它们长在译文的位置上，side 模式靠这个 class 配对——但它们不是译文。side 模式的结构性克隆 `.axt-mirror`（镜像的公式 / 插图）与 `.axt-split`（拆到右栏的整张图）同理——它们带 `.axt-t` 只是为了配对，`blur` 会把镜像的公式糊掉、其他预设会给包装层再画一遍。所有预设选择器都写成 `.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)`，克隆里嵌套的真译文仍然匹配；与 `split-figures.ts` 的 `REAL_TRANSLATION` 是同一条界线。不排除的话 `gradient` 的 `color: transparent` 会把重试按钮的字变透明，正好是用户最需要点它的时候（Codex 在 #52 指出）
 - **`custom` 只接受声明块，不接受完整规则**：选择器由扩展补（`html[data-axt-style="custom"] .axt-t { … }`），用户填的内容整段插进花括号中间，因此 `{` `}` `@` `<` 一律拒绝。这不是安全边界（用户本来就能装任何扩展），是防手滑——一个多余的花括号会把整篇论文的排版改掉，而且很难看出原因
 
+- **文档标题与副标题不与译文同行** [决定，2026-09-06，Codex 在 #13 指出]：`.ltx_subtitle` 与 `.ltx_title_document` 同属居中的标题区，压成 `inline-block` 会缩到内容宽度并贴到左边——真实页面实测 2609.00246 的 `(Extended Version)`：原本 `block` + `text-align: center`、占满 800px 栏宽、文本居中在 x≈720，改成 `inline-block` 后盒子只剩 176px、落在 l=320（父元素 `<article>` 是 `text-align: start`）。章节的 run-in 短标题是 `.ltx_title_*`，不受影响
+
 ### 7.6 等待态：加载圆环 [决定，2026-09-05，照搬 Read Frog]
 
 - 请求发出**之前**先在原块后面插一个 pending 译文节点（`.axt-t.axt-pending`，与原块同标签、同 class，`data-axt-for` 指向原块），里面只有一个 6px 的圆环 `<span class="axt-spinner">`。包裹先插、内容后填，与 §7.1 "译文只作为原块的下一个兄弟"完全一致；译文到达后**被真译文替换**（`renderText` / `renderTable` 开头的 `clearTranslation` 删掉同 `data-axt-for` 的兄弟，删前取消圆环动画）——与"填进同一个节点"效果相同、少一条路径。表格块的 pending 是 `div`，整表克隆到了才是 `table`。短标题的 pending 也按 §7.3 同行
@@ -489,6 +491,7 @@ export interface TranslateResult {
 - **缓存管理只在设置页做全局清空** [决定，2026-09-05]：`axt:cache-stats` 显示条数与体积，`axt:cache-clear`（不带 paper）清空整库，切回设置页时重读统计（翻译发生在别的标签页，不重读就永远显示打开那一刻的数字）。两条消息的响应都是 `{ ok: true, … } | { ok: false, message }`：**失败不能显示成「缓存是空的」或「已删除 0 条」**，IndexedDB 用不了时那是最不该骗人的地方（Codex 在 #52 指出）。统计前先跑一次 `cleanup()` 清掉过期条目——`get()` 只是把它们当未命中、从不删除，不清的话页面上会一直显示一堆用不了的条数与体积；这也是 `cleanup()` 在运行时唯一的调用点，所以它失败要抛出去而不是吞掉，否则统计会把清不掉的过期条目当成功结果报出去。**不做「只清本篇」**：设置页是独立扩展页面，没有当前论文的概念，为它绕一圈问 content script 不值当；真正需要按篇清的场景（这篇译得不好想重来）在 popup 上更顺手，留作后续。缓存键本来就带引擎、模型、提示词、术语表，换任何一样都不会命中旧译文，手动清是兜底而不是常规操作
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
 - **缓存读取有等待预算，读不到就继续翻** [决定，2026-09-05，issue #45]：服务是"先等缓存再发请求"的，读一旦挂住整页翻译就停在那里——MV3 的 service worker 冷启动、被挂起或消息丢失都会造成这种情况。两道闸：content 侧的消息端口 1.5s（`CACHE_READ_TIMEOUT_MS`），服务层 2s（`CACHE_READ_BUDGET_MS`，换任何 `CachePort` 实现都兜得住）。超时按全部未命中处理，代价只是多花一次请求；两个数都远大于实测的命中往返（36 ms 量级）
+- **取消之后不再写缓存** [决定，2026-09-06，Codex 在 #33 指出]：一次调用会被拆到多个批次，先完成的那些可能在 `cancel(scope)` 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时照样把它们写进库，与「恢复原文之后不再渲染也不写缓存」的承诺不符。写之前再查一次 `cancelledScopes`
 - **坏译文不入库、重发不读库** [决定，2026-09-05]：markup 路径的请求带 `accept` 回调（进程内调用才有，过不了消息边界），translate-service 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）；占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
 - 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、v5 加 `fallback: { enabled }`（默认开，§8.5）、v6 加 `glossary`（默认空表，§8.2）、v7 加 `style`（默认 `none`，§7.5）、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
@@ -501,6 +504,7 @@ export interface TranslateResult {
 **看到哪翻到哪**：只翻视口内与其下方一段距离内的块，没滚到的块不发请求、不占资源。这是 Read Frog 页面翻译**唯一**的模式（`PageTranslationManager`，没有"整篇翻"的开关），做法照搬；它的模块解耦、效果经过验证，能整段搬的整段搬（见 §12 的 `feat/lazy-loading`）。
 
 - 开始翻译时只给所有块打标记（`data-axt-id`、`pending`）并逐块交给一个 `IntersectionObserver`，**不发任何请求**。标记是切片进行的（几百个块一口气写会冻住页面），**每写一个块之前都要检查会话是否还在**：让出主线程期间用户可能已经「恢复原文」，只在循环外检查的话，`restore` 清干净之后循环会继续往 DOM 上写标记，页面留下孤儿 `data-axt-*`，§7.1 的不变量被破坏（issue #45 的实验 1）。参数照 Read Frog 的 `pageTranslation.page.preload` 默认值：`rootMargin` **1000px**、`threshold` **0**；设置页暴露为"预翻译距离"（0–10000px，步进 100）与"可见阈值"（0–1），与 Read Frog 同名同义。原先照 FluentRead 的 600px / 0.01 作废
+- **播种与观察器用同一个可见阈值** [决定，2026-09-06，Codex 在 #35 指出]：启动时同步触发的那批锚点原来只判矩形相交，忽略 `threshold`；配了阈值的用户会看到「刚露出一像素的块立刻就翻」，而同一个块晚一点进视口反而要等够比例，两条路径不一致。现在播种按「相交高度 ÷ 元素高度 ≥ threshold」判，与 `IntersectionObserver` 的 `intersectionRatio` 同义。默认 threshold 为 0，行为不变
 - 块**第一次**进入视口加边距时才发请求，同时 `unobserve`——一次性；视口外的块永远不会被请求。没有"整篇翻完"的后台队列，想整篇就把预翻译距离调大（Read Frog 也是这么做的）
 - 同一次 IO 回调里进入的块**攒成一批**：一次滚动会让几十个块同时进入，按 §8.2 的 1000 字 / 4 条切批发出，表格整表一批不变；`planBatches` 只对"这一批进入视口的块"运行，不再预先规划整篇。IO 首次回调是异步的，创建时仍按 `getBoundingClientRect` 同步播种一次，首屏不等回调
 - 请求期间原块旁边先插带加载圆环的 pending 节点（§7.6），译文到达后填入；失败换错误提示与"重试"；取消则删除
