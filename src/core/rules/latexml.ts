@@ -253,13 +253,23 @@ export const MARGIN_ASIDE = '.ltx_pubnotes, .ltx_note'
 
 /** 文档主标题：靠 text-align:center 居中，不能与译文同行（§7.3） */
 export const DOCUMENT_TITLE = '.ltx_title_document'
+/** 文档副标题（`\subtitle`）：与文档标题同属居中的标题区，同样不作同行候选 */
+export const DOCUMENT_SUBTITLE = '.ltx_subtitle'
 
 /** 摘要块与它自己的标题（"Abstract"）；论文级上下文取正文时要把标题去掉 */
 export const ABSTRACT = { root: '.ltx_abstract', title: '.ltx_title' } as const
 
 /** 短标题同行的候选：title 单元里除文档主标题外的标题（长度另由渲染层判断） */
+/**
+ * 短标题能否与译文同行（§7.3）。排除文档标题**与文档副标题**（Codex 在 #13 指出）：
+ * 它们都是居中的，压成 inline-block 会缩成内容宽度、贴到左边——
+ * 2026-09-06 在真实页面上量过 2609.00246 的 `(Extended Version)`：原本 `display: block`、
+ * `text-align: center`、占满 800px 栏宽，文本居中在 x≈720；改成 inline-block 后盒子只剩 176px、
+ * 落在 l=320，因为父元素 `<article>` 是 `text-align: start`。LaTeXML 的 `.ltx_subtitle` 来自 `\subtitle`，
+ * 只出现在标题区（12 篇 fixture 里两处都紧跟 `.ltx_title_document`），章节的 run-in 标题是 `.ltx_title_*`，不受影响
+ */
 export function isInlineTitleCandidate(el: Element): boolean {
-  return classify(el)?.rule === 'title' && !el.matches(DOCUMENT_TITLE)
+  return classify(el)?.rule === 'title' && !el.matches(`${DOCUMENT_TITLE}, ${DOCUMENT_SUBTITLE}`)
 }
 
 export function documentRoot(doc: Document | Element): Element | null {

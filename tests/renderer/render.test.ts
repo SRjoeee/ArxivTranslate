@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { extract, type TextBlock } from '@/core/extractor'
-import { FOR_ATTR, INLINE_ATTR, STATE_ATTR, T_CLASS, renderText, setState } from '@/core/renderer'
+import { FOR_ATTR, INLINE_ATTR, STATE_ATTR, T_CLASS, renderText, setState, shouldInline } from '@/core/renderer'
 import { docOf, frag } from './helpers'
 
 describe('renderText', () => {
@@ -84,5 +84,29 @@ describe('renderText', () => {
     expect(b!.el.getAttribute(STATE_ATTR)).toBe('pending')
     setState(b!, 'failed')
     expect(b!.el.getAttribute(STATE_ATTR)).toBe('failed')
+  })
+})
+
+describe('文档标题与副标题不作同行候选（Codex 在 #13 指出）', () => {
+  const inlineOf = (html: string, selector: string) => {
+    const doc = docOf(html)
+    const block = extract(doc).find(b => b.el.matches(selector))!
+    return { 成块: !!block, 行内: shouldInline(block as TextBlock) }
+  }
+
+  it('文档副标题排除在外：压成 inline-block 会从居中变成左贴边', () => {
+    // 真实页面实测（2609.00246）：block + text-align:center，占满 800px 栏宽、文本居中在 x≈720；
+    // 改成 inline-block 后盒子只剩 176px、落在 l=320，因为 <article> 是 text-align: start
+    const html = '<h1 class="ltx_title ltx_title_document">Main</h1><h2 class="ltx_subtitle">(Extended Version)</h2>'
+    expect(inlineOf(html, '.ltx_subtitle')).toEqual({ 成块: true, 行内: false })
+  })
+
+  it('文档标题同样排除（原有行为）', () => {
+    expect(inlineOf('<h1 class="ltx_title ltx_title_document">Main title</h1>', '.ltx_title_document')).toEqual({ 成块: true, 行内: false })
+  })
+
+  it('章节的 run-in 短标题照旧同行：副标题的排除不能误伤它们', () => {
+    const html = '<h2 class="ltx_title ltx_title_section">Introduction</h2>'
+    expect(inlineOf(html, '.ltx_title_section')).toEqual({ 成块: true, 行内: true })
   })
 })

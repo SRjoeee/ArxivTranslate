@@ -297,7 +297,10 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           const key = keys.get(item.id)
           if (store && cache && key && (!accept || accept(item.id, outcome.value))) writes.push({ key, translation: outcome.value, paper: cache.paper })
         })
-        if (store && writes.length > 0) await store.putMany(writes)
+        // 写之前再查一次取消（Codex 在 #33 指出）：一次调用会被拆到多个批次，先完成的那些
+        // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，
+        // 与「恢复原文之后不再写缓存」的承诺不符
+        if (store && writes.length > 0 && !(scope && cancelledScopes.has(scope))) await store.putMany(writes)
         if (failures.length > 0) return { ok: false, error: toErrorInfo(pickError(failures)) }
       }
 

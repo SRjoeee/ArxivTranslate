@@ -134,3 +134,38 @@ describe('缓存身份包含端点（issue #45 实验 3）', () => {
     expect(await keyOf(google)).toBe(await keyOf({ id: 'google-web' }))
   })
 })
+
+describe('取消之后不再写缓存（Codex 在 #33 指出）', () => {
+  it('一次调用横跨两批，先完成的那批在取消后也不入库', async () => {
+    const { createTranslateService } = await import('@/providers/translate-service')
+    const writes: string[][] = []
+    let release: (() => void) | null = null
+    const held = new Promise<void>(resolve => { release = resolve })
+    const service = createTranslateService({
+      // 每批最多 1 条：a 立刻回，b 挂住，等取消之后再放行
+      getProvider: async () => ({
+        id: 'mock', displayName: 'mock', kind: 'llm', preservesMarkup: true, maxBatchChars: 1000, maxBatchItems: 1,
+        isAvailable: async () => true,
+        translate: async r => {
+          if (r.segments[0]?.id === 'b') await held
+          return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' }
+        },
+      }),
+      cache: { getMany: async keys => keys.map(() => null), putMany: async entries => { writes.push(entries.map(e => e.translation)) } },
+      batch: { enableFallbackToIndividual: false, maxRetries: 0 },
+    })
+    const pending = service.translate({
+      request: { segments: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], source: 'en', target: 'cmn' },
+      cache: { paper: '0000.00000', renderPath: 'markup' },
+      scope: 'session-1',
+    })
+    // 等 a 那批落地，再取消整个 scope，然后放行 b
+    await new Promise(r => setTimeout(r, 200))
+    service.cancel('session-1')
+    release!()
+    await pending
+    // a 早就成功了，但会话已经撤销：不该有任何写入
+    expect(writes).toEqual([])
+  })
+})
+
