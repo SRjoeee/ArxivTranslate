@@ -6,6 +6,7 @@ import { basename, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { Window, type Document, type Element, type Text } from 'happy-dom'
 import {
+  BIB_AUTHORS_RULE,
   DOCUMENT_ROOT, FIGURE_SELECTORS, LTX_CLASS_PREFIX, PROTECT_RULES, RULES_VERSION, SKIP_RULES, TABLE_RULES, UNIT_RULES,
   classify, type Classification,
 } from '../src/core/rules/latexml'
@@ -92,6 +93,7 @@ function auditFixture(file: string): FixtureStats {
   // 规则命中的元素数也走 classify()：光按选择器数，带环境名的 tag（isNamedTag 放行的那 368 个）
   // 会被记成 protect/tag，审计口径就与运行时脱节（Codex 在 #53 指出）
   for (const r of [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES]) s.ruleElements[r.id] = 0
+  s.ruleElements[BIB_AUTHORS_RULE] = 0
   s.ruleElements.table = 0
   for (const el of Array.from(doc.querySelectorAll('*'))) {
     const c = classOf(el)
@@ -191,10 +193,13 @@ function report(all: FixtureStats[]): string {
     [...UNIT_RULES.map(r => ['unit', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0]),
      ['table', 'table', `\`${TABLE_RULES.root}\``, byRule.table ?? 0, ruleElements.table ?? 0],
      ...SKIP_RULES.map(r => ['skip', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0]),
+     // classify() 动态返回、不在三张表里的规则也要列出来（Codex 在 #18 指出）：
+     // 少了它，参考文献作者段的几百个文本节点在报告里凭空消失，回归也就看不出来
+     ['skip', BIB_AUTHORS_RULE, '（按位置 / .ltx_bib_author 判定，见 isBibAuthorBlock）', byRule[BIB_AUTHORS_RULE] ?? 0, ruleElements[BIB_AUTHORS_RULE] ?? 0],
      ...PROTECT_RULES.map(r => ['protect', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0])],
   ), '')
 
-  const dead = [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES, { id: 'table', selector: TABLE_RULES.root }]
+  const dead = [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES, { id: 'table', selector: TABLE_RULES.root }, { id: BIB_AUTHORS_RULE, selector: BIB_AUTHORS_RULE }]
     .filter(r => (ruleElements[r.id] ?? 0) === 0)
   out.push('### (a) 在所有 fixture 中都没有匹配元素的规则', '', dead.length ? dead.map(r => `- \`${r.selector}\` (${r.id})`).join('\n') : '（无）', '')
 

@@ -8,6 +8,7 @@ exports[`fixture > 2312.17141.html 1`] = `
     "bibblock": 99,
     "caption": 11,
     "footnote": 2,
+    "item": 2,
     "p": 550,
     "personname": 2,
     "title": 159,
@@ -25,8 +26,8 @@ exports[`fixture > 2312.17141.html 1`] = `
   ],
   "numericCells": 0,
   "table": 0,
-  "text": 826,
-  "total": 826,
+  "text": 828,
+  "total": 828,
 }
 `;
 
@@ -187,6 +188,7 @@ exports[`fixture > 2608.29808.html 1`] = `
     "authorinfo": 4,
     "bibblock": 137,
     "caption": 25,
+    "item": 5,
     "p": 134,
     "personname": 4,
     "table": 13,
@@ -199,14 +201,14 @@ exports[`fixture > 2608.29808.html 1`] = `
     "axt-b3",
   ],
   "lastIds": [
-    "axt-b361",
-    "axt-b362",
+    "axt-b366",
+    "axt-b367",
     "A3.SS1.SSS0.Px2.p1.1",
   ],
   "numericCells": 1537,
   "table": 13,
-  "text": 350,
-  "total": 363,
+  "text": 355,
+  "total": 368,
 }
 `;
 
@@ -354,7 +356,7 @@ exports[`fixture > synthetic-structures.html 1`] = `
     "cv": 2,
     "dedicatory": 1,
     "indexentry": 2,
-    "item": 1,
+    "item": 2,
     "marginal": 1,
     "p": 12,
     "title": 8,
@@ -366,13 +368,13 @@ exports[`fixture > synthetic-structures.html 1`] = `
     "axt-b3",
   ],
   "lastIds": [
-    "axt-b29",
     "axt-b30",
     "axt-b31",
+    "axt-b32",
   ],
   "numericCells": 0,
   "table": 0,
-  "text": 31,
-  "total": 31,
+  "text": 32,
+  "total": 32,
 }
 `;
