@@ -117,3 +117,70 @@ describe('TranslationCache：写入不扫全库', () => {
     expect((await c.stats()).bytes).toBeLessThanOrEqual(400)
   })
 })
+
+describe('账面（totals）的正确性（Codex 在 #14 指出）', () => {
+  /** 私有字段，测试里按内部状态断言：账面错了才是这两条 bug 的本体，看 stats() 是看不出来的 */
+  const totalsOf = (cache: TranslationCache) => (cache as unknown as { totals: { count: number; bytes: number } | null }).totals
+
+  it('并发的首批写入共用同一份账面：各自赋值一份的话，只有最后那份留下、先前的增量全丢', async () => {
+    const c = make()
+    // 先塞两条已存在的记录，让首次统计有非零结果
+    await c.set('seed-1', 'v', 'p')
+    await c.set('seed-2', 'v', 'p')
+    // 作废账面，模拟 worker 刚醒来：接着并发写 6 条
+    await c.clear('不存在的论文')
+    expect(totalsOf(c)).toBeNull()
+    await Promise.all(Array.from({ length: 6 }, (_, i) => c.set(`k${i}`, `译文${i}`, 'p')))
+    expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
+    expect(totalsOf(c)!.bytes).toBe((await c.stats()).bytes)
+  })
+
+  it('惰性删除过期条目要减账面：持久层命中的那条路径', async () => {
+    const c = make({ ttlMs: 1000, memoryEntries: 0 })
+    await c.set('old', 'v', 'p', 0)
+    await c.set('new', 'v', 'p', 0)
+    const before = totalsOf(c)!.count
+    // 热层容量为 0，读会走持久层；此时 old 已过期
+    expect(await c.get('old', 2000)).toBeNull()
+    expect(totalsOf(c)!.count).toBe(before - 1)
+    expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
+  })
+
+  it('惰性删除过期条目要减账面：热层命中的那条路径', async () => {
+    const c = make({ ttlMs: 1000 })
+    await c.set('old', 'v', 'p', 0)
+    await c.set('new', 'v', 'p', 0)
+    const before = totalsOf(c)!.count
+    expect(await c.get('old', 2000)).toBeNull()
+    // 热层那条是 fire-and-forget 的删除，等它落地
+    for (let i = 0; i < 50 && totalsOf(c)!.count === before; i++) await new Promise(r => setTimeout(r, 5))
+    expect(totalsOf(c)!.count).toBe(before - 1)
+    expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
+  })
+
+  it('账面不多算时不会误淘汰没过期的条目', async () => {
+    // 上限 2 条：写满 → 让第一条过期并读掉它 → 再写一条，不该把没过期的那条也淘汰掉
+    const c = make({ maxEntries: 2, ttlMs: 1000, memoryEntries: 0 })
+    await c.set('a', 'v', 'p', 0)
+    await c.set('b', 'v', 'p', 1500) // b 晚建，2000 时还没过期
+    expect(await c.get('a', 2000)).toBeNull() // a 过期，被惰性删掉
+    await c.set('c', 'v', 'p', 2000)
+    expect(await c.get('b', 2000)).toBe('v')
+    expect(await c.get('c', 2000)).toBe('v')
+  })
+
+  it('统计进行中被 clear 作废：过时的快照不落地', async () => {
+    const c = make()
+    await c.set('a', 'v', 'p')
+    await c.set('b', 'v', 'p')
+    // 与 clear 赛跑地写：统计若把 clear 之前的 2 条算进来，账面就会多算
+    const clearing = c.clear()
+    await c.set('c', 'v', 'p')
+    await clearing
+    // clear 收尾时账面作废；再写一条，重算出来的必须与库一致
+    await c.set('d', 'v', 'p')
+    expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
+    expect(totalsOf(c)!.bytes).toBe((await c.stats()).bytes)
+  })
+})
+

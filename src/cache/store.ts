@@ -63,6 +63,10 @@ export class TranslationCache {
   private readonly memory = new Map<string, CacheRecord>()
   /** 持久层的条数与字节数；null 表示尚未统计。每次 set 增量更新，clear / cleanup 后作废重算 */
   private totals: { count: number; bytes: number } | null = null
+  /** 正在统计中的那次；并发的 set 共用它，不各算各的（Codex 在 #14 指出） */
+  private counting: Promise<{ count: number; bytes: number }> | null = null
+  /** 每次 clear / cleanup 作废账面时 +1：统计期间被作废的快照不能落地 */
+  private totalsGeneration = 0
 
   constructor(options: { db?: CacheDatabase; limits?: Partial<CacheLimits> } = {}) {
     this.db = options.db ?? createCacheDb()
@@ -88,12 +92,54 @@ export class TranslationCache {
     this.memory.delete(key)
   }
 
-  /** 每个 background 生命周期只做一次：orderBy(index).keys() 只读索引键，不反序列化记录 */
+  /**
+   * 每个 background 生命周期只做一次：orderBy(index).keys() 只读索引键，不反序列化记录。
+   *
+   * **必须单飞**（Codex 在 #14 指出）：统计要 await 一次索引查询，几个 set 并发进来时会全部看到
+   * `totals` 是 null、各自算出一份快照，然后各自增量更新自己那份，最后只有最后赋值的那份留下——
+   * 先前那些 set 的计数就永久丢了，库可能悄悄超出条数与字节上限。background 的消息监听器天然并发，
+   * 一篇论文开始翻时就是一批 set 同时到达
+   */
   private async ensureTotals(): Promise<{ count: number; bytes: number }> {
-    if (this.totals) return this.totals
+    for (;;) {
+      if (this.totals) return this.totals
+      const generation = this.totalsGeneration
+      this.counting ??= this.countAll().finally(() => { this.counting = null })
+      const counted = await this.counting
+      // **正确性靠这一行**：等待期间别人已经落地了一份就用那份。少了它，每个调用方各自赋值一份，
+      // 只有最后那份留下，先前那些 set 的增量永久丢失（单飞只是顺带少扫几遍索引，不是这条的关键）
+      if (this.totals) return this.totals
+      if (generation === this.totalsGeneration) {
+        this.totals = counted
+        return this.totals
+      }
+      // 统计期间被 clear / cleanup 作废过：这份快照数的是删之前的库，丢掉重来
+    }
+  }
+
+  private async countAll(): Promise<{ count: number; bytes: number }> {
     const sizes = (await this.db.entries.orderBy('byteSize').keys()) as number[]
-    this.totals = { count: sizes.length, bytes: sizes.reduce((sum, size) => sum + (size || 0), 0) }
-    return this.totals
+    return { count: sizes.length, bytes: sizes.reduce((sum, size) => sum + (size || 0), 0) }
+  }
+
+  /**
+   * 账面作废。删除**前后各调一次**：前一次让并发的写立刻停止使用旧账面，
+   * 后一次把「与删除赛跑、数到删除之前那份库」的统计标记为过时——只在前面调的话，
+   * 那份统计看到的代际号仍是当前值，会把删掉的条目当成还在（实测：clear 之后紧接着 set，账面多算 2 条）
+   */
+  private invalidateTotals(): void {
+    this.totals = null
+    this.totalsGeneration++
+  }
+
+  /**
+   * 惰性删掉一条过期记录后同步账面（Codex 在 #14 指出）。不减的话 `totals` 会一直多算这一条，
+   * 接近上限时 `evictIfNeeded` 会为一条其实已经不存在的记录多淘汰一条**没过期的**
+   */
+  private forgetTotals(byteSize: number): void {
+    if (!this.totals) return
+    this.totals.count = Math.max(0, this.totals.count - 1)
+    this.totals.bytes = Math.max(0, this.totals.bytes - byteSize)
   }
 
   private overLimit(totals: { count: number; bytes: number }): boolean {
@@ -106,7 +152,7 @@ export class TranslationCache {
     while (this.overLimit(totals)) {
       const oldest = await this.db.entries.orderBy('lastAccessedAt').limit(batchSize).toArray()
       if (oldest.length === 0) {
-        this.totals = null
+        this.invalidateTotals()
         return
       }
       const evict: string[] = []
@@ -127,7 +173,8 @@ export class TranslationCache {
     if (hot) {
       if (this.isExpired(hot, now)) {
         this.forget(key)
-        void this.db.entries.delete(key).catch(() => undefined)
+        // 删成功才减账面：删失败的话记录还在，减了反而少算
+        void this.db.entries.delete(key).then(() => this.forgetTotals(hot.byteSize)).catch(() => undefined)
         return null
       }
       hot.lastAccessedAt = now
@@ -141,6 +188,7 @@ export class TranslationCache {
       if (!record) return null
       if (this.isExpired(record, now)) {
         await this.db.entries.delete(key)
+        this.forgetTotals(record.byteSize)
         return null
       }
       record.lastAccessedAt = now
@@ -184,9 +232,10 @@ export class TranslationCache {
    */
   async cleanup(now = Date.now()): Promise<void> {
     try {
+      this.invalidateTotals()
       await this.db.entries.where('expiresAt').belowOrEqual(now).delete()
       await this.db.entries.where('createdAt').belowOrEqual(now - this.limits.ttlMs).delete()
-      this.totals = null
+      this.invalidateTotals()
       for (const [key, record] of this.memory) if (this.isExpired(record, now)) this.memory.delete(key)
     } catch (error) {
       console.warn('[axt] 缓存清理失败', error)
@@ -196,15 +245,17 @@ export class TranslationCache {
 
   /** 清空全部，或只清某篇论文；返回删除条数 */
   async clear(paper?: string): Promise<number> {
-    this.totals = null
+    this.invalidateTotals()
     if (paper === undefined) {
       const total = await this.db.entries.count()
       this.memory.clear()
       await this.db.entries.clear()
+      this.invalidateTotals()
       return total
     }
     const keys = await this.db.entries.where('paper').equals(paper).primaryKeys()
     await this.db.entries.bulkDelete(keys)
+    this.invalidateTotals()
     for (const key of keys) this.forget(key)
     return keys.length
   }
