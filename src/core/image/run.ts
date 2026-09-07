@@ -213,8 +213,10 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       if (!ocr.ok) return fail(target, `识别失败：${ocr.error.message}`)
       // 没有标签就算完成，但上一轮留下的叠加层要清掉（换了目标语言后旧译文不该一直挂着，Codex 在 #89 指出）
       const finishEmpty = () => {
-        clearImage(target)
+        // 真的摘掉了旧叠加层就要通知整理层：side 的拆图副本里还留着它，签名不重算副本就不重建（Codex 在 #89 指出）
+        const removed = clearImage(target)
         outcome.set(target, 'done')
+        if (removed) options.onRendered?.([target])
       }
       // 动图：helper 只识别了第 0 帧，浏览器在放后面的帧，框对不上——不叠
       if ((ocr.result.frames ?? 1) > 1) return finishEmpty()

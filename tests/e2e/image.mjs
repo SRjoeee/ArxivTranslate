@@ -110,15 +110,19 @@ const page = await context.newPage()
 const logs = []
 page.on('console', m => { const text = m.text(); if (text.includes('[axt]')) logs.push({ t: Date.now(), text }) })
 await page.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
-await waitForLog(logs, /\[axt\] images: (\d+) bitmaps/, 20_000)
+// 位图数从 content 的日志里取，换论文（AXT_PAPER）时期望跟着变（Codex 在 #89 指出）
+const bitmaps = await waitForLog(logs, /\[axt\] images: (\d+) bitmaps/, 20_000)
+const N = bitmaps ? +/(\d+) bitmaps/.exec(bitmaps.text)[1] : 0
+check('content 认出了页面上的位图', N >= 1, bitmaps?.text ?? '没有 images 日志')
 await scrollThrough(page)
-const idle = await waitForLog(logs, IMAGES_IDLE, 90_000, m => +m[2] === 6 && +m[1] + +m[4] === 6)
-check('stack：6 张位图都进入并处理完（images idle）', !!idle, idle?.text ?? logs.filter(l => /images/.test(l.text)).map(l => l.text).join(' | '))
+const idle = await waitForLog(logs, IMAGES_IDLE, 90_000, m => +m[2] === N && +m[1] + +m[4] === N)
+check(`stack：${N} 张位图都进入并处理完（images idle）`, !!idle, idle?.text ?? logs.filter(l => /images/.test(l.text)).map(l => l.text).join(' | '))
 await sleep(500)
 let probe = await page.evaluate(PROBE)
 const withOverlay = probe.filter(p => p.overlay)
-// 不是每张图都有叠加层：只有数字与单字母的图、译文与原文相同的（单位、变量名）不画。2507.00150v1 的 6 张里至少 3 张有坐标轴文字
-check('stack：有可翻文字的图都有叠加层（≥ 3 张），每层至少一个标签', withOverlay.length >= 3 && withOverlay.every(p => p.overlay.labels >= 1), probe.map(p => `${p.id}:${p.overlay?.labels ?? 0}`).join(' '))
+// 不是每张图都有叠加层：只有数字与单字母的图、译文与原文相同的（单位、变量名）不画。默认论文 2507.00150v1 的 6 张里 5 张有坐标轴文字
+const minOverlays = PAPER === '2507.00150v1' ? 5 : 1
+check(`stack：有可翻文字的图都有叠加层（≥ ${minOverlays} 张），每层至少一个标签`, withOverlay.length >= minOverlays && withOverlay.every(p => p.overlay.labels >= 1), probe.map(p => `${p.id}:${p.overlay?.labels ?? 0}`).join(' '))
 check('stack：叠加层矩形与图重合（锚点定位）', withOverlay.every(p => p.overlay.visible && coincide(p.overlay.rect, p.imgRect)), withOverlay.map(p => `${p.id} Δ(${(p.overlay.rect.x - p.imgRect.x).toFixed(1)},${(p.overlay.rect.y - p.imgRect.y).toFixed(1)},${(p.overlay.rect.w - p.imgRect.w).toFixed(1)},${(p.overlay.rect.h - p.imgRect.h).toFixed(1)})`).join(' '))
 // 字号随框高：宽扁的图上标签只有三四像素，与原图上的字一样小——不设下限，读者缩放页面时一起放大
 check('stack：标签字号已按容器单位解出（> 0）', withOverlay.every(p => p.overlay.labelFont > 0), withOverlay.map(p => p.overlay.labelFont.toFixed(1)).join(' '))

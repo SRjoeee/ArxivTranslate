@@ -341,10 +341,16 @@ describe('startImageTranslation', () => {
     expect(first.doc.querySelector(`.${IMG_CLASS}`)).not.toBeNull()
     // 同一份 DOM 上开第二轮：译文原样返回
     const identity = async (call: { request: { segments: { id: string; text: string }[] } }) => ({ ok: true as const, result: { segments: call.request.segments.map(s => ({ id: s.id, text: s.text })), provider: 'mock' }, cached: 0 })
-    const second = startImageTranslation({ ...firstOptions(first), translate: identity })
+    const rendered: ImageTarget[][] = []
+    const second = startImageTranslation({ ...firstOptions(first), translate: identity, onRendered: ts => { rendered.push(ts) } })
     await second.translate(first.targets)
     expect(first.doc.querySelector(`.${IMG_CLASS}`)).toBeNull()
     expect(second.progress().done).toBe(1)
+    // 摘掉了旧叠加层 → 通知整理层重算拆图签名；没东西可摘的图不通知
+    expect(rendered).toEqual([first.targets])
+    const third = startImageTranslation({ ...firstOptions(first), translate: identity, onRendered: ts => { rendered.push(ts) } })
+    await third.translate(first.targets)
+    expect(rendered).toHaveLength(1)
   })
 
   it('动图（frames > 1）不叠译文、按完成处理，旧叠加层也清掉（helper 只识别了第 0 帧，Codex 在 #89 指出）', async () => {
