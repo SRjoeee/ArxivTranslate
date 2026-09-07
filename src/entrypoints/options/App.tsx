@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
 import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
-import { DEFAULT_CONFIG, configSchema, type Config } from '@/config/schema'
+import { DEFAULT_CONFIG, MODE_VALUES, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { THINKING_HOSTS } from '@/providers/thinking'
 import { sanitizeCustomCss, type StylePreset } from '@/core/renderer/style-preset'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 import { sendMessage } from '@/shared/messages'
+import type { HelperStatus } from '@/shared/ocr'
 import { PromptManager } from './PromptManager'
 
 /** 分组显示：整套照搬 KISS 的预设，加上 Read Frog 的绿与淡色底（§7.5） */
@@ -31,6 +32,9 @@ const STYLE_NOTES: Partial<Record<StylePreset, string>> = {
 
 const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
 
+/** 图片翻译的模式闸（§15）：与 popup 的模式按钮同一套叫法 */
+const IMAGE_MODES: [Config['mode'], string][] = [['side', '左右对照'], ['stack', '上下对照'], ['only', '仅译文']]
+
 const PROVIDERS: [Config['provider'], string, string][] = [
   ['openai-compat', 'LLM（OpenAI 兼容端点）', '译文质量最好，需要 API key'],
   ['google-web', 'Google 网页翻译（免费）', '不需要 key，整篇几秒翻完，术语准确度不如 LLM'],
@@ -51,6 +55,8 @@ export function App() {
   const [cache, setCache] = useState<{ entries: number; bytes: number } | null>(null)
   const [cacheError, setCacheError] = useState('')
   const [cacheNote, setCacheNote] = useState('')
+  /** 本机 OCR helper 的状态（§15.4）：没检测到就把图片翻译一节灰掉 */
+  const [helper, setHelper] = useState<HelperStatus | null>(null)
 
   const loadCacheStats = useCallback(async () => {
     try {
@@ -62,6 +68,10 @@ export function App() {
       setCache(null)
       setCacheError(e instanceof Error ? e.message : String(e))
     }
+  }, [])
+
+  useEffect(() => {
+    sendMessage({ type: 'axt:helper-status' }).then(setHelper).catch(() => setHelper({ available: false, reason: '扩展后台未响应' }))
   }, [])
 
   useEffect(() => {
@@ -272,6 +282,27 @@ export function App() {
           </small>
         </label>
       )}
+
+      <h2 style={{ fontSize: 15, marginTop: 24, opacity: helper?.available ? 1 : 0.5 }}>图片翻译（Mac）</h2>
+      <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>
+        {helper === null ? '正在检测本机 OCR helper…'
+          : helper.available ? `已检测到 helper ${helper.version ?? ''}。位图里的文字由本机 Vision 识别，译文叠在图上；SVG 不翻`
+          : `未检测到 helper${helper.reason ? `（${helper.reason}）` : ''}。安装方法见仓库 helper/README.md；没装时整页翻译照常，只是不翻图`}
+      </small>
+      <fieldset style={{ border: 0, padding: 0, margin: '0 0 14px' }} disabled={!helper?.available}>
+        <legend style={{ padding: 0 }}>在哪些模式下翻译图片</legend>
+        {IMAGE_MODES.map(([mode, name]) => (
+          <label key={mode} style={{ marginRight: 16 }}>
+            <input
+              type="checkbox"
+              checked={config.image.modes.includes(mode)}
+              onChange={e => setLocal(c => ({ ...c, image: { modes: MODE_VALUES.filter(m => (m === mode ? e.target.checked : c.image.modes.includes(m))) } }))}
+            />
+            {' '}{name}
+          </label>
+        ))}
+        <small style={{ display: 'block', color: '#666', marginTop: 4 }}>只影响显示：切到没勾的模式时叠加层隐藏，切回来再显示，不重新识别</small>
+      </fieldset>
 
       <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译范围</h2>
       <label style={label}>

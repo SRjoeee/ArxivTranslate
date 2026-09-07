@@ -5,7 +5,11 @@ import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
 import { STYLE_PRESETS } from '@/core/renderer/style-preset'
 import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
-export const CONFIG_VERSION = 7
+export const CONFIG_VERSION = 8
+
+/** 三种阅读模式（DESIGN §7）；`mode` 与图片翻译的模式闸共用 */
+export const MODE_VALUES = ['stack', 'side', 'only'] as const
+const modeSchema = z.enum(MODE_VALUES)
 
 /** 术语表的限额。迁移与 schema 共用，改一处两边同时生效 */
 export const GLOSSARY_LIMITS = { term: 120, translation: 200, entries: 200, totalChars: 6000 } as const
@@ -47,7 +51,7 @@ export const configSchema = z.object({
   }),
   /** ISO 639-3（v4 起；languages.ts），LLM 填英文名、Google 转 BCP-47 */
   targetLanguage: langCodeSchema,
-  mode: z.enum(['stack', 'side', 'only']),
+  mode: modeSchema,
   /** 提示词库（移植自 Read Frog）：当前选用的 id + 用户自定义 */
   prompts: z.object({
     promptId: z.string().min(1),
@@ -78,6 +82,11 @@ export const configSchema = z.object({
     margin: z.number().min(0).max(10_000),
     threshold: z.number().min(0).max(1),
   }).default({ ...DEFAULT_PRELOAD }),
+  /**
+   * 图片翻译（§15，v8 起）：在哪些模式下给位图叠译文。默认三种都开；空数组 = 关闭。
+   * 只是显示闸——切到没开的模式只隐藏叠加层，不重新请求；helper 没检测到时设置页灰掉、整条路径不跑
+   */
+  image: z.object({ modes: z.array(modeSchema).max(3) }).default({ modes: [...MODE_VALUES] }),
 })
 
 export type Config = z.infer<typeof configSchema>
@@ -99,4 +108,5 @@ export const DEFAULT_CONFIG: Config = {
   fallback: { enabled: true },
   prompts: DEFAULT_PROMPTS_CONFIG,
   preload: { ...DEFAULT_PRELOAD },
+  image: { modes: [...MODE_VALUES] },
 }

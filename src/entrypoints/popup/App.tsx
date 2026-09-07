@@ -289,9 +289,11 @@ function ProgressLine({ page }: { page: PageStatus }) {
   const text = p.state === 'idle' ? '未翻译'
     : p.state === 'on' ? `${counts}${p.inFlight > 0 ? ' · 翻译中…' : ' · 就绪，滚动继续翻'}`
     : `已停止：${counts}`
+  const images = page.images
   return (
     <p style={{ margin: 0 }}>
       {text}
+      {images && images.requested > 0 && <span>｜图 {images.done}/{images.requested}{images.failed ? `，失败 ${images.failed}` : ''}</span>}
       {p.fatal && <span style={{ color: '#b00' }}>｜{p.fatal}。修好配置后点"翻译"继续</span>}
     </p>
   )

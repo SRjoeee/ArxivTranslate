@@ -227,6 +227,8 @@ describe('chainConfigChanged：什么样的配置改动才重建链', () => {
     expect(chainConfigChanged(base, { ...base, style: { preset: 'quote', customCss: '' } })).toBe(false)
     expect(chainConfigChanged(base, { ...base, preload: { margin: 42, threshold: 0.5 } })).toBe(false)
     expect(chainConfigChanged(base, { ...base, glossary: [{ term: 'token', translation: '词元' }] })).toBe(false)
+    // 图片翻译的模式闸（§15）只是显示闸，用户翻着页勾掉一个模式不该把队列清掉
+    expect(chainConfigChanged(base, { ...base, image: { modes: ['side'] } })).toBe(false)
   })
 
   it('引擎、端点、模型、key、目标语言、提示词、降级开关改了就重建', () => {
