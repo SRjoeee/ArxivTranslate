@@ -94,7 +94,9 @@ html[data-axt-mode="side"] .ltx_document {
    新出现的包裹层自动生效，不需要维护清单。
    排除项各有理由（清单的事实来源在 src/core/renderer/side-layout.ts，测试守着两边一致）：
    译文自身不是容器；表格内部结构改成网格会毁掉表格；
-   .ltx_inline-block / .ltx_listing 是行内与预格式化上下文；
+   .ltx_inline-block / .ltx_listing 是行内与预格式化上下文——但 `\resizebox` 的包裹层
+   （.ltx_transformed_outer）不算：ar5iv 自己把它的宽高与内层 transform 抹平了，它只是个装一件东西的壳，
+   排除它会让里面的表格配对够不到列线、横跨分割线（实测 2606.07636v2）；
    脚注要连**整棵子树**一起排除——ar5iv 把折叠状态写在 .ltx_note_outer 的 display:none 上，
    译文一插进脚注内部，容器规则就会命中 :has(.axt-t) 把它改成 grid，折叠的脚注被掀开、
    165px 高 781px 宽横在正文中间，与中栏译文互相干扰（实测 2312.17141，用户反馈）；
@@ -109,7 +111,7 @@ html[data-axt-mode="side"] .ltx_document {
    英文横跨分割线、中文挤成 39px 的窄条（实测 2609.00097）；这类网格必须接管而不是排除。
    整体包在 :where() 里让权重为 0，否则会压过下面的配对规则（实测过这个坑）。
    column-gap 要显式写——.ltx_biblist 自带 3em 的间距，subgrid 会用容器自己的值，右栏偏 12px */
-html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *, .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)), .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)) *))) {
+html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block:not(.ltx_transformed_outer), .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *, .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)), .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)) *))) {
   display: grid;
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
@@ -122,7 +124,7 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
    版式由"这一块在翻译会话里"决定，不由"译文到了没"决定（§7.2）。构建会把嵌套编译成扁平选择器 */
 html[data-axt-mode="side"] .ltx_document,
 html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(:is(.axt-t, table, thead, tbody, tr, td, th,
-  .ltx_inline-block, .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *, .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)), .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)) *))) {
+  .ltx_inline-block:not(.ltx_transformed_outer), .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *, .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)), .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)) *))) {
   & > * {
     grid-column: 1 / -1;
   }
@@ -248,7 +250,7 @@ html[data-axt-mode="side"] [data-axt-fit="scroll"] {
    脚注子树要排除：改它的 display 会把 ar5iv 折叠起来的脚注掀开。
    嵌套的 .ltx_flex_figure 也要排除：它本身是 flex（面板并排），含译文时会命中 :has(.axt-t) 被压成 block，
    内层面板就竖着摞起来（2312.17141 有这种嵌套；Codex 在 #25 指出） */
-html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block) :is(.ltx_para, .ltx_abstract, :has(.axt-t, [data-axt-id])):not(:is(.ltx_note, .ltx_note *, .ltx_flex_figure)) {
+html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block:not(.ltx_transformed_outer)) :is(.ltx_para, .ltx_abstract, :has(.axt-t, [data-axt-id])):not(:is(.ltx_note, .ltx_note *, .ltx_flex_figure)) {
   display: block;
 }
 

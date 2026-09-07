@@ -59,10 +59,8 @@ exports[`side 模式的容器覆盖 > 2507.00150.html：配对能否连到翻译
 
 exports[`side 模式的容器覆盖 > 2608.29808.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
 {
-  "blockedBy": {
-    "ltx_inline-block": 13,
-  },
-  "connected": "424/437",
+  "blockedBy": {},
+  "connected": "437/437",
 }
 `;
 

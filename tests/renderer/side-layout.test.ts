@@ -141,6 +141,30 @@ describe('side 模式的容器覆盖', () => {
     expect(RULES).toMatch(/\.ltx_inline-block :is\(img, svg\) \{\s*max-width: none/)
   })
 
+  it('\\resizebox 包着的表格能连到列线：包裹层带 .ltx_inline-block，但它不是行内上下文（实测 2606.07636v2）', () => {
+    // LaTeXML 给 \\resizebox 生成 div.ltx_inline-block.ltx_transformed_outer > span.ltx_transformed_inner > table，
+    // ar5iv 自己把宽高与 transform 抹平了。把包裹层当行内上下文排除，里面的表格配对就够不到两条列线：
+    // 原表与译表是两个 inline-table，在通栏的壳子里居中排成一行、横跨分割线
+    const doc = docOf('<figure class="ltx_table"><figcaption class="ltx_caption" data-axt-id="c1">Table 1</figcaption>'
+      + `<figcaption class="ltx_caption ${T_CLASS}" data-axt-for="c1">表 1</figcaption>`
+      + '<div class="ltx_inline-block ltx_align_center ltx_transformed_outer" style="width:345.0pt"><span class="ltx_transformed_inner" style="transform:scale(1.16)">'
+      + '<table class="ltx_tabular" data-axt-id="t1"><tbody><tr><td class="ltx_td">a</td></tr></tbody></table>'
+      + `<table class="ltx_tabular ${T_CLASS}" data-axt-for="t1"><tbody><tr><td class="ltx_td">甲</td></tr></tbody></table>`
+      + '</span></div></figure>')
+    const outer = doc.querySelector('.ltx_transformed_outer')!
+    const inner = doc.querySelector('.ltx_transformed_inner')!
+    expect(isSideContainer(outer)).toBe(true)
+    expect(isSideContainer(inner)).toBe(true)
+    // 堆叠区不认它：认了的话内层被压成 block，两个 inline-table 反而在一行里居中
+    expect(outer.matches(SIDE_STACK)).toBe(false)
+    // 真正的行内上下文照旧排除
+    const plain = docOf('<div class="ltx_para"><div class="ltx_inline-block" id="ib">'
+      + `<p class="ltx_p" data-axt-id="p1">x</p><p class="ltx_p ${T_CLASS}" data-axt-for="p1">甲</p></div></div>`)
+    const inlineBlock = plain.getElementById('ib')!
+    expect(isSideContainer(inlineBlock)).toBe(false)
+    expect(inlineBlock.matches(SIDE_STACK)).toBe(true)
+  })
+
   it('脚注内部永远不算配对容器：改它的 display 会把 ar5iv 折叠的脚注掀开', () => {
     // ar5iv 把折叠状态写在 .ltx_note_outer 的 display:none 上；容器规则一命中就把它改成 grid，
     // 脚注被掀开横在正文中间（实测 2312.17141：165px 高、781px 宽，与中栏译文互相干扰）
