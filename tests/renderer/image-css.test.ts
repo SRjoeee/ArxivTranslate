@@ -45,7 +45,7 @@ describe('image.css', () => {
     expect(baseline).toBeGreaterThan(-1)
     expect(baseline).toBeLessThan(supports)
     // @supports 里面不再有第二份 display: none 基线（显示规则靠属性闸）
-    expect(RULES.slice(supports)).not.toMatch(/\n  \.axt-img \{[^}]*display: none/)
+    expect(RULES.slice(supports)).not.toMatch(/\n {2}\.axt-img \{[^}]*display: none/)
   })
 
   it('样式表里没有 ltx_ 选择器：图片叠加层不认站点结构', () => {
