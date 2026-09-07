@@ -269,14 +269,22 @@ export const MARGIN_ASIDE = '.ltx_pubnotes, .ltx_note'
 export const SIDE_LAYOUT = {
   /** 多面板 flex 图：有任何一个格子不是整栏（`ltx_flex_size_1`）的 `.ltx_flex_figure` */
   multiPanelFlex: '.ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1))',
-  /** 行内与预格式化上下文：改成网格会毁掉它们 */
-  atomicContext: '.ltx_inline-block, .ltx_note, .ltx_listing',
+  /**
+   * 行内与预格式化上下文：改成网格会毁掉它们。
+   * **`\resizebox` 的包裹层除外**（`.ltx_transformed_outer`，2026-09-07 实测 2606.07636v2）：它虽然带着
+   * `.ltx_inline-block`，却不是行内上下文，而是一个只装一件东西的块级壳子——ar5iv 自己的样式表把它的
+   * `width` / `height` / 内层 `transform` 全 `!important` 抹平了（`.ltx_table > .ltx_transformed_outer >
+   * .ltx_transformed_inner { width: initial !important; transform: none !important }`），缩放根本没生效。
+   * 把它当行内上下文排除，里面的表格配对就够不到两条列线：原表与译表成了两个 `inline-table`，
+   * 在通栏的壳子里居中排成一行、横跨分割线（实测 5 张表全部越界；宽表则换行、各占整幅）
+   */
+  atomicContext: '.ltx_inline-block:not(.ltx_transformed_outer), .ltx_note, .ltx_listing',
   /** 配对成员本身：内部出现的译文是脚注那种嵌套，不是它自己的对照 */
   pairMember: '.ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock',
   /** 脚注：折叠状态写在 `.ltx_note_outer` 的 display 上，整棵子树排除 */
   note: '.ltx_note',
-  /** 堆叠区：这些格子里没有右栏，配对降级为上下堆叠 */
-  stack: '.ltx_td, .ltx_inline-block',
+  /** 堆叠区：这些格子里没有右栏，配对降级为上下堆叠。`\resizebox` 的包裹层同样除外，理由见 atomicContext */
+  stack: '.ltx_td, .ltx_inline-block:not(.ltx_transformed_outer)',
 } as const
 
 export const DOCUMENT_TITLE = '.ltx_title_document'
