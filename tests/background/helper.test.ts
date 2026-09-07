@@ -260,12 +260,33 @@ describe('createHelperClient', () => {
     const a = client.ocr({ image: 'A' })
     await flush()
     await handshake(port())
-    port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [], truncated: true })
-    expect((await a).result.truncated).toBe(true)
+    port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [], truncated: true, frames: 3 })
+    const ra = await a
+    expect(ra.result.truncated).toBe(true)
+    expect(ra.result.frames).toBe(3) // 动图的帧数也透传
     const b = client.ocr({ image: 'B' })
     await flush()
     port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
     expect((await b).result.truncated).toBeUndefined()
+  })
+
+  it('丢掉的端口上晚到的回应一律忽略：旧连接的 ping 回应不能把版本写进 known、让新连接跳过握手（Codex 在 #87 指出）', async () => {
+    const { client, port, ports } = setup({ timeoutMs: 1000 })
+    const a = client.ocr({ image: 'A' })
+    await flush()
+    const old = port()
+    expect(old.sent.map(m => m.cmd)).toEqual(['ping'])
+    vi.advanceTimersByTime(1001) // 握手超时：端口丢掉、A 拒掉
+    await expect(a).rejects.toMatchObject({ kind: 'timeout' })
+    expect(old.disconnected).toBe(true)
+    old.reply({ v: 1, id: old.sent[0]?.id as string, ok: true, version: '0.0.9' }) // 旧端口上晚到的握手回应
+    const b = client.ocr({ image: 'B' })
+    await flush()
+    expect(ports).toHaveLength(2)
+    expect(port().sent.map(m => m.cmd)).toEqual(['ping']) // 新连接照常先握手，没被旧回应糊弄过去
+    await handshake(port(), '0.1.0')
+    port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
+    expect((await b).version).toBe('0.1.0')
   })
 
   it('host 没装（断开原因是 not found）：status 报不可用，之后不再尝试连接', async () => {
