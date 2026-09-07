@@ -545,6 +545,7 @@ export interface TranslateResult {
 | `gemini` | AI SDK `@ai-sdk/google` | true |
 | `chrome-builtin` | `Translator` API（Chrome 138+ 桌面），类型来自 `@types/dom-chromium-ai`，约定见 §8.4；2026-09-05 实现 | true（实测保留标签与 void / paired 占位符）|
 | `google-web` | `translate-pa.googleapis.com/v1/translateHtml`，移植 Read Frog `utils/host/translate/api/google.ts`；一次请求多条，body `[[[items...], from, to], "wt_lib"]` | true（实测原样保留 void / paired 占位符）|
+| `hosted` | 我们自建的 gateway 窄接口 `/translate`，零配置、无需用户 key；**契约与部署见 §16** | true（池内只收 markup-capable 模型，§16.4）|
 
 `preservesMarkup: true` 的免费引擎仍走 §6.3 的校验，失败后降级 runs；runs 路径退为纯兜底。
 
@@ -611,7 +612,7 @@ export interface TranslateResult {
 
 硬规则 4 要求"失败必须可恢复并触发 fallback 链，不能让扩展整体挂掉"。在这之前，key 过期、额度用尽或网络抖动会让 `run.ts` 命中 `no-key` / `auth` 后 `scheduler.disconnect()`，整页翻译停死、读者对着半篇译文干等。
 
-- **链的形状**：配置里选的引擎在前，其后接不与它重复的免费引擎，顺序是 `chrome-builtin` → `google-web`（内置离线、单句 10–20 ms、不受限流，所以在前；语言包没下载时它的 `isAvailable()` 为假，自动被跳过）。组装在 `providers/index.ts` 的 `buildChain`，两道过滤：`isAvailable()` 为假的剔除（免得链里躺着必然失败的一环），但**首个引擎不可用时保留**——popup 要据此提示"未配置 API key"，而不是悄悄换成免费引擎
+- **链的形状**：配置里选的引擎在前，其后接不与它重复的免费引擎，顺序是 `chrome-builtin` → `google-web`（内置离线、单句 10–20 ms、不受限流，所以在前；语言包没下载时它的 `isAvailable()` 为假，自动被跳过）。`hosted` 启用时排在链首（§16.6），它 429 返回的 `retryAfter` 要作为该步骤的降级冷却时长，不能沿用下面的固定 60s。组装在 `providers/index.ts` 的 `buildChain`，两道过滤：`isAvailable()` 为假的剔除（免得链里躺着必然失败的一环），但**首个引擎不可用时保留**——popup 要据此提示"未配置 API key"，而不是悄悄换成免费引擎
 - **不进 `translate-service`** [决定]：那里已经是"一个 provider 一套队列 + 缓存 + 批处理"的闭包，缓存键带 `providerId | model | promptKey`，不同引擎的译文天然分开存。链做成外面薄薄一层 `providers/fallback.ts`（约 110 行）：每个步骤一个完整服务，链只管在失败时把**同一个 call** 交给下一步。塞进服务内部会把队列、攒批、缓存三件事和引擎选择耦在一起
 - **降级期限分两档**：`no-key` / `auth` 是配置问题、不会自己好，本会话内永久降级；`network` / `timeout` / `rate-limit` / `invalid-response` / `unknown` 是瞬时的，降级 60s 冷却后自动恢复，该引擎一旦成功立即清空记录。队列自己的重试（retry-policy）跑完才会走到链上，所以链不叠加重试；冷却是为了避免持续故障时每次调用都白等一遍最长 120s 的批次超时。`aborted` 永不降级也永不记账——会话取消不是引擎的错，换个引擎重来只会再被取消一次
 - **全部降级后退回最后一步**：宁可再失败一次并把错误如实报给 `run.ts`（它据此停下并画失败小部件），也不能出现"无引擎可用"的状态
@@ -623,7 +624,7 @@ export interface TranslateResult {
 ## 9. 缓存与配置
 
 - 译文缓存：IndexedDB，**Dexie**，移植 FluentRead `services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层），crypto-js 换成 Web Crypto SHA-256（v0.4 修订，原定 idb-keyval）
-- 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；**`providerId` 取 `provider.cacheId ?? provider.id`** [决定，2026-09-05，issue #45]：`openai-compat` 这个 id 对所有 OpenAI 兼容端点都一样，只用 id + 模型名的话，OpenRouter 上的同名模型与本机 Ollama 上的共用缓存条目、译文互相污染。provider 自己声明身份（`openai-compat:<origin><path>`，**路径要带上**：同一域名下不同路径可能是不同网关路由、指向不同后端，只取 origin 会让两条路由共用条目；末尾斜杠归一化），**绝不放 API key**（硬规则 7）；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
+- 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；**`providerId` 取 `provider.cacheId ?? provider.id`** [决定，2026-09-05，issue #45]：`openai-compat` 这个 id 对所有 OpenAI 兼容端点都一样，只用 id + 模型名的话，OpenRouter 上的同名模型与本机 Ollama 上的共用缓存条目、译文互相污染。provider 自己声明身份（`openai-compat:<origin><path>`，**路径要带上**：同一域名下不同路径可能是不同网关路由、指向不同后端，只取 origin 会让两条路由共用条目；末尾斜杠归一化），**绝不放 API key**（硬规则 7）；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希。**`hosted` 是这条的唯一例外**：它在 `model` 位上报固定值 `pool`，因为背后的模型是 gateway 实现细节且经准入测试保证输出可互换（理由见 §16.7）
 - 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有并直接读写（IndexedDB 按扩展 origin 隔离，跨论文共享）；翻译请求本身也在 background，所以 content 完全不碰缓存，每批少两次消息往返（§8.0，2026-09-06）
 - **缓存管理只在设置页做全局清空** [决定，2026-09-05]：`axt:cache-stats` 显示条数与体积，`axt:cache-clear`（不带 paper）清空整库，切回设置页时重读统计（翻译发生在别的标签页，不重读就永远显示打开那一刻的数字）。两条消息的响应都是 `{ ok: true, … } | { ok: false, message }`：**失败不能显示成「缓存是空的」或「已删除 0 条」**，IndexedDB 用不了时那是最不该骗人的地方（Codex 在 #52 指出）。统计前先跑一次 `cleanup()` 清掉过期条目——`get()` 只是把它们当未命中、从不删除，不清的话页面上会一直显示一堆用不了的条数与体积；这也是 `cleanup()` 在运行时唯一的调用点，所以它失败要抛出去而不是吞掉，否则统计会把清不掉的过期条目当成功结果报出去。**不做「只清本篇」**：设置页是独立扩展页面，没有当前论文的概念，为它绕一圈问 content script 不值当；真正需要按篇清的场景（这篇译得不好想重来）在 popup 上更顺手，留作后续。缓存键本来就带引擎、模型、提示词、术语表，换任何一样都不会命中旧译文，手动清是兜底而不是常规操作
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
@@ -856,3 +857,159 @@ content script                       background (service worker)          axt-he
 - Native Messaging 范本：KeePassXC-Browser + keepassxc-proxy
 - Vision OCR 现成代码：macOCR、TRex、ocrmac
 - 叠加层无现成库，逻辑简单：按 bbox 放半透明标签，字号按框高自适应
+
+---
+
+## 16. 托管翻译服务 gateway [决定，2026-09-07 进入范围]
+
+对应 issue #97。实测依据全部在 RESEARCH.md §6.11，本节只写结论与契约。
+
+### 16.1 判断
+
+issue #97 设想「接入免费额度让用户零配置用上 LLM 翻译」。实测后**该设想的前提不成立，但目标可以达成，走另一条路**：
+
+1. **不能把供应商 key 打包进扩展。** SiliconFlow 用户协议 1.1.6 / 2.2.2 / 2.2.3 明令禁止并可永久封号（RESEARCH §6.11.4）。Lightrans 能内置是官方案例页的商务合作背书，不可复制。
+2. **纯免费额度撑不住。** 换算到一篇论文 26k token 后，Cloudflare Workers AI 免费额度全平台 7.8 篇/天、SiliconFlow 免费档全平台约 3 篇/分钟（RESEARCH §6.11.5）。这些是全平台而非每用户的数字。
+3. **唯一免费的 `Hunyuan-MT-7B` 走不了 markup 路径**：它保留占位符但产出的 JSON 非法（RESEARCH §6.11.2）。
+4. **但付费小模型便宜到可以直接用**：`Qwen3.5-9B` 占位符保留率 100%、延迟 15 s/9 段，成本 **$0.0044/篇**（RESEARCH §6.11.6）。
+
+**决定**：做 gateway，用付费小模型池 + 跨用户共享缓存。不追求「零成本」，而是把成本压到可忽略并**硬锁上限**。
+
+支撑这个决定的关键性质是 **arXiv 论文公开、静态、不可变**：同一篇全世界只需翻一次，且译文无隐私属性。这让共享缓存成立，也让滥用的损失有上界（见 16.3）。
+
+### 16.2 接口契约：窄接口，不透传
+
+**gateway 绝不暴露 OpenAI-compatible 透传接口。** OpenRouter 条款第 7 条禁止 "reselling API access to Models"，且透传端点一旦泄漏必被当免费 LLM 薅。**prompt 在服务端拼**，客户端只能提交待翻译的 segments。
+
+```
+POST /translate
+{
+  "paper":   "2609.00245",              // arXiv id，服务端校验格式与存在性
+  "target":  "zh-CN",
+  "segments":[{ "id":"1", "text":"…<x id=\"3\"/>…" }],
+  "v":       { "prompt":"4", "rules":"0.10.0" }
+}
+
+→ 200 { "segments":[…], "cached":[1,3,5], "model":"Qwen/Qwen3.5-9B", "v":{"prompt":"4"} }
+→ 429 { "error":"quota", "retryAfter":3600, "fallback":"byok" }
+→ 400 { "error":"bad-paper" }           // 非 arXiv 论文，直接拒
+```
+
+- **段级请求**：调度是按视口渐进的（§10），请求天然是零散批次，不是整篇。
+- **`v.prompt` 双向携带**：请求带客户端期望版本，响应回传服务端实际使用版本。gateway 必须同时支持 N 与 N-1，否则升级 prompt 会让所有旧客户端硬失败。客户端以响应里的版本作 `promptKey`。
+
+### 16.3 配额与防滥用
+
+**核心规则：读缓存不计配额，只有触发新翻译才计。** 成本结构决定的——读缓存走 R2 免费额度，只有调上游才烧钱。
+
+由此得到一个强性质：**滥用的边际损失有上界**。攻击者最多能让我们提前翻译一些本来也会被翻译的论文，而翻完即进缓存、对所有后续读者是收益；他无法让我们重复烧钱，因为第二次请求同一篇即命中。arXiv 每月新增约 2 万篇，按 $0.0044/篇算，**理论最坏上界约 $88/月**。
+
+三层控制，都很轻：
+
+1. **必带 arXiv id 并校验**（格式 + 存在性）。翻译不存在的论文直接 400 —— 这一条挡掉绝大部分「拿它当通用 LLM 用」的尝试。
+2. **安装 id + IP 双维度软限流**，只作用于新翻译。不追求防住有心人，只防顺手薅；大学 / 公司 NAT 出口的误伤由安装 id 维度兜底。
+3. **全局日预算熔断**：当日新翻译超阈值即停止调上游，只服务缓存，并对扩展返回 `429 { fallback:"byok" }`。**成本上限被硬锁死。**
+
+### 16.4 模型池与准入测试
+
+**池内只收 markup-capable 的模型。** 两条理由：
+
+1. `renderPath` 进缓存键。若池内混有只能走 runs 的模型（如 `Hunyuan-MT-7B`），一旦降级到它，全站缓存立即全部 miss，共享缓存的价值当场蒸发。
+2. §8.5 的**能力不变量**要求降级链所有步骤 `preservesMarkup` 一致，不一致的在组装时被剔除。`hosted` 若可能退化为 runs，就无法与链上其余步骤共存。
+
+由此 gateway 只有一条渲染路径，`renderPath` 恒为 markup，**不需要进 R2 键**。
+
+`Hunyuan-MT-7B` 因此不进池。它走 runs 路径尚可用（RESEARCH §6.11.3），但术语一致性有实质缺陷且吃不到 `glossary.ts`，v1 不作为独立 provider 引入；若将来引入，按 §8.5 的能力不变量它不能与 markup 链共存，需单独成链。
+
+```ts
+interface PoolEntry {
+  id: string
+  upstream: 'siliconflow' | 'openrouter' | 'cloudflare-ai'
+  model: string                       // "Qwen/Qwen3.5-9B"
+  tier: 'free' | 'paid'
+  limits: { rpm?: number; rpd?: number }
+  cost?: { inPerM: number; outPerM: number }
+  /** 准入测试的产物，不是手填 */
+  verified: { promptVersion: string; placeholderRate: number; at: string }
+}
+```
+
+**准入测试是这个设计的安全带**（`gateway/test/admission.mjs`，即 RESEARCH §6.11.2 的脚本固化）：
+
+- 新模型进池前跑 9 个真实 fixture 块，**占位符保留率不足 100% 不准进**；
+- **`PROMPT_VERSION` 一升，全池 `verified` 作废**，必须重跑——协议变了，模型的遵守情况就可能变（`Qwen3.5-4B` 即在同一协议下崩掉）。
+
+有这条，「有什么便宜/免费的用什么」才是安全的：换模型是改配置，但那行配置得先拿测试换。这同时也是「模型对客户端可互换」这一论断的依据（见 16.7）。
+
+调用层注意：请求需带 `enable_thinking: false`（否则 Qwen3 系列会把 token 预算耗在思考上），但部分模型不接受该参数（`code 20015`），需按模型省略后重试。
+
+**路由**：`free` 有额度 → 用 `free`；耗尽或 429 → 转 `paid`；超当日预算 → 熔断返回 `fallback`。上游 429/5xx 在池内顺位重试，**全池失败**才返回 `fallback`。OpenRouter 在此结构中只是池里的一个 `upstream`，其 `:free` 条目额度耗尽后自动转付费。
+
+### 16.5 共享缓存（R2）
+
+按篇聚合，**不做块级对象**：块级 10 万篇需 2,680 万次 Class A 写，超 R2 免费额度 26 倍；篇级只需 10–150 万次（RESEARCH §6.11.7）。
+
+```
+key:  t/{target}/{promptV}_{rulesV}/{paperId}.json
+body: { "meta": {…}, "blocks": { "<blockHash>": { "t":"译文", "m":"模型" } } }
+```
+
+三个设计点：
+
+1. **块索引用内容 hash 而非序号**：`blockHash = sha256(normalizedText)[:16]`。arXiv 论文出 v2/v3 时未改动的段落仍然命中，只重翻真正改过的；用序号则插一段即全盘错位。
+2. **版本进 key 路径而非对象内**：`PROMPT_VERSION` / `RULES_VERSION` 一升，整个前缀自然全 miss，无需遍历删除；旧前缀交给 R2 lifecycle rule 回收。
+3. **`model` 只作元数据**，不进键（理由见 16.7）。保留它是为了支持「某模型翻得烂时定向 purge 其产物」。
+
+**写入策略**：一次请求只在结束时写一次，且**新增块数 < 10 时不写**，攒到下次，把每篇写次数从几十压到十几。
+
+**并发**：多用户同时读同一篇会各自读-改-写产生丢失更新。用条件写（`If-Match` + ETag）检测，冲突则重读合并重试，**最多 2 次，仍失败即放弃写**。放弃是安全的——**缓存写失败不影响正确性**，译文已返回给用户，只是这几块下次再翻一遍。这个取舍让我们避开 Durable Object（每篇一个实例的复杂度与成本）。
+
+**隐私边界**：只有经 gateway 的公开 arXiv 论文译文进共享缓存；BYOK 请求不经过 gateway，其模型、key 与结果全部留在本地。
+
+### 16.6 扩展端接入
+
+新增 `src/providers/hosted.ts`，实现既有 `TranslationProvider` 接口，`preservesMarkup: true`（池内恒为 markup）。侵入面只在 provider 边界，不触及 extractor / protector / renderer。
+
+**不做 direct/gateway 双模式切换**：职责按 provider 分开更干净——`openai-compat.ts` 管 BYOK 与直连，`hosted.ts` 只对接 gateway 窄接口。开发期 `wrangler dev` 在本机起 Worker，`hosted` 指向 `localhost:8787`（复用 `pnpm e2e:local-endpoint` 那套不返 CORS 头的本机端点验证），上线只是把 baseURL 换成线上域名。
+
+降级链（§8.5）位置：**`hosted` 不特殊对待，仍按「配置里选的引擎在前」的既有原则入链**，只是它多了一个可作为降级档的身份（质量优于两个免费引擎）：
+
+| 用户配置 | 链 |
+|---|---|
+| 选 `hosted`（零配置默认） | `hosted → chrome-builtin → google-web` |
+| 选 BYOK 引擎 | `<用户引擎> → hosted → chrome-builtin → google-web` |
+
+`chrome-builtin` 在 `google-web` 前沿用 §8.5 既有约定（内置离线、单句 10–20 ms、不受限流）。**链上各步 `preservesMarkup` 全为 `true`**（§8.1 实测），满足 §8.5 的能力不变量，不会在组装时被剔除。
+
+含义是 **gateway 挂掉、欠费或被封号，用户的翻译不中断，只降质量档**，满足硬规则 4。
+
+错误映射：
+
+| gateway 响应 | `ProviderErrorKind` | 处理 |
+|---|---|---|
+| `429 { error:"quota" }` | `rate-limit` | demote，走下一档 |
+| 5xx / 超时 | `network` / `timeout` | demote |
+| `400 { error:"bad-paper" }` | `bad-request` | 不 demote（调用方错误） |
+
+**需改动既有代码**：`createFallbackService` 目前已支持 `opts.cooldownMs`，但那是**整条链共用一个值**（`fallback.ts:68`，缺省 `DEFAULT_COOLDOWN_MS = 60_000`）。配额耗尽按小时/天恢复，60 s 后重试必然再失败并让用户卡顿，而把链级默认值调大又会拖慢 `network` / `timeout` 这类瞬时故障的恢复。所以需要的是**让 `demote()` 接受一个按次的冷却时长**，在 `rate-limit` 且错误带 `retryAfter` 时覆盖链级默认值，其余情况不变。该改动须带测试。
+
+### 16.7 与硬规则 6 的偏离及理由
+
+CLAUDE.md 硬规则 6 要求缓存键含 `providerId | model`。**`hosted` 这一条路径上，两层缓存都不含 `model`**，这是刻意的偏离，理由如下：
+
+> `model` 之所以要进缓存键，是因为**换模型会改变输出契约**（`types.ts` 对 `cacheId` 的注释即警告了 openai-compat 下 OpenRouter 与本机 Ollama 同名模型互相污染，issue #45）。而 hosted 池内模型全部通过同一道准入测试——同一 `PROMPT_VERSION`、占位符保留率 100%、同一 JSON 协议。**准入测试就是让它们输出可互换的机制。** 对客户端而言 `hosted` 的契约是「markup 路径的高质量译文」，具体模型是 gateway 的实现细节，不应泄漏进客户端缓存键。
+
+因此：
+
+- 服务端 R2 键不含 `model`（`model` 存为元数据，供定向 purge）；
+- 客户端不改缓存键结构（§9 的 `providerId | model | …` 保持原样），而是让 `hosted` 声明 `cacheId = 'hosted:{promptV}_{rulesV}'` 并在 `model` 位上报固定值 `pool`——键的形状不动，只是 hosted 这一路径上 `model` 不携带信息。与服务端键维度一致，否则会出现本地失效、服务端命中的抖动。
+
+**本偏离仅限 `hosted`。** 其余 provider（尤其 `openai-compat`）继续严格遵守硬规则 6。
+
+### 16.8 代码组织与工具链
+
+**gateway 与扩展同仓库**，`gateway/` 作为 pnpm workspace 子包。理由是两端有必须同步的东西：`/translate` 的请求响应类型（可直接 `import type`）、`PROMPT_VERSION` / `RULES_VERSION`（进缓存键，对不上会静默错乱）、协议块本身（服务端拼 prompt，但 BYOK 路径仍需同一份）。跨仓库只能靠人肉纪律，同仓库一个 PR 即可改两端并跑契约测试。
+
+工具链**只引入 wrangler**，作为 `gateway/` 的 devDependency（不全局安装，版本随 lockfile 固定）。
+
+**不引入 Cloudflare 的 bindings / API MCP**：R2 桶、绑定与环境变量一律声明在 `wrangler.jsonc` 里由 `wrangler deploy` 建立。经 MCP 临时创建的资源不出现在任何配置文件中，无法 review、无法复现、无法回滚，与本项目「配置带 schema 版本与迁移、改设计先改文档」的一贯要求相悖。文档查询用既有的 context7，不另加 docs MCP。`workers-observability` MCP 可在上线后按需引入用于线上日志分析。
