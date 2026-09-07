@@ -779,6 +779,13 @@ content script                       background (service worker)          axt-he
 - **定位用 CSS 锚点定位**（Chrome ≥131，为了 `anchor-scope`；内置翻译 API 已要求 138+）：`img:has(+ .axt-img)` 声明锚点名，`.axt-img` 用 `anchor()` / `anchor-size()` 贴到图的盒子上，父元素 `position: relative; anchor-scope` 限定作用域，`grid-column: auto` 脱离配对网格。零 JS 几何读取、零 ResizeObserver；拆图副本结构相同，锚点自动成立。标签字号用容器查询单位（`cqh` / `cqw`）按框高与字数算成一个字符串写一次，不读布局——ImageTrans 那种 JS 二分量字号每框要 12 次强制布局，不用
 - **等待 / 失败态不建 DOM 节点**：pending 叠加层会被拆图克隆进副本、`stripIds` 又剥掉它的状态属性。只在成功时插叠加层（Safari 也是翻完才出现）；失败记在 image run 里，popup 显示计数、重试按钮管。可见性 CSS 只看结构与 `<html>` 属性（`data-axt-img-modes`），不看叠加层自己的属性
 - side 模式下插图整块拆两份（§7.2）：叠加层属于「只有译文」的那一份，原件那份由样式隐藏（**只限 side**——stack 显示原件、only 显示副本，叠加层跟着显示的那份走）；拆图副本的重建签名把叠加层算进去，否则译文到齐后副本里没有它。镜像每会话一次、跑在 OCR 之前，会插在 `<img>` 与叠加层之间：`mirror.ts` 的闸认 `isInjected`，插叠加层时顺手删掉紧跟的镜像；side → only 之后 OCR 才到时叠加层进了被隐藏的原件、副本签名过期，非 side 分支的整理对脏根删掉过期副本，回 side 时重建
+- **配置级错误停调度**（Codex 在 #89 指出）：翻译回 `auth` / `no-key` 时与文字管线一样第一次就停（`fatal()`），之后进入视口的图不再取字节、不再识别；popup 的「修好配置后点翻译」提示同样适用。普通失败（网络、helper 断开）只记这一张，重试按钮算上图片
+- **并发上限 2**（Codex 在 #89 指出）：取字节、base64、消息载荷都占内存，helper 又是顺序的，一次全开只是把 6 MB 一张的图囤在内存里
+- **图注取离图最近那层 figure 自己的说明**（Codex 在 #89 指出）：多面板插图每个分图各有说明，从最外层拿第一个 `figcaption` 会把 (a) 的说明给 (b)，既污染 prompt 也进错缓存键
+- **新会话先摘掉上一轮的模式闸**（Codex 在 #89 指出）：致命错误后没恢复原文就重开时，上一轮的叠加层还在——helper 没了、图片翻译关了、目标语言换了，旧的都不该再显示；新一轮处理到那张图时替换它
+- **没有标签也清旧叠加层**（Codex 在 #89 指出）：换了目标语言之后译文可能全与原文相同，这时上一轮的叠加层要摘掉；动图（helper 报 `frames > 1`）同样按"完成、无叠加层"处理
+- **6 MB 上限在读响应时执行**（Codex 在 #89 指出）：先看 Content-Length，再流式读、超了立刻取消；`arrayBuffer()` 会先把整个响应分配出来
+- **不支持锚点定位的浏览器**：`.axt-img { display: none }` 的基线写在 `@supports` 之外，叠加层不会掉成图下面的一段文字（`wxt.config.ts` 没写最低 Chrome 版本，装到旧 Chromium 上也不能坏页面）
 - **块内图片不翻**：目标 = `img.ltx_graphics` 且不在任何翻译块内（与拆图的"游离媒体"同一判定）。块内的图会随占位符克隆进译文、only 模式下原块整个隐藏，叠加层无处可挂；12 篇 fixture 的 16 张位图全在 figure / flex cell 里，无一在块内
 - **取消**：`axt:ocr` 带会话 `scope`；helper 客户端区分排队与在飞（在飞上限 1，helper 本就是顺序的，这样撤才真能撤掉活），撤 scope 时拒掉排队的、在飞的到达后丢弃；`axt:cancel-scope` 与标签页关闭都经 sessions 的 `onDrop` 钩子调它。DOM 安全仍由 content 侧每个 `await` 之后重查会话 id 保证（与文字管线同一模式）
 - helper 放在本仓库 `helper/`（Swift Package，无第三方依赖），与扩展同 PR 演进；分发要做时再拆独立仓库
@@ -818,6 +825,15 @@ content script                       background (service worker)          axt-he
 - 稳态：同一进程里第二次识别 **55 ms**，首次 147 ms（进程内加载模型）；机器上**第一次**跑 Vision 要 26.6 s（系统级模型准备，一次性）。helper 是常驻进程（端口开着就活着），一次会话内只付一次进程级首次成本
 - 参考图识别出 27 行，十个关键词全在。图里换行的标签（"Dynamical / charge"、"Tree tensor / networks"）Vision 按行返回；"E=+1"、"B"、"(a)" 这类置信度 0.5 或单字母的行由扩展侧过滤。原始结果存在 `tests/fixtures/ocr/qed3d-string-breaking.json`，合并 / 过滤规则的单测对着它写
 - Chrome 断开端口的原因（`chrome.runtime.lastError`）区分"host 没注册"与"helper 退出"：前者本 worker 生命周期内不再重连
+
+### 15.4c 叠加层实测（2026-09-07，2507.00150v1 的 6 张曲线图，Chrome for Testing 153，1440px，google-web）
+
+- **锚点定位成立**：stack 下 5 张有叠加层的图，叠加层矩形与图的矩形偏差 **(0.0, 0.0, 0.0, 0.0)**；切 side 后插图拆两份，副本里的叠加层与副本的图同样偏差 0.0，原件里的隐藏；only 下可见。零 JS 几何读取、零 ResizeObserver，靠结构自动成立——plan 里的停止条件（偏差 > 2px 就退回 JS 方案）没触发
+- **每张图的标签数**：F1 0、F2 3、F3 7、F4 3、F5 5、F6 2。F1 为 0 是对的——它只有刻度、"N"、"P=75%" 与 x 轴标签 "V_T [km s⁻¹]"，前三类被过滤，最后一个 Vision 读成 "Vr [km s-]"、google-web 原样返回：**译文与原文相同的标签不画**（折叠空白、忽略大小写与首尾标点比较），白框盖住原图只会把排版好的下标换成 OCR 读歪的字
+- **字号随框高**：解出来 3.6–17.7 px；宽扁的 F2（476×149）标签 3.6 px，与原图上的字一样小。不设下限——设了要么裁字要么溢出白框，读者缩放页面时一起放大
+- 6 张图 OCR + 翻译 + 叠加 **5.7 s**（stack，含滚动触发；OCR 未命中缓存）；模式闸关着时进入视口的图停着不请求，切到勾选的模式后 `resume` 放出去，6 张 9.0 s
+- 恢复原文后叠加层、注入节点、`data-axt-*` 属性全部为零；关掉图片翻译的 `e2e:layout` 20/20、`e2e` 27/27 与 main 一致
+- e2e 抓到的一处脚本问题：逐屏滚动要每步重读页面高度，译文插进来页面会变长，按初始高度滚会漏掉最后一张图
 
 ### 15.5 参考
 

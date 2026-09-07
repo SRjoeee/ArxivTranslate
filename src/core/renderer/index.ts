@@ -2,8 +2,9 @@
 // 不变量：译文节点只作为原块的下一个兄弟插入；原节点只追加 data-axt-id / data-axt-state；
 // 全局状态只在 <html> 上；restore 后 DOM 与翻译前逐节点相等。
 import type { Block, TableBlock, TextBlock } from '@/core/extractor'
-import { AXT_ATTR_PREFIX, T_CLASS, stripInjected } from '@/core/marks'
+import { AXT_ATTR_PREFIX, INJECTED_SELECTOR, T_CLASS, isInjected, stripInjected } from '@/core/marks'
 import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
+import imageCss from '@/styles/image.css?inline'
 import modesCss from '@/styles/modes.css?inline'
 import presetsCss from '@/styles/presets.css?inline'
 import { STYLE_ATTR_NAME, customStyleRule, type StylePreset } from './style-preset'
@@ -55,7 +56,7 @@ export function enable(doc: Document, mode: Mode, style?: { preset: StylePreset;
   if (lang) doc.documentElement.setAttribute(LANG_ATTR, lang)
   if (style) setStylePreset(doc, style)
   const existing = doc.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)
-  const css = `${modesCss}\n${presetsCss}\n${style ? customStyleRule(style.customCss ?? '') : ''}`
+  const css = `${modesCss}\n${presetsCss}\n${imageCss}\n${style ? customStyleRule(style.customCss ?? '') : ''}`
   if (existing) {
     // 自定义 CSS 可能变了（设置页改完再翻一次）：内容不同才写，避免无谓的样式重算
     if (existing.textContent !== css) existing.textContent = css
@@ -154,7 +155,7 @@ function ownText(el: Element): string {
   for (const child of Array.from(el.childNodes)) {
     if (child.nodeType === 1) {
       const element = child as Element
-      if (element.classList.contains(T_CLASS)) continue
+      if (isInjected(element)) continue
       text += ownText(element)
     } else text += child.textContent ?? ''
   }
@@ -187,11 +188,11 @@ export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragm
   return clone
 }
 
-/** 恢复原文：删所有译文节点、剥所有 data-axt-* 属性、移除注入的样式（含 #axt-debug 的） */
+/** 恢复原文：删所有注入节点（译文与图片叠加层，§7.1 第 4 条）、剥所有 data-axt-* 属性、移除注入的样式（含 #axt-debug 的） */
 export function restore(doc: Document): { removedNodes: number; strippedAttrs: number } {
   let removedNodes = 0
   let strippedAttrs = 0
-  for (const node of Array.from(doc.querySelectorAll(`.${T_CLASS}`))) {
+  for (const node of Array.from(doc.querySelectorAll(INJECTED_SELECTOR))) {
     cancelSpinnersIn(node)
     node.remove()
     removedNodes++
@@ -222,3 +223,4 @@ export * from './spinner'
 export * from './pending'
 export * from './failed'
 export * from './style-preset'
+export * from './image'

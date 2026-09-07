@@ -58,4 +58,6 @@ export interface ImageProgress {
   requested: number
   done: number
   failed: number
+  /** 配置级错误（auth / no-key）后停下的原因；popup 据此不再给无效的重试 */
+  fatal?: string
 }

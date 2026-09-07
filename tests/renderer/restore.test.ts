@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks, type TableBlock, type TextBlock } from '@/core/extractor'
-import { MODE_ATTR, ON_ATTR, enable, renderTable, renderText, restore, setMode } from '@/core/renderer'
+import { MODE_ATTR, ON_ATTR, enable, renderImage, renderTable, renderText, restore, setImageModes, setMode } from '@/core/renderer'
 import { enableDebug } from '@/entrypoints/content/debug'
 import { frag } from './helpers'
 
@@ -43,5 +43,20 @@ describe('restore', () => {
     expect(result.removedNodes).toBe(4)
     // data-axt-id ×4 + data-axt-state ×4 + 原标题的 data-axt-inline + data-axt-on + data-axt-mode + data-axt-debug
     expect(result.strippedAttrs).toBe(12)
+  })
+
+  it('图片叠加层与模式闸一起恢复（§7.1 第 4 条、§15.2）', () => {
+    document.head.innerHTML = ''
+    document.body.innerHTML = '<article class="ltx_document"><figure class="ltx_figure"><img class="ltx_graphics" src="a.png" id="g1"><figcaption class="ltx_caption" id="c">Cap</figcaption></figure></article>'
+    const before = document.documentElement.outerHTML
+    enable(document, 'stack')
+    setImageModes(document, ['stack', 'only'])
+    const el = document.getElementById('g1') as HTMLImageElement
+    renderImage({ id: 'g1', el }, [{ x: 0, y: 0, w: 0.2, h: 0.05, lines: 1, source: 'Cap', text: '说明' }])
+    const result = restore(document)
+    expect(document.documentElement.outerHTML).toBe(before)
+    expect(result.removedNodes).toBe(1)
+    // data-axt-on + data-axt-mode + data-axt-img-modes
+    expect(result.strippedAttrs).toBe(3)
   })
 })

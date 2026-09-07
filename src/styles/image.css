@@ -1,0 +1,85 @@
+/* 图片叠加层（DESIGN §15.2）：<img> 的下一个兄弟 .axt-img，内部每个 span 一个译文标签。
+   叠加层**不带 .axt-t**——带了会被 side 的配对网格排到右栏、拆图时把 <img> 当配对原件删掉、被预设装饰。
+
+   定位用 CSS 锚点定位（Chrome ≥131，anchor-scope）：图声明锚点名，叠加层用 anchor() / anchor-size()
+   贴到图的盒子上——零 JS 几何读取、零 ResizeObserver，图随栏宽缩放时自动跟随；拆图副本结构相同，
+   锚点自动成立。父元素做定位祖先并限定锚点作用域，一个父元素里多张图各找各的（同名锚点按"前面最近的"解析，
+   兄弟关系一旦被别的节点插进来就会串到上一张图，作用域是第二道保险）。
+   不支持锚点定位的浏览器：@supports 不成立，叠加层一直 display: none，不会掉到图下面。
+
+   可见性只看 <html> 上的两个属性：当前模式 + 用户勾选的模式集合（data-axt-img-modes，空格分隔）。
+   叠加层自己没有状态属性——拆图克隆会把 data-axt-* 全剥掉。 */
+
+/* 基线在 @supports 之外：不支持锚点定位的浏览器也不能让叠加层掉成一段普通文字排在图下面（Codex 在 #89 指出） */
+.axt-img {
+  display: none;
+}
+
+@supports (top: anchor(top)) and (anchor-scope: --x) {
+  html[data-axt-on] img:has(+ .axt-img) {
+    anchor-name: --axt-img;
+  }
+
+  html[data-axt-on] :has(> .axt-img) {
+    position: relative;
+    anchor-scope: --axt-img;
+  }
+
+  .axt-img {
+    position: absolute;
+    position-anchor: --axt-img;
+    top: anchor(top);
+    left: anchor(left);
+    width: anchor-size(width);
+    height: anchor-size(height);
+    /* 标签字号用容器查询单位（cqh / cqw）按框高与字数算，不读布局 */
+    container-type: size;
+    /* 图所在的 figure 可能是配对网格容器：脱离网格流（先例 modes.css 的 .ltx_item > .ltx_tag） */
+    grid-column: auto;
+    grid-row: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    pointer-events: none;
+    z-index: 1;
+    /* 站点给 figure 里的块加的居中 / 字号不该传给标签 */
+    text-align: initial;
+    font-size: initial;
+    line-height: initial;
+  }
+
+  html[data-axt-mode="side"][data-axt-img-modes~="side"] .axt-img,
+  html[data-axt-mode="stack"][data-axt-img-modes~="stack"] .axt-img,
+  html[data-axt-mode="only"][data-axt-img-modes~="only"] .axt-img {
+    display: block;
+  }
+
+  /* 照 Safari 的样子：白色圆角半透明框盖住原文字，字号随框高；hover 显示原文（title） */
+  .axt-img > span {
+    position: absolute;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.2em;
+    overflow: hidden;
+    text-align: center;
+    line-height: 1.15;
+    color: #111;
+    background: rgb(255 255 255 / 0.92);
+    border-radius: 0.3em;
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.15);
+    font-family: system-ui, -apple-system, sans-serif;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+    pointer-events: auto;
+    cursor: default;
+  }
+
+  /* side：插图整块拆两份（§7.2），叠加层属于「只有译文」的副本，原件那份隐藏。
+     只限 side——stack 显示原件、only 显示副本，叠加层跟着显示的那份走。
+     特异度与上面的显示规则相同，必须写在后面 */
+  html[data-axt-mode="side"] [data-axt-split] .axt-img {
+    display: none;
+  }
+}

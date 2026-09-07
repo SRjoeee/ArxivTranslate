@@ -312,5 +312,19 @@ describe('判定与注册用同一套刻度（Codex 在 #81 指出）', () => {
     io.emit([el], 0.28, 900)
     expect(entered).toEqual([])
   })
-})
 
+  it('泛型：只要有 el 就能调度——图片目标（§15）与文字块共用同一套观察器', () => {
+    document.body.innerHTML = '<article class="ltx_document"><img class="ltx_graphics" id="g1"><img class="ltx_graphics" id="g2"></article>'
+    const targets = Array.from(document.querySelectorAll('img')).map(el => ({ id: el.id, el: el as HTMLImageElement }))
+    layout(targets[0]!.el, 100)
+    layout(targets[1]!.el, 5000)
+    const entered: { id: string }[][] = []
+    const scheduler = createLazyScheduler(targets, { ...DEFAULT_PRELOAD, onEnter: picked => entered.push(picked) })
+    expect(entered).toEqual([[targets[0]]])
+    const io = FakeIntersectionObserver.instances.at(-1)!
+    expect(io.observed.has(targets[1]!.el)).toBe(true)
+    io.emit([targets[1]!.el])
+    expect(entered).toEqual([[targets[0]], [targets[1]]])
+    expect(scheduler.waiting()).toBe(0)
+  })
+})

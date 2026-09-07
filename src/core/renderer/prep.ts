@@ -12,18 +12,18 @@
 // 陈旧时读——prep 是 setTimeout 任务，开头那一刻浏览器刚渲染过，布局是干净的。
 //
 // 五个整理步骤的签名本来就收 `Document | Element`，这里只是终于给了它们一个更窄的根。
-import { ID_ATTR, type Block } from '@/core/extractor'
+import { ID_ATTR } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { createCoalescer, type Coalescer } from '@/core/scheduler/coalesce'
 import { createMirrors } from './mirror'
 import { localizeNotes } from './notes'
 import { readPairMargins, writePairMargins, type PairMarginPlan } from './pair-margins'
-import { outermostFigure, splitFigures } from './split-figures'
+import { dropStaleSplits, outermostFigure, splitFigures } from './split-figures'
 import { fitTables, measureColumn, resetFitCache, watchFontLoads } from './table-fit'
 
 export interface Prep {
-  /** 这些块刚动过 DOM：排一趟只碰它们所在容器的整理 */
-  touch(blocks: Block[]): void
+  /** 这些块（或图片目标，§15）刚动过 DOM：排一趟只碰它们所在容器的整理 */
+  touch(items: ReadonlyArray<{ el: Element }>): void
   /** 排一趟全量（进 side、栏宽变化、会话开始） */
   touchAll(): void
   /** 撤掉排着的那一趟（离开 side） */
@@ -88,6 +88,9 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
     let notes = 0
     for (const r of roots) notes += localizeNotes(r)
     const t1 = performance.now()
+    // 签名过期的拆图副本先丢掉：非 side 下叠加层进了被隐藏的原件那种（§15.2），回 side 全量再重建；
+    // side 下也要——插图唯一的译文（叠加层）被摘掉后 needsSplit 为假、splitFigures 会跳过它，旧副本就一直挂着（Codex 在 #89 指出）
+    for (const r of roots) dropStaleSplits(r)
     if (!options.isSide()) return
 
     // 先整块拆插图，再补镜像：拆过的插图不再参与镜像（两套方案会重复一份）
@@ -133,8 +136,8 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
   })
 
   return {
-    touch(blocks) {
-      for (const block of blocks) coalescer.schedule(block.el)
+    touch(items) {
+      for (const item of items) coalescer.schedule(item.el)
     },
     touchAll() {
       coalescer.schedule()

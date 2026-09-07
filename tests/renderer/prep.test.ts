@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { extract, markBlocks, type TextBlock } from '@/core/extractor'
-import { MIRROR_CLASS, SPLIT_CLASS, createPrep, renderText, resetFitCache, rootsOf } from '@/core/renderer'
+import { MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS, createPrep, renderImage, renderText, resetFitCache, rootsOf, splitFigures } from '@/core/renderer'
 import { docOf, frag } from './helpers'
 
 // 增量整理（issue #46）：每趟只碰刚动过 DOM 的块所在的容器，镜像整个会话只跑一次，
@@ -179,6 +179,57 @@ describe('createPrep', () => {
     prep.cancel()
     flush()
     expect(doc.querySelectorAll(`.${SPLIT_CLASS}`)).toHaveLength(0)
+  })
+})
+
+describe('createPrep × 图片叠加层（DESIGN §15.2）', () => {
+  beforeEach(() => { vi.useFakeTimers(); resetFitCache() })
+  afterEach(() => vi.useRealTimers())
+
+  const IMG_FIGURE = '<section class="ltx_section"><figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1"><figcaption class="ltx_caption" id="c1">Figure 1.</figcaption></figure></section>'
+  const overlayOn = (doc: Document) => {
+    const el = doc.querySelector('img') as HTMLImageElement
+    const target = { id: el.id, el }
+    renderImage(target, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text: '静态电荷' }])
+    return target
+  }
+
+  it('touch([图片目标]) 在 side 下拆它所在的插图：根经最外层 figure 的父元素', () => {
+    const { doc, prep } = setup(IMG_FIGURE)
+    const target = overlayOn(doc)
+    prep.touch([target])
+    flush()
+    expect(doc.querySelector(`.${SPLIT_CLASS} img`)).not.toBeNull()
+  })
+
+  it('side 下插图唯一的译文（叠加层）被摘掉：旧副本要丢掉，不能一直挂着旧标签（Codex 在 #89 指出）', () => {
+    const NO_CAPTION = '<section class="ltx_section"><figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1"></figure></section>'
+    const { doc, prep } = setup(NO_CAPTION)
+    const target = overlayOn(doc)
+    prep.touch([target])
+    flush()
+    expect(doc.querySelector(`.${SPLIT_CLASS}`)).not.toBeNull()
+    // 新一轮全是恒等译文：叠加层被摘掉，run 通过 onRendered → prep.touch
+    doc.querySelector('.axt-img')!.remove()
+    prep.touch([target])
+    flush()
+    expect(doc.querySelector(`.${SPLIT_CLASS}`)).toBeNull()
+    expect(doc.querySelector(`[${SPLIT_ATTR}]`)).toBeNull()
+  })
+
+  it('非 side 下签名过期的副本被丢掉：side → only 之后叠加层才到的情况', () => {
+    const doc = docOf(IMG_FIGURE)
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    renderText(blocks.find(b => b.el.id === 'c1') as TextBlock, frag(doc, '图 1。'))
+    splitFigures(doc) // 曾经在 side 拆过
+    expect(doc.querySelector(`.${SPLIT_CLASS}`)).not.toBeNull()
+    const prep = createPrep(doc, { isSide: () => false, columnWidth: () => 484 })
+    const target = overlayOn(doc)
+    prep.touch([target])
+    flush()
+    expect(doc.querySelector(`.${SPLIT_CLASS}`)).toBeNull()
+    expect(doc.querySelector(`[${SPLIT_ATTR}]`)).toBeNull()
   })
 })
 

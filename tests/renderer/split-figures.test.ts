@@ -1,7 +1,8 @@
 // 插图整块拆两份（DESIGN §7.2）。图与公式没有译文，按块配对右栏就空着；
 // 整张图跨两栏又等于放弃对照，所以整块复制一份、副本里只留译文。
 import { describe, expect, it } from 'vitest'
-import { MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS, T_CLASS, restore, splitFigures } from '@/core/renderer'
+import { MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS, T_CLASS, dropStaleSplits, renderImage, restore, splitFigures } from '@/core/renderer'
+import { IMG_CLASS } from '@/core/marks'
 import { ID_ATTR } from '@/core/extractor'
 import { docOf } from './helpers'
 
@@ -161,5 +162,64 @@ describe('镜像不是译文（issue #46 实测 2312.17141）', () => {
     expect(doc.querySelector('.axt-split')).toBeNull()
     expect(doc.querySelectorAll('.axt-mirror')).toHaveLength(1) // 镜像留着
   })
-})
 
+  describe('图片叠加层（DESIGN §15.2）', () => {
+    const IMG_FIGURE = '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1"><figcaption class="ltx_caption">Figure 1.</figcaption></figure>'
+    const overlayOn = (doc: Document, text = '静态电荷') => {
+      const el = doc.querySelector('img') as HTMLImageElement
+      return renderImage({ id: el.id, el }, [{ x: 0.1, y: 0.1, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text }])
+    }
+
+    it('只有叠加层、没有文字译文的插图也拆：副本里图与叠加层都在，叠加层不带 data-axt-*', () => {
+      const doc = docOf(IMG_FIGURE)
+      overlayOn(doc)
+      expect(splitFigures(doc)).toBe(1)
+      const clone = doc.querySelector(`.${SPLIT_CLASS}`)!
+      const img = clone.querySelector('img')!
+      expect(img).not.toBeNull()
+      // 叠加层紧跟在副本的图后面，锚点定位靠这个相邻关系
+      expect(img.nextElementSibling?.classList.contains(IMG_CLASS)).toBe(true)
+      expect(clone.querySelector(`.${IMG_CLASS}`)!.getAttributeNames().some(n => n.startsWith('data-axt-'))).toBe(false)
+      expect(clone.querySelector(`.${IMG_CLASS}`)!.textContent).toBe('静态电荷')
+    })
+
+    it('叠加层后到：签名变了，副本重建、带上叠加层', () => {
+      const doc = docOf(figure())
+      splitFigures(doc)
+      const before = doc.querySelector(`.${SPLIT_CLASS}`)!
+      expect(before.querySelector(`.${IMG_CLASS}`)).toBeNull()
+      overlayOn(doc)
+      expect(splitFigures(doc)).toBe(1)
+      const after = doc.querySelector(`.${SPLIT_CLASS}`)!
+      expect(after).not.toBe(before)
+      expect(after.querySelector(`.${IMG_CLASS}`)).not.toBeNull()
+      // 签名相同不重建
+      expect(splitFigures(doc)).toBe(0)
+    })
+
+    it('没有图注的插图在会话开始时整张被镜像：拆图时把 figure 级的镜像一并删掉，否则右栏三份', () => {
+      const doc = docOf(IMG_FIGURE)
+      const fig = doc.querySelector('figure')!
+      const mirror = fig.cloneNode(true) as Element
+      mirror.classList.add(T_CLASS, MIRROR_CLASS)
+      fig.after(mirror)
+      overlayOn(doc)
+      expect(splitFigures(doc)).toBe(1)
+      expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
+      expect(doc.querySelectorAll('figure')).toHaveLength(2) // 原件 + 副本
+    })
+
+    it('dropStaleSplits：非 side 下签名过期的副本丢掉、原件的标记摘掉；签名相同的不动', () => {
+      const doc = docOf(figure())
+      splitFigures(doc)
+      expect(dropStaleSplits(doc)).toBe(0)
+      overlayOn(doc) // side → only 之后叠加层才到，进了原件
+      expect(dropStaleSplits(doc)).toBe(1)
+      expect(doc.querySelector(`.${SPLIT_CLASS}`)).toBeNull()
+      expect(doc.querySelector(`[${SPLIT_ATTR}]`)).toBeNull()
+      // 回 side 再拆，副本里有叠加层
+      expect(splitFigures(doc)).toBe(1)
+      expect(doc.querySelector(`.${SPLIT_CLASS} .${IMG_CLASS}`)).not.toBeNull()
+    })
+  })
+})

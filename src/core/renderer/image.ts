@@ -1,0 +1,103 @@
+// 图片叠加层（DESIGN §15.2）：<img> 的下一个兄弟 `.axt-img`，里面每个译文标签一个 span，
+// 位置与尺寸按归一化坐标写成百分比、字号写成容器查询单位——全部在 JS 里算成字符串写一次，**不读任何几何**。
+// 叠加层不带 .axt-t（理由见 marks.ts 的 IMG_CLASS），只在成功时插；等待 / 失败没有 DOM 节点。
+// 与 §7.1 一致：<img> 本身一个属性都不加；恢复原文时 restore 按 INJECTED_SELECTOR 整层删掉。
+import { IMG_CLASS } from '@/core/marks'
+import { FOR_ATTR, LANG_ATTR } from './index'
+import { MIRROR_CLASS } from './mirror'
+
+/** <html> 上的模式闸：用户勾选的模式集合，空格分隔，CSS 用 ~= 匹配当前模式（§15 的设置项） */
+export const IMG_MODES_ATTR = 'data-axt-img-modes'
+
+export interface ImageTarget {
+  id: string
+  el: HTMLImageElement
+}
+
+/** 一个译文标签：位置与尺寸是图的归一化坐标（0–1，左上原点），lines 是 OCR 合并进来的行数 */
+export interface ImageLabel {
+  x: number
+  y: number
+  w: number
+  h: number
+  lines: number
+  /** OCR 原文，hover 显示 */
+  source: string
+  /** 译文 */
+  text: string
+}
+
+export function setImageModes(doc: Document, modes: readonly string[]): void {
+  if (modes.length > 0) doc.documentElement.setAttribute(IMG_MODES_ATTR, modes.join(' '))
+  else doc.documentElement.removeAttribute(IMG_MODES_ATTR)
+}
+
+/** 目标已有的叠加层（同一父元素里、data-axt-for 指向它的） */
+export function overlayOf(target: ImageTarget): Element | null {
+  const parent = target.el.parentElement
+  if (!parent) return null
+  for (const child of Array.from(parent.children)) {
+    if (child.classList.contains(IMG_CLASS) && child.getAttribute(FOR_ATTR) === target.id) return child
+  }
+  return null
+}
+
+export function clearImage(target: ImageTarget): boolean {
+  const existing = overlayOf(target)
+  if (!existing) return false
+  existing.remove()
+  return true
+}
+
+/**
+ * 一段文字大约占多少 em 宽：CJK 一字一 em，其余按 0.55 em 估（西文平均字宽），空格 0.3 em。
+ * 只用来给字号一个宽度上限，不求精确——译文多半是中文，通常比原文短，字号由框高决定
+ */
+export function emWidth(text: string): number {
+  let width = 0
+  for (const ch of text) {
+    if (/\s/.test(ch)) width += 0.3
+    else if (/[⺀-鿿가-힯豈-﫿＀-￯]/.test(ch)) width += 1
+    else width += 0.55
+  }
+  return Math.max(width, 0.55)
+}
+
+/**
+ * 标签的内联样式：left / top / width / height 是图的百分比；字号 = min(按框高, 按框宽)，单位是容器查询单位
+ * （叠加层是 size 容器，1cqh = 图高的 1%）。行高 1.15，一行占框高的 72% 左右；多行框按行数均摊
+ */
+export function labelStyle(label: ImageLabel): string {
+  const pct = (v: number) => `${(v * 100).toFixed(3)}%`
+  const lines = Math.max(1, label.lines)
+  const byHeight = (72 * label.h) / lines
+  // 宽度上限：整段文字分成 lines 行，每行大约 emWidth / lines 个 em；留 8% 边距
+  const byWidth = (92 * label.w * lines) / emWidth(label.text)
+  return `left:${pct(label.x)};top:${pct(label.y)};width:${pct(label.w)};height:${pct(label.h)};font-size:min(${byHeight.toFixed(2)}cqh,${byWidth.toFixed(2)}cqw)`
+}
+
+/**
+ * 给一张图插叠加层；幂等，重复渲染替换不叠加。返回叠加层节点。
+ * 紧跟在图后面的镜像先删掉：镜像每会话只跑一次、跑在 OCR 之前，会插在图与叠加层之间——
+ * 叠加层必须是图的**下一个**兄弟（锚点按"前面最近的同名锚点"解析，`img:has(+ .axt-img)` 也只认相邻）
+ */
+export function renderImage(target: ImageTarget, labels: readonly ImageLabel[]): Element {
+  clearImage(target)
+  const next = target.el.nextElementSibling
+  if (next?.classList.contains(MIRROR_CLASS)) next.remove()
+  const doc = target.el.ownerDocument
+  const node = doc.createElement('div')
+  node.className = IMG_CLASS
+  node.setAttribute(FOR_ATTR, target.id)
+  const lang = doc.documentElement.getAttribute(LANG_ATTR)
+  for (const label of labels) {
+    const span = doc.createElement('span')
+    span.textContent = label.text
+    span.title = label.source
+    if (lang) span.setAttribute('lang', lang)
+    span.setAttribute('style', labelStyle(label))
+    node.append(span)
+  }
+  target.el.after(node)
+  return node
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks, type TextBlock } from '@/core/extractor'
-import { FOR_ATTR, MIRROR_CLASS, T_CLASS, createMirrors, renderText, restore } from '@/core/renderer'
+import { FOR_ATTR, MIRROR_CLASS, T_CLASS, createMirrors, renderImage, renderText, restore } from '@/core/renderer'
+import { IMG_CLASS } from '@/core/marks'
 import { docOf, frag } from './helpers'
 
 /** 造出"某个容器里已有译文"的形状，容器判定才会生效 */
@@ -139,5 +140,39 @@ describe('createMirrors', () => {
       <div class="ltx_para"><p class="ltx_p">x</p><p class="ltx_p ${T_CLASS}" data-axt-for="1">译</p></div>`)
     createMirrors(doc)
     expect(doc.querySelectorAll('.ltx_pubnotes')).toHaveLength(1)
+  })
+
+  describe('图片叠加层（DESIGN §15.2）', () => {
+    /** 有图注块的插图：figure 是容器，img 是它的直接子元素 */
+    const FIG = '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1"><figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption></figure>'
+    const overlayOn = (doc: Document) => {
+      const el = doc.querySelector('img') as HTMLImageElement
+      renderImage({ id: el.id, el }, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text: '静态电荷' }])
+    }
+
+    it('图后面紧跟叠加层：已配对，不再镜像；叠加层自己也不镜像', () => {
+      const doc = docOf(FIG)
+      const blocks = extract(doc)
+      markBlocks(blocks)
+      overlayOn(doc)
+      createMirrors(doc)
+      expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
+      expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(1)
+    })
+
+    it('没有叠加层时图照常镜像（回归：改动没有把普通镜像一起关掉）', () => {
+      const doc = docOf(FIG)
+      markBlocks(extract(doc))
+      createMirrors(doc)
+      expect(doc.querySelector(`.${MIRROR_CLASS}`)!.tagName).toBe('IMG')
+    })
+
+    it('容器里装着图 + 叠加层的包裹层不整块镜像', () => {
+      const doc = docOf('<figure class="ltx_figure" id="F1"><div class="ltx_flex_cell ltx_flex_size_1"><img class="ltx_graphics" src="a.png" id="F1.g1"></div><figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption></figure>')
+      markBlocks(extract(doc))
+      overlayOn(doc)
+      createMirrors(doc)
+      expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
+    })
   })
 })
