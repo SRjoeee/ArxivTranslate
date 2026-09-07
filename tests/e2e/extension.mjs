@@ -133,15 +133,17 @@ async function stallEndpoint(host) {
   const held = []
   const pattern = `**://${host}/**`
   const handler = route => {
+    // 原样留着请求体：下面靠它把"队列补上的新批次"和"同一批被重发"区分开
+    const body = route.request().postData() ?? ''
     let items = 0
     try {
-      const body = JSON.parse(route.request().postData() ?? 'null')
-      if (Array.isArray(body?.[0]?.[0])) items = body[0][0].length
+      const parsed = JSON.parse(body || 'null')
+      if (Array.isArray(parsed?.[0]?.[0])) items = parsed[0][0].length
     } catch {
       // 不是 JSON 就记 0
     }
     // 不 continue / fulfill / abort：请求停在这里不动，占着一个并发槽
-    held.push({ t: Date.now(), items, route })
+    held.push({ t: Date.now(), items, body, route })
   }
   await context.route(pattern, handler)
   return {
@@ -154,8 +156,13 @@ async function stallEndpoint(host) {
 
 /**
  * 把页面推到"并发槽占满、队列里堆着一大批没发出去的活"，再做一次**正向验证**：
- * 放开一个槽位，队列立刻补上下一发——补上了才算真的观察到了未发出的批次，
+ * 放开一个槽位，看队列会不会补上一个**新的**批次——补上了才算真的观察到了未发出的批次，
  * 这条断言的前置条件才成立（Codex 在 #95 要的就是"直接观察到或造出未发出的批次"）。
+ *
+ * 判"新"要看请求体，不能只看请求数（Codex 在 #95 追加）：abort 掉截住的那一发时，provider 自己的
+ * AbortSignal 并没有 abort，`google-web` 会把这次 fetch 失败归成可重试的 `network`，队列照默认
+ * 退避重发同一批。只数请求数的话，那次重试会被当成"队列里还有活"，正向验证反而变成空的。
+ * 同一批重发的请求体是逐字一样的，所以**出现没见过的请求体**才是新批次。
  */
 async function fillQueue(page, stall, { slots = GOOGLE_SLOTS, timeoutMs = 40_000 } = {}) {
   await scrollThrough(page) // 端点截着，什么都完成不了，整篇的块都会停在 pending
@@ -170,9 +177,11 @@ async function fillQueue(page, stall, { slots = GOOGLE_SLOTS, timeoutMs = 40_000
   }
   const items = stall.held.reduce((n, h) => n + h.items, 0)
   const requests = stall.held.length
+  const known = new Set(stall.held.map(h => h.body))
   await stall.held[0]?.route.abort().catch(() => undefined)
-  for (let i = 0; i < 30 && stall.held.length === requests; i++) await sleep(200)
-  return { requests, items, pending, confirmed: stall.held.length > requests }
+  const isNew = () => stall.held.some(h => h.body && !known.has(h.body))
+  for (let i = 0; i < 40 && !isNew(); i++) await sleep(200)
+  return { requests, items, pending, confirmed: isNew(), extra: stall.held.length - requests }
 }
 
 /** 任一 1 秒窗口内的最多请求数 */
@@ -464,7 +473,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await stall.off()
   check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）',
     q.confirmed && q.requests === GOOGLE_SLOTS && late === 0,
-    `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列${q.confirmed ? '立刻补上下一发（确有排队的批次）' : '没有补上——队列里没活，这条断言无效'}；关掉标签页再放开全部槽位后新增 ${late} 个`)
+    `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列补上 ${q.extra} 发、其中${q.confirmed ? '有没见过的请求体（确有排队的新批次，不是同一批重发）' : '全是同一批重发——队列里没有排队的活，这条断言无效'}；关掉标签页再放开全部槽位后新增 ${late} 个`)
 }
 
 // ── 导航离开：tabs.onRemoved 不覆盖这种情况（Codex 在 #59 指出）──────────
@@ -484,7 +493,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.close()
   check('导航离开后 background 不再发新请求（会话随导航撤掉）',
     q.confirmed && q.requests === GOOGLE_SLOTS && late === 0,
-    `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列${q.confirmed ? '立刻补上下一发（确有排队的批次）' : '没有补上——队列里没活，这条断言无效'}；导航离开再放开全部槽位后新增 ${late} 个`)
+    `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列补上 ${q.extra} 发、其中${q.confirmed ? '有没见过的请求体（确有排队的新批次，不是同一批重发）' : '全是同一批重发——队列里没有排队的活，这条断言无效'}；导航离开再放开全部槽位后新增 ${late} 个`)
 }
 
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
