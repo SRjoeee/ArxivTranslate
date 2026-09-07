@@ -170,6 +170,27 @@ async function measureFrame(page) {
   })
   check('宽标记（(Assumption 1)）不盖正文、不伸出块外', wide.tagR <= wide.textL + 1 && wide.tagL >= wide.itemL - 1 && wide.textL <= wide.itemR,
     `标记 ${wide.tagL}–${wide.tagR}，正文起点 ${wide.textL}，块 ${wide.itemL}–${wide.itemR}`)
+  // 同行短标题（§7.3，issue #68）：`[data-axt-inline]` 的 inline-block 没按模式限定，Codex 担心 side 下
+  // 原文与译文会挤在同一列。网格项会被块级化，所以那条规则在 side 下本就无效——这里量出来守住
+  const inline = await page.evaluate(() => {
+    const doc = document.querySelector('article.ltx_document')
+    const dx = doc.getBoundingClientRect().x
+    const col = Number.parseFloat(getComputedStyle(doc).gridTemplateColumns.split(' ')[0]) || 0
+    const gap = Number.parseFloat(getComputedStyle(doc).columnGap) || 0
+    const rows = []
+    for (const orig of document.querySelectorAll('[data-axt-inline]:not(.axt-t)')) {
+      const clone = orig.nextElementSibling?.hasAttribute('data-axt-inline') ? orig.nextElementSibling : null
+      if (!clone) continue
+      const g = el => { const b = el.getBoundingClientRect(); return { l: Math.round(b.x - dx), t: Math.round(b.y), d: getComputedStyle(el).display } }
+      rows.push({ orig: g(orig), clone: g(clone) })
+    }
+    return { col: Math.round(col), gap, rows }
+  })
+  const inlineBad = inline.rows.filter(r => r.orig.d !== 'block' || r.clone.d !== 'block'
+    || r.orig.l > 1 || r.clone.l < inline.col + inline.gap - 1 || Math.abs(r.orig.t - r.clone.t) > 2)
+  check('同行短标题在 side 下被网格摊平：display 是 block，原文左栏、译文右栏、同一行（issue #68）',
+    inline.rows.length >= 3 && inlineBad.length === 0,
+    `${inline.rows.length - inlineBad.length}/${inline.rows.length} 对${inlineBad.length ? `；异常 ${JSON.stringify(inlineBad[0])}` : ''}`)
   await page.screenshot({ path: `${SHOTS}/layout-definition.png` })
   await page.close()
 }
