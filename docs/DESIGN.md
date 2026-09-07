@@ -783,6 +783,9 @@ content script                       background (service worker)          axt-he
 - **并发上限 2**（Codex 在 #89 指出）：取字节、base64、消息载荷都占内存，helper 又是顺序的，一次全开只是把 6 MB 一张的图囤在内存里
 - **图注取离图最近那层 figure 自己的说明**（Codex 在 #89 指出）：多面板插图每个分图各有说明，从最外层拿第一个 `figcaption` 会把 (a) 的说明给 (b)，既污染 prompt 也进错缓存键
 - **新会话先摘掉上一轮的模式闸**（Codex 在 #89 指出）：致命错误后没恢复原文就重开时，上一轮的叠加层还在——helper 没了、图片翻译关了、目标语言换了，旧的都不该再显示；新一轮处理到那张图时替换它
+- **没有标签也清旧叠加层**（Codex 在 #89 指出）：换了目标语言之后译文可能全与原文相同，这时上一轮的叠加层要摘掉；动图（helper 报 `frames > 1`）同样按"完成、无叠加层"处理
+- **6 MB 上限在读响应时执行**（Codex 在 #89 指出）：先看 Content-Length，再流式读、超了立刻取消；`arrayBuffer()` 会先把整个响应分配出来
+- **不支持锚点定位的浏览器**：`.axt-img { display: none }` 的基线写在 `@supports` 之外，叠加层不会掉成图下面的一段文字（`wxt.config.ts` 没写最低 Chrome 版本，装到旧 Chromium 上也不能坏页面）
 - **块内图片不翻**：目标 = `img.ltx_graphics` 且不在任何翻译块内（与拆图的"游离媒体"同一判定）。块内的图会随占位符克隆进译文、only 模式下原块整个隐藏，叠加层无处可挂；12 篇 fixture 的 16 张位图全在 figure / flex cell 里，无一在块内
 - **取消**：`axt:ocr` 带会话 `scope`；helper 客户端区分排队与在飞（在飞上限 1，helper 本就是顺序的，这样撤才真能撤掉活），撤 scope 时拒掉排队的、在飞的到达后丢弃；`axt:cancel-scope` 与标签页关闭都经 sessions 的 `onDrop` 钩子调它。DOM 安全仍由 content 侧每个 `await` 之后重查会话 id 保证（与文字管线同一模式）
 - helper 放在本仓库 `helper/`（Swift Package，无第三方依赖），与扩展同 PR 演进；分发要做时再拆独立仓库

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { extract, markBlocks } from '@/core/extractor'
-import { MAX_IMAGE_BYTES, captionOf, collectImageTargets, startImageTranslation, toBase64, type ImageRunOptions, type ImageTarget } from '@/core/image'
+import { MAX_IMAGE_BYTES, captionOf, collectImageTargets, readImageResponse, startImageTranslation, toBase64, type ImageRunOptions, type ImageTarget } from '@/core/image'
 import { IMG_CLASS } from '@/core/marks'
 import { restore } from '@/core/renderer'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
@@ -14,6 +14,15 @@ const FIGURE = '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src
 const line = (text: string, y: number): OcrLine => ({ text, conf: 1, quad: [[0.1, y], [0.3, y], [0.3, y + 0.03], [0.1, y + 0.03]] })
 const LINES = [line('Static charge', 0.1), line('Even sites', 0.5), line('12.5', 0.9)]
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]).buffer
+
+/** 在同一份 DOM 上再开一轮：沿用第一轮的 doc / targets / fetch / ocr / translate */
+function firstOptions(first: ReturnType<typeof setup>): ImageRunOptions {
+  return {
+    doc: first.doc, targets: first.targets, paper: '2507.00150', target: 'cmn', scope: 's2', preload: DEFAULT_PRELOAD,
+    fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr: first.ocr, translate: first.translate,
+    isEnabled: () => true, isCurrent: () => true,
+  }
+}
 
 function setup(overrides: Partial<ImageRunOptions> = {}) {
   const doc = docOf(FIGURE)
@@ -326,6 +335,28 @@ describe('startImageTranslation', () => {
     expect(ocr).toHaveBeenCalledTimes(1)
   })
 
+  it('新一轮没有标签（换了目标语言后全是恒等译文）：上一轮的叠加层要清掉（Codex 在 #89 指出）', async () => {
+    const first = setup()
+    await first.run.translate(first.targets)
+    expect(first.doc.querySelector(`.${IMG_CLASS}`)).not.toBeNull()
+    // 同一份 DOM 上开第二轮：译文原样返回
+    const identity = async (call: { request: { segments: { id: string; text: string }[] } }) => ({ ok: true as const, result: { segments: call.request.segments.map(s => ({ id: s.id, text: s.text })), provider: 'mock' }, cached: 0 })
+    const second = startImageTranslation({ ...firstOptions(first), translate: identity })
+    await second.translate(first.targets)
+    expect(first.doc.querySelector(`.${IMG_CLASS}`)).toBeNull()
+    expect(second.progress().done).toBe(1)
+  })
+
+  it('动图（frames > 1）不叠译文、按完成处理，旧叠加层也清掉（helper 只识别了第 0 帧，Codex 在 #89 指出）', async () => {
+    const first = setup()
+    await first.run.translate(first.targets)
+    const animated = startImageTranslation({ ...firstOptions(first), ocr: async () => ({ ok: true, result: { width: 1, height: 1, frames: 2, lines: LINES }, cached: false }) })
+    await animated.translate(first.targets)
+    expect(first.doc.querySelector(`.${IMG_CLASS}`)).toBeNull()
+    expect(animated.progress()).toEqual({ total: 1, requested: 1, done: 1, failed: 0 })
+    expect(first.translate).toHaveBeenCalledTimes(1) // 第二轮没发翻译
+  })
+
   it('已在请求中的目标不重复请求', async () => {
     let release: () => void = () => {}
     const held = new Promise<void>(resolve => { release = resolve })
@@ -351,5 +382,44 @@ describe('captionOf', () => {
     expect(captionOf(doc.getElementById('g1')!)).toBe('(a) Classifier confusion matrix')
     // 分图自己没有说明就往外层找
     expect(captionOf(doc.getElementById('g3')!)).toBe('Figure 9: Outer only')
+  })
+})
+
+describe('readImageResponse', () => {
+  const stream = (chunks: number[]) => new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const n of chunks) controller.enqueue(new Uint8Array(n))
+      controller.close()
+    },
+  })
+
+  it('Content-Length 超上限：不读响应体就拒', async () => {
+    const res = new Response(stream([10]), { headers: { 'content-type': 'image/png', 'content-length': String(MAX_IMAGE_BYTES + 1) } })
+    await expect(readImageResponse(res)).rejects.toThrow(/超过/)
+    expect(res.bodyUsed).toBe(false) // 没碰响应体
+  })
+
+  it('没有 Content-Length 的响应流式读取：超过上限立刻取消，不把整个响应读进内存（Codex 在 #89 指出）', async () => {
+    let cancelled = false
+    let pulled = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++
+        if (pulled > 10) controller.close() // 有限的 10 块共 10 000 字节：不设上限的读法会把它全读完再"成功"
+        else controller.enqueue(new Uint8Array(1000))
+      },
+      cancel() { cancelled = true },
+    })
+    const res = new Response(body, { headers: { 'content-type': 'image/png' } })
+    await expect(readImageResponse(res, 2500)).rejects.toThrow(/超过/)
+    expect(cancelled).toBe(true)
+    expect(pulled).toBeLessThanOrEqual(4) // 读到第 3 块（3000 > 2500）就停，不会一直拉
+  })
+
+  it('正常大小：拼成一整块，mime 从 content-type 取', async () => {
+    const res = new Response(stream([100, 200]), { headers: { 'content-type': 'image/jpeg; charset=binary' } })
+    const out = await readImageResponse(res, 1000)
+    expect(out.bytes.byteLength).toBe(300)
+    expect(out.mime).toBe('image/jpeg')
   })
 })

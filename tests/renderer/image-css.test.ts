@@ -39,6 +39,15 @@ describe('image.css', () => {
     expect(RULES).not.toMatch(/html\[data-axt-mode="(stack|only)"\] \[data-axt-split\] \.axt-img/)
   })
 
+  it('隐藏的基线写在 @supports 之外：不支持锚点定位的浏览器上叠加层也不会掉成图下面的一段文字', () => {
+    const supports = RULES.indexOf('@supports')
+    const baseline = RULES.search(/\.axt-img \{\s*display: none;\s*\}/)
+    expect(baseline).toBeGreaterThan(-1)
+    expect(baseline).toBeLessThan(supports)
+    // @supports 里面不再有第二份 display: none 基线（显示规则靠属性闸）
+    expect(RULES.slice(supports)).not.toMatch(/\n  \.axt-img \{[^}]*display: none/)
+  })
+
   it('样式表里没有 ltx_ 选择器：图片叠加层不认站点结构', () => {
     expect(RULES).not.toContain('ltx_')
   })

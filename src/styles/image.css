@@ -10,6 +10,11 @@
    可见性只看 <html> 上的两个属性：当前模式 + 用户勾选的模式集合（data-axt-img-modes，空格分隔）。
    叠加层自己没有状态属性——拆图克隆会把 data-axt-* 全剥掉。 */
 
+/* 基线在 @supports 之外：不支持锚点定位的浏览器也不能让叠加层掉成一段普通文字排在图下面（Codex 在 #89 指出） */
+.axt-img {
+  display: none;
+}
+
 @supports (top: anchor(top)) and (anchor-scope: --x) {
   html[data-axt-on] img:has(+ .axt-img) {
     anchor-name: --axt-img;
@@ -21,7 +26,6 @@
   }
 
   .axt-img {
-    display: none;
     position: absolute;
     position-anchor: --axt-img;
     top: anchor(top);

@@ -7,7 +7,7 @@
 // 等待 / 失败没有 DOM 节点（§15.2）：失败记在这里，popup 显示、重试按钮管。
 import { ID_ATTR } from '@/core/extractor'
 import { decodeText, escapeText } from '@/core/protector/text'
-import { type ImageLabel, type ImageTarget, renderImage } from '@/core/renderer/image'
+import { type ImageLabel, type ImageTarget, clearImage, renderImage } from '@/core/renderer/image'
 import { DOCUMENT_ROOT, FIGURE_SELECTORS } from '@/core/rules/latexml'
 import { INJECTED_SELECTOR } from '@/core/marks'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
@@ -92,11 +92,47 @@ export function collectImageTargets(doc: Document): ImageTarget[] {
   return targets
 }
 
+/**
+ * 按上限读响应体：Content-Length 可信就先看它，没有或不准的经流式读取、超过上限立刻取消——
+ * `arrayBuffer()` 会把整个响应先分配出来再判大小，上限就形同虚设（Codex 在 #89 指出）
+ */
+export async function readImageResponse(res: Response, max = MAX_IMAGE_BYTES): Promise<ImageBytes> {
+  const mime = (res.headers.get('content-type') ?? '').split(';')[0]?.trim() ?? ''
+  const tooBig = () => new Error(`图片超过 ${max / 1024 / 1024} MB`)
+  const declared = Number(res.headers.get('content-length') ?? Number.NaN)
+  if (Number.isFinite(declared) && declared > max) throw tooBig()
+  if (!res.body) {
+    const bytes = await res.arrayBuffer()
+    if (bytes.byteLength > max) throw tooBig()
+    return { bytes, mime }
+  }
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > max) {
+      await reader.cancel()
+      throw tooBig()
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return { bytes: out.buffer, mime }
+}
+
 async function defaultFetchBytes(url: string): Promise<ImageBytes> {
   // force-cache：页面已经加载过这张图，复用浏览器的图片缓存，不再下载一次
   const res = await fetch(url, { cache: 'force-cache' })
   if (!res.ok) throw new Error(`取图失败：HTTP ${res.status}`)
-  return { bytes: await res.arrayBuffer(), mime: (res.headers.get('content-type') ?? '').split(';')[0]?.trim() ?? '' }
+  return readImageResponse(res)
 }
 
 /** ArrayBuffer → base64，分块避免 String.fromCharCode 的参数上限 */
@@ -175,11 +211,15 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       const ocr = await options.ocr({ imageHash, image: toBase64(bytes), mime, paper: options.paper, scope: options.scope })
       if (!alive()) return
       if (!ocr.ok) return fail(target, `识别失败：${ocr.error.message}`)
-      const boxes = linesToBoxes(ocr.result.lines)
-      if (boxes.length === 0) {
-        outcome.set(target, 'done') // 图里没有可翻的文字：算完成，不插叠加层
-        return
+      // 没有标签就算完成，但上一轮留下的叠加层要清掉（换了目标语言后旧译文不该一直挂着，Codex 在 #89 指出）
+      const finishEmpty = () => {
+        clearImage(target)
+        outcome.set(target, 'done')
       }
+      // 动图：helper 只识别了第 0 帧，浏览器在放后面的帧，框对不上——不叠
+      if ((ocr.result.frames ?? 1) > 1) return finishEmpty()
+      const boxes = linesToBoxes(ocr.result.lines)
+      if (boxes.length === 0) return finishEmpty() // 图里没有可翻的文字
       const caption = captionOf(target.el)
       const context: TranslateContext = { ...options.context, ...(caption ? { sectionTitle: caption } : {}) }
       const res = await options.translate({
@@ -213,10 +253,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
         if (!text || sameText(text, box.text)) continue
         labels.push({ x: box.x, y: box.y, w: box.w, h: box.h, lines: box.lines, source: box.text, text })
       }
-      if (labels.length === 0) {
-        outcome.set(target, 'done')
-        return
-      }
+      if (labels.length === 0) return finishEmpty()
       renderImage(target, labels)
       outcome.set(target, 'done')
       options.onRendered?.([target])
