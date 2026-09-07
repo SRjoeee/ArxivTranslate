@@ -83,20 +83,26 @@ async function openPaper(id, host) {
     context.off('request', onRequest)
     for (const event of ['requestfinished', 'requestfailed']) context.off(event, onSettled)
   })
-  // 圆环不能靠轮询：首屏全命中缓存时 36 ms 就结束了，200 ms 的轮询必然扑空。挂个 MutationObserver 记峰值
+  // 圆环不能靠轮询：首屏全命中缓存时 36 ms 就结束了，200 ms 的轮询必然扑空。挂个 MutationObserver。
+  // **数插入次数，不采样实时数量**（issue #82）：MutationObserver 的回调在微任务检查点批量触发，
+  // 插入与移除落在同一批里时，回调里 querySelectorAll 数到的已经是 0——峰值就永远是 0。
+  // 记录被插入过的圆环节点数与时序无关
   await page.addInitScript(() => {
-    window.__axtSpinnerPeak = 0
-    const bump = () => {
-      const n = document.querySelectorAll('.axt-spinner').length
-      if (n > window.__axtSpinnerPeak) window.__axtSpinnerPeak = n
+    window.__axtSpinnersSeen = 0
+    const count = node => {
+      if (node.nodeType !== 1) return 0
+      const el = node
+      return (el.classList?.contains('axt-spinner') ? 1 : 0) + (el.querySelectorAll?.('.axt-spinner').length ?? 0)
     }
-    const start = () => new MutationObserver(bump).observe(document.documentElement, { childList: true, subtree: true })
+    const start = () => new MutationObserver(list => {
+      for (const m of list) for (const node of m.addedNodes) window.__axtSpinnersSeen += count(node)
+    }).observe(document.documentElement, { childList: true, subtree: true })
     if (document.documentElement) start()
     else document.addEventListener('readystatechange', start, { once: true })
   })
   await page.goto(`https://arxiv.org/html/${id}#axt-translate`, { waitUntil: 'domcontentloaded' })
   const originalTitle = await page.title()
-  return { page, logs, requests, originalTitle, spinnersSeen: () => page.evaluate(() => window.__axtSpinnerPeak ?? 0).catch(() => 0) }
+  return { page, logs, requests, originalTitle, spinnersSeen: () => page.evaluate(() => window.__axtSpinnersSeen ?? 0).catch(() => 0) }
 }
 
 async function waitForLog(logs, pattern, timeoutMs) {
@@ -107,6 +113,30 @@ async function waitForLog(logs, pattern, timeoutMs) {
     await sleep(250)
   }
   return null
+}
+
+/**
+ * 把页面推到**确实有积压**的状态再返回（issue #82）：撤销类断言要在"队列里还有东西"的那一刻动手，
+ * 而不是滚一遍、等几个请求、然后碰运气去读 pending。边滚边看，看到 min 个 pending 就停。
+ * 返回观察到的 pending 数；始终没攒起来返回 0，让断言带着数字失败而不是静默通过
+ */
+async function awaitBacklog(page, { minPending = 3, ready = () => true, timeoutMs = 40_000 } = {}) {
+  const t0 = Date.now()
+  let top = 0
+  let last = 0
+  while (Date.now() - t0 < timeoutMs) {
+    const state = await page.evaluate(y => {
+      window.scrollTo(0, y)
+      return { pending: document.querySelectorAll('.axt-pending').length, height: document.documentElement.scrollHeight }
+    }, top)
+    last = state.pending
+    // 两个条件要**同时**成立：翻译已经真的跑起来（ready，通常是"已发出够多请求"），
+    // 且此刻队列里还有积压。只等其中一个都测不出东西——积压先于第一个请求出现（renderPending 在发请求之前）
+    if (state.pending >= minPending && ready()) return state.pending
+    top = top + 700 > state.height ? 0 : top + 700 // 滚到底就回顶上再来一轮，直到两个条件对齐
+    await sleep(120)
+  }
+  return ready() ? last : 0
 }
 
 /** 任一 1 秒窗口内的最多请求数 */
@@ -258,7 +288,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 换一篇数学密集的：PAPER 首屏没有行内公式，检查会空跑
   const dashedPage = await context.newPage()
   await dashedPage.goto('https://arxiv.org/html/2609.04056v1#axt-translate', { waitUntil: 'domcontentloaded' })
-  await dashedPage.waitForFunction(() => document.querySelectorAll('.axt-t math').length > 0, null, { timeout: 60_000 }).catch(() => undefined)
+  // 两个条件都要等到（issue #82）：只等"出现第一个带公式的译文"的话，`<html>` 上的 data-axt-style
+  // 可能还没写上——enable() 在 startTranslation 里写它，而 #axt-translate 触发的会话与设置页刚存的预设
+  // 之间隔着一次配置读取。一次实测就撞到过：量到 22 个公式、块级 none/solid，重跑同一构建是 51 个 underline/dashed
+  await dashedPage.waitForFunction(
+    () => document.documentElement.dataset.axtStyle === 'dashed' && document.querySelectorAll('.axt-t math').length > 0,
+    null, { timeout: 60_000 },
+  ).catch(() => undefined)
+  // 再等公式数稳定：翻译还在进行时读到的是半截状态
+  let stableMaths = -1
+  for (let i = 0; i < 40; i++) {
+    await sleep(500)
+    const n = await dashedPage.evaluate(() => document.querySelectorAll('.axt-t math').length)
+    if (n === stableMaths && n > 0) break
+    stableMaths = n
+  }
   const dashed = await dashedPage.evaluate(() => {
     const deco = el => { const cs = getComputedStyle(el); return `${cs.textDecorationLine}/${cs.textDecorationStyle}` }
     const maths = [...document.querySelectorAll('.axt-t math')]
@@ -278,8 +322,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const { page, logs, requests, originalTitle, spinnersSeen } = await openPaper(PAPER, GOOGLE)
   const first = idleOf(await waitForLog(logs, IDLE, 120_000))
   check(`论文 ${PAPER}：不滚动只翻首屏附近（google-web）`, !!first && first.requested > 0 && first.requested < first.total && first.done === first.requested && first.failed === 0, first?.text ?? '(no idle line)')
-  const spinnerPeak = await spinnersSeen()
-  check('请求期间出现过加载圆环（§7.6）', spinnerPeak > 0, `最多同时 ${spinnerPeak} 个圆环`)
+  const spinners = await spinnersSeen()
+  check('请求期间插入过加载圆环（§7.6）', spinners > 0, `插入过 ${spinners} 个圆环`)
   const translated = await page.title()
   check('标签页标题被翻译', translated !== originalTitle && /[\u4e00-\u9fff]/.test(translated), `${originalTitle} → ${translated}`)
   await page.screenshot({ path: `${SHOTS}/paper-first-screen.png` })
@@ -375,24 +419,18 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   context.on('request', onRequest)
   const page = await context.newPage()
   await page.goto(`https://arxiv.org/html/${PAPER2}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  // 先把整篇滚一遍：不这么做队列里没积压，关掉之后本来就不会有请求，断言等于空转
-  // （首次写这条时首屏正好全命中缓存，只发出 2 个请求，测不出任何东西）
-  const height = await page.evaluate(() => document.documentElement.scrollHeight)
-  for (let y = 0; y < height; y += 700) {
-    await page.evaluate(top => window.scrollTo(0, top), y)
-    await sleep(40)
-  }
-  const t0 = Date.now()
-  while (Date.now() - t0 < 40_000 && seen.length < 5) await sleep(200)
+  // 队列里得真有积压，关掉之后才谈得上"还会不会发请求"；不这么做断言等于空转
+  // （首次写这条时首屏正好全命中缓存，只发出 2 个请求，测不出任何东西）。
+  // 边滚边等到 pending 攒起来那一刻再关，而不是滚完、等够 5 个请求、再碰运气读 pending（issue #82）
+  const pending = await awaitBacklog(page, { ready: () => seen.length >= 5 })
   const before = seen.length
-  const pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
   const tClose = Date.now()
   await page.close()
   await sleep(8_000)
   const late = seen.filter(t => t > tClose + 500).length
   context.off('request', onRequest)
   check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）', before >= 5 && pending > 0 && late === 0,
-    `关闭前 ${before} 个请求、${pending} 个块还在等；关闭 0.5 s 后新增 ${late} 个`)
+    `关闭时积压 ${pending} 个块、已发 ${before} 个请求；关闭 0.5 s 后新增 ${late} 个`)
 }
 
 // ── 导航离开：tabs.onRemoved 不覆盖这种情况（Codex 在 #59 指出）──────────
@@ -402,15 +440,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   context.on('request', onRequest)
   const page = await context.newPage()
   await page.goto(`https://arxiv.org/html/${PAPER3}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  const height = await page.evaluate(() => document.documentElement.scrollHeight)
-  for (let y = 0; y < height; y += 700) {
-    await page.evaluate(top => window.scrollTo(0, top), y)
-    await sleep(40)
-  }
-  const t0 = Date.now()
-  while (Date.now() - t0 < 40_000 && seen.length < 5) await sleep(200)
+  const pending = await awaitBacklog(page, { ready: () => seen.length >= 5 })
   const before = seen.length
-  const pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
   const tLeave = Date.now()
   // 跳到非 arXiv 页面：content script 没了，也永远不会再发新的 scope 过来
   await page.goto('https://example.com/', { waitUntil: 'domcontentloaded' })
@@ -419,7 +450,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   context.off('request', onRequest)
   await page.close()
   check('导航离开后 background 不再发新请求（会话随导航撤掉）', before >= 5 && pending > 0 && late === 0,
-    `离开前 ${before} 个请求、${pending} 个块还在等；离开 0.5 s 后新增 ${late} 个`)
+    `离开时积压 ${pending} 个块、已发 ${before} 个请求；离开 0.5 s 后新增 ${late} 个`)
 }
 
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
@@ -482,11 +513,24 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await options.getByRole('button', { name: '保存', exact: true }).click()
   await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 
+  // 401 回来的时刻要记下来：断言"这之后不再有新请求"，而不是数首波有几个——
+  // 首波个数取决于令牌桶的突发节奏，快一点慢一点都会让 ≤ 20 这条落空（issue #82）
+  let firstAuthFailure = Number.POSITIVE_INFINITY
+  const onAuthResponse = response => {
+    if (response.url().includes('openrouter.ai') && response.status() === 401) {
+      firstAuthFailure = Math.min(firstAuthFailure, Date.now())
+    }
+  }
+  context.on('response', onAuthResponse)
   const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
   const done = await waitForLog(logs, IDLE, 60_000)
-  await sleep(2_000)
-  // 首波只有首屏附近的几批（令牌桶突发 20 封顶）；第一个 401 回来就排空整队，不该再有第二波
-  check('错 key + 降级关闭：首波 ≤ 20 个请求，auth 后整条队列停下（不重试、没有第二波）', requests.length <= 20 && /fatal: auth/.test(done?.text ?? ''), `${requests.length} 个请求；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
+  await sleep(3_000) // 留出足够长的窗口：真有第二波的话这时该发出来了
+  context.off('response', onAuthResponse)
+  // 第一个 401 之后 1 秒（同一批里在飞的请求还会陆续发完）不该再有新请求：整条队列排空、不重试
+  const afterAuth = requests.filter(r => r.t > firstAuthFailure + 1_000)
+  check('错 key + 降级关闭：第一个 401 之后队列排空，不重试、没有第二波',
+    Number.isFinite(firstAuthFailure) && afterAuth.length === 0 && /fatal: auth/.test(done?.text ?? ''),
+    `共 ${requests.length} 个请求，401 之后 1 s 起新增 ${afterAuth.length} 个；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
   const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
   const idle = idleOf(done)
   check('失败块旁有重试 / 原因小部件（§7.6）', !!idle && widgets > 0 && widgets === idle.failed, `${widgets} 个小部件，${idle?.failed ?? '?'} 个失败块`)
