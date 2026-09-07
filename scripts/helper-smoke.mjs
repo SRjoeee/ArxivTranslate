@@ -98,6 +98,12 @@ check('EXIF 方向 6 的 JPEG：坐标与 PNG 一致（±0.02）', aligned, pair
 const shortRead = await send({ v: 1, cmd: 'ping', id: 'p2' }, { split: true })
 check('长度前缀分两次到达（短读）也能读满', shortRead.ok === true && shortRead.id === 'p2')
 
+// 动图：helper 只识别第 0 帧，得把帧数报出来让扩展跳过（Codex 在 #89 指出）
+const gif = readFileSync(join(ROOT, 'helper/Tests/Fixtures/two-frames.gif')).toString('base64')
+const animated = await send({ v: 1, cmd: 'ocr', id: 'g1', image: gif })
+check('两帧的 GIF 报 frames: 2', animated.frames === 2 && animated.id === 'g1', `frames=${animated.frames}`)
+check('静态 PNG 报 frames: 1', res.frames === 1)
+
 const bad = await send({ v: 1, cmd: 'ocr', id: 'o2', image: '!!!' })
 check('坏 base64 回错误信封而不是崩', bad.error?.code === 'bad-base64' && bad.id === 'o2', JSON.stringify(bad.error))
 const unknown = await send({ v: 1, cmd: 'nope', id: 'u1' })

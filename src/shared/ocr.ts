@@ -23,6 +23,8 @@ export interface OcrResult {
   lines: OcrLine[]
   /** helper 的回应超过大小上限、按置信度丢过行（§15.3）；结果不完整，调用方可据此提示 */
   truncated?: boolean
+  /** 图片的帧数；> 1 是动图，helper 只识别了第 0 帧，扩展不给动图叠译文 */
+  frames?: number
 }
 
 export interface HelperStatus {
