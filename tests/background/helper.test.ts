@@ -260,8 +260,10 @@ describe('createHelperClient', () => {
     const a = client.ocr({ image: 'A' })
     await flush()
     await handshake(port())
-    port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [], truncated: true })
-    expect((await a).result.truncated).toBe(true)
+    port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [], truncated: true, frames: 3 })
+    const ra = await a
+    expect(ra.result.truncated).toBe(true)
+    expect(ra.result.frames).toBe(3) // 动图的帧数也透传
     const b = client.ocr({ image: 'B' })
     await flush()
     port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })

@@ -98,6 +98,8 @@ func recognize(base64: String, languages: [String]) throws -> [String: Any] {
   guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else { throw HelperError.badBase64 }
   guard let source = CGImageSourceCreateWithData(data as CFData, nil),
         let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { throw HelperError.undecodableImage }
+  // 动图（GIF / APNG / 动态 WebP）只解第 0 帧，浏览器却在放后面的帧：帧数报给扩展，多帧的不叠译文（Codex 在 #89 指出）
+  let frames = CGImageSourceGetCount(source)
   // JPEG / TIFF 的旋转存在 EXIF 里：像素是存储方向，浏览器显示的是转正后的。方向传给 Vision，
   // 它返回的坐标就是转正后那张图的归一化坐标；宽高也按显示方向报（5–8 是转了 90°，对调）。
   // 不传的话识别的是躺着的图，叠加层整个错位（Codex 在 #87 指出）
@@ -127,7 +129,7 @@ func recognize(base64: String, languages: [String]) throws -> [String: Any] {
       .map { [clamp($0.x), clamp(1 - $0.y)] }
     lines.append(["text": candidate.string, "quad": quad, "conf": Double(observation.confidence)])
   }
-  return ["width": width, "height": height, "lines": lines]
+  return ["width": width, "height": height, "frames": frames, "lines": lines]
 }
 
 // MARK: - 主循环
