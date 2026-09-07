@@ -393,6 +393,23 @@ worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在
 
 所以设置页用 `${new URL(url).origin}/*` 生成的带端口模式是合法的，Chrome 能正确判定包含关系。
 
+## 6.10 浏览器图片翻译的现成方案调查（2026-09-07，开工前）
+
+DESIGN §15 只记了用上的两个（`macos-vision-ocr`、`ImageTrans_chrome_extension`）。没用上的也记下来，跨平台识别后端选型（issue #91）要用：
+
+| 项目 | 许可证 | 识别 | 框从哪来 | 为什么这轮没用 |
+|---|---|---|---|---|
+| [bytefer/macos-vision-ocr](https://github.com/bytefer/macos-vision-ocr) | MIT | Apple Vision | 归一化四角 + 置信度 | **用了**：helper 核心（§15.4） |
+| [xulihang/ImageTrans_chrome_extension](https://github.com/xulihang/ImageTrans_chrome_extension) | GPL-3.0 | 浏览器内 PaddleOCR（onnxruntime-web）或本机 ImageTrans 服务 | 真 OCR 框 | 叠加层渲染与视口调度的思路**用了**；识别没用——Mac 上 Vision 更准更快、无需塞模型。**它的 "OpenAI" 路径不是发图给模型**：`ajaxOpenAI` 里 `boxes = await paddleOCR(dataURL, …)`，模型只翻识别出来的文字 |
+| [Kuju29/TextPhantomOCR_Overlay](https://github.com/Kuju29/TextPhantomOCR_Overlay) | 未标注 | Gemma 3（Hugging Face）/ Ollama 读图 | 文档里看不到它要坐标，叠加层怎么定位也没说 | 许可证未标、无可搬的坐标实现；只能当"有人这么做过"的旁证 |
+| [A9T9/Copyfish](https://github.com/A9T9/Copyfish)、SkyN9ne/CopyfishOCR | GPL | ocr.space 云 API | 真 OCR 框 | 论文图要传给第三方、另需 key，与"识别留在本机"的取舍相反 |
+| Honyaku Translation Overlay | — | Google Cloud Vision + DeepL | 真 OCR 框 | 同上，且两套 key |
+| [boysugi20/python-image-translator](https://github.com/boysugi20/python-image-translator)、Crivella/ocr_translate | — | EasyOCR / 本地模型，Python | 真 OCR 框 | 桌面 / 服务端程序，不是浏览器内方案；ocr_translate 要自己跑一个 Django 服务 |
+
+**结论**：没有现成的"多模态 LLM 读图并回归一化框"的实现可移植，那条路要自己写（约一天，见 #91）；真正现成且框准的跨平台方案只有 ImageTrans 那套浏览器内 PaddleOCR，代价是约 65 MB 模型 / wasm 与每张图几秒 CPU。
+
+**浏览器内 PaddleOCR 的体积实测**（`reference/ImageTrans_chrome_extension/ImageTrans/paddleocr/`）：`rec.onnx` 20 M、`ort-wasm-simd-threaded.jsep.wasm` 25 M、`PP-OCRv6_det_small.onnx` 与 `opencv.js` 各 9.5 M、`model.onnx` 10 M；加载与推理胶水 `page-ocr.js` 779 行。
+
 ## 7. DESIGN.md 修订清单
 
 按章节排列。每条只提建议，是否采纳由设计文档决定。
