@@ -37,3 +37,6 @@ helper/.build/
 # 设计画布的发布产物（2 MiB，由 .dc.html 与 canvas.json 重新生成）
 docs/design/canvas/*.html
 !docs/design/canvas/*.dc.html
+
+# git worktree 目录
+.worktrees/
