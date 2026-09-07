@@ -383,7 +383,9 @@ interface ProtectedBlock {
 
 默认布局，译文紧跟原块。不需要额外 CSS，只有译文样式。
 
-- **短标题同行** [决定]：`title` 单元里除文档主标题外、可见文本 ≤ 60 字符的标题，渲染时给原标题与译文都加 `data-axt-inline`，CSS 令两者 `display: inline-block`（inline-block 保留标题自身的上下 margin），译文左边距 0.5em，效果是 "Abstract 摘要" 同行。参考项目把译文塞进原元素内部达到同样效果，我们不改子树，所以用属性 + CSS。主标题保持上下堆叠：它靠 `text-align: center` 居中，inline 后无法居中
+- **短标题同行** [决定]：`title` 单元里除文档主标题外、可见文本 ≤ 60 字符的标题，渲染时给原标题与译文都加 `data-axt-inline`，CSS 令两者 `display: inline-block`（inline-block 保留标题自身的上下 margin），译文左边距 0.5em，效果是 "Abstract 摘要" 同行。参考项目把译文塞进原元素内部达到同样效果，我们不改子树，所以用属性 + CSS。主标题保持上下堆叠：它靠 `text-align: center` 居中，inline 后无法居中。
+
+  **这条规则不按模式限定，因为它在 side 下本就无效** [实测，2026-09-07，issue #68 / Codex 在 #13 提出]：side 的配对容器是 `display: grid`，标题是它的直接子项，**网格项一律块级化**，`inline-block` 落不到实处。2609.00246 上 69 个同行短标题，stack 下全是 `inline-block`、原文与译文同一行（"Abstract" 0–90 接 "摘要" 90–157）；切到 side 后 **0 个**保留 `inline-block`，全部 `block`，原文占满左栏 0–648、译文占满右栏 672–1320、同一行。给规则加 `html[data-axt-mode="stack"]` 限定不改变任何渲染结果，只多一份要维护的模式判断，所以不加。`modes.css` 里另有一条**专门针对 side 下 `[data-axt-inline]` 译文**的规则（清掉那 0.5em 起始外边距），说明当前行为是有意为之。`e2e:layout` 有一条断言守着（display 为 block、原文左栏、译文右栏、同一行）
 
 - **块标记一次性写完，不切片** [决定，2026-09-06，issue #67]：`side prep` 的镜像判定（`needsMirror`）两道闸看的都是 `data-axt-id`，它分辨不出「还没轮到标记的翻译单元」与「永远不会有译文的静态内容」。标记若切片写入，第一趟 prep 撞进半途状态就会把整个 `.ltx_para` / `.ltx_proof` / `.ltx_theorem` **整块克隆**到右栏，里面的块翻出来之后右栏多一整段英文。happy-dom 里按 25% / 50% / 75% 三次 prep 复现：2312.17141 36 处、2609.04056 23 处、2609.00245 87 处；prep 推到标记之后则全部为 0。
 
