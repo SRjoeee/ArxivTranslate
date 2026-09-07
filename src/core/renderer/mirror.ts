@@ -61,8 +61,12 @@ export function createMirrors(root: Document | Element): number {
       stripInjected(clone)
       clone.classList.add(T_CLASS, MIRROR_CLASS)
       // 镜像是右栏的视觉配平副本，内容与左栏完全相同、没有译文。不藏起来的话屏幕阅读器
-      // 会把同一张图、同一个公式念两遍
+      // 会把同一张图、同一个公式念两遍。
+      // `inert` 是必须的那一半（A/B 审计在 2401.00596 上抓到，issue #72）：只标 aria-hidden 的话，
+      // 副本里的链接仍在 Tab 序列里——参考文献条目就带着 DOI / arXiv 链接——键盘用户会跳进一个
+      // 屏幕阅读器完全忽略的装饰副本，焦点落下去什么都不播报（axe: aria-hidden-focus）
       clone.setAttribute('aria-hidden', 'true')
+      clone.setAttribute('inert', '')
       clone.setAttribute(FOR_ATTR, `${MIRROR_ID_PREFIX}${made}`)
       child.after(clone)
       made++

@@ -427,7 +427,18 @@ interface ProtectedBlock {
 **属于我们、而且那次审计没查到的，是译文节点自己的属性**：
 
 - **译文必须标 `lang`**：页面的 `<html lang>` 说的是原文（arXiv 上是 `en`），而我们往里插中文。不标的话屏幕阅读器会用英文语音念中文——实测装扩展后 14 个译文节点全部继承 `lang="en"`。译文语言（BCP-47，由 `toBcp47(target)` 得到）在 `enable()` 时写进 `<html>` 的 `data-axt-lang`（§7.1：全局状态只在这里），`renderText` 逐个写到译文节点的 `lang` 上；**不能直接改 `<html lang>`**，那会把原文也说成中文
-- **纯装饰的副本对屏幕阅读器隐藏**：side 模式的镜像（`.axt-mirror`）是右栏的视觉配平副本，内容与左栏完全相同且没有译文，不隐藏就会被念两遍；加载圆环（`.axt-spinner`）同理，逐块的等待状态由 popup 的进度承担。两者都加 `aria-hidden="true"`。真正的译文不隐藏——它是有信息的内容
+- **纯装饰的副本对屏幕阅读器隐藏**：side 模式的镜像（`.axt-mirror`）是右栏的视觉配平副本，内容与左栏完全相同且没有译文，不隐藏就会被念两遍；加载圆环（`.axt-spinner`）同理，逐块的等待状态由 popup 的进度承担。两者都加 `aria-hidden="true"`**外加 `inert`** [补充，2026-09-07，A/B 审计在 2401.00596 上抓到]：`aria-hidden` 只挡屏幕阅读器，挡不住 Tab——参考文献条目的镜像里带着 DOI / arXiv 链接，键盘用户会跳进一个屏幕阅读器完全忽略的装饰副本，焦点落下去什么都不播报（axe 的 `aria-hidden-focus`）。`inert` 同时管住焦点与可访问性树，Chrome 102 起支持，远低于本项目 131 的下限。镜像与圆环都是**我们自己插的节点**，加属性不涉及 §7.1。真正的译文不隐藏——它是有信息的内容
+
+**归属判断已自动化** [决定，2026-09-07，issue #72]：手工对照「不装扩展的同一页面」这件事不该每次重做——审计任何注入型扩展都会重复那场误会。`tests/e2e/a11y.mjs`（`pnpm e2e:a11y`）同一篇论文跑两次 axe，基线是不装扩展的同一页，门槛只看差集。
+
+难点在**差集怎么求**：我们把译文作为兄弟节点插进去，`:nth-child` 会整体位移，直接拿 axe 给的选择器比对全是误报。做法是给每条违规算一个两次运行可比的键——落在注入内容里的，顺着 `data-axt-for` 找回它翻译的那个原块，再按相对路径定位到原块里**对应的那个元素**，用它的键；宿主元素用自己的键（有 `id` 用 `#id`，没有就沿祖先拼标签名与**排除 `.axt-*` 之后**的同标签序号）。这样上面说的「`h6` 从 1 变 2」自动归为继承，而译文上原块没有的问题（漏标 `lang`、对比度不足）映射不到基线的键，照报不误。
+
+两类东西按规则 id 而不是按元素比：
+
+- **文档级规则**（`region` / `landmark-*` / `page-has-heading-one` / `bypass`）：axe 报的是「最外层那个不在 landmark 里的元素」，插入译文就会让它换一个元素来报。根因是宿主页面一个 landmark 都没有，而补 landmark 要改写原文档子树，§7.1 不允许。
+- **`scrollable-region-focusable`**：axe 查滚动容器上有没有 `tabindex`；Chrome 从 127 起给「没有可聚焦子元素的滚动容器」内置了顺序焦点，本项目最低支持 131。2026-09-07 在 Chrome 153 上对 side 模式的 6 个滚动容器逐个做过往返实测（聚焦 → Shift+Tab → Tab），**6/6 都回得来**。而且这 6 个里有 3 个是原节点（`#alg1.4`、`#S2.T1.2`、`#S2.F2`），加 `tabindex` 同样违反 §7.1。这条**照样打印**，只是不判失败。
+
+2026-09-07 首次实测（2410.00260，Chrome 153）：基线 45 条 / 6 类（`empty-table-header`、`heading-order`、`landmark-*`、`region`），装扩展后 stack 56 条、side 544 条、only 399 条，**三种模式的差集都为空**。变异检查：给 `.axt-t` 压一条低对比度的 `color` 再构建，stack 新增 441 条、side 新增 569 条 `color-contrast`，全部标为 `translation`——映射没有把译文自己的问题误判成继承。
 
 ### 7.5 译文样式 [决定，2026-09-05 实现]
 
@@ -669,6 +680,7 @@ export interface TranslateResult {
 | 渲染 | Vitest + happy-dom | 翻译 → 切换三模式 → 恢复，恢复后 DOM 与原始逐节点相等 |
 | provider | Vitest（mock fetch）| 请求拼装与响应解析；免费接口另有可选的 live 测试，默认跳过 |
 | 端到端 | Playwright（`pnpm e2e`，`tests/e2e/extension.mjs`，2026-09-05 起） | 起一个装着 `.output/chrome-mv3` 的 Chromium（`channel: 'chromium'` 的新 headless 支持扩展），驱动设置页与 popup、读控制台与网络：google-web 整篇翻完与速率、刷新命中缓存、翻译中途恢复原文（译文与 `data-axt-*` 全清、不再发请求）、错 key 时降级链把整页翻完（popup 显示降级提示）、关掉降级后恢复 auth 排空整队、设置页的语言与自定义提示词保存后重载仍在。不碰用户浏览器与 key，LLM 只测错 key 不花钱。**不返 CORS 头的本机端点**在 `tests/e2e/local-endpoint.mjs`（`pnpm e2e:local-endpoint`，2026-09-06 起）：起一个不发任何 CORS 头、预检一律 405 的 `http://127.0.0.1` OpenAI 兼容端点，断言设置页连接测试与整页翻译都打到它、服务端只见 `chrome-extension://` 的 Origin、零次预检、页面自己零请求（§8.0 的对照表）。它复制一份构建产物、只给副本的 manifest 加本机 host 权限，因为原生授权弹窗 Playwright 点不到（RESEARCH §6.9）。**布局断言**在 `tests/e2e/layout.mjs`（`pnpm e2e:layout`，2026-09-05 起）：side 模式在 1440 / 2000px 下不横向溢出、文章居中且两侧对称、正文吃满（≤ 96rem）、两栏等宽、行间公式装进一栏、右侧沟槽元素落在文章右缘与视口之间、只含公式的列表项与兄弟项标记对齐（含 `(Assumption 1)` 这类宽标记不盖正文）、单列 flex 图里的表格与脚注左右配对、多面板 flex 图仍并排且无镜像、正文脚注副本落在沟槽里，以及 2312.17141 上的**主线程长任务预算**（最长 ≤ 400ms、合计 ≤ 1.5s，守 side prep 的量法不退回克隆） |
+| 无障碍 A/B | Playwright + axe-core（`pnpm e2e:a11y`，`tests/e2e/a11y.mjs`，2026-09-07 起） | 同一篇论文跑两次 axe：不装扩展是基线，装了扩展的 side / stack / only 各审一次，**只报差集**——绝对分数由 arXiv 决定，改它要动原文档子树（§7.4b / §7.1）。归属靠「两次运行可比的键」：注入内容顺着 `data-axt-for` 映射回原块里对应的元素，宿主元素用 id 锚定的路径且序号排除 `.axt-*`，否则插入兄弟节点会让选择器整体位移、全是误报。文档级规则与 `scrollable-region-focusable` 按规则 id 比（理由见 §7.4b，后者有 Chrome 153 上 6/6 的 Tab 往返实测）。基线本身必须查出东西来，否则「差集为空」是空断言 |
 | 手动清单 | 用户在自己的 Chrome | 走真实 key 的 LLM 路径；锚点跳转、脚注弹出、公式渲染、Ctrl+F、打印 |
 
 fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取，覆盖多领域与多结构，含一篇转换失败页；全部为 oxide 0.7.6）。规则测试用 happy-dom 解析，1.8 MB 页面约 0.6 s，可直接跑全量 fixture。

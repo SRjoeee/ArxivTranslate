@@ -17,6 +17,7 @@
     "check:output": "node scripts/check-output.mjs",
     "e2e": "node tests/e2e/extension.mjs",
     "e2e:layout": "node tests/e2e/layout.mjs",
+    "e2e:a11y": "node tests/e2e/a11y.mjs",
     "e2e:local-endpoint": "node tests/e2e/local-endpoint.mjs",
     "e2e:image": "node tests/e2e/image.mjs",
     "helper:build": "swift build -c release --package-path helper",
@@ -25,6 +26,7 @@
     "lint:fix": "biome lint --write ."
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@biomejs/biome": "^2.5.12",
     "@types/dom-chromium-ai": "^0.0.17",
     "@types/react": "^19.2.18",

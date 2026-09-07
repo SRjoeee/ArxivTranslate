@@ -58,6 +58,9 @@ describe('纯装饰的副本对屏幕阅读器隐藏', () => {
     expect(made).toBeGreaterThan(0)
     const mirrors = [...doc.querySelectorAll('.axt-mirror')]
     expect(mirrors.every(el => el.getAttribute('aria-hidden') === 'true')).toBe(true)
+    // aria-hidden 只挡屏幕阅读器，挡不住 Tab：副本里的链接仍在焦点序列里，键盘用户会跳进一个
+    // 什么都不播报的装饰副本（A/B 审计在 2401.00596 的参考文献镜像上抓到，issue #72）
+    expect(mirrors.every(el => el.hasAttribute('inert'))).toBe(true)
   })
 
   it('真正的译文不隐藏：它是有信息的内容', () => {
