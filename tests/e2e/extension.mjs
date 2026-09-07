@@ -583,19 +583,24 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 首个 401 到 idle 之间那一段不能不看（Codex 在 #95 追加）。但它**今天不是 0**，
   // 而且不是回归：实测第一个 401 之后 75~279 ms 必然还有一波，因为 `failQueue` 只排空当下排在
   // RequestQueue 里的任务，那会儿剩下的块还在 BatchQueue 里攒批、不在场（issue #96 记着，附时间线）。
-  // 所以这一波纳入检查、设上界，而不是像旧写法那样用一秒窗口把它豁免掉。上界取**已调度的块数**：
-  // 一个批次至少装一个块，所以请求数超过块数只可能是把新的块拉进来了、或者在重试同一批——
-  // 这一波只准把 401 之前就排好的那些块走完。#96 修好之后这里直接收成 afterAuth.length === 0。
+  // 所以这一波纳入检查、设上界，而不是像旧写法那样用一秒窗口把它豁免掉。判据是**它必须是一次冲刷**：
+  // 401 之后发出的请求彼此落在同一拍里（实测跨度 0~1 ms，都是 BatchQueue 一次攒完就全推出去的）。
+  // 这一条正好卡住 Codex 点名的两种回归：队列真的没排空的话，批次会随槽位陆续腾出而摊开好几秒；
+  // 失败的批次被重试的话，退避至少 1 秒，也落在同一拍之外。#96 修好之后这里直接收成 afterAuth.length === 0
+  // （那时跨度为 0 依然成立，这条不必再改）。
   const beforeAuth = requests.filter(r => r.t <= firstAuthFailure + EVENT_JITTER_MS)
   const afterAuth = requests.filter(r => r.t > firstAuthFailure + EVENT_JITTER_MS)
   const afterIdle = requests.filter(r => r.t > (done?.t ?? 0) + EVENT_JITTER_MS)
+  // requests 是按发出顺序 push 的，首尾之差就是这一波的跨度
+  const POST_AUTH_FLUSH_MS = 100
+  const afterAuthSpan = afterAuth.length > 1 ? afterAuth[afterAuth.length - 1].t - afterAuth[0].t : 0
   const offsets = requests.map(r => Math.round(r.t - firstAuthFailure)).sort((a, b) => a - b)
   check('错 key + 降级关闭：401 之后整个会话停下，滚到底也不再发请求',
     Number.isFinite(firstAuthFailure) && /fatal: auth/.test(done?.text ?? '')
       && (idle?.requested ?? 0) < (idle?.total ?? 0) // 还有没请求过的块，滚一遍才证伪得了
-      && requests.length <= (idle?.requested ?? 0) // 401 之后只走完已排好的块，不拉新活、不重试
+      && afterAuthSpan <= POST_AUTH_FLUSH_MS // 401 之后只有一次冲刷，不是陆续派发、也不是重试
       && afterIdle.length === 0,
-    `${idle?.requested}/${idle?.total} 个块请求过，共 ${requests.length} 个请求（相对首个 401 的时刻 ${offsets.join('/')} ms）；401 之前 ${beforeAuth.length} 个、之后 ${afterAuth.length} 个（#96：应为 0，现在是 BatchQueue 里攒着的那一波）；报 fatal 后整篇滚一遍新增 ${afterIdle.length} 个；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
+    `${idle?.requested}/${idle?.total} 个块请求过，共 ${requests.length} 个请求（相对首个 401 的时刻 ${offsets.join('/')} ms）；401 之前 ${beforeAuth.length} 个、之后 ${afterAuth.length} 个、跨度 ${afterAuthSpan} ms（#96：应为 0，现在是 BatchQueue 里攒着的那一波一次推完）；报 fatal 后整篇滚一遍新增 ${afterIdle.length} 个；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
   const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
   check('失败块旁有重试 / 原因小部件（§7.6）', !!idle && widgets > 0 && widgets === idle.failed, `${widgets} 个小部件，${idle?.failed ?? '?'} 个失败块`)
   await page.close()
