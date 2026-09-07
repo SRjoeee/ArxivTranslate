@@ -88,11 +88,10 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
     let notes = 0
     for (const r of roots) notes += localizeNotes(r)
     const t1 = performance.now()
-    if (!options.isSide()) {
-      // 不在 side：签名过期的拆图副本丢掉（叠加层进了被隐藏的原件那种，§15.2），回 side 全量再重建
-      for (const r of roots) dropStaleSplits(r)
-      return
-    }
+    // 签名过期的拆图副本先丢掉：非 side 下叠加层进了被隐藏的原件那种（§15.2），回 side 全量再重建；
+    // side 下也要——插图唯一的译文（叠加层）被摘掉后 needsSplit 为假、splitFigures 会跳过它，旧副本就一直挂着（Codex 在 #89 指出）
+    for (const r of roots) dropStaleSplits(r)
+    if (!options.isSide()) return
 
     // 先整块拆插图，再补镜像：拆过的插图不再参与镜像（两套方案会重复一份）
     let split = 0

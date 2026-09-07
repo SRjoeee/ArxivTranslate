@@ -294,16 +294,21 @@ describe('startImageTranslation', () => {
       await new Promise<void>(resolve => release.push(resolve))
       return { ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false }
     })
+    const progress: { failed: number; fatal?: string }[] = []
     const run = startImageTranslation({
       doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr, maxConcurrent: 2,
       translate: async () => ({ ok: false, error: { kind: 'no-key', message: '未配置 key' } }),
       isEnabled: () => true, isCurrent: () => true,
+      onProgress: p => { progress.push({ failed: p.failed, fatal: p.fatal }) },
     })
     const all = run.translate(targets) // 2 在飞、1 排队
     await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(2))
     release.shift()?.() // 第一张回来 → 翻译 no-key → 致命
     await vi.waitFor(() => expect(run.fatal()).toBeDefined())
+    // 另一张还在等 OCR：带 fatal 的进度已经发出去了，popup 不用等它（Codex 在 #89 指出）
+    expect(progress.at(-1)).toMatchObject({ failed: 3 })
+    expect(run.progress().fatal).toContain('no-key')
     release.shift()?.() // 第二张这时才回来：会话已致命，丢弃
     await all
     expect(ocr).toHaveBeenCalledTimes(2) // 排队的第三张没开始

@@ -244,6 +244,10 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
           // 已认领但没完成的（并发中的、排队的）一并记失败，进度与 failed() 才对得上；排队的直接结清
           for (const [other, state] of outcome) if (state === 'requested' && other !== target) fail(other, `停在配置错误：${res.error.message}`)
           for (const entry of queue.splice(0)) entry.done()
+          fail(target, `翻译失败：${res.error.message}`)
+          // 立刻把带 fatal 的进度发出去：别等还在等 OCR 的另一个 worker（最长一个 helper 超时）结束才让 popup 知道（Codex 在 #89 指出）
+          report()
+          return
         }
         return fail(target, `翻译失败：${res.error.message}`)
       }

@@ -202,6 +202,21 @@ describe('createPrep × 图片叠加层（DESIGN §15.2）', () => {
     expect(doc.querySelector(`.${SPLIT_CLASS} img`)).not.toBeNull()
   })
 
+  it('side 下插图唯一的译文（叠加层）被摘掉：旧副本要丢掉，不能一直挂着旧标签（Codex 在 #89 指出）', () => {
+    const NO_CAPTION = '<section class="ltx_section"><figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1"></figure></section>'
+    const { doc, prep } = setup(NO_CAPTION)
+    const target = overlayOn(doc)
+    prep.touch([target])
+    flush()
+    expect(doc.querySelector(`.${SPLIT_CLASS}`)).not.toBeNull()
+    // 新一轮全是恒等译文：叠加层被摘掉，run 通过 onRendered → prep.touch
+    doc.querySelector('.axt-img')!.remove()
+    prep.touch([target])
+    flush()
+    expect(doc.querySelector(`.${SPLIT_CLASS}`)).toBeNull()
+    expect(doc.querySelector(`[${SPLIT_ATTR}]`)).toBeNull()
+  })
+
   it('非 side 下签名过期的副本被丢掉：side → only 之后叠加层才到的情况', () => {
     const doc = docOf(IMG_FIGURE)
     const blocks = extract(doc)
