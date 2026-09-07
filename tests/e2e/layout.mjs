@@ -195,7 +195,44 @@ async function measureFrame(page) {
   await page.close()
 }
 
-// ── 论文 3：2312.17141（多面板 flex 图仍并排；正文脚注副本在右侧沟槽）──
+// ── 论文 3：2606.07636v2（5 张表全被 \resizebox 包着；用户反馈"表格越过分割线"）──
+{
+  const page = await openSide('2606.07636v2')
+  // 五张表散在全篇：按视口翻译，得逐张滚到才会翻，不然只量得到第一张
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(n => document.querySelectorAll('.ltx_transformed_outer')[n]?.scrollIntoView({ block: 'center' }), i)
+    await sleep(400)
+  }
+  await quiesce(page)
+  await page.evaluate(() => document.querySelector('.ltx_transformed_outer')?.scrollIntoView({ block: 'center' }))
+  await sleep(300)
+  const tables = await page.evaluate(() => {
+    const doc = document.querySelector('article.ltx_document')
+    const dx = doc.getBoundingClientRect().x
+    const col = Number.parseFloat(getComputedStyle(doc).gridTemplateColumns.split(' ')[0])
+    const gap = Number.parseFloat(getComputedStyle(doc).columnGap) || 0
+    const rows = []
+    for (const orig of document.querySelectorAll('table.ltx_tabular:not(.axt-t)')) {
+      const clone = orig.nextElementSibling?.classList.contains('axt-t') ? orig.nextElementSibling : null
+      if (!clone) continue
+      const r = el => { const b = el.getBoundingClientRect(); return { l: Math.round(b.x - dx), r: Math.round(b.right - dx) } }
+      const a = r(orig)
+      const b = r(clone)
+      // LaTeXML 的 \resizebox 包裹层带着 .ltx_inline-block，曾被当成行内上下文排除在配对之外：
+      // 两张表成了 inline-table，在通栏的壳子里居中排成一行、横跨分割线
+      rows.push({ id: orig.id, fit: orig.getAttribute('data-axt-fit'), ok: a.l >= -1 && a.r <= col + 1 && b.l >= col + gap - 1 && b.r <= 2 * col + gap + 1, a, b })
+    }
+    return { col, gap, rows }
+  })
+  const bad = tables.rows.filter(t => !t.ok)
+  check('\\resizebox 包着的表格：原表在左栏、译表在右栏，都不越界',
+    tables.rows.length === 5 && bad.length === 0,
+    `${tables.rows.length - bad.length}/${tables.rows.length} 对；栏宽 ${tables.col}${bad.length ? `；越界的 ${bad.map(t => `${t.id} ${t.a.l}–${t.a.r} / ${t.b.l}–${t.b.r}`).join('、')}` : ''}`)
+  await page.screenshot({ path: `${SHOTS}/layout-resizebox-table.png` })
+  await page.close()
+}
+
+// ── 论文 4：2312.17141（多面板 flex 图仍并排；正文脚注副本在右侧沟槽）──
 {
   const page = await openSide('2312.17141')
   await page.setViewportSize({ width: 2000, height: 900 })
