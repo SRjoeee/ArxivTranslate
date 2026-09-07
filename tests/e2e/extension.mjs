@@ -19,6 +19,10 @@ const PAPER3 = process.env.AXT_PAPER3 ?? '2312.17141'
 /** 第四篇：12 篇 fixture 里指向翻译块的锚点最多的一篇（64 个），只译文模式的锚点用例靠它 */
 const PAPER4 = process.env.AXT_PAPER4 ?? '2609.00246'
 const GOOGLE = 'translate-pa.googleapis.com'
+/** 请求收尾的两个事件：成功与失败都要把 end 记上，否则它会一直算在飞 */
+const SETTLED_EVENTS = ['requestfinished', 'requestfailed']
+/** google-web 声明的 maxConcurrent：截住端点后能同时挂住几发，也就是"槽位占满"的判据 */
+const GOOGLE_SLOTS = 2
 
 const results = []
 const check = (name, ok, detail) => {
@@ -78,25 +82,31 @@ async function openPaper(id, host) {
     if (entry) { entry.end = Date.now(); inFlight.delete(request) }
   }
   context.on('request', onRequest)
-  for (const event of ['requestfinished', 'requestfailed']) context.on(event, onSettled)
+  for (const event of SETTLED_EVENTS) context.on(event, onSettled)
   page.once('close', () => {
     context.off('request', onRequest)
-    for (const event of ['requestfinished', 'requestfailed']) context.off(event, onSettled)
+    for (const event of SETTLED_EVENTS) context.off(event, onSettled)
   })
-  // 圆环不能靠轮询：首屏全命中缓存时 36 ms 就结束了，200 ms 的轮询必然扑空。挂个 MutationObserver 记峰值
+  // 圆环不能靠轮询：首屏全命中缓存时 36 ms 就结束了，200 ms 的轮询必然扑空。挂个 MutationObserver。
+  // **数插入次数，不采样实时数量**（issue #82）：MutationObserver 的回调在微任务检查点批量触发，
+  // 插入与移除落在同一批里时，回调里 querySelectorAll 数到的已经是 0——峰值就永远是 0。
+  // 记录被插入过的圆环节点数与时序无关
   await page.addInitScript(() => {
-    window.__axtSpinnerPeak = 0
-    const bump = () => {
-      const n = document.querySelectorAll('.axt-spinner').length
-      if (n > window.__axtSpinnerPeak) window.__axtSpinnerPeak = n
+    window.__axtSpinnersSeen = 0
+    const count = node => {
+      if (node.nodeType !== 1) return 0
+      const el = node
+      return (el.classList?.contains('axt-spinner') ? 1 : 0) + (el.querySelectorAll?.('.axt-spinner').length ?? 0)
     }
-    const start = () => new MutationObserver(bump).observe(document.documentElement, { childList: true, subtree: true })
+    const start = () => new MutationObserver(list => {
+      for (const m of list) for (const node of m.addedNodes) window.__axtSpinnersSeen += count(node)
+    }).observe(document.documentElement, { childList: true, subtree: true })
     if (document.documentElement) start()
     else document.addEventListener('readystatechange', start, { once: true })
   })
   await page.goto(`https://arxiv.org/html/${id}#axt-translate`, { waitUntil: 'domcontentloaded' })
   const originalTitle = await page.title()
-  return { page, logs, requests, originalTitle, spinnersSeen: () => page.evaluate(() => window.__axtSpinnerPeak ?? 0).catch(() => 0) }
+  return { page, logs, requests, originalTitle, spinnersSeen: () => page.evaluate(() => window.__axtSpinnersSeen ?? 0).catch(() => 0) }
 }
 
 async function waitForLog(logs, pattern, timeoutMs) {
@@ -107,6 +117,79 @@ async function waitForLog(logs, pattern, timeoutMs) {
     await sleep(250)
   }
   return null
+}
+
+/**
+ * 截住发往 host 的请求：route 处理器只登记、不放行，请求就一直挂着占着一个并发槽。
+ *
+ * 为什么要截（issue #82，Codex 在 #95 追加）：撤销类断言必须在"队列里确实还有没发出去的活"
+ * 那一刻动手，否则"撤掉之后零新请求"是空断言。这件事从 DOM 反推是推不出来的——命中缓存的块在
+ * 查缓存**之前**就挂上了 pending 节点、根本不会产生请求，刚收尾还没渲染的请求也会被算漏，
+ * 而且一个块不一定只对应一段（实测 215 个块发出 249 段），减法在大页上能算成负数。
+ * 截住之后就不用推：**有多少发真的打出去了，直接数 route 命中次数**；
+ * 也没有任何东西会完成，所以 pending 数一旦稳住，就说明查缓存那一轮已经跑完。
+ */
+async function stallEndpoint(host) {
+  const held = []
+  const pattern = `**://${host}/**`
+  const handler = route => {
+    // 原样留着请求体：下面靠它把"队列补上的新批次"和"同一批被重发"区分开
+    const body = route.request().postData() ?? ''
+    let items = 0
+    try {
+      const parsed = JSON.parse(body || 'null')
+      if (Array.isArray(parsed?.[0]?.[0])) items = parsed[0][0].length
+    } catch {
+      // 不是 JSON 就记 0
+    }
+    // 不 continue / fulfill / abort：请求停在这里不动，占着一个并发槽
+    held.push({ t: Date.now(), items, body, route })
+  }
+  await context.route(pattern, handler)
+  return {
+    held,
+    /** 放开截住的请求，把并发槽腾出来。队列还活着的话，下一批马上就会补上 */
+    release: async () => { for (const h of held.slice()) await h.route.abort().catch(() => undefined) },
+    /**
+     * 先摘处理器再把**所有**截住过的请求结掉（Codex 在 #95 指出）：撤销真出了回归时，release
+     * 之后还会有请求进到处理器里被挂住，`unroute` 只是摘掉处理器、不会结掉它已经挂住的那些。
+     * 留着不结就一直占着 google 那对队列的并发槽，后面的导航 / 降级 / only 模式几段会莫名其妙地挂住
+     */
+    off: async () => {
+      await context.unroute(pattern, handler)
+      for (const h of held) await h.route.abort().catch(() => undefined)
+    },
+  }
+}
+
+/**
+ * 把页面推到"并发槽占满、队列里堆着一大批没发出去的活"，再做一次**正向验证**：
+ * 放开一个槽位，看队列会不会补上一个**新的**批次——补上了才算真的观察到了未发出的批次，
+ * 这条断言的前置条件才成立（Codex 在 #95 要的就是"直接观察到或造出未发出的批次"）。
+ *
+ * 判"新"要看请求体，不能只看请求数（Codex 在 #95 追加）：abort 掉截住的那一发时，provider 自己的
+ * AbortSignal 并没有 abort，`google-web` 会把这次 fetch 失败归成可重试的 `network`，队列照默认
+ * 退避重发同一批。只数请求数的话，那次重试会被当成"队列里还有活"，正向验证反而变成空的。
+ * 同一批重发的请求体是逐字一样的，所以**出现没见过的请求体**才是新批次。
+ */
+async function fillQueue(page, stall, { slots = GOOGLE_SLOTS, timeoutMs = 40_000 } = {}) {
+  await scrollThrough(page) // 端点截着，什么都完成不了，整篇的块都会停在 pending
+  const t0 = Date.now()
+  let samples = []
+  let pending = 0
+  while (Date.now() - t0 < timeoutMs) {
+    await sleep(400)
+    pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
+    samples = [...samples.slice(-2), pending]
+    if (stall.held.length >= slots && samples.length === 3 && samples.every(n => n === pending) && pending > 0) break
+  }
+  const items = stall.held.reduce((n, h) => n + h.items, 0)
+  const requests = stall.held.length
+  const known = new Set(stall.held.map(h => h.body))
+  await stall.held[0]?.route.abort().catch(() => undefined)
+  const isNew = () => stall.held.some(h => h.body && !known.has(h.body))
+  for (let i = 0; i < 40 && !isNew(); i++) await sleep(200)
+  return { requests, items, pending, confirmed: isNew(), extra: stall.held.length - requests }
 }
 
 /** 任一 1 秒窗口内的最多请求数 */
@@ -258,7 +341,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 换一篇数学密集的：PAPER 首屏没有行内公式，检查会空跑
   const dashedPage = await context.newPage()
   await dashedPage.goto('https://arxiv.org/html/2609.04056v1#axt-translate', { waitUntil: 'domcontentloaded' })
-  await dashedPage.waitForFunction(() => document.querySelectorAll('.axt-t math').length > 0, null, { timeout: 60_000 }).catch(() => undefined)
+  // 两个条件都要等到（issue #82）：只等"出现第一个带公式的译文"的话，`<html>` 上的 data-axt-style
+  // 可能还没写上——enable() 在 startTranslation 里写它，而 #axt-translate 触发的会话与设置页刚存的预设
+  // 之间隔着一次配置读取。一次实测就撞到过：量到 22 个公式、块级 none/solid，重跑同一构建是 51 个 underline/dashed
+  await dashedPage.waitForFunction(
+    () => document.documentElement.dataset.axtStyle === 'dashed' && document.querySelectorAll('.axt-t math').length > 0,
+    null, { timeout: 60_000 },
+  ).catch(() => undefined)
+  // 再等公式数稳定：翻译还在进行时读到的是半截状态
+  let stableMaths = -1
+  for (let i = 0; i < 40; i++) {
+    await sleep(500)
+    const n = await dashedPage.evaluate(() => document.querySelectorAll('.axt-t math').length)
+    if (n === stableMaths && n > 0) break
+    stableMaths = n
+  }
   const dashed = await dashedPage.evaluate(() => {
     const deco = el => { const cs = getComputedStyle(el); return `${cs.textDecorationLine}/${cs.textDecorationStyle}` }
     const maths = [...document.querySelectorAll('.axt-t math')]
@@ -278,8 +375,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const { page, logs, requests, originalTitle, spinnersSeen } = await openPaper(PAPER, GOOGLE)
   const first = idleOf(await waitForLog(logs, IDLE, 120_000))
   check(`论文 ${PAPER}：不滚动只翻首屏附近（google-web）`, !!first && first.requested > 0 && first.requested < first.total && first.done === first.requested && first.failed === 0, first?.text ?? '(no idle line)')
-  const spinnerPeak = await spinnersSeen()
-  check('请求期间出现过加载圆环（§7.6）', spinnerPeak > 0, `最多同时 ${spinnerPeak} 个圆环`)
+  const spinners = await spinnersSeen()
+  check('请求期间插入过加载圆环（§7.6）', spinners > 0, `插入过 ${spinners} 个圆环`)
   const translated = await page.title()
   check('标签页标题被翻译', translated !== originalTitle && /[\u4e00-\u9fff]/.test(translated), `${originalTitle} → ${translated}`)
   await page.screenshot({ path: `${SHOTS}/paper-first-screen.png` })
@@ -369,57 +466,42 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 // 请求搬回 background 之后，销毁 content script 不再销毁这些工作。不撤的话，关掉的标签页还会
 // 继续发付费请求，直到批次耗尽预算（单批最长 180 秒）。
 {
-  const seen = []
-  // 监听器挂在 context 上且**不随页面关闭移除**：要观察的正是页面消失之后还有没有请求
-  const onRequest = request => { if (request.url().includes(GOOGLE)) seen.push(Date.now()) }
-  context.on('request', onRequest)
+  const stall = await stallEndpoint(GOOGLE)
   const page = await context.newPage()
   await page.goto(`https://arxiv.org/html/${PAPER2}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  // 先把整篇滚一遍：不这么做队列里没积压，关掉之后本来就不会有请求，断言等于空转
+  // 队列里得真有还没发出去的活，关掉之后才谈得上"还会不会发请求"；不这么做断言等于空转
   // （首次写这条时首屏正好全命中缓存，只发出 2 个请求，测不出任何东西）
-  const height = await page.evaluate(() => document.documentElement.scrollHeight)
-  for (let y = 0; y < height; y += 700) {
-    await page.evaluate(top => window.scrollTo(0, top), y)
-    await sleep(40)
-  }
-  const t0 = Date.now()
-  while (Date.now() - t0 < 40_000 && seen.length < 5) await sleep(200)
-  const before = seen.length
-  const pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
-  const tClose = Date.now()
+  const q = await fillQueue(page, stall)
+  const before = stall.held.length
   await page.close()
-  await sleep(8_000)
-  const late = seen.filter(t => t > tClose + 500).length
-  context.off('request', onRequest)
-  check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）', before >= 5 && pending > 0 && late === 0,
-    `关闭前 ${before} 个请求、${pending} 个块还在等；关闭 0.5 s 后新增 ${late} 个`)
+  await sleep(500)
+  await stall.release() // 把槽位腾出来：队列还活着的话，下一批立刻就会打出来
+  await sleep(6_000)
+  const late = stall.held.length - before
+  await stall.off()
+  check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）',
+    q.confirmed && q.requests === GOOGLE_SLOTS && late === 0,
+    `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列补上 ${q.extra} 发、其中${q.confirmed ? '有没见过的请求体（确有排队的新批次，不是同一批重发）' : '全是同一批重发——队列里没有排队的活，这条断言无效'}；关掉标签页再放开全部槽位后新增 ${late} 个`)
 }
 
 // ── 导航离开：tabs.onRemoved 不覆盖这种情况（Codex 在 #59 指出）──────────
 {
-  const seen = []
-  const onRequest = request => { if (request.url().includes(GOOGLE)) seen.push(Date.now()) }
-  context.on('request', onRequest)
+  const stall = await stallEndpoint(GOOGLE)
   const page = await context.newPage()
   await page.goto(`https://arxiv.org/html/${PAPER3}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  const height = await page.evaluate(() => document.documentElement.scrollHeight)
-  for (let y = 0; y < height; y += 700) {
-    await page.evaluate(top => window.scrollTo(0, top), y)
-    await sleep(40)
-  }
-  const t0 = Date.now()
-  while (Date.now() - t0 < 40_000 && seen.length < 5) await sleep(200)
-  const before = seen.length
-  const pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
-  const tLeave = Date.now()
+  const q = await fillQueue(page, stall)
+  const before = stall.held.length
   // 跳到非 arXiv 页面：content script 没了，也永远不会再发新的 scope 过来
   await page.goto('https://example.com/', { waitUntil: 'domcontentloaded' })
-  await sleep(8_000)
-  const late = seen.filter(t => t > tLeave + 500).length
-  context.off('request', onRequest)
+  await sleep(500)
+  await stall.release()
+  await sleep(6_000)
+  const late = stall.held.length - before
+  await stall.off()
   await page.close()
-  check('导航离开后 background 不再发新请求（会话随导航撤掉）', before >= 5 && pending > 0 && late === 0,
-    `离开前 ${before} 个请求、${pending} 个块还在等；离开 0.5 s 后新增 ${late} 个`)
+  check('导航离开后 background 不再发新请求（会话随导航撤掉）',
+    q.confirmed && q.requests === GOOGLE_SLOTS && late === 0,
+    `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列补上 ${q.extra} 发、其中${q.confirmed ? '有没见过的请求体（确有排队的新批次，不是同一批重发）' : '全是同一批重发——队列里没有排队的活，这条断言无效'}；导航离开再放开全部槽位后新增 ${late} 个`)
 }
 
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
@@ -482,13 +564,68 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await options.getByRole('button', { name: '保存', exact: true }).click()
   await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 
+  // 401 回来的时刻要记下来：断言"这之后不再有新请求"，而不是数首波有几个——
+  // 首波个数取决于令牌桶的突发节奏，快一点慢一点都会让 ≤ 20 这条落空（issue #82）
+  let firstAuthFailure = Number.POSITIVE_INFINITY
+  // 401 到达的**那一刻已经发出过几个请求**。用序号切、不用时间切（Codex 在 #95 指出）：
+  // 时间上留任何容差，都会把"槽位一腾出就立刻补发"的那些划到 401 之前、两个判据都管不到。
+  // 已经在飞的请求，它们的 `request` 事件必然早于这个 401 的 `response` 事件，序号就是精确的分界
+  let sentAtAuth = -1
+  // 401 与 403 都算（Codex 在 #95 指出）：网关用 403 拒掉假 key 时，`openai-compat` 一样归成 auth、
+  // retry-policy 一样按整队排空处理，只听 401 会让这条断言在产品行为正确时反而红
+  const onAuthResponse = response => {
+    if (!response.url().includes('openrouter.ai')) return
+    if (response.status() !== 401 && response.status() !== 403) return
+    if (Number.isFinite(firstAuthFailure)) return
+    firstAuthFailure = Date.now()
+    sentAtAuth = requests.length
+  }
+  context.on('response', onAuthResponse)
   const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
   const done = await waitForLog(logs, IDLE, 60_000)
-  await sleep(2_000)
-  // 首波只有首屏附近的几批（令牌桶突发 20 封顶）；第一个 401 回来就排空整队，不该再有第二波
-  check('错 key + 降级关闭：首波 ≤ 20 个请求，auth 后整条队列停下（不重试、没有第二波）', requests.length <= 20 && /fatal: auth/.test(done?.text ?? ''), `${requests.length} 个请求；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
-  const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
+  // 报 fatal 之后**把整篇滚一遍**：这才是能证伪的做法（Codex 在 #95 指出旧写法的 1 秒窗口太宽）。
+  // 旧写法只看首个 401 之后 1 秒内有没有新请求，可那一秒里本来就还有同一波在飞的批次要收尾，
+  // 数字是几都说明不了问题；实测那一秒里正好还有第二波 7 个请求，被窗口整个盖住。
+  //
+  // 第二波本身不是重试：8 个批次占满并发槽同时挨 401，剩下的块是**之后**才攒成批入队的，
+  // 队列的 failQueue 只排空当下排着的那些。真正要守的承诺是**会话整个停下**——
+  // 292 个块里只碰了首屏那一小撮，剩下 200 多个再也不发。滚一遍就是对这条承诺的证伪试验：
+  // fatal 没把观察器摘掉的话，剩下的块会逐屏进入视口继续烧配额。
+  // idle 那行的时刻取自 console 监听器、请求时刻取自 request 监听器，各自 Date.now()，先后可能差几毫秒。
+  // 这点容差在这里遮不住任何东西：401 之后的请求已经由下面按序号切出来的 afterAuth 全数管着，
+  // 这一条只负责"滚一遍之后还有没有"，那种请求会落在 idle 之后好几秒
+  const EVENT_JITTER_MS = 50
   const idle = idleOf(done)
+  await scrollThrough(page)
+  await sleep(3_000)
+  context.off('response', onAuthResponse)
+  // 首个 401 到 idle 之间那一段不能不看（Codex 在 #95 追加）。但它**今天不是 0**，
+  // 而且不是回归：实测第一个 401 之后 75~279 ms 必然还有一波，因为 `failQueue` 只排空当下排在
+  // RequestQueue 里的任务，那会儿剩下的块还在 BatchQueue 里攒批、不在场（issue #96 记着，附时间线）。
+  // 所以这一波纳入检查、设上界，而不是像旧写法那样用一秒窗口把它豁免掉。判据是**它必须是一次冲刷**：
+  // 401 之后发出的请求彼此落在同一拍里（实测跨度 0~1 ms，都是 BatchQueue 一次攒完就全推出去的）。
+  // 这一条正好卡住 Codex 点名的两种回归：队列真的没排空的话，批次会随槽位陆续腾出而摊开好几秒；
+  // 失败的批次被重试的话，退避至少 1 秒，也落在同一拍之外。#96 修好之后这里直接收成 afterAuth.length === 0
+  // （那时跨度为 0 依然成立，这条不必再改）。
+  const beforeAuth = requests.slice(0, Math.max(sentAtAuth, 0))
+  const afterAuth = requests.slice(Math.max(sentAtAuth, 0))
+  const afterIdle = requests.filter(r => r.t > (done?.t ?? 0) + EVENT_JITTER_MS)
+  // requests 是按发出顺序 push 的，首尾之差就是这一波的跨度。
+  // 只看跨度的话单发是盲区（一发的跨度恒为 0，几秒之后漏出来的那一发也照样过，Codex 在 #95 指出），
+  // 所以再压一个上界：这一波必须整个落在 401 之后 1 秒内。实测最迟的一发在 +283 ms，
+  // 三倍余量；而队列真没排空 / 批次被重试时，退避本身就把它推到 1 秒之外
+  const POST_AUTH_FLUSH_MS = 100
+  const POST_AUTH_WINDOW_MS = 1_000
+  const afterAuthSpan = afterAuth.length > 1 ? afterAuth[afterAuth.length - 1].t - afterAuth[0].t : 0
+  const afterAuthLast = afterAuth.length > 0 ? afterAuth[afterAuth.length - 1].t - firstAuthFailure : 0
+  const offsets = requests.map(r => Math.round(r.t - firstAuthFailure)).sort((a, b) => a - b)
+  check('错 key + 降级关闭：401 之后整个会话停下，滚到底也不再发请求',
+    Number.isFinite(firstAuthFailure) && sentAtAuth >= 0 && /fatal: auth/.test(done?.text ?? '')
+      && (idle?.requested ?? 0) < (idle?.total ?? 0) // 还有没请求过的块，滚一遍才证伪得了
+      && afterAuthSpan <= POST_AUTH_FLUSH_MS && afterAuthLast <= POST_AUTH_WINDOW_MS // 401 之后只有一次冲刷，不是陆续派发、也不是重试
+      && afterIdle.length === 0,
+    `${idle?.requested}/${idle?.total} 个块请求过，共 ${requests.length} 个请求（相对首个 401 的时刻 ${offsets.join('/')} ms）；401 之前 ${beforeAuth.length} 个、之后 ${afterAuth.length} 个、跨度 ${afterAuthSpan} ms、最迟一发 +${afterAuthLast} ms（#96：应为 0，现在是 BatchQueue 里攒着的那一波一次推完）；报 fatal 后整篇滚一遍新增 ${afterIdle.length} 个；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
+  const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
   check('失败块旁有重试 / 原因小部件（§7.6）', !!idle && widgets > 0 && widgets === idle.failed, `${widgets} 个小部件，${idle?.failed ?? '?'} 个失败块`)
   await page.close()
 }
