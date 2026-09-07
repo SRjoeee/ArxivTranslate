@@ -150,7 +150,15 @@ async function stallEndpoint(host) {
     held,
     /** 放开截住的请求，把并发槽腾出来。队列还活着的话，下一批马上就会补上 */
     release: async () => { for (const h of held.slice()) await h.route.abort().catch(() => undefined) },
-    off: () => context.unroute(pattern, handler),
+    /**
+     * 先摘处理器再把**所有**截住过的请求结掉（Codex 在 #95 指出）：撤销真出了回归时，release
+     * 之后还会有请求进到处理器里被挂住，`unroute` 只是摘掉处理器、不会结掉它已经挂住的那些。
+     * 留着不结就一直占着 google 那对队列的并发槽，后面的导航 / 降级 / only 模式几段会莫名其妙地挂住
+     */
+    off: async () => {
+      await context.unroute(pattern, handler)
+      for (const h of held) await h.route.abort().catch(() => undefined)
+    },
   }
 }
 
@@ -559,8 +567,10 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 401 回来的时刻要记下来：断言"这之后不再有新请求"，而不是数首波有几个——
   // 首波个数取决于令牌桶的突发节奏，快一点慢一点都会让 ≤ 20 这条落空（issue #82）
   let firstAuthFailure = Number.POSITIVE_INFINITY
+  // 401 与 403 都算（Codex 在 #95 指出）：网关用 403 拒掉假 key 时，`openai-compat` 一样归成 auth、
+  // retry-policy 一样按整队排空处理，只听 401 会让这条断言在产品行为正确时反而红
   const onAuthResponse = response => {
-    if (response.url().includes('openrouter.ai') && response.status() === 401) {
+    if (response.url().includes('openrouter.ai') && (response.status() === 401 || response.status() === 403)) {
       firstAuthFailure = Math.min(firstAuthFailure, Date.now())
     }
   }
@@ -591,16 +601,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const beforeAuth = requests.filter(r => r.t <= firstAuthFailure + EVENT_JITTER_MS)
   const afterAuth = requests.filter(r => r.t > firstAuthFailure + EVENT_JITTER_MS)
   const afterIdle = requests.filter(r => r.t > (done?.t ?? 0) + EVENT_JITTER_MS)
-  // requests 是按发出顺序 push 的，首尾之差就是这一波的跨度
+  // requests 是按发出顺序 push 的，首尾之差就是这一波的跨度。
+  // 只看跨度的话单发是盲区（一发的跨度恒为 0，几秒之后漏出来的那一发也照样过，Codex 在 #95 指出），
+  // 所以再压一个上界：这一波必须整个落在 401 之后 1 秒内。实测最迟的一发在 +283 ms，
+  // 三倍余量；而队列真没排空 / 批次被重试时，退避本身就把它推到 1 秒之外
   const POST_AUTH_FLUSH_MS = 100
+  const POST_AUTH_WINDOW_MS = 1_000
   const afterAuthSpan = afterAuth.length > 1 ? afterAuth[afterAuth.length - 1].t - afterAuth[0].t : 0
+  const afterAuthLast = afterAuth.length > 0 ? afterAuth[afterAuth.length - 1].t - firstAuthFailure : 0
   const offsets = requests.map(r => Math.round(r.t - firstAuthFailure)).sort((a, b) => a - b)
   check('错 key + 降级关闭：401 之后整个会话停下，滚到底也不再发请求',
     Number.isFinite(firstAuthFailure) && /fatal: auth/.test(done?.text ?? '')
       && (idle?.requested ?? 0) < (idle?.total ?? 0) // 还有没请求过的块，滚一遍才证伪得了
-      && afterAuthSpan <= POST_AUTH_FLUSH_MS // 401 之后只有一次冲刷，不是陆续派发、也不是重试
+      && afterAuthSpan <= POST_AUTH_FLUSH_MS && afterAuthLast <= POST_AUTH_WINDOW_MS // 401 之后只有一次冲刷，不是陆续派发、也不是重试
       && afterIdle.length === 0,
-    `${idle?.requested}/${idle?.total} 个块请求过，共 ${requests.length} 个请求（相对首个 401 的时刻 ${offsets.join('/')} ms）；401 之前 ${beforeAuth.length} 个、之后 ${afterAuth.length} 个、跨度 ${afterAuthSpan} ms（#96：应为 0，现在是 BatchQueue 里攒着的那一波一次推完）；报 fatal 后整篇滚一遍新增 ${afterIdle.length} 个；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
+    `${idle?.requested}/${idle?.total} 个块请求过，共 ${requests.length} 个请求（相对首个 401 的时刻 ${offsets.join('/')} ms）；401 之前 ${beforeAuth.length} 个、之后 ${afterAuth.length} 个、跨度 ${afterAuthSpan} ms、最迟一发 +${afterAuthLast} ms（#96：应为 0，现在是 BatchQueue 里攒着的那一波一次推完）；报 fatal 后整篇滚一遍新增 ${afterIdle.length} 个；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
   const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
   check('失败块旁有重试 / 原因小部件（§7.6）', !!idle && widgets > 0 && widgets === idle.failed, `${widgets} 个小部件，${idle?.failed ?? '?'} 个失败块`)
   await page.close()
