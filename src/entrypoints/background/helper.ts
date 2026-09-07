@@ -136,6 +136,9 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
     const opened = deps.connect()
     port = opened
     opened.onMessage.addListener(raw => {
+      // 端口已经被丢掉（超时、握手失败、撤销）：Chrome 里排着的回应还会送到这个监听器，一律忽略——
+      // 否则陈旧连接的 ping 回应会把 known 写成旧 helper 的版本，新连接跳过握手（Codex 在 #87 指出）
+      if (port !== opened) return
       const reply = raw as Record<string, unknown> | null
       const id = typeof reply?.id === 'string' ? reply.id : ''
       const entry = settle(id)
