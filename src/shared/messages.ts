@@ -5,6 +5,7 @@ import type { Progress } from '@/core/pipeline/run'
 import type { Mode } from '@/core/renderer'
 import type { ProviderStatus } from '@/providers/transport'
 import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
+import type { HelperStatus, OcrCall, OcrMessageResponse } from './ocr'
 
 export interface PageStatus {
   /** 当前页面的 arXiv id；不是 arXiv HTML 页面时为 null */
@@ -43,6 +44,10 @@ export interface AxtMessages {
   'axt:retry-failed': { request: Record<never, never>; response: { retried: number } }
   /** popup → background：某个引擎刚被用户修好（语言包下载完）；重建引擎链，让它重新参与降级（§8.5） */
   'axt:engine-ready': { request: { id: string }; response: { reset: boolean } }
+  /** options / content → background：本机 OCR helper 是否可用（DESIGN §15.4 的 ping 检测） */
+  'axt:helper-status': { request: Record<never, never>; response: HelperStatus }
+  /** content → background：给一张位图做 OCR；结果按 imageHash 缓存（§15.2） */
+  'axt:ocr': { request: OcrCall; response: OcrMessageResponse }
 }
 
 export type AxtMessageType = keyof AxtMessages

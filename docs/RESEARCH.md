@@ -193,7 +193,7 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 
 ## 4. 参考文件地图（DESIGN.md §4 各模块）
 
-仓库在 `reference/`（gitignore，只读）：kiss-translator@c95bd46、read-frog@9b44f82、FluentRead@536a819。核心模块只借鉴设计思路。
+仓库在 `reference/`（gitignore，只读）：kiss-translator@c95bd46、read-frog@9b44f82、FluentRead@536a819；2026-09-07 加 macos-vision-ocr@91a236a（MIT）、ImageTrans_chrome_extension@ef11ca7（GPL-3.0）。核心模块只借鉴设计思路。
 
 | 模块 | 参考 |
 |---|---|
@@ -205,6 +205,7 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 | `providers`（LLM） | Read Frog `src/utils/providers/model.ts`（AI SDK 模型工厂）、`src/entrypoints/background/llm-generate-text.ts`、`translate/api/ai.ts`；KISS `src/apis/trans.js`（`genOpenAI` / `genClaude` / `genGemini` 的请求拼装） |
 | `google-gtx` / `translateHtml` | Read Frog `translate/api/google-legacy.ts`（gtx）、`translate/api/google.ts`（translateHtml）；KISS `src/apis/trans.js`（`genGoogle` / `genGoogle2`）、`src/config/api.js`（端点表） |
 | `chrome-builtin` | KISS `src/libs/builtinAI.js`（`Translator.availability` / `create` 的封装与降级） |
+| `image`（§15 图片翻译） | helper：`macos-vision-ocr/Sources/ocr.swift@91a236a`（`extractText` / `extractSubBounds`，Vision 调用与四角坐标）；叠加层：`ImageTrans_chrome_extension/ImageTrans/getImage.js@ef11ca7` 的 `renderTranslatedImageDOM`（:1607）、`fitBoxFontSize`（:1535）、`detectBackgroundColor`（:1405）、`wrapLines`（:1924）；视口调度 `startAutoTranslate` / `observeImage` / `processQueue`（:2780–2930）；`background.js` 的 `computeImageHash`（:115）。不看它替换 img src 的 `replaceImgSrc` |
 | `cache` | FluentRead `src/services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层 + Dexie）、`src/app/background/handlers/translationCache.ts`；Read Frog `translate/in-memory-translation-cache.ts`；KISS `src/libs/cache.js`、`cacheDigest.js` |
 | `config` | Read Frog `src/utils/config/storage.ts`、`migration.ts`、`migration-scripts/`（带版本号的迁移函数） |
 | UI / Shadow DOM | Read Frog `src/entrypoints/side.content/index.tsx`、`selection.content/index.tsx`（WXT `createShadowRootUi`）；FluentRead `entrypoints/shadowBridge.content.ts` |

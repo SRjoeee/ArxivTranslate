@@ -12,6 +12,11 @@ import type { TranslationTransport } from '@/providers/transport'
 export interface SessionRouter {
   /** 取这次调用该用的链：带 scope 的绑定到它开始时的那条，不带的（设置页连接测试）用当前那条 */
   forCall(scope: string | undefined, tabId: number | undefined): Promise<TranslationTransport>
+  /**
+   * 只记下 scope 属于哪个标签页，不建链、不等待：图片 OCR 的第一条请求要绑 tab 才撤得到，
+   * 但不能让它等翻译链构造（Codex 在 #87 指出）。同一标签页的旧 scope 顺手撤掉
+   */
+  bind(scope: string, tabId: number | undefined): void
   /** 撤掉这些 scope 并解绑，返回撤掉的条数 */
   drop(scopes: readonly string[]): Promise<number>
   /** 标签页关闭 / 导航：撤掉挂在它上面的会话 */
@@ -27,16 +32,31 @@ export interface SessionRouter {
 
 /**
  * @param current 取「此刻的」链；配置变更后它返回新的一条，已绑定的会话不受影响
+ * @param options.onDrop 每撤掉一个 scope 调一次：翻译队列之外还有别的按 scope 排队的东西（图片 OCR，§15.2），
+ *   撤会话时一起撤；返回它撤掉的条数
  */
-export function createSessionRouter(current: () => Promise<TranslationTransport>): SessionRouter {
-  const sessions = new Map<string, { transport: TranslationTransport; tabId?: number }>()
+export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string) => number } = {}): SessionRouter {
+  /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
+  const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number }>()
+  /**
+   * 撤过的 scope。会话 id 不会重复，撤过的不该再活过来：bind 之后 forCall 正在 `await current()` 时
+   * 标签页关掉了——drop 看到的是"没 transport"就跳过了撤翻译，forCall 回来又把它 set 回去、请求照发
+   *（Codex 在 #87 指出）。forCall 回来发现自己被撤过：不重新绑定，把 scope 在这条链上撤掉再交出去，
+   * 之后带这个 scope 的请求在 translate-service 里直接 aborted
+   */
+  const dropped = new Set<string>()
 
   const drop = async (scopes: readonly string[]): Promise<number> => {
     let cancelled = 0
     for (const scope of scopes) {
       const bound = sessions.get(scope)
       sessions.delete(scope)
-      // 没绑过也要撤：worker 中途重启过，绑定丢了但队列里可能还有这个 scope 的任务
+      dropped.add(scope)
+      // 别的按 scope 排队的东西（图片 OCR）先撤，不等建链：建链可能挂在 Translator.availability() 上（Codex 在 #87 指出）
+      cancelled += options.onDrop?.(scope) ?? 0
+      // 只经 bind 绑过、从没翻过字的会话（bound 有值、没 transport）：这个 worker 里没有它的翻译请求，不用为撤它建一条链。
+      // 完全没绑过的也要撤：worker 中途重启过，绑定丢了但队列里可能还有这个 scope 的任务
+      if (bound && !bound.transport) continue
       const transport = bound?.transport ?? await current()
       cancelled += await transport.cancel(scope)
     }
@@ -50,15 +70,35 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
     async forCall(scope, tabId) {
       if (scope === undefined) return current()
       const bound = sessions.get(scope)
-      if (bound) return bound.transport
-      // 一个标签页同时只有一个会话：出现新 scope 说明上一轮没走 endRun（导航、刷新），把它撤掉
-      if (tabId !== undefined) {
+      if (bound?.transport) return bound.transport
+      if (!bound && dropped.has(scope)) {
+        // 撤过的会话又来请求（worker 里的旧 content 还在发）：给它当前链但先撤掉，请求会直接 aborted
+        const transport = await current()
+        await transport.cancel(scope)
+        return transport
+      }
+      // 一个标签页同时只有一个会话：出现新 scope 说明上一轮没走 endRun（导航、刷新），把它撤掉。
+      // bind 过的（bound 有值、没 transport）已经在 bind 里撤过了
+      if (!bound && tabId !== undefined) {
         const stale = scopesOfTab(tabId)
         if (stale.length > 0) await drop(stale)
       }
       const transport = await current()
-      sessions.set(scope, { transport, ...(tabId !== undefined ? { tabId } : {}) })
+      // 建链期间被撤（关标签页 / 恢复原文）：不复活，补撤这条链上的它
+      if (dropped.has(scope)) {
+        await transport.cancel(scope)
+        return transport
+      }
+      sessions.set(scope, { ...bound, transport, ...(tabId !== undefined ? { tabId } : {}) })
       return transport
+    },
+    bind(scope, tabId) {
+      if (sessions.has(scope) || dropped.has(scope)) return
+      if (tabId !== undefined) {
+        const stale = scopesOfTab(tabId)
+        if (stale.length > 0) void drop(stale)
+      }
+      sessions.set(scope, tabId !== undefined ? { tabId } : {})
     },
     drop,
     dropTab: tabId => drop(scopesOfTab(tabId)),

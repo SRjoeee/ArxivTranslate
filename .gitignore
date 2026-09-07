@@ -30,3 +30,6 @@ reference/
 
 # WXT 生成的类型与 tsconfig
 .wxt/
+
+# Swift helper 的构建产物（DESIGN §15）
+helper/.build/
