@@ -1,0 +1,247 @@
+// A/B 无障碍审计（issue #72，DESIGN §7.4b）：同一篇论文跑两次 axe——不装扩展是基线，装了扩展是对照，
+// 只报「装扩展之后新增」的那些。绝对分数由 arXiv 决定，我们改不了也不该改（§7.4b：改宿主页面的
+// 标题层级 / 地标 / 表头都要改写原文档子树，直接违反 §7.1 的 DOM 不变量），所以门槛只看差集。
+//
+// 这件事之所以要自动化：同事上一轮的审计把 arXiv / LaTeXML 自己的四个问题算到了扩展头上，
+// 当时是手工对照「不装扩展的同一页面」才分清归属的。审计任何注入型扩展都会重复这场误会。
+//
+// 用法：pnpm build && pnpm e2e:a11y   （首次先 npx playwright install chromium）
+// 环境变量：AXT_PAPER 换论文；AXT_HEADED=1 看着跑。
+import { mkdirSync, rmSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import AxeBuilder from '@axe-core/playwright'
+import { chromium } from 'playwright'
+
+const HERE = fileURLToPath(new URL('.', import.meta.url))
+const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
+const PROFILE = `${HERE}.profile-a11y`
+const BASE_PROFILE = `${HERE}.profile-a11y-base`
+const SHOTS = `${HERE}.shots`
+/** §7.4b 当初手工实测的就是这篇：h6 1 个、h5 1 个、main 0 个、12 张表里 8 张没 th */
+const PAPER = process.env.AXT_PAPER ?? '2410.00260'
+const PAPER_URL = `https://arxiv.org/html/${PAPER}`
+const IDLE = /session idle: (\d+)\/(\d+) requested of (\d+), (\d+) failed, (\d+) cached/
+const LAUNCH = { channel: 'chromium', headless: !process.env.AXT_HEADED, viewport: { width: 1440, height: 900 } }
+
+/**
+ * 文档级规则：命中**哪个**元素取决于兄弟结构——「页面内容没被 landmark 包住」这类规则，axe 报的是
+ * 最外层那个不在 landmark 里的元素，我们往里插译文就会让它换一个元素来报，按元素求差必然误报。
+ * 这类只比「基线里这条规则出现过没有」：根因是宿主页面一个 landmark 都没有（§7.4b 实测 main 为 0），
+ * 而给别人的页面补 landmark 要改写原文档子树，§7.1 不允许。真出现基线里没有的新规则，照样会报出来。
+ */
+const DOCUMENT_RULES = new Set([
+  'region', 'landmark-one-main', 'landmark-unique', 'landmark-no-duplicate-contentinfo',
+  'landmark-no-duplicate-banner', 'landmark-complementary-is-top-level', 'landmark-banner-is-top-level',
+  'landmark-contentinfo-is-top-level', 'page-has-heading-one', 'bypass',
+])
+
+/**
+ * axe 的判据与 Chrome 实际行为脱节的规则：**照样打印出来**，但不判失败。进这个集合的理由必须是实测。
+ *
+ * - `scrollable-region-focusable`：axe 查的是滚动容器上有没有 `tabindex`。Chrome 从 127 起给
+ *   「没有可聚焦子元素的滚动容器」内置了顺序焦点（keyboard focusable scrollers），本项目最低支持
+ *   Chrome 131（§15.2 的锚点定位），全在范围内。2026-09-07 在 Chrome 153 上对 side 模式的 6 个
+ *   滚动容器逐个做过往返实测（聚焦 → Shift+Tab → Tab），6/6 都回得来。
+ *   另一半理由是就算想按 axe 说的加 `tabindex`，这 6 个里有 3 个是**原节点**（`#alg1.4`、
+ *   `#S2.T1.2`、`#S2.F2`），给它们加属性会违反 §7.1 的 DOM 不变量。
+ */
+const BROWSER_HANDLED = new Set(['scrollable-region-focusable'])
+
+const results = []
+const check = (name, ok, detail) => {
+  results.push({ name, ok, detail })
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${name} — ${detail}`)
+}
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+/** axe 的结果拍平成一条条「某个节点违反了某条规则」 */
+const flatten = result => result.violations.flatMap(v =>
+  v.nodes.map(n => ({ rule: v.id, impact: v.impact ?? '', target: n.target, html: (n.html ?? '').replace(/\s+/g, ' ').slice(0, 140) })))
+
+/**
+ * 在页面里给每条违规算一个**两次运行可比的键**。
+ *
+ * 不能直接拿 axe 给的选择器求差（issue #72 的核心难点）：我们把译文作为兄弟节点插进去，
+ * `:nth-child` 会整体位移，同一个宿主页面的问题在两次运行里选择器就不一样了，全是误报。
+ *
+ * 键的算法：
+ * - 节点落在我们注入的内容里 → 顺着 `data-axt-for` 找回它翻译的那个原块，用**原块**的键。
+ *   §7.4b 说的「双语渲染让 h6 从 1 个变 2 个」由此自动归为继承：译文那份映射回原块，
+ *   而原块的键基线里已经有了。译文上原块没有的问题（漏标 lang、叠加层对比度不足）则映射不到，
+ *   基线里找不到 → 判为新增。
+ * - 映射不回原块的注入内容（图片叠加层、失败控件）→ 键带 `axt:` 前缀，基线里必然没有，一律算新增。
+ * - 宿主元素 → 用它自己的稳定键。
+ *
+ * 稳定键：有 `id` 就用 `#id`（LaTeXML 给绝大多数块都发了 `S1.p1` 这类 id，命中率很高）；
+ * 没有就往上走到最近一个带 id 的祖先，沿途拼标签名与**排除 `.axt-*` 之后**的同标签兄弟序号。
+ * 排除注入的兄弟，正是让两次运行的序号对得上的关键。
+ */
+const KEYED = items => {
+  const INJECTED = '.axt-t, .axt-img, .axt-note-t, .axt-spinner'
+  const stable = el => {
+    const parts = []
+    let cur = el
+    while (cur?.nodeType === 1 && cur !== document.documentElement) {
+      if (cur.id) {
+        parts.unshift(`#${cur.id}`)
+        return parts.join('>')
+      }
+      const parent = cur.parentElement
+      if (!parent) break
+      const tag = cur.tagName.toLowerCase()
+      const sibs = [...parent.children].filter(s => !s.matches(INJECTED) && s.tagName === cur.tagName)
+      parts.unshift(`${tag}[${sibs.indexOf(cur)}]`)
+      cur = parent
+    }
+    return parts.join('>') || '<root>'
+  }
+  // 译文是原块的结构副本，所以「译文里的这个元素」在原块里有个对应元素：
+  // 记下它相对译文根的路径（标签 + 同标签序号），再拿同一条路径从原块走下去
+  const pathTo = (el, root) => {
+    const parts = []
+    let cur = el
+    while (cur && cur !== root) {
+      const parent = cur.parentElement
+      if (!parent) return null
+      const sibs = [...parent.children].filter(s => s.tagName === cur.tagName)
+      parts.unshift([cur.tagName, sibs.indexOf(cur)])
+      cur = parent
+    }
+    return cur === root ? parts : null
+  }
+  const follow = (root, path) => {
+    let cur = root
+    for (const [tag, i] of path) {
+      cur = [...cur.children].filter(s => s.tagName === tag)[i]
+      if (!cur) return null
+    }
+    return cur
+  }
+  return items.map(item => {
+    // target 是数组；多于一项说明穿过了 shadow root（只有失败控件用 shadow，§7.6）
+    const [outer] = item.target
+    const el = typeof outer === 'string' ? document.querySelector(outer) : null
+    if (!el) return { ...item, key: `${item.rule}@?${item.target.join(' ')}`, origin: 'unresolved' }
+    const injected = el.closest(INJECTED)
+    if (!injected) return { ...item, key: `${item.rule}@${stable(el)}`, origin: 'host' }
+    const forId = injected.closest('[data-axt-for]')?.getAttribute('data-axt-for')
+    const original = forId ? document.querySelector(`[data-axt-id="${CSS.escape(forId)}"]`) : null
+    const path = original ? pathTo(el, injected) : null
+    const counterpart = path ? follow(original, path) : null
+    if (counterpart) return { ...item, key: `${item.rule}@${stable(counterpart)}`, origin: 'translation' }
+    // 对不上原块的注入内容（图片叠加层、失败控件，或译文结构与原块不同构）→ 基线里必然没有，算新增
+    return { ...item, key: `${item.rule}@axt:${injected.className}:${stable(injected.parentElement ?? injected)}`, origin: 'injected' }
+  })
+}
+
+/** 跑一次 axe，把每条违规都换算成可比的键 */
+const audit = async page => page.evaluate(KEYED, flatten(await new AxeBuilder({ page }).analyze()))
+
+/** 逐屏往下滚：一次跳到底只会让最后一屏进入观察器 */
+async function scrollThrough(page) {
+  const height = await page.evaluate(() => document.documentElement.scrollHeight)
+  for (let y = 0; y < height; y += 800) {
+    await page.evaluate(top => window.scrollTo(0, top), y)
+    await sleep(120)
+  }
+  await page.evaluate(() => window.scrollTo(0, 0))
+}
+
+/** 静止的判定照 extension.mjs：最后一条 idle 行连续 3 秒没变，且页面上没有 pending 节点 */
+async function waitSettled(page, logs) {
+  let last = null
+  let stable = 0
+  for (let i = 0; i < 90 && stable < 3; i++) {
+    await sleep(1_000)
+    const idle = logs.findLast(l => IDLE.test(l))
+    const pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
+    stable = idle && pending === 0 && idle === last ? stable + 1 : 0
+    last = idle
+  }
+  return last
+}
+
+rmSync(PROFILE, { recursive: true, force: true })
+rmSync(BASE_PROFILE, { recursive: true, force: true })
+mkdirSync(SHOTS, { recursive: true })
+
+// ── 基线：同一篇，不装扩展 ────────────────────────────────────────────────
+const baseContext = await chromium.launchPersistentContext(BASE_PROFILE, LAUNCH)
+const basePage = await baseContext.newPage()
+await basePage.goto(PAPER_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+await sleep(2_000) // arXiv 自己的脚本（主题、ToC、阅读模式）跑完再审
+const baseline = await audit(basePage)
+await basePage.screenshot({ path: `${SHOTS}/a11y-baseline.png` })
+await baseContext.close()
+
+const baseKeys = new Set(baseline.map(i => i.key))
+const baseRuleSet = new Set(baseline.map(i => i.rule))
+const baseRules = [...baseRuleSet].sort()
+// 基线本身必须查出东西来：一条都没有多半是 axe 没跑起来，那样"差集为空"就成了空断言
+check('基线（不装扩展）确实查出了宿主页面自带的问题', baseline.length > 0,
+  `${baseline.length} 条、${baseRules.length} 类：${baseRules.join(' / ')}`)
+
+// ── 对照：装扩展，三种模式各审一次 ────────────────────────────────────────
+const context = await chromium.launchPersistentContext(PROFILE, {
+  ...LAUNCH,
+  args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
+})
+let [worker] = context.serviceWorkers()
+if (!worker) worker = await context.waitForEvent('serviceworker')
+const extId = worker.url().split('/')[2]
+
+const options = await context.newPage()
+await options.goto(`chrome-extension://${extId}/options.html`)
+await options.selectOption('select >> nth=0', 'google-web') // 免费引擎，不花钱
+await options.getByRole('button', { name: '保存', exact: true }).click()
+await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+await options.close()
+
+const logs = []
+const page = await context.newPage()
+page.on('console', m => { if (m.text().includes('[axt]')) logs.push(m.text()) })
+await page.goto(`${PAPER_URL}#axt-translate`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+// 整篇滚一遍：只翻首屏的话，审计覆盖不到正文的绝大部分（§10 的加载模式）
+await scrollThrough(page)
+const settled = await waitSettled(page, logs)
+check('整篇翻完再审计（没有残留的 pending 圆环）', !!settled, settled ?? '(no idle line)')
+
+// popup 按**活动标签页**取状态：论文页不在前台时它渲染的是另一套 UI，模式按钮根本不出现。
+// 所以 goto 之后必须先把论文页提回前台再等按钮，而且全程不能把 popup 提到前台（照 image.mjs 的顺序）
+const popupUrl = `chrome-extension://${extId}/popup.html`
+
+for (const [label, button] of [['stack', '上下'], ['side', '左右'], ['only', '仅译文']]) {
+  const popup = await context.newPage()
+  await popup.goto(popupUrl)
+  await page.bringToFront()
+  const control = popup.getByRole('button', { name: button, exact: true })
+  await control.waitFor({ timeout: 10_000 })
+  await control.click()
+  await popup.close()
+  await sleep(2_000) // side 要拆图与镜像，给版式一点时间落定
+  const withExt = await audit(page)
+  const isNew = i => (DOCUMENT_RULES.has(i.rule) ? !baseRuleSet.has(i.rule) : !baseKeys.has(i.key))
+  const excused = withExt.filter(i => isNew(i) && BROWSER_HANDLED.has(i.rule))
+  const introduced = withExt.filter(i => isNew(i) && !BROWSER_HANDLED.has(i.rule))
+  await page.screenshot({ path: `${SHOTS}/a11y-${label}.png` })
+  const byRule = [...new Set(introduced.map(i => i.rule))].sort()
+  const tail = excused.length > 0 ? `；另有 ${excused.length} 条 ${[...new Set(excused.map(i => i.rule))].join(' / ')} 已按实测豁免` : ''
+  check(`${label} 模式：没有由扩展引入的无障碍问题`, introduced.length === 0,
+    (introduced.length === 0
+      ? `共 ${withExt.length} 条，全部在基线里已有（宿主页面自带）`
+      : `新增 ${introduced.length} 条、${byRule.length} 类：${byRule.join(' / ')}`) + tail)
+  const show = (items, mark) => {
+    for (const item of items.slice(0, 12)) {
+      console.log(`    ${mark} ${item.impact.padEnd(8)} ${item.rule}  [${item.origin}]  ${item.key}`)
+      console.log(`               ${item.html}`)
+    }
+    if (items.length > 12) console.log(`    …… 另有 ${items.length - 12} 条`)
+  }
+  show(introduced, '✗')
+  show(excused, '·') // 豁免的也打出来，免得它悄悄变多
+}
+
+await context.close()
+const pass = results.filter(r => r.ok).length
+console.log(`\n${pass}/${results.length} passed; screenshots in ${SHOTS}`)
+process.exit(pass === results.length ? 0 : 1)
