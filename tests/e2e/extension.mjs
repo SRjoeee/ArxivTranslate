@@ -19,6 +19,12 @@ const PAPER3 = process.env.AXT_PAPER3 ?? '2312.17141'
 /** 第四篇：12 篇 fixture 里指向翻译块的锚点最多的一篇（64 个），只译文模式的锚点用例靠它 */
 const PAPER4 = process.env.AXT_PAPER4 ?? '2609.00246'
 const GOOGLE = 'translate-pa.googleapis.com'
+/** 请求收尾的两个事件：成功与失败都要把 end 记上，否则它会一直算在飞 */
+const SETTLED_EVENTS = ['requestfinished', 'requestfailed']
+/** 撤销类断言用的高视口：要攒出一批**装不进在飞请求**的待译块，900 px 的首屏不够 */
+const BACKLOG_VIEWPORT = { width: 1440, height: 3000 }
+/** 排队量要到这个数才算“确实有没发出去的活”：等待与断言用同一个门槛，超时没攒够就带着数字失败 */
+const MIN_QUEUED = 5
 
 const results = []
 const check = (name, ok, detail) => {
@@ -78,10 +84,10 @@ async function openPaper(id, host) {
     if (entry) { entry.end = Date.now(); inFlight.delete(request) }
   }
   context.on('request', onRequest)
-  for (const event of ['requestfinished', 'requestfailed']) context.on(event, onSettled)
+  for (const event of SETTLED_EVENTS) context.on(event, onSettled)
   page.once('close', () => {
     context.off('request', onRequest)
-    for (const event of ['requestfinished', 'requestfailed']) context.off(event, onSettled)
+    for (const event of SETTLED_EVENTS) context.off(event, onSettled)
   })
   // 圆环不能靠轮询：首屏全命中缓存时 36 ms 就结束了，200 ms 的轮询必然扑空。挂个 MutationObserver。
   // **数插入次数，不采样实时数量**（issue #82）：MutationObserver 的回调在微任务检查点批量触发，
@@ -116,27 +122,72 @@ async function waitForLog(logs, pattern, timeoutMs) {
 }
 
 /**
- * 把页面推到**确实有积压**的状态再返回（issue #82）：撤销类断言要在"队列里还有东西"的那一刻动手，
- * 而不是滚一遍、等几个请求、然后碰运气去读 pending。边滚边看，看到 min 个 pending 就停。
- * 返回观察到的 pending 数；始终没攒起来返回 0，让断言带着数字失败而不是静默通过
+ * 在 context 上记下发往 host 的请求（含攒批段数与收尾时刻），**不随页面关闭摘掉**：
+ * 撤销类断言要观察的正是页面消失之后还有没有请求
  */
-async function awaitBacklog(page, { minPending = 3, ready = () => true, timeoutMs = 40_000 } = {}) {
+function trackRequests(host) {
+  const requests = []
+  const live = new Map()
+  const onRequest = request => {
+    if (!request.url().includes(host)) return
+    let items = 0
+    try {
+      const body = JSON.parse(request.postData() ?? 'null')
+      if (Array.isArray(body?.[0]?.[0])) items = body[0][0].length
+    } catch {
+      // 不是 JSON 就记 0
+    }
+    const entry = { t: Date.now(), items, end: Number.POSITIVE_INFINITY }
+    live.set(request, entry)
+    requests.push(entry)
+  }
+  const onSettled = request => {
+    const entry = live.get(request)
+    if (entry) { entry.end = Date.now(); live.delete(request) }
+  }
+  context.on('request', onRequest)
+  for (const event of SETTLED_EVENTS) context.on(event, onSettled)
+  return {
+    requests,
+    off: () => {
+      context.off('request', onRequest)
+      for (const event of SETTLED_EVENTS) context.off(event, onSettled)
+    },
+  }
+}
+
+/**
+ * 把页面推到**确实有还没发出去的活**的状态再返回（issue #82）：撤销类断言要在队列真有积压的
+ * 那一刻动手，而不是滚一遍、等几个请求、然后碰运气去读 pending。
+ *
+ * 只数 pending 节点不够（Codex 在 #95 指出）：google-web 允许两个请求同时在飞、单发最多 100 段，
+ * 看到的 pending 有可能整个都装在已经发出去的请求里，那"关掉之后零新请求"就是空断言。
+ * 判据改成 **pending 块数 − 在飞段数**：这些块被标了 pending 却不在任何一个已发出的请求里，
+ * 只能是排在队列里等着发。在飞段数取与采样窗口有交叠的全部请求之和，宁可高估——判据只会更严。
+ * 一个块对 google-web 正好对应一段（markup 路径整块发一次），两个数字可比。
+ *
+ * 返回 { pending, inFlight, queued }；始终没攒起来 queued 记 0，让断言带着数字失败而不是静默通过
+ */
+async function awaitBacklog(page, { requests, minQueued = MIN_QUEUED, ready = () => true, timeoutMs = 40_000 } = {}) {
   const t0 = Date.now()
   let top = 0
-  let last = 0
+  let last = { pending: 0, inFlight: 0, queued: 0 }
   while (Date.now() - t0 < timeoutMs) {
+    const before = Date.now()
     const state = await page.evaluate(y => {
       window.scrollTo(0, y)
       return { pending: document.querySelectorAll('.axt-pending').length, height: document.documentElement.scrollHeight }
     }, top)
-    last = state.pending
-    // 两个条件要**同时**成立：翻译已经真的跑起来（ready，通常是"已发出够多请求"），
-    // 且此刻队列里还有积压。只等其中一个都测不出东西——积压先于第一个请求出现（renderPending 在发请求之前）
-    if (state.pending >= minPending && ready()) return state.pending
+    const after = Date.now()
+    const inFlight = requests.filter(r => r.t <= after && r.end >= before).reduce((n, r) => n + r.items, 0)
+    last = { pending: state.pending, inFlight, queued: state.pending - inFlight }
+    // 两个条件要**同时**成立：翻译已经真的跑起来（ready，通常是"已发出够多请求"），且此刻有**没发出去**的活。
+    // 只等其中一个都测不出东西——pending 节点先于第一个请求出现（renderPending 跑在发请求之前）
+    if (last.queued >= minQueued && ready()) return last
     top = top + 700 > state.height ? 0 : top + 700 // 滚到底就回顶上再来一轮，直到两个条件对齐
     await sleep(120)
   }
-  return ready() ? last : 0
+  return ready() ? last : { ...last, queued: 0 }
 }
 
 /** 任一 1 秒窗口内的最多请求数 */
@@ -413,44 +464,42 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 // 请求搬回 background 之后，销毁 content script 不再销毁这些工作。不撤的话，关掉的标签页还会
 // 继续发付费请求，直到批次耗尽预算（单批最长 180 秒）。
 {
-  const seen = []
-  // 监听器挂在 context 上且**不随页面关闭移除**：要观察的正是页面消失之后还有没有请求
-  const onRequest = request => { if (request.url().includes(GOOGLE)) seen.push(Date.now()) }
-  context.on('request', onRequest)
+  const { requests, off } = trackRequests(GOOGLE)
   const page = await context.newPage()
+  // 视口放高：默认 900 px 的首屏只攒得出十几个 pending，全塞得进两个在飞的请求里，证不出"有排队的活"
+  await page.setViewportSize(BACKLOG_VIEWPORT)
   await page.goto(`https://arxiv.org/html/${PAPER2}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  // 队列里得真有积压，关掉之后才谈得上"还会不会发请求"；不这么做断言等于空转
+  // 队列里得真有还没发出去的活，关掉之后才谈得上"还会不会发请求"；不这么做断言等于空转
   // （首次写这条时首屏正好全命中缓存，只发出 2 个请求，测不出任何东西）。
-  // 边滚边等到 pending 攒起来那一刻再关，而不是滚完、等够 5 个请求、再碰运气读 pending（issue #82）
-  const pending = await awaitBacklog(page, { ready: () => seen.length >= 5 })
-  const before = seen.length
+  // 边滚边等到排队量攒起来那一刻再关，而不是滚完、等够 5 个请求、再碰运气读 pending（issue #82、#95）
+  const backlog = await awaitBacklog(page, { requests, ready: () => requests.length >= 5 })
+  const before = requests.length
   const tClose = Date.now()
   await page.close()
   await sleep(8_000)
-  const late = seen.filter(t => t > tClose + 500).length
-  context.off('request', onRequest)
-  check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）', before >= 5 && pending > 0 && late === 0,
-    `关闭时积压 ${pending} 个块、已发 ${before} 个请求；关闭 0.5 s 后新增 ${late} 个`)
+  const late = requests.filter(r => r.t > tClose + 500).length
+  off()
+  check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）', before >= 5 && backlog.queued >= MIN_QUEUED && late === 0,
+    `关闭时 ${backlog.pending} 个块待译、在飞 ${backlog.inFlight} 段 → 排队 ${backlog.queued} 段，已发 ${before} 个请求；关闭 0.5 s 后新增 ${late} 个`)
 }
 
 // ── 导航离开：tabs.onRemoved 不覆盖这种情况（Codex 在 #59 指出）──────────
 {
-  const seen = []
-  const onRequest = request => { if (request.url().includes(GOOGLE)) seen.push(Date.now()) }
-  context.on('request', onRequest)
+  const { requests, off } = trackRequests(GOOGLE)
   const page = await context.newPage()
+  await page.setViewportSize(BACKLOG_VIEWPORT)
   await page.goto(`https://arxiv.org/html/${PAPER3}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  const pending = await awaitBacklog(page, { ready: () => seen.length >= 5 })
-  const before = seen.length
+  const backlog = await awaitBacklog(page, { requests, ready: () => requests.length >= 5 })
+  const before = requests.length
   const tLeave = Date.now()
   // 跳到非 arXiv 页面：content script 没了，也永远不会再发新的 scope 过来
   await page.goto('https://example.com/', { waitUntil: 'domcontentloaded' })
   await sleep(8_000)
-  const late = seen.filter(t => t > tLeave + 500).length
-  context.off('request', onRequest)
+  const late = requests.filter(r => r.t > tLeave + 500).length
+  off()
   await page.close()
-  check('导航离开后 background 不再发新请求（会话随导航撤掉）', before >= 5 && pending > 0 && late === 0,
-    `离开时积压 ${pending} 个块、已发 ${before} 个请求；离开 0.5 s 后新增 ${late} 个`)
+  check('导航离开后 background 不再发新请求（会话随导航撤掉）', before >= 5 && backlog.queued >= MIN_QUEUED && late === 0,
+    `离开时 ${backlog.pending} 个块待译、在飞 ${backlog.inFlight} 段 → 排队 ${backlog.queued} 段，已发 ${before} 个请求；离开 0.5 s 后新增 ${late} 个`)
 }
 
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
@@ -524,15 +573,27 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   context.on('response', onAuthResponse)
   const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
   const done = await waitForLog(logs, IDLE, 60_000)
-  await sleep(3_000) // 留出足够长的窗口：真有第二波的话这时该发出来了
-  context.off('response', onAuthResponse)
-  // 第一个 401 之后 1 秒（同一批里在飞的请求还会陆续发完）不该再有新请求：整条队列排空、不重试
-  const afterAuth = requests.filter(r => r.t > firstAuthFailure + 1_000)
-  check('错 key + 降级关闭：第一个 401 之后队列排空，不重试、没有第二波',
-    Number.isFinite(firstAuthFailure) && afterAuth.length === 0 && /fatal: auth/.test(done?.text ?? ''),
-    `共 ${requests.length} 个请求，401 之后 1 s 起新增 ${afterAuth.length} 个；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
-  const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
+  // 报 fatal 之后**把整篇滚一遍**：这才是能证伪的做法（Codex 在 #95 指出旧写法的 1 秒窗口太宽）。
+  // 旧写法只看首个 401 之后 1 秒内有没有新请求，可那一秒里本来就还有同一波在飞的批次要收尾，
+  // 数字是几都说明不了问题；实测那一秒里正好还有第二波 7 个请求，被窗口整个盖住。
+  //
+  // 第二波本身不是重试：8 个批次占满并发槽同时挨 401，剩下的块是**之后**才攒成批入队的，
+  // 队列的 failQueue 只排空当下排着的那些。真正要守的承诺是**会话整个停下**——
+  // 292 个块里只碰了首屏那一小撮，剩下 200 多个再也不发。滚一遍就是对这条承诺的证伪试验：
+  // fatal 没把观察器摘掉的话，剩下的块会逐屏进入视口继续烧配额。
+  const EVENT_JITTER_MS = 50 // idle 那行的时刻取自 console 监听器、请求时刻取自 request 监听器，各自 Date.now()
   const idle = idleOf(done)
+  await scrollThrough(page)
+  await sleep(3_000)
+  context.off('response', onAuthResponse)
+  const afterIdle = requests.filter(r => r.t > (done?.t ?? 0) + EVENT_JITTER_MS)
+  const offsets = requests.map(r => Math.round(r.t - firstAuthFailure)).sort((a, b) => a - b)
+  check('错 key + 降级关闭：401 之后整个会话停下，滚到底也不再发请求',
+    Number.isFinite(firstAuthFailure) && /fatal: auth/.test(done?.text ?? '')
+      && (idle?.requested ?? 0) < (idle?.total ?? 0) // 还有没请求过的块，滚一遍才证伪得了
+      && afterIdle.length === 0,
+    `${idle?.requested}/${idle?.total} 个块请求过，共 ${requests.length} 个请求（相对首个 401 的时刻 ${offsets.join('/')} ms）；报 fatal 后整篇滚一遍新增 ${afterIdle.length} 个；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
+  const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
   check('失败块旁有重试 / 原因小部件（§7.6）', !!idle && widgets > 0 && widgets === idle.failed, `${widgets} 个小部件，${idle?.failed ?? '?'} 个失败块`)
   await page.close()
 }
