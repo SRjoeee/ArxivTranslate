@@ -567,12 +567,18 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 401 回来的时刻要记下来：断言"这之后不再有新请求"，而不是数首波有几个——
   // 首波个数取决于令牌桶的突发节奏，快一点慢一点都会让 ≤ 20 这条落空（issue #82）
   let firstAuthFailure = Number.POSITIVE_INFINITY
+  // 401 到达的**那一刻已经发出过几个请求**。用序号切、不用时间切（Codex 在 #95 指出）：
+  // 时间上留任何容差，都会把"槽位一腾出就立刻补发"的那些划到 401 之前、两个判据都管不到。
+  // 已经在飞的请求，它们的 `request` 事件必然早于这个 401 的 `response` 事件，序号就是精确的分界
+  let sentAtAuth = -1
   // 401 与 403 都算（Codex 在 #95 指出）：网关用 403 拒掉假 key 时，`openai-compat` 一样归成 auth、
   // retry-policy 一样按整队排空处理，只听 401 会让这条断言在产品行为正确时反而红
   const onAuthResponse = response => {
-    if (response.url().includes('openrouter.ai') && (response.status() === 401 || response.status() === 403)) {
-      firstAuthFailure = Math.min(firstAuthFailure, Date.now())
-    }
+    if (!response.url().includes('openrouter.ai')) return
+    if (response.status() !== 401 && response.status() !== 403) return
+    if (Number.isFinite(firstAuthFailure)) return
+    firstAuthFailure = Date.now()
+    sentAtAuth = requests.length
   }
   context.on('response', onAuthResponse)
   const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
@@ -585,7 +591,10 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 队列的 failQueue 只排空当下排着的那些。真正要守的承诺是**会话整个停下**——
   // 292 个块里只碰了首屏那一小撮，剩下 200 多个再也不发。滚一遍就是对这条承诺的证伪试验：
   // fatal 没把观察器摘掉的话，剩下的块会逐屏进入视口继续烧配额。
-  const EVENT_JITTER_MS = 50 // idle 那行的时刻取自 console 监听器、请求时刻取自 request 监听器，各自 Date.now()
+  // idle 那行的时刻取自 console 监听器、请求时刻取自 request 监听器，各自 Date.now()，先后可能差几毫秒。
+  // 这点容差在这里遮不住任何东西：401 之后的请求已经由下面按序号切出来的 afterAuth 全数管着，
+  // 这一条只负责"滚一遍之后还有没有"，那种请求会落在 idle 之后好几秒
+  const EVENT_JITTER_MS = 50
   const idle = idleOf(done)
   await scrollThrough(page)
   await sleep(3_000)
@@ -598,8 +607,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 这一条正好卡住 Codex 点名的两种回归：队列真的没排空的话，批次会随槽位陆续腾出而摊开好几秒；
   // 失败的批次被重试的话，退避至少 1 秒，也落在同一拍之外。#96 修好之后这里直接收成 afterAuth.length === 0
   // （那时跨度为 0 依然成立，这条不必再改）。
-  const beforeAuth = requests.filter(r => r.t <= firstAuthFailure + EVENT_JITTER_MS)
-  const afterAuth = requests.filter(r => r.t > firstAuthFailure + EVENT_JITTER_MS)
+  const beforeAuth = requests.slice(0, Math.max(sentAtAuth, 0))
+  const afterAuth = requests.slice(Math.max(sentAtAuth, 0))
   const afterIdle = requests.filter(r => r.t > (done?.t ?? 0) + EVENT_JITTER_MS)
   // requests 是按发出顺序 push 的，首尾之差就是这一波的跨度。
   // 只看跨度的话单发是盲区（一发的跨度恒为 0，几秒之后漏出来的那一发也照样过，Codex 在 #95 指出），
@@ -611,7 +620,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const afterAuthLast = afterAuth.length > 0 ? afterAuth[afterAuth.length - 1].t - firstAuthFailure : 0
   const offsets = requests.map(r => Math.round(r.t - firstAuthFailure)).sort((a, b) => a - b)
   check('错 key + 降级关闭：401 之后整个会话停下，滚到底也不再发请求',
-    Number.isFinite(firstAuthFailure) && /fatal: auth/.test(done?.text ?? '')
+    Number.isFinite(firstAuthFailure) && sentAtAuth >= 0 && /fatal: auth/.test(done?.text ?? '')
       && (idle?.requested ?? 0) < (idle?.total ?? 0) // 还有没请求过的块，滚一遍才证伪得了
       && afterAuthSpan <= POST_AUTH_FLUSH_MS && afterAuthLast <= POST_AUTH_WINDOW_MS // 401 之后只有一次冲刷，不是陆续派发、也不是重试
       && afterIdle.length === 0,
