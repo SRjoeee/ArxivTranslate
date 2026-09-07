@@ -8,6 +8,10 @@ export default defineConfig({
   vite: () => ({ build: { modulePreload: false } }),
   manifest: {
     name: 'arXiv HTML Translator',
+    // 图片叠加层用 CSS 锚点定位，`anchor-scope` 要 Chrome 131（§15.2）。文档一直这么写，但没落到
+    // manifest 上，低于这个版本的 Chrome 照样装得上、拿到一个错位的叠加层，而且滚动容器也不进
+    // 顺序焦点（Codex 在 #99 指出）。声明出来，让文档写的下限真正生效
+    minimum_chrome_version: '131',
     description: '面向 arxiv.org/html 的保结构、可逆双语翻译',
     // nativeMessaging：Mac 上的图片翻译经本机 helper 做 OCR（DESIGN §15）；没装 helper 时这条权限闲着，不弹窗
     permissions: ['storage', 'nativeMessaging'],

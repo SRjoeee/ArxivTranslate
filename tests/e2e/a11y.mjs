@@ -7,6 +7,7 @@
 //
 // 用法：pnpm build && pnpm e2e:a11y   （首次先 npx playwright install chromium）
 // 环境变量：AXT_PAPER 换论文；AXT_HEADED=1 看着跑。
+// 换论文值得跑一跑：2401.00596（参考文献带链接 + 无标签 <object>）当初就是靠它抓到镜像漏标 inert 的。
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import AxeBuilder from '@axe-core/playwright'
@@ -36,16 +37,36 @@ const DOCUMENT_RULES = new Set([
 ])
 
 /**
- * axe 的判据与 Chrome 实际行为脱节的规则：**照样打印出来**，但不判失败。进这个集合的理由必须是实测。
+ * axe 的判据与浏览器实际行为脱节的规则：不凭版本号豁免，**在跑这一轮的浏览器里逐个实测**，
+ * 过不了的照样判失败（Codex 在 #99 指出：无条件豁免会在没有该行为的浏览器上给出绿灯）。
  *
  * - `scrollable-region-focusable`：axe 查的是滚动容器上有没有 `tabindex`。Chrome 从 127 起给
- *   「没有可聚焦子元素的滚动容器」内置了顺序焦点（keyboard focusable scrollers），本项目最低支持
- *   Chrome 131（§15.2 的锚点定位），全在范围内。2026-09-07 在 Chrome 153 上对 side 模式的 6 个
- *   滚动容器逐个做过往返实测（聚焦 → Shift+Tab → Tab），6/6 都回得来。
- *   另一半理由是就算想按 axe 说的加 `tabindex`，这 6 个里有 3 个是**原节点**（`#alg1.4`、
- *   `#S2.T1.2`、`#S2.F2`），给它们加属性会违反 §7.1 的 DOM 不变量。
+ *   「没有可聚焦子元素的滚动容器」内置了顺序焦点，而 manifest 的 `minimum_chrome_version` 是 131
+ *   （§15.2 的锚点定位要求），所有能装上本扩展的 Chrome 都在范围内。这里用往返法逐个验：
+ *   聚焦 → Shift+Tab 退到上一个 → Tab 应当回到它，回得来才说明它真在顺序焦点里。
+ *   另一半理由是就算想按 axe 说的加 `tabindex`，side 模式那几个滚动容器里有一半是**原节点**
+ *   （`#alg1.4`、`#S2.T1.2`、`#S2.F2`），给它们加属性会违反 §7.1 的 DOM 不变量。
  */
-const BROWSER_HANDLED = new Set(['scrollable-region-focusable'])
+const VERIFY_KEYBOARD = new Set(['scrollable-region-focusable'])
+
+/** 往返法实测键盘够不够得到：聚焦 → Shift+Tab → Tab 能回来，才算在顺序焦点里 */
+async function keyboardReachable(page, selectors) {
+  const out = []
+  for (const sel of selectors) {
+    const focused = await page.evaluate(s => {
+      const el = document.querySelector(s)
+      if (!el) return false
+      el.scrollIntoView({ block: 'center' })
+      el.focus()
+      return document.activeElement === el
+    }, sel).catch(() => false)
+    if (!focused) { out.push(false); continue }
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Tab')
+    out.push(await page.evaluate(s => document.activeElement === document.querySelector(s), sel).catch(() => false))
+  }
+  return out
+}
 
 const results = []
 const check = (name, ok, detail) => {
@@ -97,14 +118,18 @@ const KEYED = items => {
   }
   // 译文是原块的结构副本，所以「译文里的这个元素」在原块里有个对应元素：
   // 记下它相对译文根的路径（标签 + 同标签序号），再拿同一条路径从原块走下去
+  // 序号两侧都排除注入的兄弟：原块在 stack 下自己也会被插进译文（嵌套块，例如表格单元格），
+  // 不排除的话副本与原件的序号对不上
+  const sameTag = (parent, tag) => [...parent.children].filter(s => s.tagName === tag && !s.matches(INJECTED))
   const pathTo = (el, root) => {
     const parts = []
     let cur = el
     while (cur && cur !== root) {
       const parent = cur.parentElement
       if (!parent) return null
-      const sibs = [...parent.children].filter(s => s.tagName === cur.tagName)
-      parts.unshift([cur.tagName, sibs.indexOf(cur)])
+      const i = sameTag(parent, cur.tagName).indexOf(cur)
+      if (i < 0) return null
+      parts.unshift([cur.tagName, i])
       cur = parent
     }
     return cur === root ? parts : null
@@ -112,7 +137,7 @@ const KEYED = items => {
   const follow = (root, path) => {
     let cur = root
     for (const [tag, i] of path) {
-      cur = [...cur.children].filter(s => s.tagName === tag)[i]
+      cur = sameTag(cur, tag)[i]
       if (!cur) return null
     }
     return cur
@@ -124,12 +149,20 @@ const KEYED = items => {
     if (!el) return { ...item, key: `${item.rule}@?${item.target.join(' ')}`, origin: 'unresolved' }
     const injected = el.closest(INJECTED)
     if (!injected) return { ...item, key: `${item.rule}@${stable(el)}`, origin: 'host' }
-    const forId = injected.closest('[data-axt-for]')?.getAttribute('data-axt-for')
-    const original = forId ? document.querySelector(`[data-axt-id="${CSS.escape(forId)}"]`) : null
-    const path = original ? pathTo(el, injected) : null
+    // 最近的那个「能对回原文」的锚：译文用 data-axt-for，side 的拆图副本用 data-axt-split-of。
+    // 副本的 data-axt-for 是合成的 `split:N`，指不到任何 data-axt-id（Codex 在 #99 指出）——
+    // 不认 data-axt-split-of 的话，副本里那些**继承自原件**的问题（例如没标签的 <object>）
+    // 会被算成扩展引入的
+    const anchor = el.closest('[data-axt-for], [data-axt-split-of]')
+    const forId = anchor?.getAttribute('data-axt-for')
+    const splitOf = anchor?.getAttribute('data-axt-split-of')
+    const original = forId && !forId.startsWith('split:')
+      ? document.querySelector(`[data-axt-id="${CSS.escape(forId)}"]`)
+      : splitOf ? document.getElementById(splitOf) : null
+    const path = original && anchor ? pathTo(el, anchor) : null
     const counterpart = path ? follow(original, path) : null
-    if (counterpart) return { ...item, key: `${item.rule}@${stable(counterpart)}`, origin: 'translation' }
-    // 对不上原块的注入内容（图片叠加层、失败控件，或译文结构与原块不同构）→ 基线里必然没有，算新增
+    if (counterpart) return { ...item, key: `${item.rule}@${stable(counterpart)}`, origin: splitOf && !counterpart.closest(INJECTED) ? 'split' : 'translation' }
+    // 对不上原文的注入内容（图片叠加层、失败控件，或结构与原件不同构）→ 基线里必然没有，算新增
     return { ...item, key: `${item.rule}@axt:${injected.className}:${stable(injected.parentElement ?? injected)}`, origin: 'injected' }
   })
 }
@@ -137,28 +170,44 @@ const KEYED = items => {
 /** 跑一次 axe，把每条违规都换算成可比的键 */
 const audit = async page => page.evaluate(KEYED, flatten(await new AxeBuilder({ page }).analyze()))
 
-/** 逐屏往下滚：一次跳到底只会让最后一屏进入观察器 */
+/**
+ * 逐屏往下滚：一次跳到底只会让最后一屏进入观察器。
+ * 每一步都**重读**文档高度（Codex 在 #99 指出）：译文是边滚边插进去的，文档会越滚越长，
+ * 拿滚之前那个高度当上界会停在半路；而没进过视口的块不会有 pending 节点，静止判定照样成立，
+ * 于是下半篇被悄悄跳过、审计覆盖不到
+ */
 async function scrollThrough(page) {
-  const height = await page.evaluate(() => document.documentElement.scrollHeight)
-  for (let y = 0; y < height; y += 800) {
-    await page.evaluate(top => window.scrollTo(0, top), y)
+  for (let y = 0, guard = 0; guard < 500; guard++, y += 800) {
+    const height = await page.evaluate(top => {
+      window.scrollTo(0, top)
+      return document.documentElement.scrollHeight
+    }, y)
+    if (y >= height) break
     await sleep(120)
   }
   await page.evaluate(() => window.scrollTo(0, 0))
 }
 
-/** 静止的判定照 extension.mjs：最后一条 idle 行连续 3 秒没变，且页面上没有 pending 节点 */
+/**
+ * 静止的判定照 extension.mjs：最后一条 idle 行连续 3 秒没变，且页面上没有 pending 节点。
+ * 光看「有没有 idle 行」不够（Codex 在 #99 指出）：超时退出、或者有块翻失败时也拿得到一行，
+ * 那时页面上是圆环与错误控件，审计的就不是译文了，还会报出一个漂亮的空差集。
+ * 所以要同时满足：真的稳住了、请求过的块全部完成、零失败
+ */
 async function waitSettled(page, logs) {
   let last = null
   let stable = 0
   for (let i = 0; i < 90 && stable < 3; i++) {
     await sleep(1_000)
-    const idle = logs.findLast(l => IDLE.test(l))
+    const line = logs.findLast(l => IDLE.test(l))
     const pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
-    stable = idle && pending === 0 && idle === last ? stable + 1 : 0
-    last = idle
+    stable = line && pending === 0 && line === last ? stable + 1 : 0
+    last = line
   }
-  return last
+  const m = last ? IDLE.exec(last) : null
+  const idle = m ? { done: +m[1], requested: +m[2], total: +m[3], failed: +m[4] } : null
+  const ok = stable >= 3 && !!idle && idle.requested > 0 && idle.done === idle.requested && idle.failed === 0
+  return { ok, idle, text: last ?? '(no idle line)' }
 }
 
 rmSync(PROFILE, { recursive: true, force: true })
@@ -204,7 +253,8 @@ await page.goto(`${PAPER_URL}#axt-translate`, { waitUntil: 'domcontentloaded', t
 // 整篇滚一遍：只翻首屏的话，审计覆盖不到正文的绝大部分（§10 的加载模式）
 await scrollThrough(page)
 const settled = await waitSettled(page, logs)
-check('整篇翻完再审计（没有残留的 pending 圆环）', !!settled, settled ?? '(no idle line)')
+check('整篇翻完再审计：翻译静止、请求过的块全部完成、零失败', settled.ok,
+  `${settled.idle ? `${settled.idle.requested}/${settled.idle.total} 个块请求过；` : ''}${settled.text}`)
 
 // popup 按**活动标签页**取状态：论文页不在前台时它渲染的是另一套 UI，模式按钮根本不出现。
 // 所以 goto 之后必须先把论文页提回前台再等按钮，而且全程不能把 popup 提到前台（照 image.mjs 的顺序）
@@ -221,11 +271,16 @@ for (const [label, button] of [['stack', '上下'], ['side', '左右'], ['only',
   await sleep(2_000) // side 要拆图与镜像，给版式一点时间落定
   const withExt = await audit(page)
   const isNew = i => (DOCUMENT_RULES.has(i.rule) ? !baseRuleSet.has(i.rule) : !baseKeys.has(i.key))
-  const excused = withExt.filter(i => isNew(i) && BROWSER_HANDLED.has(i.rule))
-  const introduced = withExt.filter(i => isNew(i) && !BROWSER_HANDLED.has(i.rule))
+  const candidates = withExt.filter(i => isNew(i) && VERIFY_KEYBOARD.has(i.rule))
+  const reachable = await keyboardReachable(page, candidates.map(i => i.target[0]))
+  const excused = candidates.filter((_, n) => reachable[n])
+  const introduced = [
+    ...withExt.filter(i => isNew(i) && !VERIFY_KEYBOARD.has(i.rule)),
+    ...candidates.filter((_, n) => !reachable[n]), // 实测键盘够不到的，不豁免
+  ]
   await page.screenshot({ path: `${SHOTS}/a11y-${label}.png` })
   const byRule = [...new Set(introduced.map(i => i.rule))].sort()
-  const tail = excused.length > 0 ? `；另有 ${excused.length} 条 ${[...new Set(excused.map(i => i.rule))].join(' / ')} 已按实测豁免` : ''
+  const tail = excused.length > 0 ? `；另有 ${excused.length} 条 ${[...new Set(excused.map(i => i.rule))].join(' / ')} 已当场实测键盘够得到、豁免` : ''
   check(`${label} 模式：没有由扩展引入的无障碍问题`, introduced.length === 0,
     (introduced.length === 0
       ? `共 ${withExt.length} 条，全部在基线里已有（宿主页面自带）`
