@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: 'Manrope', 'PingFang SC', 'Noto Sans SC', system-ui, sans-serif; color: #1e1e24; }
+    a { color: #b31b1b; } a:hover { color: #8f1515; }
+  </style>
+</helmet>
+<div style="width: 1120px; height: 720px; box-sizing: border-box; background: #f5f5f7; display: flex; font-size: 13px;">
+  <div style="width: 220px; box-sizing: border-box; padding: 28px 16px; display: flex; flex-direction: column; gap: 24px;">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 8px;">
+      <div style="width: 30px; height: 30px; border-radius: 9px; background: #b31b1b; display: flex; align-items: center; justify-content: center; color: #ffffff; font-weight: 700; font-size: 13px;">译</div>
+      <div style="font-weight: 700; font-size: 14px;">arXiv Translate</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 4px; font-weight: 600;">
+      <div style="padding: 9px 12px; border-radius: 10px; background: #ffffff; box-shadow: 0 1px 2px rgba(30,30,36,0.06); color: #b31b1b;">引擎</div>
+      <div style="padding: 9px 12px; border-radius: 10px; color: #55555f;">阅读</div>
+      <div style="padding: 9px 12px; border-radius: 10px; color: #55555f;">提示词与术语</div>
+      <div style="padding: 9px 12px; border-radius: 10px; color: #55555f;">数据</div>
+    </div>
+  </div>
+
+  <div style="flex: 1; box-sizing: border-box; padding: 32px 40px 32px 24px; display: flex; flex-direction: column; gap: 14px; overflow: hidden;">
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="font-size: 22px; font-weight: 700; letter-spacing: -0.01em;">引擎</div>
+      <div style="font-size: 13px; color: #7c7c89; font-weight: 500;">选一个翻译引擎，改动即时生效</div>
+    </div>
+
+    <div style="background: #ffffff; border-radius: 14px; box-shadow: 0 1px 2px rgba(30,30,36,0.06); display: flex; justify-content: space-between; align-items: center; padding: 14px 18px;">
+      <div style="font-weight: 700;">译成</div>
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border: 1px solid #e3e3e8; border-radius: 10px; min-width: 150px; font-weight: 600;">中文（简体）<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7c7c89" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+      <div style="box-sizing: border-box; padding: 14px 16px; background: #ffffff; border-radius: 14px; box-shadow: 0 0 0 2px #b31b1b; display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 700; font-size: 14px;">LLM</div><div style="width: 18px; height: 18px; border-radius: 50%; background: #b31b1b; display: flex; align-items: center; justify-content: center;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></div></div>
+        <div style="font-size: 12px; color: #7c7c89; line-height: 1.5; font-weight: 500;">译文质量最好，术语跟着论文走；需要 API key</div>
+      </div>
+      <div style="box-sizing: border-box; padding: 14px 16px; background: #ffffff; border-radius: 14px; box-shadow: 0 1px 2px rgba(30,30,36,0.06); display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 700; font-size: 14px;">Google 翻译</div><span style="padding: 2px 8px; border-radius: 999px; background: #eeeef2; color: #55555f; font-size: 11px; font-weight: 600;">免费</span></div>
+        <div style="font-size: 12px; color: #7c7c89; line-height: 1.5; font-weight: 500;">几秒翻完一篇；术语不如 LLM 准</div>
+      </div>
+      <div style="box-sizing: border-box; padding: 14px 16px; background: #ffffff; border-radius: 14px; box-shadow: 0 1px 2px rgba(30,30,36,0.06); display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-weight: 700; font-size: 14px;">Chrome 离线翻译</div><span style="padding: 2px 8px; border-radius: 999px; background: #eeeef2; color: #55555f; font-size: 11px; font-weight: 600;">离线</span></div>
+        <div style="font-size: 12px; color: #7c7c89; line-height: 1.5; font-weight: 500;">不联网，单句十几毫秒；先下载一次语言包</div>
+      </div>
+    </div>
+
+    <div style="background: #ffffff; border-radius: 14px; box-shadow: 0 1px 2px rgba(30,30,36,0.06); display: flex; flex-direction: column;">
+      <div style="display: grid; grid-template-columns: 130px 1fr; gap: 12px; align-items: center; padding: 12px 18px; border-bottom: 1px solid #ececf0;"><div style="font-weight: 600;">端点</div><div style="padding: 7px 10px; border: 1px solid #e3e3e8; border-radius: 10px;">https://openrouter.ai/api/v1</div></div>
+      <div style="display: grid; grid-template-columns: 130px 1fr; gap: 12px; align-items: center; padding: 12px 18px; border-bottom: 1px solid #ececf0;"><div style="font-weight: 600;">API key</div><div style="display: flex; gap: 8px; align-items: center;"><div style="flex: 1; padding: 7px 10px; border: 1px solid #e3e3e8; border-radius: 10px; color: #7c7c89;">sk-or-••••••••••••••••</div><div style="padding: 6px 12px; border-radius: 999px; background: #eeeef2; font-weight: 600; font-size: 12px;">清除</div></div></div>
+      <div style="display: grid; grid-template-columns: 130px 1fr; gap: 12px; align-items: center; padding: 12px 18px; border-bottom: 1px solid #ececf0;"><div style="font-weight: 600;">模型</div><div style="padding: 7px 10px; border: 1px solid #e3e3e8; border-radius: 10px;">deepseek/deepseek-v4-flash</div></div>
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; border-bottom: 1px solid #ececf0;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #7c7c89; font-weight: 600;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #1f8a4c;"></span>已连接 · 412 ms · 「设 G 为连通图」</div>
+        <div style="padding: 8px 20px; border-radius: 999px; background: #1e1e24; color: #ffffff; font-weight: 700;">连接</div>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; color: #7c7c89; font-weight: 600;">
+        <span>更多选项</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#c2c2ca" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"></path></svg>
+      </div>
+    </div>
+
+    <div style="background: #ffffff; border-radius: 14px; box-shadow: 0 1px 2px rgba(30,30,36,0.06); display: flex; justify-content: space-between; align-items: center; padding: 14px 18px;">
+      <div style="display: flex; flex-direction: column; gap: 2px;"><div style="font-weight: 700;">失败时自动改用免费引擎</div><div style="font-size: 12px; color: #7c7c89; font-weight: 500;">key 失效、额度用尽或断网时整页不停下</div></div>
+      <span style="width: 36px; height: 20px; border-radius: 10px; background: #b31b1b; position: relative; display: inline-block;"><span style="position: absolute; right: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: #ffffff;"></span></span>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
