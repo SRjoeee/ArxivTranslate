@@ -84,11 +84,22 @@ describe('fitTables', () => {
 
   it('多张表各自算各自的', () => {
     const doc = pairDoc(2)
-    const widths = [551, 1200]
-    let i = 0
-    const r = fitTables(doc, { naturalWidth: () => widths[i++]!, columnWidth: () => 484 })
+    // 每对的两张都会被量（按更宽的定档），所以按元素给宽度而不是按调用次序
+    const widths = new Map(Array.from(doc.querySelectorAll('.ltx_tabular')).map((el, i) => [el, i < 2 ? 551 : 1200]))
+    const r = fitTables(doc, { naturalWidth: el => widths.get(el) ?? 0, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 1, scrolled: 1 })
     expect(originals(doc).map(fitOf)).toEqual(['85', FIT_SCROLL])
+  })
+
+  it('译表比原表宽时按译表定档，两张同一档（实测 2606.07636v2 的 Table 4：原表装得下、译表溢出 179px）', () => {
+    const doc = pairDoc()
+    const [orig, clone] = Array.from(doc.querySelectorAll('.ltx_tabular'))
+    const widths = new Map([[orig!, 600], [clone!, 800]])
+    const r = fitTables(doc, { naturalWidth: el => widths.get(el) ?? 0, columnWidth: () => 648 })
+    // 只看原表的话 600 ≤ 648 不用缩；按译表 648/800 = 0.81 → 80 档
+    expect(r).toEqual({ fitted: 1, scrolled: 0 })
+    expect(fitOf(orig!)).toBe('80')
+    expect(fitOf(clone!)).toBe('80')
   })
 })
 
@@ -145,10 +156,11 @@ describe('读写分批与缓存（issue #46）', () => {
   it('同栏宽、同译文节点：第二趟不再量，直接用上次的档', () => {
     const doc = pairDoc()
     const natural = vi.fn(() => 551)
+    // 一对表量两次（原表 + 译表，按更宽的定档）
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(1)
+    expect(natural).toHaveBeenCalledTimes(2)
     const r = fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(1)
+    expect(natural).toHaveBeenCalledTimes(2)
     // 结果与计数照旧
     expect(r).toEqual({ fitted: 1, scrolled: 0 })
     expect(fitOf(originals(doc)[0]!)).toBe('85')
@@ -159,7 +171,7 @@ describe('读写分批与缓存（issue #46）', () => {
     const natural = vi.fn(() => 551)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 700 })
-    expect(natural).toHaveBeenCalledTimes(2)
+    expect(natural).toHaveBeenCalledTimes(4) // 两趟 × 每趟两张
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
 
@@ -171,18 +183,18 @@ describe('读写分批与缓存（issue #46）', () => {
     const fresh = original.nextElementSibling!.cloneNode(true) as Element
     original.nextElementSibling!.replaceWith(fresh)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(2)
+    expect(natural).toHaveBeenCalledTimes(4) // 两趟 × 每趟两张
     expect(fitOf(fresh)).toBe('85')
   })
 
   it('量到 0（还没布局）的不进缓存，下一趟照样量', () => {
     const doc = pairDoc()
-    const widths = [0, 551]
+    const widths = [0, 0, 551, 551]
     const natural = vi.fn(() => widths.shift()!)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
     expect(fitOf(originals(doc)[0]!)).toBeNull()
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(2)
+    expect(natural).toHaveBeenCalledTimes(4) // 两趟 × 每趟两张
     expect(fitOf(originals(doc)[0]!)).toBe('85')
   })
 
@@ -214,9 +226,9 @@ describe('读写分批与缓存（issue #46）', () => {
       return 551
     })
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    // 两张都该落到 85 档——但量第二张的时候第一张还是干净的
+    // 两张都该落到 85 档——但量到第一张以外的任何一张时，第一张都还是干净的（一对量两张，两对共三次）
     expect(originals(doc).map(fitOf)).toEqual(['85', '85'])
-    expect(seen).toEqual([null])
+    expect(seen).toEqual([null, null, null])
   })
 })
 
@@ -235,15 +247,17 @@ describe('字体加载完成要让缓存失效（Codex 在 #84 指出）', () =>
     const fonts = withFonts(doc)
     const scheduled = vi.fn()
     const off = watchFontLoads(doc, scheduled)
-    const widths = [551, 700]
-    const natural = vi.fn(() => widths.shift() ?? 700)
+    // 一趟量两张（原表 + 译表）：字体到达前后各给一个宽度
+    let width = 551
+    const natural = vi.fn(() => width)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
     expect(fitOf(originals(doc)[0]!)).toBe('85')
     // 字体到了：自然宽度变成 700，但译文节点、栏宽都没变——不清缓存就永远停在 85
     fonts.dispatchEvent(new Event('loadingdone'))
     expect(scheduled).toHaveBeenCalledTimes(1)
+    width = 700
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(2)
+    expect(natural).toHaveBeenCalledTimes(4) // 两趟 × 每趟两张
     expect(fitOf(originals(doc)[0]!)).toBe(FIT_SCROLL) // 484/700 = 0.69 < 0.7
     off()
   })

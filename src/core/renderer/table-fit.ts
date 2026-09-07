@@ -38,7 +38,7 @@ export interface NaturalWidth {
 }
 
 export interface FitDeps {
-  /** 表格不受栏宽约束时的自然宽度；返回数字视为精确值 */
+  /** 表格不受栏宽约束时的自然宽度；返回数字视为精确值。原表与译表各量一次，按更宽的那张定档 */
   naturalWidth?: (table: Element) => number | NaturalWidth
   /** 表格所在容器一栏的宽度 */
   columnWidth?: (table: Element) => number
@@ -153,6 +153,10 @@ export function watchFontLoads(doc: Document, onDone: () => void): () => void {
  */
 export function fitTables(root: Document | Element, deps: FitDeps = {}): { fitted: number; scrolled: number } {
   const columnWidth = deps.columnWidth ?? measureColumn
+  const measureOne = (el: Element, column: number): NaturalWidth => {
+    const measured = deps.naturalWidth ? deps.naturalWidth(el) : measureNatural(el, column)
+    return typeof measured === 'number' ? { width: measured, exact: true } : measured
+  }
 
   // ── 1. 收集：只看属性与兄弟，不读几何 ──
   const targets: Array<{ table: Element; translation: Element | null; current: string | null }> = []
@@ -179,8 +183,13 @@ export function fitTables(root: Document | Element, deps: FitDeps = {}): { fitte
       decided.push({ ...t, next: hit.fit, cacheable: false })
       continue
     }
-    const measured = deps.naturalWidth ? deps.naturalWidth(t.table) : measureNatural(t.table, column)
-    const { width: natural, exact } = typeof measured === 'number' ? { width: measured, exact: true } : measured
+    // **两张都量，按更宽的那张定档**：译表可能比原表宽——中文表头更长（实测 2606.07636v2 的 Table 4：
+    // 原表按 0.75 档正好 648 装进栏里，译表同档却是 827，右栏溢出 179px）。两张必须同一档，
+    // 不然行高不一致、左右对不上，所以取 max 而不是各判各的。读都在这一段，仍然只触发一次布局
+    const own = measureOne(t.table, column)
+    const other = measureOne(t.translation, column)
+    const natural = Math.max(own.width, other.width)
+    const exact = own.exact && other.exact
     if (!(natural > 0)) { decided.push({ ...t, next: null, cacheable: false }); continue }
     let next = decide(natural, column)
     // 估算值永远不用来收紧（它量的是"装得下"的状态，收紧没有依据）；放松要按加了余量的宽度重新判
