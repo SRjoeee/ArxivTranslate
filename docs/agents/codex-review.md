@@ -63,3 +63,18 @@ gh pr checks <N>
 ```
 
 合并方式固定为 merge（不 squash），每次合并前问一句用户。
+
+## 叠着的 PR（B 以 A 的分支为 base）
+
+**先改下游的 base，再合并上游并删分支**（2026-09-07 实测 #87 / #88 踩到）：`gh pr merge A --delete-branch` 删掉 A 的分支时，
+GitHub 会把以它为 base 的 B **直接关掉**，不会转到 main；关掉的 PR 改不了 base（`Cannot change the base branch of a closed pull request`），
+得把分支临时推回去（`git push origin <sha>:refs/heads/<branch>`）、`gh pr reopen B`、`gh pr edit B --base main`、再删分支。正确顺序：
+
+```
+gh pr edit B --base main            # 先把下游转到 main（此时 diff 会暂时包含 A 的改动，合掉 A 就恢复）
+gh pr merge A --merge --delete-branch
+# B 的 CI 会按新 base 重跑；绿了再合 B，同样先把 C 的 base 改到 main
+```
+
+上游 PR 每轮修复要 `git merge` 进下游分支再 push（下游 HEAD 变了，Codex 会重新审一轮；它审的是下游对 base 的 diff，上游的改动不重复审）。
+限额（`You have reached your Codex usage limits`）恢复后在 PR 上评论 `@codex review` 补审最后一轮。
