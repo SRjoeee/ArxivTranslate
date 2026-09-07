@@ -21,10 +21,8 @@ const PAPER4 = process.env.AXT_PAPER4 ?? '2609.00246'
 const GOOGLE = 'translate-pa.googleapis.com'
 /** 请求收尾的两个事件：成功与失败都要把 end 记上，否则它会一直算在飞 */
 const SETTLED_EVENTS = ['requestfinished', 'requestfailed']
-/** 撤销类断言用的高视口：要攒出一批**装不进在飞请求**的待译块，900 px 的首屏不够 */
-const BACKLOG_VIEWPORT = { width: 1440, height: 3000 }
-/** 排队量要到这个数才算“确实有没发出去的活”：等待与断言用同一个门槛，超时没攒够就带着数字失败 */
-const MIN_QUEUED = 5
+/** google-web 声明的 maxConcurrent：截住端点后能同时挂住几发，也就是"槽位占满"的判据 */
+const GOOGLE_SLOTS = 2
 
 const results = []
 const check = (name, ok, detail) => {
@@ -122,72 +120,59 @@ async function waitForLog(logs, pattern, timeoutMs) {
 }
 
 /**
- * 在 context 上记下发往 host 的请求（含攒批段数与收尾时刻），**不随页面关闭摘掉**：
- * 撤销类断言要观察的正是页面消失之后还有没有请求
+ * 截住发往 host 的请求：route 处理器只登记、不放行，请求就一直挂着占着一个并发槽。
+ *
+ * 为什么要截（issue #82，Codex 在 #95 追加）：撤销类断言必须在"队列里确实还有没发出去的活"
+ * 那一刻动手，否则"撤掉之后零新请求"是空断言。这件事从 DOM 反推是推不出来的——命中缓存的块在
+ * 查缓存**之前**就挂上了 pending 节点、根本不会产生请求，刚收尾还没渲染的请求也会被算漏，
+ * 而且一个块不一定只对应一段（实测 215 个块发出 249 段），减法在大页上能算成负数。
+ * 截住之后就不用推：**有多少发真的打出去了，直接数 route 命中次数**；
+ * 也没有任何东西会完成，所以 pending 数一旦稳住，就说明查缓存那一轮已经跑完。
  */
-function trackRequests(host) {
-  const requests = []
-  const live = new Map()
-  const onRequest = request => {
-    if (!request.url().includes(host)) return
+async function stallEndpoint(host) {
+  const held = []
+  const pattern = `**://${host}/**`
+  const handler = route => {
     let items = 0
     try {
-      const body = JSON.parse(request.postData() ?? 'null')
+      const body = JSON.parse(route.request().postData() ?? 'null')
       if (Array.isArray(body?.[0]?.[0])) items = body[0][0].length
     } catch {
       // 不是 JSON 就记 0
     }
-    const entry = { t: Date.now(), items, end: Number.POSITIVE_INFINITY }
-    live.set(request, entry)
-    requests.push(entry)
+    // 不 continue / fulfill / abort：请求停在这里不动，占着一个并发槽
+    held.push({ t: Date.now(), items, route })
   }
-  const onSettled = request => {
-    const entry = live.get(request)
-    if (entry) { entry.end = Date.now(); live.delete(request) }
-  }
-  context.on('request', onRequest)
-  for (const event of SETTLED_EVENTS) context.on(event, onSettled)
+  await context.route(pattern, handler)
   return {
-    requests,
-    off: () => {
-      context.off('request', onRequest)
-      for (const event of SETTLED_EVENTS) context.off(event, onSettled)
-    },
+    held,
+    /** 放开截住的请求，把并发槽腾出来。队列还活着的话，下一批马上就会补上 */
+    release: async () => { for (const h of held.slice()) await h.route.abort().catch(() => undefined) },
+    off: () => context.unroute(pattern, handler),
   }
 }
 
 /**
- * 把页面推到**确实有还没发出去的活**的状态再返回（issue #82）：撤销类断言要在队列真有积压的
- * 那一刻动手，而不是滚一遍、等几个请求、然后碰运气去读 pending。
- *
- * 只数 pending 节点不够（Codex 在 #95 指出）：google-web 允许两个请求同时在飞、单发最多 100 段，
- * 看到的 pending 有可能整个都装在已经发出去的请求里，那"关掉之后零新请求"就是空断言。
- * 判据改成 **pending 块数 − 在飞段数**：这些块被标了 pending 却不在任何一个已发出的请求里，
- * 只能是排在队列里等着发。在飞段数取与采样窗口有交叠的全部请求之和，宁可高估——判据只会更严。
- * 一个块对 google-web 正好对应一段（markup 路径整块发一次），两个数字可比。
- *
- * 返回 { pending, inFlight, queued }；始终没攒起来 queued 记 0，让断言带着数字失败而不是静默通过
+ * 把页面推到"并发槽占满、队列里堆着一大批没发出去的活"，再做一次**正向验证**：
+ * 放开一个槽位，队列立刻补上下一发——补上了才算真的观察到了未发出的批次，
+ * 这条断言的前置条件才成立（Codex 在 #95 要的就是"直接观察到或造出未发出的批次"）。
  */
-async function awaitBacklog(page, { requests, minQueued = MIN_QUEUED, ready = () => true, timeoutMs = 40_000 } = {}) {
+async function fillQueue(page, stall, { slots = GOOGLE_SLOTS, timeoutMs = 40_000 } = {}) {
+  await scrollThrough(page) // 端点截着，什么都完成不了，整篇的块都会停在 pending
   const t0 = Date.now()
-  let top = 0
-  let last = { pending: 0, inFlight: 0, queued: 0 }
+  let samples = []
+  let pending = 0
   while (Date.now() - t0 < timeoutMs) {
-    const before = Date.now()
-    const state = await page.evaluate(y => {
-      window.scrollTo(0, y)
-      return { pending: document.querySelectorAll('.axt-pending').length, height: document.documentElement.scrollHeight }
-    }, top)
-    const after = Date.now()
-    const inFlight = requests.filter(r => r.t <= after && r.end >= before).reduce((n, r) => n + r.items, 0)
-    last = { pending: state.pending, inFlight, queued: state.pending - inFlight }
-    // 两个条件要**同时**成立：翻译已经真的跑起来（ready，通常是"已发出够多请求"），且此刻有**没发出去**的活。
-    // 只等其中一个都测不出东西——pending 节点先于第一个请求出现（renderPending 跑在发请求之前）
-    if (last.queued >= minQueued && ready()) return last
-    top = top + 700 > state.height ? 0 : top + 700 // 滚到底就回顶上再来一轮，直到两个条件对齐
-    await sleep(120)
+    await sleep(400)
+    pending = await page.evaluate(() => document.querySelectorAll('.axt-pending').length)
+    samples = [...samples.slice(-2), pending]
+    if (stall.held.length >= slots && samples.length === 3 && samples.every(n => n === pending) && pending > 0) break
   }
-  return ready() ? last : { ...last, queued: 0 }
+  const items = stall.held.reduce((n, h) => n + h.items, 0)
+  const requests = stall.held.length
+  await stall.held[0]?.route.abort().catch(() => undefined)
+  for (let i = 0; i < 30 && stall.held.length === requests; i++) await sleep(200)
+  return { requests, items, pending, confirmed: stall.held.length > requests }
 }
 
 /** 任一 1 秒窗口内的最多请求数 */
@@ -464,42 +449,42 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 // 请求搬回 background 之后，销毁 content script 不再销毁这些工作。不撤的话，关掉的标签页还会
 // 继续发付费请求，直到批次耗尽预算（单批最长 180 秒）。
 {
-  const { requests, off } = trackRequests(GOOGLE)
+  const stall = await stallEndpoint(GOOGLE)
   const page = await context.newPage()
-  // 视口放高：默认 900 px 的首屏只攒得出十几个 pending，全塞得进两个在飞的请求里，证不出"有排队的活"
-  await page.setViewportSize(BACKLOG_VIEWPORT)
   await page.goto(`https://arxiv.org/html/${PAPER2}#axt-translate`, { waitUntil: 'domcontentloaded' })
   // 队列里得真有还没发出去的活，关掉之后才谈得上"还会不会发请求"；不这么做断言等于空转
-  // （首次写这条时首屏正好全命中缓存，只发出 2 个请求，测不出任何东西）。
-  // 边滚边等到排队量攒起来那一刻再关，而不是滚完、等够 5 个请求、再碰运气读 pending（issue #82、#95）
-  const backlog = await awaitBacklog(page, { requests, ready: () => requests.length >= 5 })
-  const before = requests.length
-  const tClose = Date.now()
+  // （首次写这条时首屏正好全命中缓存，只发出 2 个请求，测不出任何东西）
+  const q = await fillQueue(page, stall)
+  const before = stall.held.length
   await page.close()
-  await sleep(8_000)
-  const late = requests.filter(r => r.t > tClose + 500).length
-  off()
-  check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）', before >= 5 && backlog.queued >= MIN_QUEUED && late === 0,
-    `关闭时 ${backlog.pending} 个块待译、在飞 ${backlog.inFlight} 段 → 排队 ${backlog.queued} 段，已发 ${before} 个请求；关闭 0.5 s 后新增 ${late} 个`)
+  await sleep(500)
+  await stall.release() // 把槽位腾出来：队列还活着的话，下一批立刻就会打出来
+  await sleep(6_000)
+  const late = stall.held.length - before
+  await stall.off()
+  check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）',
+    q.confirmed && q.requests === GOOGLE_SLOTS && late === 0,
+    `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列${q.confirmed ? '立刻补上下一发（确有排队的批次）' : '没有补上——队列里没活，这条断言无效'}；关掉标签页再放开全部槽位后新增 ${late} 个`)
 }
 
 // ── 导航离开：tabs.onRemoved 不覆盖这种情况（Codex 在 #59 指出）──────────
 {
-  const { requests, off } = trackRequests(GOOGLE)
+  const stall = await stallEndpoint(GOOGLE)
   const page = await context.newPage()
-  await page.setViewportSize(BACKLOG_VIEWPORT)
   await page.goto(`https://arxiv.org/html/${PAPER3}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  const backlog = await awaitBacklog(page, { requests, ready: () => requests.length >= 5 })
-  const before = requests.length
-  const tLeave = Date.now()
+  const q = await fillQueue(page, stall)
+  const before = stall.held.length
   // 跳到非 arXiv 页面：content script 没了，也永远不会再发新的 scope 过来
   await page.goto('https://example.com/', { waitUntil: 'domcontentloaded' })
-  await sleep(8_000)
-  const late = requests.filter(r => r.t > tLeave + 500).length
-  off()
+  await sleep(500)
+  await stall.release()
+  await sleep(6_000)
+  const late = stall.held.length - before
+  await stall.off()
   await page.close()
-  check('导航离开后 background 不再发新请求（会话随导航撤掉）', before >= 5 && backlog.queued >= MIN_QUEUED && late === 0,
-    `离开时 ${backlog.pending} 个块待译、在飞 ${backlog.inFlight} 段 → 排队 ${backlog.queued} 段，已发 ${before} 个请求；离开 0.5 s 后新增 ${late} 个`)
+  check('导航离开后 background 不再发新请求（会话随导航撤掉）',
+    q.confirmed && q.requests === GOOGLE_SLOTS && late === 0,
+    `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列${q.confirmed ? '立刻补上下一发（确有排队的批次）' : '没有补上——队列里没活，这条断言无效'}；导航离开再放开全部槽位后新增 ${late} 个`)
 }
 
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
