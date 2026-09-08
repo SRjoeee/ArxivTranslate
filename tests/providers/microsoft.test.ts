@@ -33,12 +33,6 @@ describe('createMicrosoftProvider', () => {
     expect(result.provider).toBe('microsoft')
   })
 
-  it('source 为 auto 时 from 留空，让端点自己检测（照搬上游）', async () => {
-    const fetch = vi.fn(async () => ok(['一']))
-    await provider(fetch).translate({ ...req(['one']), source: 'auto' })
-    expect(String((fetch.mock.calls[0] as unknown as [string])[0])).toContain('from=&to=zh')
-  })
-
   it('记号原样穿过；**不再二次转义**——protector 已经转过了', async () => {
     const text = '让 @a# 与 @b# 相等，且 a &lt; b'
     const fetch = vi.fn(async () => ok([text]))
@@ -69,7 +63,8 @@ describe('createMicrosoftProvider', () => {
     const fetch = vi.fn(async () => new Response('slow down', { status: 429, statusText: 'Too Many Requests', headers: { 'retry-after': '2' } }))
     const error = await provider(fetch).translate(req(['one'])).catch(e => e)
     expect((error as ProviderError).kind).toBe('rate-limit')
-    expect(getRequestErrorMeta(error)?.responseHeaders?.get('retry-after')).toBe('2')
+    const headers = getRequestErrorMeta(error)?.responseHeaders
+    expect(headers instanceof Headers ? headers.get('retry-after') : headers?.['retry-after']).toBe('2')
   })
 
   it('条数不符 / 缺 translations[0].text → invalid-response', async () => {

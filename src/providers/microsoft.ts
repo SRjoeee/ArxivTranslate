@@ -64,7 +64,9 @@ interface MicrosoftItem {
 
 async function translateTexts(texts: string[], from: string, to: string, deps: MicrosoftDeps, signal?: AbortSignal): Promise<string[]> {
   const doFetch = deps.fetch ?? globalThis.fetch
-  // 上游的处理：auto 表示让端点自己检测，参数留空
+  // 上游的处理：auto 表示让端点自己检测，参数留空。**我们这边目前到不了**——`TranslateRequest.source`
+  // 是字面量 `'en'`（arXiv 固定英文）。按 CLAUDE.md「没有额外负担的部分随模块一起搬」保留，
+  // 源语言将来放宽时就是现成的
   const query = new URLSearchParams({ from: from === 'auto' ? '' : from, to, isEnterpriseClient: 'false' })
   let response: Response
   try {
