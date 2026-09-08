@@ -2,7 +2,9 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
-import { joinRuns, rehydrate, serialize, splitRuns, tokenize, validate } from '@/core/protector'
+// runs 路径的 markers 覆盖在 runs.test.ts：在这里对 12 篇跑一遍只是「不抛异常」，不挂断言，
+// 却让这个文件与 tags 那个并行时把最重的 fixture 顶到 10 s 预算线上（CI 实测 10223 ms）
+import { rehydrate, serialize, tokenize, validate } from '@/core/protector'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 
@@ -42,8 +44,6 @@ describe('fixture 往返（markers）', () => {
         const got = [...fragment.childNodes].flatMap(n => (n.nodeType === 1 ? [(n as Element).tagName] : []))
         expect(got, `${f} 受保护节点对不上：${target.id || target.className}`).toEqual(want)
 
-        const layout = splitRuns(block)
-        joinRuns(layout.runs, layout, block, doc)
       }
       console.info(`[protector/markers] ${f}: ${targets.length} 个块，${markers} 个记号，${escaped} 处 @ 转义`)
       expect(doc.documentElement.outerHTML).toBe(before)

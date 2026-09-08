@@ -40,28 +40,51 @@ export function fromAlpha(s: string): number {
 }
 
 export function tokenize(s: string, format: WireFormat = 'tags'): Token[] {
+  return format === 'markers' ? tokenizeMarkers(s) : tokenizeTags(s)
+}
+
+/**
+ * tags 与 markers 走两条显式的循环，而不是一条带回调的通用循环。
+ *
+ * 这里是最热的一段：`validate` / `rehydrate` / `splitRuns` 每个块都要跑一遍。第一版把两种格式合成
+ * 一条循环、用一个 push 闭包统一处理「合并相邻文本」，实测最重的 fixture（2609.04056）上整篇往返
+ * 从 1645 ms 涨到 1833 ms（+11%），而这条往返有 10 s 的预算断言——CI 上直接撞线。
+ * 相邻文本只有 markers 会切出来（`@@` 的反转义），tags 每次匹配前最多推一个文本 token，永远不相邻。
+ */
+function tokenizeTags(s: string): Token[] {
   const out: Token[] = []
   let last = 0
-  const push = (t: Token) => {
-    // 合并相邻文本：`@@` 的反转义会在真文本中间切出碎片，下游按节点比对时不该看出差别
-    const prev = out[out.length - 1]
-    if (t.kind === 'text' && prev?.kind === 'text') prev.text += t.text
-    else out.push(t)
-  }
-  const re = format === 'markers' ? MARKER_RE : TAG_RE
-  re.lastIndex = 0
-  for (const m of s.matchAll(re)) {
+  TAG_RE.lastIndex = 0
+  for (const m of s.matchAll(TAG_RE)) {
     const index = m.index ?? 0
-    if (index > last) push({ kind: 'text', text: s.slice(last, index) })
-    if (format === 'markers') {
-      if (m[0] === '@@') push({ kind: 'text', text: '@' })
-      else push({ kind: 'void', id: fromAlpha(m[1]!) })
-    } else if (m[0].startsWith('</')) push({ kind: 'close' })
-    else if (m[0].startsWith('<x')) push({ kind: 'void', id: Number(m[1] ?? m[2] ?? m[3]) })
-    else push({ kind: 'open', id: Number(m[4] ?? m[5] ?? m[6]) })
+    if (index > last) out.push({ kind: 'text', text: s.slice(last, index) })
+    if (m[0].startsWith('</')) out.push({ kind: 'close' })
+    else if (m[0].startsWith('<x')) out.push({ kind: 'void', id: Number(m[1] ?? m[2] ?? m[3]) })
+    else out.push({ kind: 'open', id: Number(m[4] ?? m[5] ?? m[6]) })
     last = index + m[0].length
   }
-  if (last < s.length) push({ kind: 'text', text: s.slice(last) })
+  if (last < s.length) out.push({ kind: 'text', text: s.slice(last) })
+  return out
+}
+
+function tokenizeMarkers(s: string): Token[] {
+  const out: Token[] = []
+  let last = 0
+  // `@@` 的反转义会在真文本中间切出碎片；合并起来，下游按节点比对时不该看出差别
+  const text = (t: string) => {
+    const prev = out[out.length - 1]
+    if (prev?.kind === 'text') prev.text += t
+    else out.push({ kind: 'text', text: t })
+  }
+  MARKER_RE.lastIndex = 0
+  for (const m of s.matchAll(MARKER_RE)) {
+    const index = m.index ?? 0
+    if (index > last) text(s.slice(last, index))
+    if (m[0] === '@@') text('@')
+    else out.push({ kind: 'void', id: fromAlpha(m[1]!) })
+    last = index + m[0].length
+  }
+  if (last < s.length) text(s.slice(last))
   return out
 }
 
