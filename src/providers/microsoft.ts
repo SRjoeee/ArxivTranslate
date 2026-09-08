@@ -40,18 +40,25 @@ const SUPPORTED = new Set(`
 `.trim().split(/\s+/))
 
 /**
- * 这个目标语言能不能翻。**必须允许按主语言回退**：表里只有 `zh-Hans` / `zh-Hant`、没有裸 `zh`，
- * 而 `toBcp47('cmn')` 给出 `zh`——精确匹配会把中文（我们的默认目标）判成不支持，而实测 `to=zh`
- * 返回 200 并归一成 `zh-Hans`。
+ * 公开表之外、端点仍然接受的标签。**逐个实测出来的，不是按主语言推的**（2026-09-09，
+ * 把 `toBcp47` 产出的全部 179 个标签打了一遍端点：接受 107、拒绝 72，公开表里的无一被拒，
+ * 表外被接受的只有这四个）。
+ *
+ * 第一版写的是通用的「主语言回退」——只用 `zh` 一个案例就推广成规则，于是把 `zlm`（`toBcp47`
+ * 特意给出 `ms-Arab` 求爪夷文）也判成支持，而 `ms-Arab` 实测 **400**，`ms` 才 200 且是拉丁文的
+ * 马来语——归一过去等于悄悄换了文字（Codex 在 #115 指出）。所以这里只收实测通过的别名。
  */
+const VERIFIED_ALIASES: Record<string, string> = {
+  zh: 'zh-Hans',      // toBcp47('cmn')；我们的默认目标
+  'zh-TW': 'zh-Hant', // toBcp47('cmn-Hant')
+  mn: 'mn-Cyrl',
+  sr: 'sr-Latn',
+}
+
+/** 这个目标语言能不能翻：公开表里有，或在实测过的别名表里 */
 export function supportsTarget(target: string): boolean {
   const tag = toBcp47(target)
-  if (SUPPORTED.has(tag)) return true
-  const primary = tag.split('-')[0]!
-  if (SUPPORTED.has(primary)) return true
-  // 表里带地区 / 文字子标签的条目也算数：zh-Hans 让裸 zh 成立
-  for (const s of SUPPORTED) if (s.split('-')[0] === primary) return true
-  return false
+  return SUPPORTED.has(tag) || tag in VERIFIED_ALIASES
 }
 
 export interface MicrosoftDeps {
@@ -150,6 +157,12 @@ export function createMicrosoftProvider(targetLanguage: string, deps: MicrosoftD
     },
     async translate(request: TranslateRequest): Promise<TranslateResult> {
       if (request.segments.length === 0) return { segments: [], provider: 'microsoft' }
+      // 目标语言不支持时**本地就退出**，不去问端点。`buildChain` 会把不可用的首选留在链首
+      // （popup 要据此提示），而 `fallback.ts` 挑步骤时看的是降级记录、不是 `isAvailable()`——
+      // 于是第一批请求仍会发出去换回 400，并发下甚至是好几发（Codex 在 #115 指出）
+      if (!supportsTarget(request.target)) {
+        throw new ProviderError('bad-request', `微软翻译不支持目标语言 ${request.target}`, { isolatable: false })
+      }
       const texts = request.segments.map(segment => segment.text)
       // 协商层已经保证送进来的是 markers（纯文本）。万一漏了也不能把标签发出去：
       // 端点没有 markup 模式，会按目标语言各异的方式把标签毁掉，事后无法还原（上游 Read Frog 的原话）

@@ -119,6 +119,25 @@ describe('supportsTarget', () => {
     }
   })
 
+  it('别名只收实测通过的：zlm → ms-Arab 端点返回 400，不能靠主语言推成支持（Codex 在 #115 指出）', () => {
+    // toBcp47('zlm') 特意给出 ms-Arab 求爪夷文；ms-Arab 实测 400，ms 才 200 且是拉丁文马来语，
+    // 归一过去等于悄悄换了文字。通用的主语言回退会把它判成支持
+    expect(supportsTarget('zlm')).toBe(false)
+    // 四个实测通过的别名仍然成立
+    for (const code of ['cmn', 'cmn-Hant', 'mon', 'srp']) {
+      expect([code, supportsTarget(code)]).toEqual([code, true])
+    }
+  })
+
+  it('不支持的目标语言在本地就失败，不去问端点（Codex 在 #115 指出）', async () => {
+    // buildChain 会把不可用的首选留在链首，而 fallback.ts 挑步骤看的是降级记录、不是 isAvailable()，
+    // 所以不本地拦的话第一批请求会真的发出去换回 400
+    const fetch = vi.fn(async () => ok(['x']))
+    const error = await provider(fetch, 'epo').translate(req(['one'], 'epo')).catch(e => e)
+    expect((error as ProviderError).kind).toBe('bad-request')
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('isAvailable() 就是这道闸：不支持的语言直接报不可用，链会自动跳过它', async () => {
     expect(await createMicrosoftProvider('cmn').isAvailable()).toBe(true)
     expect(await createMicrosoftProvider('epo').isAvailable()).toBe(false)

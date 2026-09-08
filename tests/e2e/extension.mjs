@@ -442,8 +442,13 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await options.getByRole('button', { name: '保存', exact: true }).click()
   await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 
-  const { page, logs } = await openPaper(PAPER, 'edge.microsoft.com')
+  const { page, logs, requests } = await openPaper(PAPER, 'edge.microsoft.com')
   const idle = idleOf(await waitForLog(logs, IDLE, 120_000))
+  // **必须验证请求真的打到了微软**（Codex 在 #115 指出）：微软坏掉、Google 兜底成功时，
+  // 下面那些「翻完了 / 节点数对得上 / 没有记号残留」全都照样成立——Google 也保得住 markers。
+  // 不数请求的话这一轮验的就不是它声称要验的那个端点
+  check('微软引擎：请求确实打到了微软端点，不是 Google 兜底顶上的（#98）',
+    requests.length > 0, `edge.microsoft.com 请求 ${requests.length} 个`)
   check('微软引擎：首屏翻完、没有致命错误（#98）',
     !!idle && idle.requested > 0 && idle.done === idle.requested && idle.failed === 0 && !/fatal/.test(idle.text),
     idle?.text ?? '(no idle line)')
