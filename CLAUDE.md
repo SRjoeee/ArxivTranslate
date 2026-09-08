@@ -115,7 +115,10 @@ reference/              # 参考仓库，gitignore，只读
 - **PR 开出或 push 后，等 Codex 审完再合并**：它先打 👀 反应表示审查中，结束时留 👍 反应（无建议）、一条 review + 行内评论（有建议）或限额提示，三种终态信号之一出现前不要合。评论逐条核实（fixture / 实测 / 读代码）再采纳，没采纳的写明理由。See `docs/agents/codex-review.md`。
 - 遇到 DESIGN.md 里标 **[待验证]** 的内容，先用 fixture 或 curl 实测，把结论写进 `docs/RESEARCH.md`，再实现。
 - 发现 DESIGN.md 与实测不符：停下，在 RESEARCH.md 记录差异并提出修改建议，不要默默改设计。
-- 代码标识符英文，注释和文档中文。commit message 英文，格式 `type(scope): summary`。
+- **仓库里的一切用英文**：标识符、注释、文档、测试名与断言文案、commit message、PR 描述、issue。
+  commit 格式 `type(scope): summary`。**与用户对话仍用中文**——这条规则只约束进到仓库里的内容。
+  存量中文（2026-09-09 时 179 个文件、5727 行）**改到哪个文件就顺手把那个文件转成英文**，
+  不做一次性全量翻译：那会是一个没法审的巨型 diff，还会把 `git blame` 全部打断。
 
 ---
 
