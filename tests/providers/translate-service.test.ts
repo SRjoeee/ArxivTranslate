@@ -102,6 +102,28 @@ describe('createTranslateService', () => {
     expect(calls).toBe(3)
   })
 
+  it('去重把两个会话并进同一个任务时，两个 scope 都要记上（Codex 在 #113 指出）', async () => {
+    // 两个标签页翻同一篇的同一段：BatchQueue / RequestQueue 按 dedupKey 合并，
+    // 执行那头只看得见先到的那份 QueueItem。记在执行路径上的话第二个 scope 漏掉，
+    // 它后面的批次照样发得出去，第二波又回来了
+    let calls = 0
+    const { port } = fakePort()
+    const service = createTranslateService({
+      getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }),
+      cache: port,
+    })
+    const [a, b] = await Promise.all([
+      service.translate({ ...req(['x']), scope: 'tabA' }),
+      service.translate({ ...req(['x']), scope: 'tabB' }),
+    ])
+    expect([a.ok, b.ok]).toEqual([false, false])
+    const afterFirst = calls
+    // 两个会话各自的后续块都不该再问端点
+    await service.translate({ ...req(['y']), scope: 'tabA' })
+    await service.translate({ ...req(['z']), scope: 'tabB' })
+    expect(calls).toBe(afterFirst)
+  })
+
   it('只有 no-key / auth 黏：别的错不该把整轮翻译废掉', () => {
     // 与 fallback.ts 的 PERMANENT_KINDS 同一份判断。bad-request 是「这一批的问题」，
     // 换一批就可能好，黏住它等于因为一个坏块放弃整篇

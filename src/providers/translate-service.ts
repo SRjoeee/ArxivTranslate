@@ -199,15 +199,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       const byId = new Map(result.segments.map(s => [s.id, s.text]))
       return ids.map(id => byId.get(id) ?? '')
     } catch (e) {
-      const error = asBatchError(e, items.length)
-      // key 没配 / 不认：这轮里再打多少次都是同一个 401。`failQueue` 只排空**那一刻**排在
-      // RequestQueue 里的任务，而占满并发槽时等待区恰好是空的——剩下的块还在 BatchQueue 里攒批，
-      // 攒完照常派发，于是有第二波（issue #96 实测 +744 ms 又发了 7 个）。在这里把状态黏住
-      if (e instanceof ProviderError && FATAL_FOR_QUEUE.has(e.kind)) {
-        const state = queuesFor(first.provider).fatal
-        for (const item of items) if (item.scope) state.scopes.set(item.scope, error)
-      }
-      throw error
+      throw asBatchError(e, items.length)
     }
   }
 
@@ -356,7 +348,18 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，
         // 与「恢复原文之后不再写缓存」的承诺不符
         if (store && writes.length > 0 && !(scope && cancelledScopes.has(scope))) await store.putMany(writes)
-        if (failures.length > 0) return { ok: false, error: toErrorInfo(pickError(failures)) }
+        if (failures.length > 0) {
+          const error = pickError(failures)
+          // key 没配 / 不认：这轮里再打多少次都是同一个 401。`failQueue` 只排空**那一刻**排在
+          // RequestQueue 里的任务，而占满并发槽时等待区恰好是空的——剩下的块还在 BatchQueue 里攒批，
+          // 攒完照常派发，于是有第二波（issue #96 实测 +744 ms 又发了 7 个）。这里把状态黏住。
+          //
+          // 记在**调用方**这一层而不是执行路径上：去重会让两个标签页的相同段落并进同一个队列任务，
+          // 执行那头只看得见第一个调用方的 QueueItem，第二个的 scope 就漏了，它后面的批次照样发得出去
+          //（Codex 在 #113 指出）。而每个调用方都会各自拿到这个拒绝，在这里记一个都不漏
+          if (scope && error instanceof ProviderError && FATAL_FOR_QUEUE.has(error.kind)) pair.fatal.scopes.set(scope, error)
+          return { ok: false, error: toErrorInfo(error) }
+        }
       }
 
       // 4. 按原顺序合并
