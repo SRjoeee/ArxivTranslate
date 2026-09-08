@@ -58,9 +58,12 @@ export default defineContentScript({
     // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
     // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
     watchConfig(config => {
+      // 先立闸再比值：watcher 一响就说明它拿到的是最新的存储内容，哪怕这次不需要重画。
+      // 否则「页面带着旧外观启动 + 用户点恢复默认」会走进等值快路径，闸没立起来，
+      // 随后 getConfig() 那份旧快照又把非默认外观装回去（Codex 在 #106 指出）
+      styleFromWatcher = true
       if (JSON.stringify(config.style) === JSON.stringify(style)) return
       style = config.style
-      styleFromWatcher = true
       applyStyle(document, style)
     })
     // 一次会话 = 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）

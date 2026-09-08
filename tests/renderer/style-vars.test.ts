@@ -20,6 +20,12 @@ describe('sanitizeColor', () => {
     expect(sanitizeColor('   ')).toEqual({ ok: true, color: '' })
   })
 
+  it('十六进制只认 3 / 4 / 6 / 8 位：其余长度浏览器会整条丢掉，存下来等于设置无效', () => {
+    for (const value of ['#abc', '#abcd', '#a1b2c3', '#a1b2c3d4']) expect([value, sanitizeColor(value).ok]).toEqual([value, true])
+    // 这些过了白名单也写不进渲染：用户会看到设置存住了、页面却没变（Codex 在 #106 指出）
+    for (const value of ['#ab', '#abcde', '#a1b2c3d', '#a1b2c3d4e']) expect([value, sanitizeColor(value).ok]).toEqual([value, false])
+  })
+
   it('挡住会开出新声明或闭合规则的输入', () => {
     // 手填框里写成 "red; opacity: 0" 会多出一条声明；"}" 会提前闭合，后面的内容变成整页规则
     for (const value of ['red; opacity: 0', 'red}', '#fff{', 'url(x)', 'var(--x)', '<script>']) {

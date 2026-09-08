@@ -65,7 +65,7 @@ export interface StyleVars {
   color?: string
   /** 1 = 不透明（默认） */
   opacity?: number
-  /** 空串 = 用 presets.css 里那个跟随正文色的默认强调色 */
+  /** 空串 = 用每个预设自己的默认色：下划线族的 --axt-accent 跟随正文，marker / highlight / glow 的 --axt-green 是固定的绿 */
   accent?: string
 }
 
@@ -79,7 +79,7 @@ export interface StyleVars {
 /** 上限放到能装下一条 color-mix()；设置页的取色器产出的是 7 个字符的 #rrggbb */
 export const COLOR_MAX = 64
 
-const COLOR_RE = /^(?:#[0-9a-f]{3,8}|[a-z]+|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix)\([0-9a-z\s.%,/+-]*\))$/i
+const COLOR_RE = /^(?:#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|[a-z]+|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix)\([0-9a-z\s.%,/+-]*\))$/i
 
 export function sanitizeColor(value: string): { ok: true; color: string } | { ok: false; reason: string } {
   const trimmed = value.trim()

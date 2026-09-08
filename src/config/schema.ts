@@ -78,7 +78,7 @@ export const configSchema = z.object({
     color: z.string().max(COLOR_MAX).refine(v => sanitizeColor(v).ok, '不是有效的颜色值'),
     /** 译文透明度。下限 0.3 是防手滑调到看不见 */
     opacity: z.number().min(OPACITY_MIN).max(OPACITY_MAX),
-    /** 高亮 / 下划线等装饰的颜色；空串 = 跟随正文色的默认强调色 */
+    /** 高亮 / 下划线等装饰的颜色；空串 = 各预设自己的默认色（下划线族跟随正文，marker / highlight / glow 是固定的绿） */
     accent: z.string().max(COLOR_MAX).refine(v => sanitizeColor(v).ok, '不是有效的颜色值'),
   }).default({ preset: 'none', customCss: '', color: '', opacity: OPACITY_MAX, accent: '' }),
   /** 引擎降级链（§8.5）：首选引擎失败时自动切到免费引擎，别让整页翻译停死 */

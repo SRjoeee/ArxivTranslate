@@ -318,7 +318,9 @@ export function App() {
             <label style={{ fontWeight: 'normal', display: 'flex', alignItems: 'center', gap: 4 }}>
               <input type="checkbox" checked={config.style.accent === ''}
                 onChange={e => setLocal(c => ({ ...c, style: { ...c.style, accent: e.target.checked ? '' : '#808080' } }))} />
-              跟随正文
+              {/* 不叫「跟随正文」：只有下划线族的 --axt-accent 是 currentColor 派生的，
+                  marker / highlight / glow 用的 --axt-green 是写死的绿，不跟正文走（Codex 在 #106 指出） */}
+              预设默认色
             </label>
           </span>
         </div>
