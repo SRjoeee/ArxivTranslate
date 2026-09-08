@@ -195,7 +195,7 @@ export function App() {
         // 用**已保存的**那个而不是表单里的——按钮上写着「用已保存的配置」，而 background 也是从
         // storage 读配置建链；拿未保存的下拉值去指名，轻则测错引擎，重则报「不在当前链上」（Codex 在 #59 指出）
         providerId: saved.provider,
-        request: { segments: [{ id: 'sample', text: sampleFor(saved) }], source: 'en', target: config.targetLanguage, context: { sectionTitle: '连接测试' } },
+        request: { segments: [{ id: 'sample', text: sampleFor(saved) }], source: 'en', target: saved.targetLanguage, context: { sectionTitle: '连接测试' } },
       })
       const ms = Math.round(performance.now() - t0)
       setTestResult(res.ok

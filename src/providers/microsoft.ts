@@ -55,7 +55,18 @@ const REWRITE: Record<string, string> = {
   'zh-TW': 'zh-Hant', // toBcp47('cmn-Hant')
   mn: 'mn-Cyrl',      // 现代蒙古语的通行文字；裸 mn 也是归到这里，显式写出来不依赖默认
   sr: 'sr-Cyrl',      // ← 裸 sr 会被归成拉丁文，与我们的语言含义相反
+  ny: 'nya',          // ↓ 这两个反过来：端点用三字母码，`toBcp47` 却缩成两字母，缩完反而不在表里
+  lg: 'lug',
 }
+
+/**
+ * 端点交付不了我们所标注的**文字**的目标语言。这三个在 `languages.ts` 里写的是「(Cyrillic)」，
+ * 但端点表里没有对应的西里尔变体，`toBcp47` 给出的 `bs` / `uz` / `az` 实测都返回拉丁字母
+ * （`languages.ts` 的 BCP47_OVERRIDES 注释里记着这次实测）。发出去会**静默换掉文字**，
+ * 所以判为不支持、走降级——与 `zlm → ms-Arab` 因不在表里而判false 是同一个道理，只是这里
+ * 两字母码碰巧落在表内，得显式挡一次（Codex 在 #115 指出）。
+ */
+const SCRIPT_UNAVAILABLE = new Set(['bos', 'uzn', 'azj'])
 
 /** 实际发给端点的目标语言标签 */
 function wireTarget(target: string): string {
@@ -68,6 +79,7 @@ function wireTarget(target: string): string {
  * 不做任何按主语言的推断（第一版那么写，把 `zlm → ms-Arab` 判成了支持，而它实测 400）。
  */
 export function supportsTarget(target: string): boolean {
+  if (SCRIPT_UNAVAILABLE.has(target)) return false
   return SUPPORTED.has(wireTarget(target))
 }
 

@@ -128,6 +128,29 @@ describe('supportsTarget', () => {
     expect(String((fetch.mock.calls[0] as unknown as [string])[0])).toContain('to=sr-Cyrl')
   })
 
+  it('nya / lug 发三字母码——toBcp47 缩成两字母之后反而不在表里（Codex 在 #115 指出）', async () => {
+    // 179 个目标当初是拿 toBcp47 的结果去探的，所以 nya / lug 这两个标签本身从没被打过。
+    // 补测（2026-09-09）：to=ny 400、to=nya 200「Neural network imagwirizana.」；
+    //                    to=lg 400、to=lug 200「Neural network ekwatagana.」
+    for (const [code, wire] of [['nya', 'nya'], ['lug', 'lug']] as const) {
+      expect([code, supportsTarget(code)]).toEqual([code, true])
+      const fetch = vi.fn(async () => ok(['x']))
+      await provider(fetch, code).translate(req(['one'], code))
+      expect(String((fetch.mock.calls[0] as unknown as [string])[0])).toContain(`to=${wire}`)
+    }
+  })
+
+  it('端点交付不了西里尔文的 bos / uzn / azj 判为不支持，不静默换成拉丁文（Codex 在 #115 指出）', () => {
+    // 这三个在 languages.ts 里写的是「(Cyrillic)」，但 toBcp47 给出的 bs / uz / az 落在表内、
+    // 实测 200 却返回拉丁文，而 bs-Cyrl / uz-Cyrl / az-Cyrl 全部 400。与 zlm 同类，只是这里
+    // 两字母码碰巧在表里，得显式挡。变异检查：去掉 SCRIPT_UNAVAILABLE 这三条会全红
+    for (const code of ['bos', 'uzn', 'azj']) {
+      expect([code, supportsTarget(code)]).toEqual([code, false])
+    }
+    // 同族里端点真能交付的那个不受影响：sr-Cyrl 实测 200 且是西里尔文
+    expect(supportsTarget('srp')).toBe(true)
+  })
+
   it('别名只收实测通过的：zlm → ms-Arab 端点返回 400，不能靠主语言推成支持（Codex 在 #115 指出）', () => {
     // toBcp47('zlm') 特意给出 ms-Arab 求爪夷文；ms-Arab 实测 400，ms 才 200 且是拉丁文马来语，
     // 归一过去等于悄悄换了文字。通用的主语言回退会把它判成支持
