@@ -101,6 +101,27 @@ describe('注入与恢复', () => {
     expect(css).not.toContain('[object Object]')
   })
 
+  it('会叠加的预设声明只作用于顶层译文，嵌套的脚注译文不再乘第二遍', () => {
+    // opacity / filter / 改这两者的 animation 都作用于整棵子树：side 模式的 .axt-note-t.axt-t 嵌在段落译文里，
+    // 两层都匹配就会相乘。Chrome 实测（滑杆 0.5）：改前 outer/nested 都是 0.375 且各挨一次
+    // blur(4px)，改后 nested 是 1 / none（Codex 在 #106 指出）
+    const css = readFileSync(join(import.meta.dirname, '../../src/styles/presets.css'), 'utf8')
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/@media[^{]*\{/g, '')
+    const offenders: string[] = []
+    for (const m of rules.matchAll(/([^{}]*\.axt-t[^{}]*)\{([^{}]*)\}/g)) {
+      const [, selector, body] = m
+      // 逐条声明解析，不用带负向先行的正则：`\s*` 会回溯成零宽，让 (?!none) 在空格处求值而恒真
+      const compounds = body!.split(';').some(decl => {
+        const [prop, ...rest] = decl.split(':')
+        // animation 也算：blink 不直接写 opacity，它的透明度来自 @keyframes
+        return ['opacity', 'filter', 'animation'].includes(prop!.trim()) && rest.join(':').trim() !== 'none'
+      })
+      if (!compounds) continue
+      if (!selector!.includes(':not(:where(')) offenders.push(selector!.trim())
+    }
+    expect(offenders).toEqual([])
+  })
+
   it('presets.css 里 blur 与 blink 消费 --axt-opacity，而不是把它顶掉', () => {
     const css = readFileSync(join(import.meta.dirname, '../../src/styles/presets.css'), 'utf8')
     const rules = css.replace(/\/\*[\s\S]*?\*\//g, '')
