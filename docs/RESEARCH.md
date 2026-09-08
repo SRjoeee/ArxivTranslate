@@ -253,6 +253,10 @@ Content-Type: application/json
 
 **2026-09-09 更正**：上面这个 108/71 是拿公开表 + 「按主语言回退」推出来的，**推多了一个**。把 `toBcp47` 产出的全部 179 个标签逐个打端点实测：**接受 107、拒绝 72**；公开表里的无一被拒，表外被接受的只有 4 个别名——`zh`→zh-Hans、`zh-TW`→zh-Hant、`mn`→mn-Cyrl、`sr`→sr-Latn。
 
+**2026-09-09 再补一条**：端点自己的默认归一**不一定等于我们的语言含义**。`toBcp47('srp')` 给出裸 `sr`，端点归一成 **`sr-Latn`（拉丁文）**，而 `languages.ts` 里 `srp` 写的是 **Serbian (Cyrillic)**——等于悄悄换文字，与 `ms-Arab` 同类。所以 provider 侧维护的是一张**重写表**（`zh→zh-Hans`、`zh-TW→zh-Hant`、`mn→mn-Cyrl`、`sr→sr-Cyrl`），把每个目标显式落到公开表的真实条目上，判定随之简化成「重写后在不在表里」，不做任何按主语言的推断。实测：`sr-Cyrl` → Неуронске…（西里尔）、`sr` → Neuronske…（拉丁）。
+
+**CORS**：端点实测返回 `access-control-allow-origin: *`，所以没有 host 权限也能从 background 请求成功。但那是我们控制不了的依赖——`wxt.config.ts` 的 `host_permissions` 里已按其他联网引擎的惯例补上 `https://edge.microsoft.com/*`。
+
 差的那一个是 `zlm`：`toBcp47` 特意给出 `ms-Arab`（爪夷文），实测 **400**；而 `ms` 是 200 但返回拉丁文马来语，归一过去等于悄悄换文字。**所以判定只能是「公开表精确匹配 + 实测过的别名」，不能按主语言推**（Codex 在 #115 指出）。
 
 **所以 provider 不能只做代码映射**：得带一份支持列表，在目标语言不受支持时提前退出（或在设置页把该引擎标灰），而不是等运行时 400 才发现。

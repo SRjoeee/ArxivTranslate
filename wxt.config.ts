@@ -18,7 +18,10 @@ export default defineConfig({
     // background 向 LLM 端点 fetch 需要 host 权限；默认只给 OpenRouter，自定义 baseURL 在设置页保存时按 origin 申请。
     // google-web 的端点也列进来（Codex 在 #59 指出）：它眼下返 CORS 头，普通跨域就能过，
     // 但那正是这次搬迁想摆脱的依赖——对方哪天不发这个头，免费引擎就整个不可用了
-    host_permissions: ['https://openrouter.ai/*', 'https://translate-pa.googleapis.com/*'],
+    // 每个联网引擎都要在这里：MV3 的 background fetch 仍然受 CORS 约束，没有 host 权限时
+    // 只能指望对方返 `Access-Control-Allow-Origin`。微软今天确实返 `*`（实测），但那是我们控制不了的
+    // 依赖——它哪天不返，整个引擎就变成 `network` 失败（Codex 在 #115 指出；加 provider 时漏了这一行）
+    host_permissions: ['https://openrouter.ai/*', 'https://translate-pa.googleapis.com/*', 'https://edge.microsoft.com/*'],
     // 自定义端点可能是 http 的 127.0.0.1 / 局域网（Ollama、LM Studio）；只写 localhost 字面量时申请会直接失败（Codex 在 #6 指出）。
     // 这里只是"允许申请"的范围，真正授权仍在设置页按 origin 逐个请求
     optional_host_permissions: ['https://*/*', 'http://*/*'],

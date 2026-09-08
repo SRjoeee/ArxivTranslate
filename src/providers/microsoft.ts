@@ -40,25 +40,35 @@ const SUPPORTED = new Set(`
 `.trim().split(/\s+/))
 
 /**
- * 公开表之外、端点仍然接受的标签。**逐个实测出来的，不是按主语言推的**（2026-09-09，
- * 把 `toBcp47` 产出的全部 179 个标签打了一遍端点：接受 107、拒绝 72，公开表里的无一被拒，
- * 表外被接受的只有这四个）。
+ * 我们的目标语言（经 `toBcp47`）→ **实际发给端点的标签**。不在这张表里的原样发。
  *
- * 第一版写的是通用的「主语言回退」——只用 `zh` 一个案例就推广成规则，于是把 `zlm`（`toBcp47`
- * 特意给出 `ms-Arab` 求爪夷文）也判成支持，而 `ms-Arab` 实测 **400**，`ms` 才 200 且是拉丁文的
- * 马来语——归一过去等于悄悄换了文字（Codex 在 #115 指出）。所以这里只收实测通过的别名。
+ * 两件事一起解决：公开表里没有的裸标签（`zh` / `sr` / `mn`），以及**端点自己的默认归一与我们的
+ * 语言含义不符**的情况。后者是真 bug：`toBcp47('srp')` 给出 `sr`，端点把它归一成 **`sr-Latn`**（拉丁文），
+ * 而我们的 `srp` 在 `languages.ts` 里写的是 **Serbian (Cyrillic)** ——等于悄悄换了文字，与 `zlm → ms-Arab`
+ * 同一类（Codex 在 #115 指出）。显式发 `sr-Cyrl` 就不再依赖端点怎么默认。
+ *
+ * 逐条实测（2026-09-09）：`sr-Cyrl` → Неуронске…（西里尔）、`sr` → Neuronske…（拉丁）、
+ * `mn-Cyrl` / `zh-Hans` / `zh-Hant` 均 200 且文字正确。
  */
-const VERIFIED_ALIASES: Record<string, string> = {
-  zh: 'zh-Hans',      // toBcp47('cmn')；我们的默认目标
+const REWRITE: Record<string, string> = {
+  zh: 'zh-Hans',      // toBcp47('cmn')，我们的默认目标
   'zh-TW': 'zh-Hant', // toBcp47('cmn-Hant')
-  mn: 'mn-Cyrl',
-  sr: 'sr-Latn',
+  mn: 'mn-Cyrl',      // 现代蒙古语的通行文字；裸 mn 也是归到这里，显式写出来不依赖默认
+  sr: 'sr-Cyrl',      // ← 裸 sr 会被归成拉丁文，与我们的语言含义相反
 }
 
-/** 这个目标语言能不能翻：公开表里有，或在实测过的别名表里 */
-export function supportsTarget(target: string): boolean {
+/** 实际发给端点的目标语言标签 */
+function wireTarget(target: string): string {
   const tag = toBcp47(target)
-  return SUPPORTED.has(tag) || tag in VERIFIED_ALIASES
+  return REWRITE[tag] ?? tag
+}
+
+/**
+ * 这个目标语言能不能翻。重写之后一律落在公开表的真实条目上，所以判定就是一句「在不在表里」——
+ * 不做任何按主语言的推断（第一版那么写，把 `zlm → ms-Arab` 判成了支持，而它实测 400）。
+ */
+export function supportsTarget(target: string): boolean {
+  return SUPPORTED.has(wireTarget(target))
 }
 
 export interface MicrosoftDeps {
@@ -169,7 +179,7 @@ export function createMicrosoftProvider(targetLanguage: string, deps: MicrosoftD
       if (texts.some(text => /<[a-z/]/i.test(text))) {
         throw new ProviderError('bad-request', '微软端点不接受标签格式的占位符，只能走 markers', { isolatable: false })
       }
-      const translated = await translateTexts(texts, request.source, toBcp47(request.target), deps, request.signal)
+      const translated = await translateTexts(texts, request.source, wireTarget(request.target), deps, request.signal)
       return {
         segments: request.segments.map((segment, i) => ({ id: segment.id, text: translated[i]! })),
         provider: 'microsoft',

@@ -26,7 +26,8 @@ describe('createMicrosoftProvider', () => {
     const result = await provider(fetch).translate(req(['one', 'two', 'three']))
     expect(fetch).toHaveBeenCalledTimes(1)
     const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
-    expect(url).toBe('https://edge.microsoft.com/translate/translatetext?from=en&to=zh&isEnterpriseClient=false')
+    // 发的是显式的 zh-Hans，不是裸 zh——不依赖端点自己怎么归一
+    expect(url).toBe('https://edge.microsoft.com/translate/translatetext?from=en&to=zh-Hans&isEnterpriseClient=false')
     // 上游那版的形状：裸数组，不是旧的 [{ Text }]
     expect(JSON.parse(String(init.body))).toEqual(['one', 'two', 'three'])
     expect(result.segments).toEqual([{ id: 's0', text: '一' }, { id: 's1', text: '二' }, { id: 's2', text: '三' }])
@@ -117,6 +118,14 @@ describe('supportsTarget', () => {
     for (const code of ['ceb', 'epo', 'tgl', 'nno', 'ckb']) {
       expect([code, supportsTarget(code)]).toEqual([code, false])
     }
+  })
+
+  it('srp 发 sr-Cyrl，不发裸 sr——裸 sr 会被端点归成拉丁文（Codex 在 #115 指出）', async () => {
+    // languages.ts 里 srp 写的是 "Serbian (Cyrillic)"，而 toBcp47('srp') 给出 sr，
+    // 端点把裸 sr 归一成 sr-Latn。实测：sr-Cyrl → Неуронске…，sr → Neuronske…
+    const fetch = vi.fn(async () => ok(['х']))
+    await provider(fetch, 'srp').translate(req(['one'], 'srp'))
+    expect(String((fetch.mock.calls[0] as unknown as [string])[0])).toContain('to=sr-Cyrl')
   })
 
   it('别名只收实测通过的：zlm → ms-Arab 端点返回 400，不能靠主语言推成支持（Codex 在 #115 指出）', () => {
