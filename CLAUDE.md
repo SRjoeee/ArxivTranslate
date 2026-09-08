@@ -112,6 +112,22 @@ reference/              # 参考仓库，gitignore，只读
      于是设置页的「测试连接」永远失败（#115）；
   3. 把自己的 diff 当成别人的代码通读一遍，问「这次改动让什么原本能用的东西不能用了」。
 - 一次修复批次只叫一次审查，不要推一个 commit 叫一次。
+- **Do not wait on review to start the next independent PR.** Review is the bottleneck, not
+  authorship: a PR under 100 lines costs one Codex run, one over 491 costs five or six, and Codex
+  hit its usage limit four times on 2026-09-08. Check what the next PR actually depends on — if it
+  touches different files, branch it from `main` and start. Rebasing independent files is cheap;
+  waiting is not. What is *not* cheap is two branches editing the same file: #118 and #120 both
+  touched CLAUDE.md, and #115 carried a semantic conflict that rebase could not see (an assertion
+  pinned to a value #116 had renamed). So parallelise across files, never within one.
+- **Parallelise measurements with subagents; write implementation yourself.** Probes and
+  experiments are independent, self-verifying (the output is numbers), land no code, and need none
+  of the invariants in this file — those are worth running concurrently, with the conclusions
+  re-checked here, since a measurement can be wrong in ways its own output does not show (the
+  sentLen figures reported on #105 were measured on contaminated input). Implementation is the
+  opposite: correctness here keeps coming from holding the whole context — that `\s` eats NBSP,
+  that §5.2 relies on boundary whitespace between inline blocks, that a mutation check can look
+  like it passed while testing the wrong half. Briefing a subagent to that standard costs about as
+  much as writing the module.
 - 结束前必须通过：`pnpm typecheck && pnpm lint && pnpm test && pnpm build`（**与 CI 的四步一致**）。`pnpm test` 是 vitest，**不做类型检查**；漏掉 typecheck 的话本地会全绿而 CI 红——2026-09-08 的 #115 就是这么栽的。
 - **PR 开出或 push 后，等 Codex 审完再合并**：它先打 👀 反应表示审查中，结束时留 👍 反应（无建议）、一条 review + 行内评论（有建议）或限额提示，三种终态信号之一出现前不要合。评论逐条核实（fixture / 实测 / 读代码）再采纳，没采纳的写明理由。See `docs/agents/codex-review.md`。
 - 遇到 DESIGN.md 里标 **[待验证]** 的内容，先用 fixture 或 curl 实测，把结论写进 `docs/RESEARCH.md`，再实现。
