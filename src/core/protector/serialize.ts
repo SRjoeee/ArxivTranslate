@@ -5,6 +5,7 @@
 // 序列化时要当普通 paired 走进去，否则整格只剩一个占位符、文字全丢（实测 2410.00260 表 1；Codex 在 #5 指出）。
 import { isInjected } from '@/core/marks'
 import { FUNCTIONAL_INLINE, classify, isTableCell } from '@/core/rules/latexml'
+import type { TextSpan } from './offsets'
 import { escapeText } from './text'
 import { type WireFormat, writeVoid } from './tokens'
 
@@ -18,6 +19,8 @@ export interface ProtectedBlock {
   paired: Set<number>
   /** 超过 VOID_DENSE_THRESHOLD 的块视为公式密集，由 pipeline 单独成批 */
   voidCount: number
+  /** 线上偏移 ↔ 文本节点的映射；只有 `serialize(root, format, { offsets: true })` 才产出（§6.2 / issue #105） */
+  offsets?: TextSpan[]
 }
 
 export const VOID_DENSE_THRESHOLD = 40
@@ -55,10 +58,54 @@ const HTML_SPACE = /[\t\n\f\r ]+/g
 const collapseWhitespace = (text: string) => text.replace(HTML_SPACE, ' ')
 
 
-export function serialize(root: Element, format: WireFormat = 'tags'): ProtectedBlock {
+/**
+ * 逐字符写入线上文本，同时记录「线上偏移 ↔ 节点内偏移」。**只在要偏移表时走这条路**——
+ * 默认路径仍是整串 `escapeText` + 一次 `collapseWhitespace`，一个字符都不多碰（性能）。
+ * 两条路径必须产出**逐字节相同**的线上文本，`tests/protector/offsets.test.ts` 拿 12 篇 fixture 钉住这一点。
+ */
+function makeTracker(format: WireFormat, parts: string[], spans: TextSpan[]) {
+  let len = 0
+  let afterSpace = false
+  return {
+    /** 占位符：内部没有需要折叠的空白，也不以空白开头结尾，原样写 */
+    raw(s: string) {
+      parts.push(s)
+      len += s.length
+      afterSpace = false
+    },
+    text(node: Text) {
+      const data = node.data
+      const from = len
+      const anchors: [number, number][] = [[len, 0]]
+      let out = ''
+      for (let i = 0; i < data.length; i++) {
+        const c = data[i]!
+        let emitted: string
+        if (c === ' ' || c === '\t' || c === '\n' || c === '\f' || c === '\r') {
+          emitted = afterSpace ? '' : ' '
+          afterSpace = true
+        } else {
+          emitted = c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : format === 'markers' && c === '@' ? '@@' : c
+          afterSpace = false
+        }
+        out += emitted
+        // 输入一个字符没有正好产出一个字符 → 这里之后重新 1:1，记一个锚点
+        if (emitted.length !== 1) anchors.push([len + out.length, i + 1])
+      }
+      if (out.length === 0) return
+      parts.push(out)
+      len += out.length
+      spans.push({ node, from, to: len, anchors })
+    },
+  }
+}
+
+export function serialize(root: Element, format: WireFormat = 'tags', options: { offsets?: boolean } = {}): ProtectedBlock {
   const slots = new Map<number, Node>()
   const paired = new Set<number>()
   const parts: string[] = []
+  const spans: TextSpan[] = []
+  const tracker = options.offsets === true ? makeTracker(format, parts, spans) : undefined
   let voidCount = 0
   let next = 1
   const inCell = isTableCell(root)
@@ -66,7 +113,8 @@ export function serialize(root: Element, format: WireFormat = 'tags'): Protected
   const walk = (node: Element) => {
     for (const child of Array.from(node.childNodes)) {
       if (child.nodeType === TEXT_NODE) {
-        parts.push(escapeText((child as Text).data, format))
+        if (tracker) tracker.text(child as Text)
+        else parts.push(escapeText((child as Text).data, format))
       } else if (child.nodeType === ELEMENT_NODE) {
         const el = child as Element
         // 我们自己插的译文 / 镜像不是原文：再次翻译时它们已经在原块内部（Codex 在 #8 指出）
@@ -85,17 +133,22 @@ export function serialize(root: Element, format: WireFormat = 'tags'): Protected
         slots.set(id, el)
         if (isVoid || format === 'markers') {
           voidCount++
-          parts.push(writeVoid(id, format))
+          if (tracker) tracker.raw(writeVoid(id, format))
+          else parts.push(writeVoid(id, format))
         } else {
           paired.add(id)
-          parts.push(`<t id="${id}">`)
+          if (tracker) tracker.raw(`<t id="${id}">`)
+          else parts.push(`<t id="${id}">`)
           walk(el)
-          parts.push('</t>')
+          if (tracker) tracker.raw('</t>')
+          else parts.push('</t>')
         }
       }
       // 注释等其他节点忽略
     }
   }
   walk(root)
-  return { format, text: collapseWhitespace(parts.join('')), slots, paired, voidCount }
+  // 记账路径在写入时就折叠好了，不能再折一次
+  const text = tracker ? parts.join('') : collapseWhitespace(parts.join(''))
+  return tracker ? { format, text, slots, paired, voidCount, offsets: spans } : { format, text, slots, paired, voidCount }
 }
