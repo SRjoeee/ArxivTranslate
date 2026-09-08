@@ -1,0 +1,192 @@
+[
+ {
+  "i": 0,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 1,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 2,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 3,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 4,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 5,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 6,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 7,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 8,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 9,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 10,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 11,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 12,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 13,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 14,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 15,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 16,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 17,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 18,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 19,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 20,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 21,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 22,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 23,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 24,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 25,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 26,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 27,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 28,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 29,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 30,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 31,
+  "A": "google",
+  "B": "microsoft"
+ },
+ {
+  "i": 32,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 33,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 34,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 35,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 36,
+  "A": "microsoft",
+  "B": "google"
+ },
+ {
+  "i": 37,
+  "A": "microsoft",
+  "B": "google"
+ }
+]

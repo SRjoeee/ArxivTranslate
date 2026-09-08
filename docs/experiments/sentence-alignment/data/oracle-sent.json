@@ -1,0 +1,10 @@
+[
+ {
+  "url": "https://edge.microsoft.com/translate/translatetext",
+  "body": "[\"Stress\"]"
+ },
+ {
+  "url": "https://edge.microsoft.com/translate/translatetext",
+  "body": "[\"Consider the symbols @0# and @1# and @2# and @3# and @4# and @5# and @6# and @7# and @8# and @9# and @10# and @11# and @12# and @13# and @14# and @15# and @16# and @17# and @18# and @19# and @20# and @21# and @22# and @23# and @24# and @25# and @26# and @27# and @28# and @29# which together exhaust the alphabet used in this construction.\",\"Adjacent markers @0# @1# @2# immediately followed by @3# @4# appear with no separating words at all in this sentence.\",\"A sentence that both uses the literal token @0# and a real formula @0# in the same paragraph, which is the ambiguous case.\"]"
+ }
+]

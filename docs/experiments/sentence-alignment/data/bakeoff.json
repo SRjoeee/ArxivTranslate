@@ -1,0 +1,86 @@
+{
+ "A  @N#     digits (Immersive)|ms": {
+  "ok": 74,
+  "total": 90,
+  "lost": 16,
+  "dup": 10,
+  "sample": "@12#奈梅亨拉德博德大学，@3#Erasmusplein @1#，@4#奈梅亨，@5#荷兰 "
+ },
+ "A  @N#     digits (Immersive)|google": {
+  "ok": 59,
+  "total": 90,
+  "lost": 75,
+  "dup": 9,
+  "sample": "@12#奈梅亨拉德堡大学、@3#Erasmusplein @1#、@4#奈梅亨、@5#荷兰"
+ },
+ "B  @xN#    letter prefix|ms": {
+  "ok": 73,
+  "total": 90,
+  "lost": 17,
+  "dup": 10,
+  "sample": "@x12#Radboud 奈梅亨大学，@x3#Erasmusplein @x1#，@x4#Nijmegen，@x5#The荷兰 "
+ },
+ "B  @xN#    letter prefix|google": {
+  "ok": 61,
+  "total": 90,
+  "lost": 52,
+  "dup": 11,
+  "sample": "@x12#奈梅亨拉德堡大学、@x3#Erasmusplein @x1#、@x4#奈梅亨、@x5#荷兰"
+ },
+ "C  @abc#   letters only|ms": {
+  "ok": 77,
+  "total": 90,
+  "lost": 13,
+  "dup": 10,
+  "sample": "@m#Radboud 奈梅亨大学，@d#Erasmusplein @b#，@e#Nijmegen，@f#The荷兰 "
+ },
+ "C  @abc#   letters only|google": {
+  "ok": 59,
+  "total": 90,
+  "lost": 62,
+  "dup": 11,
+  "sample": "@m#奈梅亨拉德堡大学、@d#Erasmusplein @b#、@e#奈梅亨、@f#荷兰"
+ },
+ "D  PUA U+E0xx single char|ms": {
+  "ok": 0,
+  "total": 90,
+  "lost": 455,
+  "dup": 0,
+  "sample": "荷兰奈梅亨拉德布德大学 "
+ },
+ "D  PUA U+E0xx single char|google": {
+  "ok": 34,
+  "total": 90,
+  "lost": 130,
+  "dup": 7,
+  "sample": "荷兰奈梅亨拉德堡德大学，伊拉斯谟广场，奈梅亨，荷兰"
+ },
+ "E  [[abc]] letters only|ms": {
+  "ok": 55,
+  "total": 90,
+  "lost": 47,
+  "dup": 8,
+  "sample": "[[男]]奈梅亨拉德博德大学，[[d]，埃拉斯穆斯广场 [[b]]，[[e]]奈梅亨，[[f]]荷兰 "
+ },
+ "E  [[abc]] letters only|google": {
+  "ok": 60,
+  "total": 90,
+  "lost": 51,
+  "dup": 10,
+  "sample": "[[m]]奈梅亨拉德堡德大学，[[d]]伊拉斯姆斯广场 [[b]]，[[e]]奈梅亨，[[f]]荷兰"
+ },
+ "F  ‹abc› guillemet|ms": {
+  "ok": 65,
+  "total": 90,
+  "lost": 25,
+  "dup": 10,
+  "sample": "‹m›奈梅亨拉德布德大学，‹d›Erasmusplein ‹b›，‹e›奈梅亨，‹f›荷兰 "
+ },
+ "F  ‹abc› guillemet|google": {
+  "ok": 54,
+  "total": 90,
+  "lost": 57,
+  "dup": 9,
+  "sample": "奈梅亨内梅亨大学，奈梅亨大学，伊拉斯姆斯广场，奈梅亨大学，荷兰"
+ }
+}
