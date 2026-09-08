@@ -105,3 +105,21 @@ describe('renderPath 进键（#104）', () => {
     expect(asPath).toEqual(['tags', 'markers', 'runs'])
   })
 })
+
+describe('空白折叠为什么必须升 CACHE_KEY_VERSION（#122）', () => {
+  it('带硬换行的文本与折叠后的文本算出同一个键——所以旧的坏译文不会自然失效', async () => {
+    // #119 之前，带换行的请求让微软逐行翻译（state explosion → 「州级爆炸性质」）。
+    // 键这边 normalizeText 早就折叠空白，两种文本因此**碰撞**：折叠上线后，
+    // 已经翻过的块会命中同一条旧记录，把坏译文在 30 天 TTL 内继续返回，修复到不了它们。
+    // 递增 CACHE_KEY_VERSION 是唯一能作废它们的手段——这条用例钉的就是那个碰撞
+    const withNewlines = 'Automatic verification faces state\nexplosion due to\nthe interleavings.'
+    const collapsed = withNewlines.replace(/[\t\n\f\r ]+/g, ' ')
+    expect(withNewlines).not.toBe(collapsed)
+    const identity = { providerId: 'microsoft', model: '', promptKey: '', target: 'cmn', renderPath: 'markers' as const }
+    const [a, b] = await Promise.all([
+      cacheKeyFor({ ...identity, text: withNewlines }),
+      cacheKeyFor({ ...identity, text: collapsed }),
+    ])
+    expect(a).toBe(b)
+  })
+})

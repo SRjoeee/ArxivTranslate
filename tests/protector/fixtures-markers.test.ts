@@ -5,6 +5,7 @@ import { extract } from '@/core/extractor'
 // runs 路径的 markers 覆盖在 runs.test.ts：在这里对 12 篇跑一遍只是「不抛异常」，不挂断言，
 // 却让这个文件与 tags 那个并行时把最重的 fixture 顶到 10 s 预算线上（CI 实测 10223 ms）
 import { rehydrate, serialize, tokenize, validate } from '@/core/protector'
+import { sameModuloWhitespace } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 
@@ -35,8 +36,10 @@ describe('fixture 往返（markers）', () => {
         expect(v.ok, `${f} 恒等校验失败：${target.id || target.className}`).toBe(true)
 
         const fragment = rehydrate(block.text, block, doc)
-        // 文字逐字相等：转义 + 拍平都不该动一个字符
-        expect(fragment.textContent, `${f} 文字对不上：${target.id || target.className}`).toBe(target.textContent)
+        // 文字相等：转义 + 拍平不该动一个**非空白**字符。空白数量从 #119 起在 serialize 出口折叠，
+        // 所以按同一口径两侧都折叠再比——少一个词、掉一处词间空格仍然会红
+        const [gotText, wantText] = sameModuloWhitespace(fragment.textContent ?? '', target.textContent ?? '')
+        expect(gotText, `${f} 文字对不上：${target.id || target.className}`).toBe(wantText)
         // markers 没有 open token，所有克隆都挂在 fragment 根上：元素序列必然逐个对应记号顺序。
         // 只比标签名——比 outerHTML 要给几万个公式各建一个几十 KB 的串，实测 4 GB 堆都不够。
         // 相邻同名节点被换位由上面那条 textContent 相等挡住（它们的文字不同），深克隆的保真度由 tags 那组覆盖

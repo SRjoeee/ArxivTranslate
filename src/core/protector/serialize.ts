@@ -27,6 +27,34 @@ const TEXT_NODE = 3
 
 const hasText = (el: Element) => /\S/.test(el.textContent ?? '')
 
+/**
+ * 连续空白折成一个空格、首尾去掉。**必须在这里做，不能只在 pipeline 里改送出去的那一份**：
+ * runs 路径送的是 `splitRuns(protected)` 从这个字符串切出来的段，只归一化 `segment.text`
+ * 修不到它（#119）。
+ *
+ * 为什么非做不可：LaTeXML 的 HTML 带硬换行，12 篇 fixture 的 3847 个正文块里 2373 个（62%）有，
+ * 合计 7383 个。微软把每个换行当句号——同一段带换行时 `state explosion` 译成「州级爆炸性质」、
+ * 切成 5 句，归一化后是「状态爆炸」、2 句；60 段实测里假句边界从 128/266 降到 5/140。
+ * HTML 渲染本来就折叠这些空白，所以对 DOM 没有语义损失。
+ *
+ * 对占位符安全：`<x id="N"/>` / `<t id="N">` 里只有单个空格，`@abc#` 不含空白，
+ * 折叠都不会碰到它们。缓存键那边 `normalizeText` 做的是同一件事，所以键不变、旧缓存继续命中，
+ * 不需要升 `CACHE_KEY_VERSION`。
+ *
+ * 跳过的块（`<pre>` / 代码）不走这里：规则模块把它们判成 void，整块进槽位、原样保留。
+ *
+ * **不能用 `\s`**：JS 的 `\s` 含 U+00A0，而 `&nbsp;` 在 LaTeXML 输出里是有语义的排版
+ * （`Section&nbsp;1.1`、`no.&nbsp;1`、`W.&nbsp;Arendt` 都靠它禁止折行），HTML 自己也不折叠它。
+ * 只折叠 HTML 规范会折叠的那五个字符。
+ *
+ * **也不 trim**：块首尾的空白在行内块之间是有渲染意义的——`<span>A</span><span>B</span>` 渲染成
+ * `AB`，`<span>A </span>` 才是 `A B`。作者名与联系方式标签就是这种相邻行内块（§5.2），
+ * trim 掉会让相邻译文粘连。而要修的是**块内部的硬换行**，折叠就够了，trim 不在需求里。
+ */
+const HTML_SPACE = /[\t\n\f\r ]+/g
+const collapseWhitespace = (text: string) => text.replace(HTML_SPACE, ' ')
+
+
 export function serialize(root: Element, format: WireFormat = 'tags'): ProtectedBlock {
   const slots = new Map<number, Node>()
   const paired = new Set<number>()
@@ -69,5 +97,5 @@ export function serialize(root: Element, format: WireFormat = 'tags'): Protected
     }
   }
   walk(root)
-  return { format, text: parts.join(''), slots, paired, voidCount }
+  return { format, text: collapseWhitespace(parts.join('')), slots, paired, voidCount }
 }

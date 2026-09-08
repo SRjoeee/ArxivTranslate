@@ -47,8 +47,15 @@ export interface CacheIdentity {
   text: string
 }
 
-/** 改变键的算法或归一化规则时递增，旧数据自然失效。3：加入 markers 路径（#104）；4：markup 改名 tags（#108，键里存的是这个字符串） */
-export const CACHE_KEY_VERSION = 4
+/**
+ * 改变键的算法或归一化规则时递增，旧数据自然失效。
+ * 3：加入 markers 路径（#104）；4：markup 改名 tags（#108，键里存的是这个字符串）；
+ * 5：序列化开始折叠空白（#119）。**这一次不是键的算法变了，是旧条目的内容坏了**——
+ * 带硬换行的请求让微软逐行翻译（`state explosion` → 「州级爆炸性质」），而 `normalizeText`
+ * 让带换行和折叠后的两种文本算出同一个键，于是那些坏译文会在 30 天 TTL 内继续被原样返回、
+ * 修复根本到不了已经翻过的块。递增版本号把它们一次作废（Codex 在 #122 指出）。
+ */
+export const CACHE_KEY_VERSION = 5
 
 /** NFC + 连续空白折成一个空格 + 首尾 trim。只用于算键，不改动送翻译的文本 */
 export function normalizeText(text: string): string {
