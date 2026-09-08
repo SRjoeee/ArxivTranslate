@@ -9,14 +9,20 @@ import type { WireFormat } from '@/core/protector/tokens'
 import { sha256Hex } from '@/shared/digest'
 
 /**
- * 渲染路径。`markup` / `markers` 是两种线上格式（见 protector/tokens.ts），`runs` 是切段兜底。
- * 名字与 `WireFormat` 的 `tags` 不对称是历史包袱（DESIGN §9 一直叫 markup），映射只在 `wireFormatOf` 一处。
+ * 渲染路径 = 线上格式（见 protector/tokens.ts）再加一个切段兜底 `runs`。
+ *
+ * 曾经叫 `markup` / `markers` / `runs`，与 `WireFormat` 的 `tags` / `markers` 是**同一个东西的两套名字**，
+ * 中间靠一个映射函数来回换。那正是「三处硬编码 `'tags'` 会漏」的温床——新加的调用点写错一个字面量，
+ * 类型系统拦不住。统一之后 `serialize(el, renderPath)` 这种写法直接成立（issue #108）。
  */
-export type RenderPath = 'markup' | 'markers' | 'runs'
+export type RenderPath = WireFormat | 'runs'
 
-/** 渲染路径 → 线上格式。`runs` 不走占位符，取 `tags` 只是给它一个确定的转义规则 */
+/**
+ * 渲染路径 → 线上格式。名字统一之后这里只剩一件**真事**：`runs` 不走占位符，
+ * 它送的是切好的纯文本段，但仍要按某种规则转义，取 `tags`（`& < >` 转实体）。
+ */
 export function wireFormatOf(path: RenderPath): WireFormat {
-  return path === 'markers' ? 'markers' : 'tags'
+  return path === 'runs' ? 'tags' : path
 }
 
 export interface CacheContext {
@@ -41,8 +47,8 @@ export interface CacheIdentity {
   text: string
 }
 
-/** 改变键的算法或归一化规则时递增，旧数据自然失效。3：加入 markers 路径（#104） */
-export const CACHE_KEY_VERSION = 3
+/** 改变键的算法或归一化规则时递增，旧数据自然失效。3：加入 markers 路径（#104）；4：markup 改名 tags（#108，键里存的是这个字符串） */
+export const CACHE_KEY_VERSION = 4
 
 /** NFC + 连续空白折成一个空格 + 首尾 trim。只用于算键，不改动送翻译的文本 */
 export function normalizeText(text: string): string {

@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildCacheKey, cacheKeyFor, normalizeText, ocrCacheKey, wireFormatOf, type CacheIdentity } from '@/cache/key'
+import { buildCacheKey, cacheKeyFor, normalizeText, ocrCacheKey, wireFormatOf, type CacheIdentity, type RenderPath } from '@/cache/key'
+import type { WireFormat } from '@/core/protector'
 
 const base: CacheIdentity = {
-  providerId: 'openai-compat', model: 'm', promptVersion: '1', promptKey: 'default', context: { paperTitle: 'P', abstract: 'A' }, rulesVersion: '0.2.0', target: 'zh-CN', renderPath: 'markup',
+  providerId: 'openai-compat', model: 'm', promptVersion: '1', promptKey: 'default', context: { paperTitle: 'P', abstract: 'A' }, rulesVersion: '0.2.0', target: 'zh-CN', renderPath: 'tags',
   text: 'Hello <x id="1"/> world',
 }
 
@@ -84,13 +85,23 @@ describe('renderPath 进键（#104）', () => {
   // 批次键也用同一个字段（translate-service 的 batchKey），两种格式的段落不会攒进同一批
   it('同一段没有占位符的原文，三条路径算出三个不同的键', async () => {
     const base = { providerId: 'p', model: 'm', promptKey: '', target: 'zh-CN', text: 'Hello world.' }
-    const keys = await Promise.all((['markup', 'markers', 'runs'] as const).map(renderPath => cacheKeyFor({ ...base, renderPath })))
+    const keys = await Promise.all((['tags', 'markers', 'runs'] as const).map(renderPath => cacheKeyFor({ ...base, renderPath })))
     expect(new Set(keys).size).toBe(3)
   })
 
-  it('wireFormatOf：只有 markers 走记号，其余都按 tags 转义', () => {
+  it('wireFormatOf 只剩一件真事：runs 按 tags 转义，其余原样（#108）', () => {
+    // 改名之前它还兼着「markup ↔ tags 换名字」，那是同一个东西的两套叫法；
+    // 现在 RenderPath = WireFormat | 'runs'，同名的部分是恒等，只有 runs 需要落到一个格式上
     expect(wireFormatOf('markers')).toBe('markers')
-    expect(wireFormatOf('markup')).toBe('tags')
+    expect(wireFormatOf('tags')).toBe('tags')
     expect(wireFormatOf('runs')).toBe('tags')
+  })
+
+  it('RenderPath 与 WireFormat 同名：serialize 能直接吃 renderPath，不必先换名字（#108）', () => {
+    // 这条钉的是类型关系而不是运行时值：两个格式取值必须逐字相同，
+    // 否则「新加的调用点写错一个字面量」这个坑就回来了
+    const asWire: WireFormat[] = ['tags', 'markers']
+    const asPath: RenderPath[] = [...asWire, 'runs']
+    expect(asPath).toEqual(['tags', 'markers', 'runs'])
   })
 })

@@ -20,7 +20,7 @@ function mockProvider(translate: TranslationProvider['translate'], extra: Partia
 
 /** 链由测试直接给：不碰真的 buildChain，也就不需要真的 API key */
 const withChain = (chain: TranslationProvider[], extra: Parameters<typeof createLocalTransport>[1] = {}) =>
-  createLocalTransport(DEFAULT_CONFIG, { buildChain: async () => ({ chain, renderPath: 'markup' as const }), ...extra })
+  createLocalTransport(DEFAULT_CONFIG, { buildChain: async () => ({ chain, renderPath: 'tags' as const }), ...extra })
 
 const portOf = (cache: TranslationCache): CachePort => ({
   getMany: keys => Promise.all(keys.map(key => cache.get(key))),
@@ -133,7 +133,7 @@ describe('createLocalTransport：状态', () => {
       model: DEFAULT_CONFIG.openaiCompat.model,
       maxBatchChars: 1000,
       maxBatchItems: 4,
-      renderPath: 'markup',
+      renderPath: 'tags',
       chain: ['openai-compat', 'google-web'],
       engine: { id: 'openai-compat', displayName: 'openai-compat' },
     })
@@ -182,7 +182,7 @@ describe('createLocalTransport：缓存', () => {
     calls.push(r.segments.map(s => s.id))
     return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock', model: 'm' }
   })
-  const withCache = { paper: '2410.00260', renderPath: 'markup' as const }
+  const withCache = { paper: '2410.00260', renderPath: 'tags' as const }
   const two: TranslateRequest = { segments: [{ id: 'a', text: 'x' }, { id: 'b', text: 'y' }], source: 'en', target: 'zh-CN' }
 
   it('首次全部未命中并写缓存；第二次全部命中不调用 provider', async () => {

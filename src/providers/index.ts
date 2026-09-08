@@ -69,7 +69,7 @@ export async function buildChain(
     }
   }
   if (format === undefined) return { chain, renderPath: 'runs' }
-  return { chain, renderPath: format === 'markers' ? 'markers' : 'markup' }
+  return { chain, renderPath: format === 'markers' ? 'markers' : 'tags' }
 }
 
 export { PROMPT_VERSION } from './prompt'

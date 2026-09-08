@@ -18,14 +18,14 @@ describe('createMessageTransport', () => {
     const transport = createMessageTransport(send)
     const res = await transport.translate({
       request: { segments: [{ id: 'a', text: 'A' }], source: 'en', target: 'cmn' },
-      cache: { paper: '2410.00260', renderPath: 'markup' },
+      cache: { paper: '2410.00260', renderPath: 'tags' },
       scope: 'session-1',
     })
     expect(res.ok).toBe(true)
     expect(sent).toEqual([{
       type: 'axt:translate',
       request: { segments: [{ id: 'a', text: 'A' }], source: 'en', target: 'cmn' },
-      cache: { paper: '2410.00260', renderPath: 'markup' },
+      cache: { paper: '2410.00260', renderPath: 'tags' },
       scope: 'session-1',
     }])
   })
@@ -45,7 +45,7 @@ describe('createMessageTransport', () => {
   })
 
   it('status 直接透传 axt:provider-status；失败要往上抛，start() 据此拒绝开始', async () => {
-    const { sent, send } = recorder(() => ({ providerId: 'mock', available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'markup' as const, chain: ['mock'], engine: { id: 'mock', displayName: 'Mock' } }))
+    const { sent, send } = recorder(() => ({ providerId: 'mock', available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, chain: ['mock'], engine: { id: 'mock', displayName: 'Mock' } }))
     expect((await createMessageTransport(send).status()).providerId).toBe('mock')
     expect(sent).toEqual([{ type: 'axt:provider-status' }])
     const dead = recorder(() => { throw new Error('后台未响应') })

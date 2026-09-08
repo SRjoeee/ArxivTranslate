@@ -45,7 +45,7 @@ export function planBatches(
   options: { maxBatchChars: number; maxBatchItems: number; renderPath?: RenderPath },
   sectionOf?: (block: Block) => string | undefined,
 ): Batch[] {
-  const format = wireFormatOf(options.renderPath ?? 'markup')
+  const format = wireFormatOf(options.renderPath ?? 'tags')
   const batches: Batch[] = []
   let current: Segment[] = []
   let currentChars = 0
