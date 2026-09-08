@@ -26,6 +26,16 @@ describe('sanitizeColor', () => {
     for (const value of ['#ab', '#abcde', '#a1b2c3d', '#a1b2c3d4e']) expect([value, sanitizeColor(value).ok]).toEqual([value, false])
   })
 
+  it('命名颜色查精确表，不是「一串小写字母就算」', () => {
+    for (const value of ['red', 'rebeccapurple', 'darkslategrey', 'transparent', 'currentcolor', 'CurrentColor']) {
+      expect([value, sanitizeColor(value).ok]).toEqual([value, true])
+    }
+    // 这些过了词法形状却不是颜色：存得住、浏览器却整条丢掉声明（Codex 在 #106 指出）
+    for (const value of ['banana', 'reddish', 'colour', 'notacolor', 'inherit', 'initial', 'unset', 'revert']) {
+      expect([value, sanitizeColor(value).ok]).toEqual([value, false])
+    }
+  })
+
   it('挡住会开出新声明或闭合规则的输入', () => {
     // 手填框里写成 "red; opacity: 0" 会多出一条声明；"}" 会提前闭合，后面的内容变成整页规则
     for (const value of ['red; opacity: 0', 'red}', '#fff{', 'url(x)', 'var(--x)', '<script>']) {
