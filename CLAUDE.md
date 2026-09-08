@@ -78,7 +78,7 @@ reference/              # 参考仓库，gitignore，只读
 
 - **默认优先移植**：它们已经迭代多年，能整段拿来用的就拿来用（provider 请求拼装、队列 / 重试 / 批处理、缓存、配置迁移、占位符校验、视口调度、样式预设、UI 组件），移植后按本项目的命名与目录改造，不引入它们的配置体系。参考文件地图见 `docs/RESEARCH.md` §4。**搬不搬只看有无负面影响**：暂时用不上但没有额外负担的部分随模块一起搬（按目录搬，不按函数挑），功能稳定后统一清理；会让性能或效果变差的才单独讨论取舍，并把理由写进 DESIGN.md。
 - **原创的例外**只有三种：(1) arXiv 适配——`rules/latexml.ts`、`extractor` 的 LaTeXML 路径与 `protector` 占位符引擎（Phase 1 / 2 已完成，DESIGN.md §6）；(2) `renderer`——三个项目都改动、包裹或替换原节点，与 DESIGN.md §7.1 的 DOM 不变量冲突；(3) 移植会与 DESIGN.md 的不变量冲突或让代码变乱时改写，并在 PR 里说明理由。
-- **来源标注（GPL §5）**：每个移植文件的文件头写 `// 移植自 reference/<repo>/<path>@<commit>（GPL-3.0），<YYYY-MM-DD> 移植、有修改`（GPL §5(a) 要求修改声明带日期），并在 `docs/THIRD_PARTY.md` 登记；改写幅度大的也要登记。
+- **来源标注（GPL §5）**：每个移植文件的文件头写 `// Ported from reference/<repo>/<path>@<commit> (GPL-3.0), <YYYY-MM-DD>, modified`（GPL §5(a) 要求修改声明带日期；模板本身也用英文，与下面的语言规则一致——已有文件在下次实质改动时一并换），并在 `docs/THIRD_PARTY.md` 登记；改写幅度大的也要登记。
 - 面向未来：extractor 以"站点适配器"接口组织，LaTeXML 是第一个适配器；通用启发式 walker（Read Frog `dom/filter.ts`、`dom/traversal.ts`）移植后作为 v2 的第二个适配器接入其他论文站点，v1 仍只做 arXiv。
 
 ---
@@ -117,15 +117,20 @@ reference/              # 参考仓库，gitignore，只读
 - 发现 DESIGN.md 与实测不符：停下，在 RESEARCH.md 记录差异并提出修改建议，不要默默改设计。
 - **写给开发者看的一切用英文**：标识符、注释、文档、测试名与断言文案、commit message、PR 描述、issue。
   commit 格式 `type(scope): summary`。
-  存量（2026-09-09 时 179 个文件、5727 行）**改到哪个文件就顺手把那个文件转成英文**，
-  不做一次性全量翻译：那会是一个没法审的巨型 diff，还会把 `git blame` 全部打断。
+  存量（2026-09-09 时 179 个文件、5727 行）**改哪段转哪段**：只转这次改动碰到的那部分与它周围的行文，
+  **不要因为动了一行就翻掉整个文件**——`docs/DESIGN.md` 858 行、`docs/phase0/rules-audit.md` 656 行，
+  那样产生的正是本条想避免的、没法审又打断 `git blame` 的巨型 diff（Codex 在 #120 指出）。
 
-  **两类中文不动，它们是功能不是行文**：
+  **三类中文不动，它们是功能不是行文**：
   1. **产品 UI 的文案**——这个扩展对用户讲中文。popup 与 options 里的提示语、错误文案、按钮标签
      都是产品的一部分，翻成英文是改产品，不是改代码风格。
   2. **本地化数据**——`config/languages.ts` 的 `LANG_CODE_TO_ZH_NAME` / `LANG_CODE_TO_LOCALE_NAME`
-     是 `label()` 直接喂给设置页的语言名（「简体中文（中文）」），翻掉等于把本地化删了
-     （Codex 在 #120 指出）。同理，钉这些文案的测试期望值跟着它们走。
+     是 `label()` 直接喂给设置页的语言名（「简体中文（中文）」），翻掉等于把本地化删了。
+  3. **多语种的测试输入与期望值**——它们是覆盖率本身：`tests/providers/prompt.test.ts` 用
+     `weights -> 权重` 验术语表进 prompt 的形状，`tests/rules/latexml.test.ts` 用 `证明。`
+     验非拉丁文本的识别。翻成英文等于**悄悄删掉这些用例的覆盖面**，非拉丁回归会直接漏过去。
+
+  三类都是 Codex 在 #120 逐条指出的。测试**名**与断言消息仍然转英文——它们是写给开发者看的。
 
   **与用户对话也仍用中文**——这条规则约束的是仓库内容，不是聊天。
 
