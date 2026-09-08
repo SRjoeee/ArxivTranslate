@@ -94,9 +94,13 @@ describe('转义的不可伪造性', () => {
     expect(htmlOf(rehydrate(b.text, b, doc))).toBe('写作 @a# 时 <math class="ltx_Math"><mi>x</mi></math> 成立')
   })
 
-  it('markers 不做 HTML 转义：这条线是纯文本，< 不是结构字符', () => {
-    expect(escapeText('a < b & c > d', 'markers')).toBe('a < b & c > d')
+  it('markers 也转义 & < >：google-web 的 translateHtml 会把请求体当 HTML 解析（Codex 在 #107 指出）', () => {
+    // 实测 12 篇 fixture 的 markers 线上文本里有 102 个 &、1 个 <、3 个 >，分布在 5992 个块的 80 个里，
+    // 都是正经内容（`Springer science & business media`、`Very long (>1k words) … (<500 words)`）
+    expect(escapeText('a < b & c > d', 'markers')).toBe('a &lt; b &amp; c &gt; d')
     expect(escapeText('a < b & c > d', 'tags')).toBe('a &lt; b &amp; c &gt; d')
+    // 两种转义互不干扰：`@@` 里没有 & < >，实体里也没有 @
+    expect(escapeText('@ & @', 'markers')).toBe('@@ &amp; @@')
   })
 })
 
@@ -149,9 +153,12 @@ describe('纯文本往返（标题与 OCR 行）', () => {
     }
   })
 
-  it('markers 的反转义不解 HTML 实体：那会把 OCR 出来的字面量 &amp; 吃掉', () => {
-    expect(unescapeText('a &amp; b', 'markers')).toBe('a &amp; b')
-    expect(unescapeText('a &amp; b', 'tags')).toBe('a & b')
+  it('字面量 &amp; 靠转义保住往返，不是靠「不解实体」', () => {
+    // 原文里写着 `&amp;`（讲 HTML 的论文、OCR 出来的代码）→ 转义成 `&amp;amp;` → 解回 `&amp;`
+    for (const s of ['a &amp; b', 'a & b', '&lt;div&gt;', '@ &amp; @']) {
+      expect([s, unescapeText(escapeText(s, 'markers'), 'markers')]).toEqual([s, s])
+      expect([s, unescapeText(escapeText(s, 'tags'), 'tags')]).toEqual([s, s])
+    }
   })
 
   it('占位符路径不能用它：tokenize 已经还原过一遍，再来一次会把字面量 @@ 吃成 @', () => {

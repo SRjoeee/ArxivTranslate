@@ -15,7 +15,7 @@ export function rehydrate(translated: string, block: ProtectedBlock, doc: Docume
 
   for (const t of tokenize(translated, block.format)) {
     if (t.kind === 'text') {
-      top().append(doc.createTextNode(decodeText(t.text, block.format)))
+      top().append(doc.createTextNode(decodeText(t.text)))
     } else if (t.kind === 'void') {
       top().append(cloneWithoutIds(doc, block.slots.get(t.id)!, true))
     } else if (t.kind === 'open') {

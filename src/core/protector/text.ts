@@ -11,20 +11,28 @@
 //   （Codex 在 #107 指出）。`tags` 没这个问题，正因为它的转义（`& < >`）也是无条件的。
 //   代价实测：12 篇 fixture 的 5992 个块、779160 个 markers 线上字符里只有 5 处 `@`（邮箱与 `@app.route`），
 //   翻倍一共多 5 个字符。
-//   `markers` 不做 HTML 转义：这条线是纯文本，`<` 不是结构字符，转义只会给引擎添噪声。
+//
+//   `markers` **也转义 `& < >`**。曾经不转义，理由是「这条线是纯文本」——但那是对引擎的假设，不是事实：
+//   `google-web` 走的是 `translateHtml`，会把请求体当 HTML 解析。实测 12 篇 fixture 的 markers 线上文本里
+//   有 102 个 `&`、1 个 `<`、3 个 `>`，分布在 5992 个块的 80 个里，都是正经内容
+//   （`Springer science & business media`、`Very long (>1k words) … (<500 words)`）——不转义的话 `<500`
+//   会被当成标签开头，`&` 会在响应里变成 `&amp;` 而回填不解实体，读者就看到实体本身（Codex 在 #107 指出）。
+//   转义之后这条线对 HTML 与纯文本两种传输都成立，也不需要给 provider 单开一层编解码。
+//   伪造性不受影响：解实体在**分词之后**做，引擎回来的 `&#64;abc#` 不会被读成记号。
 import type { WireFormat } from './tokens'
 
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
 export function escapeText(s: string, format: WireFormat = 'tags'): string {
-  if (format === 'markers') return s.replace(/@/g, '@@')
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  // 两步顺序无关：`@@` 里没有 `& < >`，实体里也没有 `@`
+  return format === 'markers' ? escapeHtml(s.replace(/@/g, '@@')) : escapeHtml(s)
 }
 
 // nbsp 写成转义序列：字面的 U+00A0 会被文本工具悄悄归一成普通空格（改这个文件时踩过）
 const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }
 
-export function decodeText(s: string, format: WireFormat = 'tags'): string {
-  // markers 的 `@@` 已经在 tokenize 里还原；这条线上没有实体，解实体反而会把原文的字面量 `&amp;` 吃掉
-  if (format === 'markers') return s
+/** 解实体。两种格式同一套规则——markers 的 `@@` 已经在 tokenize / unescapeText 里还原，这里不碰它 */
+export function decodeText(s: string): string {
   return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, body: string) => {
     if (body.startsWith('#')) {
       const hex = body[1]?.toLowerCase() === 'x'
@@ -42,5 +50,6 @@ export function decodeText(s: string, format: WireFormat = 'tags'): string {
  * `replace` 与分词器一样从左到右不重叠匹配，所以 `@@@@` → `@@`、`@@@@@` → `@@@`，两边一致
  */
 export function unescapeText(s: string, format: WireFormat = 'tags'): string {
-  return format === 'markers' ? s.replace(/@@/g, '@') : decodeText(s, format)
+  // 先解实体再还原 `@@`：引擎若把 `@@` 编码成 `&#64;&#64;`，反过来的顺序会漏掉它
+  return format === 'markers' ? decodeText(s).replace(/@@/g, '@') : decodeText(s)
 }

@@ -39,7 +39,7 @@ export function splitRuns(block: ProtectedBlock): RunLayout {
       runs.push(buffer)
     } else {
       // raw 段不送翻译，直接进文本节点，所以在这里就解回来
-      items.push({ kind: 'raw', text: decodeText(buffer, block.format) })
+      items.push({ kind: 'raw', text: decodeText(buffer) })
     }
     buffer = ''
   }
