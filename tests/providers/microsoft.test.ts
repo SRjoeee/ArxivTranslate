@@ -20,6 +20,50 @@ const ok = (texts: string[]) =>
 const provider = (fetch: unknown, target = 'cmn') =>
   createMicrosoftProvider(target, { fetch: fetch as typeof globalThis.fetch })
 
+const withSentLen = (items: { text: string; src: number[]; trans: number[] }[]) =>
+  new Response(
+    JSON.stringify(items.map(i => ({ translations: [{ text: i.text, to: 'zh-Hans', sentLen: { srcSentLen: i.src, transSentLen: i.trans } }] }))),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  )
+
+describe('sentence alignment from sentLen (#105)', () => {
+  const source = 'One sentence. Two here.'
+  const target = '第一句。第二句。'
+
+  it('reads the endpoint\'s own boundaries — we neither ask for them nor pay for them', async () => {
+    const fetch = vi.fn(async () => withSentLen([{ text: target, src: [14, 9], trans: [4, 4] }]))
+    const result = await provider(fetch).translate(req([source]))
+    expect(result.segments[0]?.alignment).toEqual({ source: [14, 9], target: [4, 4] })
+    // The request body is unchanged: no extra field, no extra round trip
+    const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual([source])
+  })
+
+  it('drops boundaries that do not add up, rather than highlighting the wrong characters', async () => {
+    const fetch = vi.fn(async () => withSentLen([{ text: target, src: [14, 8], trans: [4, 4] }]))
+    const result = await provider(fetch).translate(req([source]))
+    expect(result.segments[0]?.text).toBe(target)
+    expect(result.segments[0]?.alignment).toBeUndefined()
+  })
+
+  it('leaves the translation intact when the response carries no sentLen at all', async () => {
+    const fetch = vi.fn(async () => ok([target]))
+    const result = await provider(fetch).translate(req([source]))
+    expect([result.segments[0]?.text, result.segments[0]?.alignment]).toEqual([target, undefined])
+  })
+
+  it('verifies each segment against its own texts, not against the batch', async () => {
+    const fetch = vi.fn(async () =>
+      withSentLen([
+        { text: target, src: [14, 9], trans: [4, 4] },
+        { text: '短句。', src: [6], trans: [3] },
+      ]),
+    )
+    const result = await provider(fetch).translate(req([source, 'Short.']))
+    expect(result.segments.map(s => s.alignment)).toEqual([{ source: [14, 9], target: [4, 4] }, { source: [6], target: [3] }])
+  })
+})
+
 describe('createMicrosoftProvider', () => {
   it('裸字符串数组一次带上全部段落，按下标映射回 id', async () => {
     const fetch = vi.fn(async () => ok(['一', '二', '三']))

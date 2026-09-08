@@ -21,6 +21,7 @@ import { kindOfStatus } from './http-errors'
 import { attachRequestErrorMeta } from './request/retry-policy'
 import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 import { WIRE_FORMATS } from './wire-formats'
+import { type SentenceAlignment, verifyAlignment } from './alignment'
 
 const ENDPOINT = 'https://edge.microsoft.com/translate/translatetext'
 
@@ -89,10 +90,16 @@ export interface MicrosoftDeps {
 }
 
 interface MicrosoftItem {
-  translations?: { text?: string }[]
+  translations?: { text?: string; sentLen?: { srcSentLen?: number[]; transSentLen?: number[] } }[]
 }
 
-async function translateTexts(texts: string[], from: string, to: string, deps: MicrosoftDeps, signal?: AbortSignal): Promise<string[]> {
+async function translateTexts(
+  texts: string[],
+  from: string,
+  to: string,
+  deps: MicrosoftDeps,
+  signal?: AbortSignal,
+): Promise<{ text: string; alignment?: SentenceAlignment }[]> {
   const doFetch = deps.fetch ?? globalThis.fetch
   // 上游的处理：auto 表示让端点自己检测，参数留空。**我们这边目前到不了**——`TranslateRequest.source`
   // 是字面量 `'en'`（arXiv 固定英文）。按 CLAUDE.md「没有额外负担的部分随模块一起搬」保留，
@@ -139,9 +146,18 @@ async function translateTexts(texts: string[], from: string, to: string, deps: M
     throw new ProviderError('invalid-response', `translatetext 返回 ${payload.length} 条，期望 ${texts.length} 条`)
   }
   return payload.map((item: MicrosoftItem, i) => {
-    const text = item?.translations?.[0]?.text
+    const translation = item?.translations?.[0]
+    const text = translation?.text
     if (typeof text !== 'string') throw new ProviderError('invalid-response', `translatetext 第 ${i + 1} 条缺少译文`)
-    return text
+    // The endpoint segments internally and reports it; we neither ask for it nor pay for it.
+    // Measured over 60 real blocks: the partition was complete on all 60 and 96.2% of boundaries
+    // landed after sentence punctuation — but only once whitespace was collapsed (#119), which is
+    // why this is worth reading at all. verifyAlignment still gates it.
+    const sentLen = translation?.sentLen
+    const alignment = Array.isArray(sentLen?.srcSentLen) && Array.isArray(sentLen?.transSentLen)
+      ? { source: sentLen.srcSentLen, target: sentLen.transSentLen }
+      : undefined
+    return { text, alignment }
   })
 }
 
@@ -194,7 +210,10 @@ export function createMicrosoftProvider(targetLanguage: string, deps: MicrosoftD
       }
       const translated = await translateTexts(texts, request.source, wireTarget(request.target), deps, request.signal)
       return {
-        segments: request.segments.map((segment, i) => ({ id: segment.id, text: translated[i]! })),
+        segments: request.segments.map((segment, i) => {
+          const { text, alignment } = translated[i]!
+          return { id: segment.id, text, alignment: verifyAlignment(alignment, segment.text, text) }
+        }),
         provider: 'microsoft',
       }
     },

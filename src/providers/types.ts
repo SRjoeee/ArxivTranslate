@@ -1,6 +1,7 @@
 // Provider 统一接口（DESIGN §8）。每个引擎一个文件，禁止跨文件共享未公开接口的细节。
 
 import type { WireFormat } from '@/core/protector/tokens'
+import type { SentenceAlignment } from './alignment'
 import { attachRequestErrorMeta, type RequestErrorMeta } from './request/retry-policy'
 
 export interface TranslateSegment {
@@ -27,8 +28,18 @@ export interface TranslateRequest {
   signal?: AbortSignal
 }
 
+/**
+ * A translated segment. `alignment` is present only when the engine could report sentence
+ * boundaries **and** they reconstructed both texts (see `alignment.ts`). There is no capability
+ * flag on the provider: an engine that can report it does, and the pipeline never branches on which
+ * mechanism produced it — that is the one architectural requirement issue #105 puts on this layer.
+ */
+export interface TranslatedSegment extends TranslateSegment {
+  alignment?: SentenceAlignment
+}
+
 export interface TranslateResult {
-  segments: TranslateSegment[]
+  segments: TranslatedSegment[]
   provider: string
   model?: string
 }
