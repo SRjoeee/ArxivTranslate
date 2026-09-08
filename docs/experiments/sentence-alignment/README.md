@@ -275,3 +275,23 @@ Google  逐字相同 0/40，相似度中位 0.919，p10 0.811
 评委仍是单个 LLM（我），且实验也是我设计的。
 
 脚本：`scripts/tag-blind-eval.mts`（出题）、`scripts/tag-blind-score.mts`（对答案）。
+
+## 九、内容脚本的隔离世界能不能画出高亮（2026-09-09）
+
+§三 里那句「CSS Custom Highlight API 可用，`domUnchanged: true`」是用 `page.evaluate()` 验的，
+而那是**页面主世界**。真正要问的是：**我们的内容脚本跑在隔离世界，它注册的高亮页面会不会绘制。**
+两个世界的 `window` 是分开的，这件事不是显然的。
+
+写了一个一次性扩展（`scripts/highlight-isolated-world/`，内容脚本**不**声明 `world: "MAIN"`），
+在真实 arXiv 页面上「注册 → 清除 → 再注册」，每步截同一个段落的图比对哈希
+（`::highlight()` 无法用 `getComputedStyle` 查，只能看像素）：
+
+```
+隔离世界的 API   hasHighlights ✓  hasHighlight ✓  hasCaretPos ✓
+未注册  a01eb0b55e40      已清除  a01eb0b55e40   ← 相同
+已注册  03027b7198f6      再注册  03027b7198f6   ← 相同，且与上面不同
+```
+
+三态严格一致，**高亮确实被绘制**。所以不需要往主世界注入脚本、不需要事件桥，
+`caretPositionFromPoint` 也在隔离世界里可用（命中判定要用它，不能用 Chrome 140 才有的
+`highlightsFromPoint`——`minimum_chrome_version` 是 131）。
