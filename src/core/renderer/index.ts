@@ -7,7 +7,7 @@ import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/la
 import imageCss from '@/styles/image.css?inline'
 import modesCss from '@/styles/modes.css?inline'
 import presetsCss from '@/styles/presets.css?inline'
-import { STYLE_ATTR_NAME, customStyleRule, type StylePreset } from './style-preset'
+import { STYLE_ATTR_NAME, customStyleRule, styleVarsRule, type StylePreset, type StyleVars } from './style-preset'
 import { delocalizeNotes } from './notes'
 import { cancelSpinnersIn } from './spinner'
 
@@ -44,11 +44,43 @@ export const INLINE_TITLE_MAX_CHARS = 60
 export const STYLE_ATTR = 'data-axt-sheet'
 const STYLE_MARK = 'modes'
 
+/** 注入样式表所需的全部用户可调项（§7.5） */
+export interface StyleOptions extends StyleVars {
+  preset: StylePreset
+  customCss?: string
+}
+
+/**
+ * 注入表的内容。顺序即层叠顺序，两处**必须**保持：
+ * - `styleVarsRule` 排在 presetsCss 之后：`muted` / `green` 也写 `--axt-color`，选择器形状与特异度相同，
+ *   靠顺序让用户的值赢；`--axt-accent` 同理覆盖 presets.css 里的默认强调色
+ * - `customStyleRule` 排在最后：它是进阶逃生口，该有最后的发言权
+ */
+function styleSheet(style?: StyleOptions): string {
+  const vars = style ? styleVarsRule(style) : ''
+  const custom = style ? customStyleRule(style.customCss ?? '') : ''
+  return `${modesCss}\n${presetsCss}\n${imageCss}\n${vars}${custom}`
+}
+
+/**
+ * 只改外观、不碰任何译文节点（#47）：写 `data-axt-style`，重算注入表的内容。
+ * 设置页改颜色时走这条，**不重新请求翻译**（§8.5 的 chainConfigChanged 本来就忽略 style）。
+ * 翻译没开着（没有注入表）时什么都不做——下次 enable 会带上新值
+ */
+export function applyStyle(doc: Document, style: StyleOptions): boolean {
+  const sheet = doc.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)
+  if (!sheet) return false
+  setStylePreset(doc, style)
+  const css = styleSheet(style)
+  if (sheet.textContent !== css) sheet.textContent = css
+  return true
+}
+
 /**
  * 打开翻译态：<html> 上写状态属性，注入模式与预设样式（幂等）。
  * 样式预设与模式一样只是 <html> 上的一个属性（§7.5），切换不动 DOM；自定义 CSS 每次注入时重算
  */
-export function enable(doc: Document, mode: Mode, style?: { preset: StylePreset; customCss?: string }, lang?: string): void {
+export function enable(doc: Document, mode: Mode, style?: StyleOptions, lang?: string): void {
   doc.documentElement.setAttribute(ON_ATTR, '')
   doc.documentElement.setAttribute(MODE_ATTR, mode)
   // 译文的语言记在 <html> 上（§7.1：全局状态只在这里），renderText 逐个写到译文节点的 lang 上。
@@ -56,7 +88,7 @@ export function enable(doc: Document, mode: Mode, style?: { preset: StylePreset;
   if (lang) doc.documentElement.setAttribute(LANG_ATTR, lang)
   if (style) setStylePreset(doc, style)
   const existing = doc.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)
-  const css = `${modesCss}\n${presetsCss}\n${imageCss}\n${style ? customStyleRule(style.customCss ?? '') : ''}`
+  const css = styleSheet(style)
   if (existing) {
     // 自定义 CSS 可能变了（设置页改完再翻一次）：内容不同才写，避免无谓的样式重算
     if (existing.textContent !== css) existing.textContent = css

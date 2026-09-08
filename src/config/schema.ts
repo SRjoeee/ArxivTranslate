@@ -2,10 +2,10 @@
 import { z } from 'zod'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
-import { STYLE_PRESETS } from '@/core/renderer/style-preset'
+import { COLOR_MAX, OPACITY_MAX, OPACITY_MIN, STYLE_PRESETS, sanitizeColor } from '@/core/renderer/style-preset'
 import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
-export const CONFIG_VERSION = 8
+export const CONFIG_VERSION = 9
 
 /** 三种阅读模式（DESIGN §7）；`mode` 与图片翻译的模式闸共用 */
 export const MODE_VALUES = ['stack', 'side', 'only'] as const
@@ -74,7 +74,13 @@ export const configSchema = z.object({
   style: z.object({
     preset: z.enum(STYLE_PRESETS),
     customCss: z.string().max(2000),
-  }).default({ preset: 'none', customCss: '' }),
+    /** 译文文字颜色；空串 = 跟随原文。手填的值由 sanitizeColor 白名单挡一道 */
+    color: z.string().max(COLOR_MAX).refine(v => sanitizeColor(v).ok, '不是有效的颜色值'),
+    /** 译文透明度。下限 0.3 是防手滑调到看不见 */
+    opacity: z.number().min(OPACITY_MIN).max(OPACITY_MAX),
+    /** 高亮 / 下划线等装饰的颜色；空串 = 跟随正文色的默认强调色 */
+    accent: z.string().max(COLOR_MAX).refine(v => sanitizeColor(v).ok, '不是有效的颜色值'),
+  }).default({ preset: 'none', customCss: '', color: '', opacity: OPACITY_MAX, accent: '' }),
   /** 引擎降级链（§8.5）：首选引擎失败时自动切到免费引擎，别让整页翻译停死 */
   fallback: z.object({ enabled: z.boolean() }).default({ enabled: true }),
   /** 按视口翻译的范围（§10，Read Frog 的 preload）：视口下方多少像素算临近（0–10000）、露出多少比例算进入（0–1） */
@@ -104,7 +110,7 @@ export const DEFAULT_CONFIG: Config = {
   targetLanguage: DEFAULT_LANG_CODE,
   mode: 'stack',
   glossary: [],
-  style: { preset: 'none', customCss: '' },
+  style: { preset: 'none', customCss: '', color: '', opacity: OPACITY_MAX, accent: '' },
   fallback: { enabled: true },
   prompts: DEFAULT_PROMPTS_CONFIG,
   preload: { ...DEFAULT_PRELOAD },

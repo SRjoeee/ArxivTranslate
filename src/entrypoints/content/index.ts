@@ -1,10 +1,11 @@
-import type { Config } from '@/config/schema'
-import { getConfig, setConfig } from '@/config/storage'
+import { DEFAULT_CONFIG, type Config } from '@/config/schema'
+import { getConfig, setConfig, watchConfig } from '@/config/storage'
 import { extract, paperContext, type Block } from '@/core/extractor'
 import { collectImageTargets, startImageTranslation, type ImageRun } from '@/core/image'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
 import {
+  applyStyle,
   clearPairMargins, createModeController, createPrep, installAnchorFallback,
   restore, setImageModes,
   type Mode, type ModeController,
@@ -40,8 +41,16 @@ export default defineContentScript({
     let uninstallAnchors: (() => void) | null = null
     let savedMode: Mode = 'stack'
     /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性；开始翻译时从配置读一次 */
-    let style: Config['style'] = { preset: 'none', customCss: '' }
+    let style: Config['style'] = DEFAULT_CONFIG.style
     void getConfig().then(config => { savedMode = config.mode; style = config.style })
+    // 设置页改完外观立刻生效（#47）：只重算注入表与 <html data-axt-style>，一个译文节点都不碰，
+    // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
+    // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
+    watchConfig(config => {
+      if (JSON.stringify(config.style) === JSON.stringify(style)) return
+      style = config.style
+      applyStyle(document, style)
+    })
     // 一次会话 = 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
     let run: TranslationRun | null = null
     let title: TitleTranslator | null = null

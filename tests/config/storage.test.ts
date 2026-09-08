@@ -191,7 +191,7 @@ describe('provider 选择', () => {
     const fresh = await import('@/config/storage')
     const c = await fresh.getConfig()
     expect(c.version).toBe(CONFIG_VERSION)
-    expect(c.style).toEqual({ preset: 'none', customCss: '' })
+    expect(c.style).toEqual({ preset: 'none', customCss: '', color: '', opacity: 1, accent: '' })
     expect(c.glossary).toEqual([{ term: 'weights', translation: '权重' }])
   })
 
@@ -241,7 +241,7 @@ describe('provider 选择', () => {
     const c = await fresh.getConfig()
     expect(c.version).toBe(CONFIG_VERSION)
     expect(c.image).toEqual({ modes: ['stack', 'side', 'only'] })
-    expect(c.style).toEqual({ preset: 'quote', customCss: '' })
+    expect(c.style).toEqual({ preset: 'quote', customCss: '', color: '', opacity: 1, accent: '' })
     expect(c.openaiCompat.apiKey).toBe('sk-keep')
   })
 
@@ -252,8 +252,8 @@ describe('provider 选择', () => {
   })
 
   it('样式预设只认清单里的 id，自定义 CSS 有长度上限', async () => {
-    await expect(setConfig({ ...DEFAULT_CONFIG, style: { preset: 'rainbow' as never, customCss: '' } })).rejects.toThrow()
-    await expect(setConfig({ ...DEFAULT_CONFIG, style: { preset: 'custom', customCss: 'x'.repeat(2001) } })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, style: { ...DEFAULT_CONFIG.style, preset: 'rainbow' as never } })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, style: { ...DEFAULT_CONFIG.style, preset: 'custom', customCss: 'x'.repeat(2001) } })).rejects.toThrow()
   })
 
   it('术语表超过 200 条被 schema 拒绝，条目缺字段也拒绝', async () => {

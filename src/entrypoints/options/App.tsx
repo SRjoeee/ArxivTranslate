@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { browser } from 'wxt/browser'
 import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
 import { DEFAULT_CONFIG, MODE_VALUES, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { THINKING_HOSTS } from '@/providers/thinking'
-import { sanitizeCustomCss, type StylePreset } from '@/core/renderer/style-preset'
+import presetsCss from '@/styles/presets.css?inline'
+import { OPACITY_MAX, OPACITY_MIN, customStyleRule, sanitizeCustomCss, styleVarsRule, type StylePreset } from '@/core/renderer/style-preset'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 import { sendMessage } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
@@ -42,6 +43,30 @@ const PROVIDERS: [Config['provider'], string, string][] = [
 ]
 
 // Phase 2：provider 配置 + 连接测试。样式预设、术语表、缓存管理在 Phase 3。
+/**
+ * 预览：用**真实的**注入表渲染一段示例，放进 Shadow DOM，免得预设的规则漏到设置页自身。
+ * 结构照译文节点的实际形状（`.axt-t` + `data-axt-on` / `data-axt-style`），
+ * 否则预设的排除列表会让预览与真实效果对不上
+ */
+function StylePreview({ style }: { style: Config['style'] }) {
+  const host = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = host.current
+    if (!el) return
+    const root = el.shadowRoot ?? el.attachShadow({ mode: 'open' })
+    root.innerHTML = `<style>${presetsCss}\n${styleVarsRule(style)}${customStyleRule(style.customCss)}</style>`
+      + `<div data-axt-on data-axt-style="${style.preset}" style="padding:10px 12px;line-height:1.7">`
+      + '<span>The Fourier transform is bounded.</span><br>'
+      + '<span class="axt-t">傅里叶变换是有界的。</span></div>'
+  }, [style])
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>预览</div>
+      <div ref={host} style={{ border: '1px solid #ddd', borderRadius: 4 }} />
+    </div>
+  )
+}
+
 export function App() {
   const [config, setLocal] = useState<Config>(DEFAULT_CONFIG)
   const [hasStoredKey, setHasStoredKey] = useState(false)
@@ -267,6 +292,45 @@ export function App() {
         </select>
         <small style={{ color: '#666' }}>{STYLE_NOTES[config.style.preset] ?? '译文只加装饰，字体与字号仍随论文原样'}</small>
       </label>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
+        <div style={{ ...label, marginBottom: 0 }}>
+          <span style={{ display: 'block' }}>文字颜色</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <input type="color" style={{ width: 44, height: 28, padding: 0 }}
+              value={config.style.color || '#333333'}
+              onChange={e => setLocal(c => ({ ...c, style: { ...c.style, color: e.target.value } }))} />
+            <label style={{ fontWeight: 'normal', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input type="checkbox" checked={config.style.color === ''}
+                onChange={e => setLocal(c => ({ ...c, style: { ...c.style, color: e.target.checked ? '' : '#333333' } }))} />
+              跟随原文
+            </label>
+          </span>
+        </div>
+        <div style={{ ...label, marginBottom: 0 }}>
+          <span style={{ display: 'block' }}>高亮颜色</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <input type="color" style={{ width: 44, height: 28, padding: 0 }}
+              value={config.style.accent || '#808080'}
+              onChange={e => setLocal(c => ({ ...c, style: { ...c.style, accent: e.target.value } }))} />
+            <label style={{ fontWeight: 'normal', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input type="checkbox" checked={config.style.accent === ''}
+                onChange={e => setLocal(c => ({ ...c, style: { ...c.style, accent: e.target.checked ? '' : '#808080' } }))} />
+              跟随正文
+            </label>
+          </span>
+        </div>
+        <label style={{ ...label, marginBottom: 0, minWidth: 180 }}>
+          透明度 {config.style.opacity.toFixed(2)}
+          <input type="range" min={OPACITY_MIN} max={OPACITY_MAX} step={0.05} value={config.style.opacity}
+            style={{ display: 'block', width: '100%', marginTop: 8 }}
+            onChange={e => setLocal(c => ({ ...c, style: { ...c.style, opacity: Number(e.target.value) } }))} />
+        </label>
+        <button type="button" style={{ alignSelf: 'end', padding: '6px 10px' }}
+          onClick={() => setLocal(c => ({ ...c, style: { ...c.style, color: '', opacity: OPACITY_MAX, accent: '' } }))}>
+          恢复默认
+        </button>
+      </div>
+      <StylePreview style={config.style} />
       {config.style.preset === 'custom' && (
         <label style={label}>
           自定义声明
