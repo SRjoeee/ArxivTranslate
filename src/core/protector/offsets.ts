@@ -1,28 +1,45 @@
-// 线上文本的字符偏移 ↔ DOM Range（DESIGN §6.2 的配套）。
+// Wire-text offsets mapped onto DOM ranges (companion to DESIGN §6.2).
 //
-// 句子对齐的坐标系是**线上文本**——微软的 `sentLen` 就是在我们发出去的那串上量的（issue #105）。
-// 要把它变成可高亮的 `Range`，需要「线上偏移 → 文本节点 + 节点内偏移」的映射。
+// Sentence alignment is expressed in wire-text coordinates — Microsoft's `sentLen` is measured on
+// the exact string we send (issue #105). Turning an interval of that string into a highlightable
+// `Range` needs a mapping from wire offset to DOM position.
 //
-// 难点在于线上文本与节点内容不是逐字符对应的：`escapeText` 会把 `&` 变成 `&amp;`、`@` 变成 `@@`，
-// `serialize` 出口还会折叠 HTML 空白（#119）。两种变换都是**逐字符、上下文无关**的，
-// 所以不必存逐字符表，只在「输入一个字符、输出不是一个字符」的地方记一个锚点，
-// 锚点之间是严格 1:1，中间靠加法算。
+// Wire text and node content are not character-for-character: `escapeText` turns `&` into `&amp;`
+// and, for markers, `@` into `@@`, and `serialize` collapses HTML whitespace on the way out (#119).
+// Both transforms are per-character and context-free, so rather than storing a table per character
+// a text span records an anchor only where one input character did not produce exactly one output
+// character; between anchors the mapping is addition.
 
-/** 线上文本的一段与它来自的文本节点 */
-export interface TextSpan {
-  node: Text
-  /** 在线上文本里的区间 `[from, to)` */
-  from: number
-  to: number
-  /**
-   * 分叉点：`[线上偏移, 节点内偏移]`，两个锚点之间严格 1:1。
-   * 第一个锚点总是 `[from, 0]`（节点开头可能被折叠吃掉前导空白，所以节点侧未必是 0——见构造处）
-   */
-  anchors: readonly (readonly [number, number])[]
-}
+/** One run of wire text and where it came from. Text and slot spans together tile the whole string. */
+export type WireSpan =
+  | {
+      kind: 'text'
+      node: Text
+      /** Interval `[from, to)` in the wire text */
+      from: number
+      to: number
+      /**
+       * Divergence points as `[wireOffset, nodeOffset]`. The mapping is strictly 1:1 between
+       * consecutive anchors, so a lookup is a search plus an addition.
+       */
+      anchors: readonly (readonly [number, number])[]
+    }
+  | {
+      /**
+       * A placeholder: `<x id="N"/>`, `@abc#`, or one of the `<t id="N">` / `</t>` pair.
+       * Its wire run has no character-level correspondence to anything in the DOM, so a range
+       * boundary landing inside it resolves to the node's own boundary rather than an offset.
+       */
+      kind: 'slot'
+      node: Node
+      from: number
+      to: number
+      /** True for `</t>`, whose boundary is *after* the element rather than before it */
+      closing?: boolean
+    }
 
-/** 线上偏移 → 节点内偏移。锚点之间 1:1，所以取最后一个不超过它的锚点再加差值 */
-export function nodeOffsetAt(span: TextSpan, wireOffset: number): number {
+/** Wire offset to offset within the node. Anchors are 1:1 in between, so take the last one at or before it. */
+export function nodeOffsetAt(span: Extract<WireSpan, { kind: 'text' }>, wireOffset: number): number {
   const clamped = Math.max(span.from, Math.min(wireOffset, span.to))
   let lo = 0
   let hi = span.anchors.length - 1
@@ -35,31 +52,45 @@ export function nodeOffsetAt(span: TextSpan, wireOffset: number): number {
   return Math.min(node + (clamped - wire), span.node.data.length)
 }
 
-/** 落在这个线上偏移上的段；偏移正好在两段之间时取后一段（`side: 'end'` 取前一段） */
-export function spanAt(spans: readonly TextSpan[], wireOffset: number, side: 'start' | 'end' = 'start'): TextSpan | undefined {
-  if (spans.length === 0) return undefined
-  if (side === 'end') {
-    for (let i = spans.length - 1; i >= 0; i--) if (spans[i]!.from < wireOffset) return spans[i]
-    return spans[0]
+/** The span covering this wire offset. Spans tile the wire text, so this only misses past the end. */
+export function spanAt(spans: readonly WireSpan[], wireOffset: number): WireSpan | undefined {
+  let lo = 0
+  let hi = spans.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    const span = spans[mid]!
+    if (wireOffset < span.from) hi = mid - 1
+    else if (wireOffset >= span.to) lo = mid + 1
+    else return span
   }
-  for (const span of spans) if (wireOffset < span.to) return span
-  return spans[spans.length - 1]
+  return undefined
 }
 
 /**
- * 线上区间 `[from, to)` → `Range`。区间跨占位符时，Range 从第一段的起点跨到最后一段的终点，
- * 中间的受保护节点自然被包进去——高亮一句话时公式也该亮，这是想要的行为。
+ * Wire interval `[from, to)` as a `Range`.
  *
- * 落不到任何文本段上（整段都是占位符）时返回 `undefined`，调用方按「这一句没有高亮」处理。
+ * A boundary inside a placeholder resolves to that node's own boundary, so a sentence that opens or
+ * closes on a formula still contains it. Resolving such a boundary to the neighbouring text span
+ * instead would drop the formula, and an interval covering only a placeholder would collapse
+ * (Codex pointed this out on #123).
+ *
+ * Returns undefined only when there is nothing to select: no spans, an empty interval, or an
+ * interval past the end of the wire text.
  */
-export function rangeOf(spans: readonly TextSpan[], from: number, to: number): Range | undefined {
+export function rangeOf(spans: readonly WireSpan[], from: number, to: number): Range | undefined {
   if (spans.length === 0 || to <= from) return undefined
-  const startSpan = spanAt(spans, from, 'start')
-  const endSpan = spanAt(spans, to, 'end')
-  if (!startSpan || !endSpan) return undefined
-  // Range 必须由节点自己的 document 创建，否则跨文档、`toString()` 返回空串（写这个模块时踩到）
-  const range = startSpan.node.ownerDocument.createRange()
-  range.setStart(startSpan.node, nodeOffsetAt(startSpan, from))
-  range.setEnd(endSpan.node, nodeOffsetAt(endSpan, to))
+  const start = spanAt(spans, from)
+  const end = spanAt(spans, to - 1)
+  if (!start || !end) return undefined
+  // The range must come from the nodes' own document; building it from another one silently
+  // yields an empty toString().
+  const range = (start.node.ownerDocument ?? end.node.ownerDocument)?.createRange()
+  if (!range) return undefined
+  if (start.kind === 'text') range.setStart(start.node, nodeOffsetAt(start, from))
+  else if (start.closing) range.setStartAfter(start.node)
+  else range.setStartBefore(start.node)
+  if (end.kind === 'text') range.setEnd(end.node, nodeOffsetAt(end, to))
+  else if (end.closing) range.setEndAfter(end.node)
+  else range.setEndBefore(end.node)
   return range
 }

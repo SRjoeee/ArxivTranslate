@@ -5,7 +5,7 @@
 // 序列化时要当普通 paired 走进去，否则整格只剩一个占位符、文字全丢（实测 2410.00260 表 1；Codex 在 #5 指出）。
 import { isInjected } from '@/core/marks'
 import { FUNCTIONAL_INLINE, classify, isTableCell } from '@/core/rules/latexml'
-import type { TextSpan } from './offsets'
+import type { WireSpan } from './offsets'
 import { escapeText } from './text'
 import { type WireFormat, writeVoid } from './tokens'
 
@@ -19,8 +19,8 @@ export interface ProtectedBlock {
   paired: Set<number>
   /** 超过 VOID_DENSE_THRESHOLD 的块视为公式密集，由 pipeline 单独成批 */
   voidCount: number
-  /** 线上偏移 ↔ 文本节点的映射；只有 `serialize(root, format, { offsets: true })` 才产出（§6.2 / issue #105） */
-  offsets?: TextSpan[]
+  /** Wire offset to DOM mapping; only produced by `serialize(root, format, { offsets: true })` (§6.2, issue #105) */
+  offsets?: WireSpan[]
 }
 
 export const VOID_DENSE_THRESHOLD = 40
@@ -59,17 +59,26 @@ const collapseWhitespace = (text: string) => text.replace(HTML_SPACE, ' ')
 
 
 /**
- * 逐字符写入线上文本，同时记录「线上偏移 ↔ 节点内偏移」。**只在要偏移表时走这条路**——
- * 默认路径仍是整串 `escapeText` + 一次 `collapseWhitespace`，一个字符都不多碰（性能）。
- * 两条路径必须产出**逐字节相同**的线上文本，`tests/protector/offsets.test.ts` 拿 12 篇 fixture 钉住这一点。
+ * Writes the wire text character by character while recording where wire offsets land in the DOM.
+ * Only taken when offsets are requested: the default path still escapes the whole string at once
+ * and collapses once at the end, touching not one extra character, so translation pays nothing.
+ *
+ * The two paths must emit byte-identical wire text; `tests/protector/offsets.test.ts` pins that
+ * across all 12 fixtures in both wire formats.
  */
-function makeTracker(format: WireFormat, parts: string[], spans: TextSpan[]) {
+function makeTracker(format: WireFormat, parts: string[], spans: WireSpan[]) {
   let len = 0
   let afterSpace = false
   return {
-    /** 占位符：内部没有需要折叠的空白，也不以空白开头结尾，原样写 */
-    raw(s: string) {
+    /**
+     * A placeholder run. It holds no collapsible whitespace and neither starts nor ends with any,
+     * so it goes out verbatim. Recording it as a span matters for ranges: a boundary landing inside
+     * a placeholder has to resolve to that node's own boundary, otherwise a sentence opening or
+     * closing on a formula would drop it (Codex pointed this out on #123).
+     */
+    raw(s: string, node: Node, closing = false) {
       parts.push(s)
+      spans.push(closing ? { kind: 'slot', node, from: len, to: len + s.length, closing } : { kind: 'slot', node, from: len, to: len + s.length })
       len += s.length
       afterSpace = false
     },
@@ -89,13 +98,14 @@ function makeTracker(format: WireFormat, parts: string[], spans: TextSpan[]) {
           afterSpace = false
         }
         out += emitted
-        // 输入一个字符没有正好产出一个字符 → 这里之后重新 1:1，记一个锚点
+        // One input character did not produce exactly one output character, so the 1:1 run
+        // restarts here and needs an anchor.
         if (emitted.length !== 1) anchors.push([len + out.length, i + 1])
       }
       if (out.length === 0) return
       parts.push(out)
       len += out.length
-      spans.push({ node, from, to: len, anchors })
+      spans.push({ kind: 'text', node, from, to: len, anchors })
     },
   }
 }
@@ -104,7 +114,7 @@ export function serialize(root: Element, format: WireFormat = 'tags', options: {
   const slots = new Map<number, Node>()
   const paired = new Set<number>()
   const parts: string[] = []
-  const spans: TextSpan[] = []
+  const spans: WireSpan[] = []
   const tracker = options.offsets === true ? makeTracker(format, parts, spans) : undefined
   let voidCount = 0
   let next = 1
@@ -133,14 +143,14 @@ export function serialize(root: Element, format: WireFormat = 'tags', options: {
         slots.set(id, el)
         if (isVoid || format === 'markers') {
           voidCount++
-          if (tracker) tracker.raw(writeVoid(id, format))
+          if (tracker) tracker.raw(writeVoid(id, format), el)
           else parts.push(writeVoid(id, format))
         } else {
           paired.add(id)
-          if (tracker) tracker.raw(`<t id="${id}">`)
+          if (tracker) tracker.raw(`<t id="${id}">`, el)
           else parts.push(`<t id="${id}">`)
           walk(el)
-          if (tracker) tracker.raw('</t>')
+          if (tracker) tracker.raw('</t>', el, true)
           else parts.push('</t>')
         }
       }
@@ -148,7 +158,7 @@ export function serialize(root: Element, format: WireFormat = 'tags', options: {
     }
   }
   walk(root)
-  // 记账路径在写入时就折叠好了，不能再折一次
+  // The tracked path collapses as it writes, so it must not be collapsed again.
   const text = tracker ? parts.join('') : collapseWhitespace(parts.join(''))
   return tracker ? { format, text, slots, paired, voidCount, offsets: spans } : { format, text, slots, paired, voidCount }
 }
