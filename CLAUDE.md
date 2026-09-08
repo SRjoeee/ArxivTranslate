@@ -113,12 +113,20 @@ reference/              # 参考仓库，gitignore，只读
   3. 把自己的 diff 当成别人的代码通读一遍，问「这次改动让什么原本能用的东西不能用了」。
 - 一次修复批次只叫一次审查，不要推一个 commit 叫一次。
 - **Do not wait on review to start the next independent PR.** Review is the bottleneck, not
-  authorship: a PR under 100 lines costs one Codex run, one over 491 costs five or six, and Codex
-  hit its usage limit four times on 2026-09-08. Check what the next PR actually depends on — if it
-  touches different files, branch it from `main` and start. Rebasing independent files is cheap;
-  waiting is not. What is *not* cheap is two branches editing the same file: #118 and #120 both
-  touched CLAUDE.md, and #115 carried a semantic conflict that rebase could not see (an assertion
-  pinned to a value #116 had renamed). So parallelise across files, never within one.
+  authorship: on the lower bounds above, a PR under 100 lines costs at least one Codex run and one
+  over 491 at least five or six, and Codex hit its usage limit four times on 2026-09-08.
+
+  Check what the next PR actually depends on. Disjoint file lists are necessary but **not
+  sufficient**: a branch consuming a type, a schema value or a behaviour that a pending PR
+  introduces is not independent of it however disjoint the files, because it would compile against a
+  `main` that lacks the prerequisite and validate the wrong behaviour. Branch that one off the
+  pending branch, or wait. This is not hypothetical — carrying alignment through the queue consumes
+  a type #125 introduces while touching entirely different files. Where no such dependency exists,
+  branch from `main` and start; rebasing disjoint files is cheap and waiting is not.
+
+  Two branches editing the same file is the case to avoid outright: #118 and #120 both touched
+  CLAUDE.md, and #115 carried a conflict rebase could not see, where an assertion pinned a value
+  #116 had renamed.
 - **Parallelise measurements with subagents; write implementation yourself.** Probes and
   experiments are independent, self-verifying (the output is numbers), land no code, and need none
   of the invariants in this file — those are worth running concurrently, with the conclusions
