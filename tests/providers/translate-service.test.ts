@@ -25,7 +25,7 @@ function fakePort(seed: Record<string, string> = {}) {
 
 const req = (ids: string[]) => ({
   request: { segments: ids.map(id => ({ id, text: `text-${id}` })), source: 'en' as const, target: 'zh-CN' },
-  cache: { paper: '2410.00260', renderPath: 'markup' as RenderPath },
+  cache: { paper: '2410.00260', renderPath: 'tags' as RenderPath },
 })
 
 const rateLimited = () => attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
@@ -213,7 +213,7 @@ describe('createTranslateService', () => {
       cache: port,
     })
     await service.translate(req(['a']))
-    const again = await service.translate({ ...req(['a']), cache: { paper: '2410.00260', renderPath: 'markup', bypass: true } })
+    const again = await service.translate({ ...req(['a']), cache: { paper: '2410.00260', renderPath: 'tags', bypass: true } })
     expect(calls).toBe(2)
     expect(reads).toHaveLength(1)
     expect(writes).toHaveLength(2)

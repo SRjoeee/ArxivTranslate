@@ -36,7 +36,7 @@ function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: st
 async function start(doc: Document, blocks: Block[], transport: Transport, extra: Partial<Parameters<typeof startTranslation>[0]> = {}) {
   const run = startTranslation({
     doc, blocks, target: 'zh-CN', mode: 'stack', paper: 'test', transport, preload: DEFAULT_PRELOAD,
-    capabilities: { maxBatchChars: 100_000, maxBatchItems: 100, renderPath: 'markup' }, ...extra,
+    capabilities: { maxBatchChars: 100_000, maxBatchItems: 100, renderPath: 'tags' }, ...extra,
   })
   await run.ready
   return run
@@ -58,7 +58,7 @@ describe('startTranslation', () => {
     expect(doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
     // 两个章节各一批文本 + 表格一批
     expect(requests).toHaveLength(3)
-    expect(requests[0]?.cache).toEqual({ paper: 'test', renderPath: 'markup' })
+    expect(requests[0]?.cache).toEqual({ paper: 'test', renderPath: 'tags' })
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)?.querySelector('math')).not.toBeNull()
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="T1"]`)?.querySelector(TABLE_RULES.cell)?.textContent).toBe('Model')
     expect(doc.documentElement.hasAttribute('data-axt-on')).toBe(true)
@@ -116,7 +116,7 @@ describe('startTranslation', () => {
     await run.translate(blocks)
     expect(run.progress()).toMatchObject({ done: 6, failed: 0 })
     const retry = requests.find(r => r.request.segments.length === 1 && r.request.segments[0]?.id === 'p2')
-    expect(retry?.cache).toEqual({ paper: 'test', renderPath: 'markup', bypass: true })
+    expect(retry?.cache).toEqual({ paper: 'test', renderPath: 'tags', bypass: true })
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)?.querySelector('math')).not.toBeNull()
   })
 
@@ -124,7 +124,7 @@ describe('startTranslation', () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport, requests } = makeTransport((req, seg) => {
-      if (seg.id === 'p2' && req.cache?.renderPath === 'markup') return '坏了'
+      if (seg.id === 'p2' && req.cache?.renderPath === 'tags') return '坏了'
       return undefined as unknown as string
     })
     const run = await start(doc, blocks, transport)
@@ -132,9 +132,9 @@ describe('startTranslation', () => {
     expect(run.progress().failed).toBe(0)
     const runsReq = requests.find(r => r.cache?.renderPath === 'runs')
     expect(runsReq?.request.segments.map(s => s.id)).toEqual(['p2#r0', 'p2#r1'])
-    const markup = requests.find(r => r.cache?.renderPath === 'markup')!
+    const tags = requests.find(r => r.cache?.renderPath === 'tags')!
     // 请求只带得走的东西：段落、缓存参数、scope。校验回调过不了消息边界，也不再需要
-    expect(Object.keys(markup).sort()).toEqual(['cache', 'request'])
+    expect(Object.keys(tags).sort()).toEqual(['cache', 'request'])
     const node = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)
     expect(node?.querySelector('math')).not.toBeNull()
     expect(node?.textContent).toContain('Two')

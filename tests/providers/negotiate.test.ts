@@ -28,19 +28,19 @@ describe('buildChain 的格式协商', () => {
   it('只有 Google 时走 tags：它两种都行，偏好序里 tags 在前，内联样式保得住', async () => {
     const { chain, renderPath } = await chainOf([])
     expect(chain.map(p => p.id)).toEqual(['google-web'])
-    expect(renderPath).toBe('markup')
+    expect(renderPath).toBe('tags')
   })
 
   it('接上只认 tags 的引擎，交集仍是 tags', async () => {
     const { chain, renderPath } = await chainOf([engine('builtin-ish', ['tags'])])
     expect(chain.map(p => p.id)).toEqual(['google-web', 'builtin-ish'])
-    expect(renderPath).toBe('markup')
+    expect(renderPath).toBe('tags')
   })
 
   it('首选偏好 tags 时，markers-only 的候选进不来——它救不了 tags 会话', async () => {
     const { chain, renderPath } = await chainOf([engine('microsoft-ish', ['markers'])])
     expect(chain.map(p => p.id)).toEqual(['google-web'])
-    expect(renderPath).toBe('markup')
+    expect(renderPath).toBe('tags')
   })
 
   it('**顺序无关**：候选表怎么排，格式与进链结果都一样（#103 的前置）', async () => {
@@ -51,7 +51,7 @@ describe('buildChain 的格式协商', () => {
     const a = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' }, { freeEngines: [markers, tags] })
     const b = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' }, { freeEngines: [tags, markers] })
     expect(a.chain.map(p => p.id)).toEqual(b.chain.map(p => p.id))
-    expect([a.renderPath, b.renderPath]).toEqual(['markup', 'markup'])
+    expect([a.renderPath, b.renderPath]).toEqual(['tags', 'tags'])
     // 具体是：只有支持 tags 的那个进得来
     expect(a.chain.map(p => p.id)).toEqual(['google-web', 'builtin-ish'])
   })
@@ -68,7 +68,7 @@ describe('buildChain 的格式协商', () => {
   it('不可用的候选不参与协商，也不该把交集压窄', async () => {
     const { chain, renderPath } = await chainOf([engine('microsoft-ish', ['markers'], false), engine('builtin-ish', ['tags'])])
     expect(chain.map(p => p.id)).toEqual(['google-web', 'builtin-ish'])
-    expect(renderPath).toBe('markup')
+    expect(renderPath).toBe('tags')
   })
 
   it('首选一个格式都保不住时走 runs，兜底引擎照样进链——runs 发的是纯文本，不需要共同格式', async () => {
@@ -82,11 +82,20 @@ describe('buildChain 的格式协商', () => {
     expect(renderPath).toBe('runs')
   })
 
+  it('renderPath 就是协商出的线上格式本身，中间不做转换（#116）', async () => {
+    // 这条钉的是契约。真正的护栏是类型：`RenderPath = WireFormat | 'runs'`，所以 `renderPath: format`
+    // 能直接通过；将来加第三种 WireFormat 会自动流下去，而不是被一个 `? :` 静默改写成 tags
+    for (const fmt of ['tags', 'markers'] as const) {
+      const { renderPath } = await buildChain(DEFAULT_CONFIG, { primary: engine('x', [fmt]), freeEngines: [] })
+      expect([fmt, renderPath]).toEqual([fmt, fmt])
+    }
+  })
+
   it('关掉降级就只剩首选，格式取它自己的偏好', async () => {
     const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web', fallback: { enabled: false } }, {
       freeEngines: [() => engine('microsoft-ish', ['markers'])],
     })
     expect(chain.map(p => p.id)).toEqual(['google-web'])
-    expect(renderPath).toBe('markup')
+    expect(renderPath).toBe('tags')
   })
 })

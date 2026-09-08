@@ -37,7 +37,7 @@ const req = (texts: string[], signal?: AbortSignal): TranslateRequest => ({
 const named = (name: string, message = name) => Object.assign(new Error(message), { name })
 
 describe('createChromeBuiltinProvider', () => {
-  it('形状：markup 路径、内置类别、本地批次参数', () => {
+  it('形状：tags 路径、内置类别、本地批次参数', () => {
     const { api } = fakeApi()
     const provider = createChromeBuiltinProvider('cmn', { translator: api })
     expect(provider.id).toBe('chrome-builtin')

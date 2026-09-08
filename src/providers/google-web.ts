@@ -76,7 +76,7 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
 
 /**
  * Google 网页版翻译的免费端点。视为随时会断（DESIGN §8.3）：错误独立分类，失败可回退到别的 provider。
- * 保留占位符标记，所以走 markup 路径（RESEARCH.md §6.6）。
+ * 保留占位符标记，所以走 tags 路径（RESEARCH.md §6.6）。
  */
 export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationProvider {
   return {

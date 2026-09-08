@@ -25,7 +25,7 @@ describe('createGoogleWebProvider', () => {
     expect(result.provider).toBe('google-web')
   })
 
-  it('占位符原样穿过（端点保留标记，走 markup 路径）', async () => {
+  it('占位符原样穿过（端点保留标记，走 tags 路径）', async () => {
     const text = 'Let <x id="1"/> be a <t id="2">connected</t> graph.'
     const translated = '让 <x id="1"/> 是一个 <t id="2">连通的</t> 图。'
     const provider = createGoogleWebProvider({ fetch: (async () => okResponse([translated])) as unknown as typeof globalThis.fetch })

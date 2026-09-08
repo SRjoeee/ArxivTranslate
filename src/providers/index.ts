@@ -69,7 +69,10 @@ export async function buildChain(
     }
   }
   if (format === undefined) return { chain, renderPath: 'runs' }
-  return { chain, renderPath: format === 'markers' ? 'markers' : 'markup' }
+  // 直接返回，不再做转换：`RenderPath = WireFormat | 'runs'` 已经接受任何线上格式。
+  // 留着 `format === 'markers' ? … : 'tags'` 的话，将来加第三种 WireFormat 会被**静默改写成 tags**，
+  // 只支持新格式的 provider 会收到 tags 序列化的批次、把占位符毁掉（Codex 在 #116 指出）
+  return { chain, renderPath: format }
 }
 
 export { PROMPT_VERSION } from './prompt'

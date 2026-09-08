@@ -27,7 +27,7 @@ describe('启动期间恢复原文（issue #45 实验 1）', () => {
       target: 'cmn',
       mode: 'stack',
       paper: '0000.00000',
-      capabilities: { maxBatchChars: 1000, maxBatchItems: 4, renderPath: 'markup' },
+      capabilities: { maxBatchChars: 1000, maxBatchItems: 4, renderPath: 'tags' },
       preload: { margin: 1000, threshold: 0 },
       transport: async () => ({ ok: false, error: { kind: 'aborted', message: '不该发出请求' } }),
     })
@@ -59,7 +59,7 @@ describe('缓存读取的等待预算：换任何 CachePort 都不会被拖死�
     })
     return { service, calls }
   }
-  const call = { request: { segments: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], source: 'en' as const, target: 'cmn' }, cache: { paper: '0000.00000', renderPath: 'markup' as const } }
+  const call = { request: { segments: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], source: 'en' as const, target: 'cmn' }, cache: { paper: '0000.00000', renderPath: 'tags' as const } }
 
   it('正常返回时不受预算影响，命中的段落不再发给 provider', async () => {
     const { service, calls } = await serviceWith({ getMany: async keys => keys.map((_, i) => (i === 0 ? '甲' : null)), putMany: async () => undefined })
@@ -100,7 +100,7 @@ describe('缓存身份包含端点（issue #45 实验 3）', () => {
     model: 'same-model',
     promptKey: provider.promptKey ?? '',
     target: 'cmn',
-    renderPath: 'markup',
+    renderPath: 'tags',
     text: 'Hello',
   })
 
@@ -161,7 +161,7 @@ describe('取消跨了消息边界（issue #42）', () => {
       target: 'cmn',
       mode: 'stack',
       paper: '0000.00000',
-      capabilities: { maxBatchChars: 1000, maxBatchItems: 10, renderPath: 'markup' },
+      capabilities: { maxBatchChars: 1000, maxBatchItems: 10, renderPath: 'tags' },
       preload: { margin: 1000, threshold: 0 },
       scope: 'session-1',
       transport: call => transport.translate(call),
@@ -208,7 +208,7 @@ describe('取消之后不再写缓存（Codex 在 #33 指出）', () => {
     })
     const pending = service.translate({
       request: { segments: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], source: 'en', target: 'cmn' },
-      cache: { paper: '0000.00000', renderPath: 'markup' },
+      cache: { paper: '0000.00000', renderPath: 'tags' },
       scope: 'session-1',
     })
     // 等 a 那批落地，再取消整个 scope，然后放行 b

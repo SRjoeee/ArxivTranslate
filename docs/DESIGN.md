@@ -29,7 +29,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 
 1. **不需要通用翻译器那套启发式 DOM walker 和站点规则订阅系统**。用一套针对 LaTeXML 的确定性规则做块切分和跳过判定，规则集中在一个文件里，可版本化。
 2. **三种模式共享同一份 DOM，模式切换只改一个 CSS 属性**。译文节点永远作为原块的相邻兄弟插入，从不修改原节点子树。这是可逆性的根基。
-3. **渲染路径由 provider 的能力集协商出来，不由引擎类型决定**。`markup` 路径用标签占位符整块翻译；`markers` 路径用纯文本记号整块翻译（只有 void，成对占位符拍平）；`runs` 路径按行内不可翻译节点切段。provider 用 `wireFormats` 声明自己保得住哪些线上格式（**按偏好排序的集合，不是布尔位**——Google 两种都保得住），链在组装时取交集，一次会话只用一种格式（§8.5）。Phase 0 / Phase 3 实测 LLM、Google translateHtml、Chrome 内置 Translator 都保得住标签，所以默认协商出 `markup`；`markers` 是给那些会把标签撕烂的免费引擎准备的（#104 实测：微软 Edge 端点在标签上 0%、在记号上 98%），`runs` 是校验失败后的兜底（RESEARCH.md §5 / §6）。
+3. **渲染路径由 provider 的能力集协商出来，不由引擎类型决定**。`tags` 路径用标签占位符整块翻译；`markers` 路径用纯文本记号整块翻译（只有 void，成对占位符拍平）；`runs` 路径按行内不可翻译节点切段。provider 用 `wireFormats` 声明自己保得住哪些线上格式（**按偏好排序的集合，不是布尔位**——Google 两种都保得住），链在组装时取交集，一次会话只用一种格式（§8.5）。Phase 0 / Phase 3 实测 LLM、Google translateHtml、Chrome 内置 Translator 都保得住标签，所以默认协商出 `tags`；`markers` 是给那些会把标签撕烂的免费引擎准备的（#104 实测：微软 Edge 端点在标签上 0%、在记号上 98%），`runs` 是校验失败后的兜底（RESEARCH.md §5 / §6）。
 
 ---
 
@@ -41,7 +41,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 | Protected node（受保护节点） | 块内不翻译、必须原样保留的行内节点：公式、引用、代码、脚注标记等 |
 | Placeholder（占位符） | 发给模型时替代受保护节点的记号。`tags` 格式下 void 型 `<x id="n"/>`、paired 型 `<t id="n">…</t>`；`markers` 格式下只有 void 型 `@a#` |
 | Wire format（线上格式） | 占位符在请求文本里的语法：`tags` 或 `markers`。provider 用 `wireFormats` 声明能保住哪些，链取交集协商出唯一一个（§8.5） |
-| Render path（渲染路径） | `markup`（tags 整块翻译）、`markers`（记号整块翻译）或 `runs`（按受保护节点切段逐段翻译）。进缓存键 |
+| Render path（渲染路径） | `tags`（标签占位符整块翻译）、`markers`（记号整块翻译）或 `runs`（按受保护节点切段逐段翻译）。**取值与 `WireFormat` 同名**，只多一个 `runs`；进缓存键 |
 | Mode（模式） | `side` / `stack` / `only`，由 `html[data-axt-mode]` 控制 |
 | Provider | 一个翻译引擎适配器，实现统一接口 |
 | Fixture | 保存在仓库里的真实 arXiv HTML 页面，用于测试 |
@@ -78,7 +78,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 1. `extractor` 按规则收集所有 Block，打上稳定 id（`data-axt-id`）
 2. `scheduler` 只翻进入视口（加预翻译距离）的块；没滚到的块不发请求、不占资源（§10，照搬 Read Frog）
 3. 先查缓存（缓存与请求同在 background，content 不碰 IndexedDB）；命中直接渲染
-4. 未命中：`protector` 按协商出的线上格式把块序列化为 `{format, text, slots}`；渲染路径决定走 `markup` / `markers`（整块带占位符）还是 `runs`（切段）
+4. 未命中：`protector` 按协商出的线上格式把块序列化为 `{format, text, slots}`；渲染路径决定走 `tags` / `markers`（整块带占位符）还是 `runs`（切段）
 5. background 里移植的 `request-queue` 按 provider 的速率（令牌桶）与并发上限发请求、`batch-queue` 攒批（§8.0：2026-09-06 起请求跑在 background）；失败退避、重试、429 暂停、必要时切换 fallback provider
 6. `validator` 校验占位符完整性；失败 → 单块重试一次 → 降级 runs 路径
 7. `rehydrator` 把占位符换回受保护节点的克隆（剥掉 `id` 属性）
@@ -245,7 +245,7 @@ interface ProtectedBlock {
   **转义必须与上下文无关**：序列化是逐个文本节点转义再拼接的，条件转义的歧义会在拼接处产生（`<p>@<math/></p>` 的 `@` 单独看不需要转义，拼上占位符成了 `@@a#`，占位符被读成字面量而消失）。代价实测：12 篇 fixture 的 779160 个 markers 线上字符里只有 5 处 `@`，翻倍共多 5 个字符
 - `markers` **也转义 `& < >`**。曾经不转义，理由是「这条线是纯文本」——那是对引擎的假设而非事实：`google-web` 走 `translateHtml`，会把请求体当 HTML 解析。实测 markers 线上文本里有 102 个 `&`、1 个 `<`、3 个 `>`，分布在 5992 个块的 80 个里，都是正经内容（`Springer science & business media`、`Very long (>1k words) … (<500 words)`）。转义之后这条线对 HTML 与纯文本两种传输都成立，不必给 provider 单开编解码层。解实体在**分词之后**做，所以引擎回来的 `&#64;abc#` 不会被读成记号
 - 保留 `&nbsp;` 与细空格（`\u2009`）在公式两侧的位置，序列化时不 trim 内部空白
-- 一个块内 void 占位符超过阈值（初值 40）时，视为公式密集块，仍走 markup 路径但单独成批
+- 一个块内 void 占位符超过阈值（初值 40）时，视为公式密集块，仍走 tags 路径但单独成批
 
 ### 6.3 校验
 
@@ -266,7 +266,7 @@ interface ProtectedBlock {
 
 - **带功能的元素整块保留** [决定，2026-09-05，issue #44]：样式丢了还能读，链接丢了就点不动了——降级不能把原本可点击的内容变成纯文字。`a[href]`（`FUNCTIONAL_INLINE`）在这条路径上按 void 处理：整块原样保留、内部文字不翻，跳过时按嵌套深度数 `</t>`，免得内层的结束标记提前收尾。**实测 12 篇 fixture 的 4221 个翻译块里这种链接有 0 个**——arXiv 正文的链接全是 `.ltx_ref` 交叉引用或 mailto，规则层已当受保护节点原样保留——所以这条不是修一个正在发生的故障，而是把「降级只损样式、不损行为」变成结构保证，同时给 v2 的其他论文站点兜底
 
-`wireFormats: []`（一个占位符都保不住）的引擎专用，同时也是 markup / markers 路径校验失败后的兜底。v1 的三个免费引擎实测都保留占位符（RESEARCH.md §5 / §6），runs 在 v1 主要以兜底身份存在，但实现不能省：
+`wireFormats: []`（一个占位符都保不住）的引擎专用，同时也是 tags / markers 路径校验失败后的兜底。v1 的三个免费引擎实测都保留占位符（RESEARCH.md §5 / §6），runs 在 v1 主要以兜底身份存在，但实现不能省：
 - 以 void 节点为分隔，把块切成若干文本段（paired 节点内的文字并入所在段，丢失其样式）
 - 每段单独翻译，按原顺序拼回，void 节点克隆插回原位
 - 已知代价：被公式打断的句子各翻各的；这是可接受的降级
@@ -628,7 +628,7 @@ export interface TranslateResult {
 - **降级期限分两档**：`no-key` / `auth` 是配置问题、不会自己好，本会话内永久降级；`network` / `timeout` / `rate-limit` / `invalid-response` / `unknown` 是瞬时的，降级 60s 冷却后自动恢复，该引擎一旦成功立即清空记录。队列自己的重试（retry-policy）跑完才会走到链上，所以链不叠加重试；冷却是为了避免持续故障时每次调用都白等一遍最长 120s 的批次超时。`aborted` 永不降级也永不记账——会话取消不是引擎的错，换个引擎重来只会再被取消一次
 - **全部降级后退回最后一步**：宁可再失败一次并把错误如实报给 `run.ts`（它据此停下并画失败小部件），也不能出现"无引擎可用"的状态
 - **能力不变量**：渲染路径决定块的形状，而 `run.ts` 只在开始时取一次 `capabilities`；中途换路径会让先后渲染的块两套形状。因此**一次会话只能有一种线上格式**。**格式由首选引擎决定**——取它 `wireFormats` 偏好序里的第一个；候选支持不了这个格式就不进链并告警。这条规则是**顺序无关**的
-  - 选 Google（`['tags','markers']`）→ 锁定 `markup` → 内置（`['tags']`）进链；markers-only 的候选挡在外面
+  - 选 Google（`['tags','markers']`）→ 锁定 `tags` → 内置（`['tags']`）进链；markers-only 的候选挡在外面
   - 选微软（`['markers']`）→ 锁定 `markers` → Google 两种都保得住，进链兜底
   - 首选 `wireFormats: []`（一个占位符都保不住）→ 整条会话走 `runs`；runs 发的是纯文本段、不需要共同格式，所以这时格式闸整个让开，否则首选一挂就没得降级
   - 布尔位表达不了「两种都行」，会逼得选了微软就没有兜底——这是 #104 把它换成集合的理由
@@ -640,7 +640,7 @@ export interface TranslateResult {
 ## 9. 缓存与配置
 
 - 译文缓存：IndexedDB，**Dexie**，移植 FluentRead `services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层），crypto-js 换成 Web Crypto SHA-256（v0.4 修订，原定 idb-keyval）
-- 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；`renderPath` 三取值 `markup` / `markers` / `runs`——同一段没有占位符的原文在三条路径下线上文本相同，只有它能把三者分开，批次键也用同一个字段，两种格式的段落不会攒进同一批（`CACHE_KEY_VERSION` 因此升到 3）；**`providerId` 取 `provider.cacheId ?? provider.id`** [决定，2026-09-05，issue #45]：`openai-compat` 这个 id 对所有 OpenAI 兼容端点都一样，只用 id + 模型名的话，OpenRouter 上的同名模型与本机 Ollama 上的共用缓存条目、译文互相污染。provider 自己声明身份（`openai-compat:<origin><path>`，**路径要带上**：同一域名下不同路径可能是不同网关路由、指向不同后端，只取 origin 会让两条路由共用条目；末尾斜杠归一化），**绝不放 API key**（硬规则 7）；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
+- 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；`renderPath` 三取值 `tags` / `markers` / `runs`，**与 `WireFormat` 同名**（#108：曾经叫 `tags`，同一个东西两套名字靠映射函数来回换，新调用点写错一个字面量类型系统拦不住）——同一段没有占位符的原文在三条路径下线上文本相同，只有它能把三者分开，批次键也用同一个字段，两种格式的段落不会攒进同一批（`CACHE_KEY_VERSION` 因此升到 3，改名时再升到 4：键里存的就是这个字符串）；**`providerId` 取 `provider.cacheId ?? provider.id`** [决定，2026-09-05，issue #45]：`openai-compat` 这个 id 对所有 OpenAI 兼容端点都一样，只用 id + 模型名的话，OpenRouter 上的同名模型与本机 Ollama 上的共用缓存条目、译文互相污染。provider 自己声明身份（`openai-compat:<origin><path>`，**路径要带上**：同一域名下不同路径可能是不同网关路由、指向不同后端，只取 origin 会让两条路由共用条目；末尾斜杠归一化），**绝不放 API key**（硬规则 7）；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
 - 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有并直接读写（IndexedDB 按扩展 origin 隔离，跨论文共享）；翻译请求本身也在 background，所以 content 完全不碰缓存，每批少两次消息往返（§8.0，2026-09-06）
 - **缓存管理只在设置页做全局清空** [决定，2026-09-05]：`axt:cache-stats` 显示条数与体积，`axt:cache-clear`（不带 paper）清空整库，切回设置页时重读统计（翻译发生在别的标签页，不重读就永远显示打开那一刻的数字）。两条消息的响应都是 `{ ok: true, … } | { ok: false, message }`：**失败不能显示成「缓存是空的」或「已删除 0 条」**，IndexedDB 用不了时那是最不该骗人的地方（Codex 在 #52 指出）。统计前先跑一次 `cleanup()` 清掉过期条目——`get()` 只是把它们当未命中、从不删除，不清的话页面上会一直显示一堆用不了的条数与体积；这也是 `cleanup()` 在运行时唯一的调用点，所以它失败要抛出去而不是吞掉，否则统计会把清不掉的过期条目当成功结果报出去。**不做「只清本篇」**：设置页是独立扩展页面，没有当前论文的概念，为它绕一圈问 content script 不值当；真正需要按篇清的场景（这篇译得不好想重来）在 popup 上更顺手，留作后续。缓存键本来就带引擎、模型、提示词、术语表，换任何一样都不会命中旧译文，手动清是兜底而不是常规操作
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
