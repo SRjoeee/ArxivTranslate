@@ -134,7 +134,8 @@ describe('runs 路径（markers）', () => {
     const b = serialize(el('<p class="ltx_p">a &lt; b <math class="ltx_Math"><mi>x</mi></math> c</p>'), 'markers')
     expect(b.text).toBe('a &lt; b @a# c')
     const layout = splitRuns(b)
-    expect(layout.runs).toEqual(['a < b ', ' c'])
-    expect(htmlOf(joinRuns(['甲 < 乙 ', ' 丙'], layout, b, document))).toBe('甲 &lt; 乙 <math class="ltx_Math"><mi>x</mi></math> 丙')
+    // 送出去的段保持线上形态（issue #111）：markers 与 tags 在这一点上一致
+    expect(layout.runs).toEqual(['a &lt; b ', ' c'])
+    expect(htmlOf(joinRuns(['甲 &lt; 乙 ', ' 丙'], layout, b, document))).toBe('甲 &lt; 乙 <math class="ltx_Math"><mi>x</mi></math> 丙')
   })
 })
