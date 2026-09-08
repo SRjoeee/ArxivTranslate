@@ -410,6 +410,122 @@ DESIGN §15 只记了用上的两个（`macos-vision-ocr`、`ImageTrans_chrome_e
 
 **浏览器内 PaddleOCR 的体积实测**（`reference/ImageTrans_chrome_extension/ImageTrans/paddleocr/`）：`rec.onnx` 20 M、`ort-wasm-simd-threaded.jsep.wasm` 25 M、`PP-OCRv6_det_small.onnx` 与 `opencv.js` 各 9.5 M、`model.onnx` 10 M；加载与推理胶水 `page-ocr.js` 779 行。
 
+## 6.11 托管免费 LLM provider 调研（2026-09-07，issue #97）
+
+调研目标是 issue #97 设想的「由我们统一接入免费额度，让用户零配置用上 LLM 翻译」。结论是**该设想的三个前提有两个不成立**，但换一条路（付费小模型 + 跨用户共享缓存）反而更便宜、更干净。以下为实测依据。
+
+### 6.11.1 一篇 arXiv 论文的翻译体量（12 篇 fixture）
+
+方法：happy-dom 解析 fixture，移除 `math, .ltx_Math, .ltx_equation, .ltx_listing, script, style, .ltx_bibliography, .ltx_page_navbar`，取 `p.ltx_p` / 各级 `.ltx_title` / `.ltx_caption` / `li.ltx_item` / 摘要段落。token 按 4 字符/token 估（学术文本术语多，实际略高）；中译文按英文字符数 ×0.55 估。
+
+| fixture | 块数 | 字符 | ~输入 tok | ~输出 tok |
+|---|---|---|---|---|
+| 2312.17141 | 703 | 108,443 | 27,111 | 24,400 |
+| 2312.17527 | 101 | 39,288 | 9,822 | 8,840 |
+| 2401.00418 | 305 | 37,884 | 9,471 | 8,524 |
+| 2401.00596 | 81 | 56,995 | 14,249 | 12,824 |
+| 2410.00260 | 129 | 45,419 | 11,355 | 10,220 |
+| 2507.00150 | 72 | 44,553 | 11,138 | 10,024 |
+| 2608.29808 | 206 | 82,103 | 20,526 | 18,473 |
+| 2609.00245 | 583 | 70,052 | 17,513 | 15,762 |
+| 2609.00246 | 352 | 80,638 | 20,160 | 18,144 |
+| 2609.03768 | 129 | 34,279 | 8,570 | 7,713 |
+| 2609.04056 | 557 | 58,524 | 14,631 | 13,168 |
+
+**平均每篇 268 块、54,850 字符、约 13.7k 输入 + 12.3k 输出 = 26k token。** 这是本节所有成本与额度换算的基准。
+
+### 6.11.2 五个模型的协议合规与占位符保留（SiliconFlow，真实 fixture 块）
+
+方法：从 2312.17141 / 2401.00596 / 2609.00246 各抽 3 个**含占位符的真实段落**（共 9 块，void 32 个、paired 14 个），按 `src/providers/prompt.ts` 的 `PROTOCOL_BLOCK`（`PROMPT_VERSION=4`）拼 system + JSON segments，`temperature=0`，一次请求发全部 9 段。
+
+| 模型 | JSON | 段完好 | void 保留 | paired 保留 | 延迟 |
+|---|---|---|---|---|---|
+| `Qwen/Qwen3.5-9B` | ✅ object | **9/9** | **100%** | **100%** | **15.1 s** |
+| `Qwen/Qwen3-8B` | ✅ array | 9/9 | 100% | 100% | 56–64 s |
+| `THUDM/GLM-4-9B-0414` | ✅ object | 7–8/9 | 100% | 86–93% | 25–34 s |
+| `Qwen/Qwen3.5-4B` | ❌ | — | — | — | 17–27 s |
+| `tencent/Hunyuan-MT-7B` | ❌ | — | — | — | 24–39 s |
+
+两个失败各有确切原因，都不是「翻得不好」：
+
+- **Hunyuan-MT-7B：占位符保留了，但产出的 JSON 非法。** 原始输出形如 `"text":"我们将 <t id="1">精确条件化</t> 的范式…"`——标签属性里的双引号**未转义**，直接截断 JSON 字符串。它是翻译专用模型（模型卡自述 *"our model does not have the default system_prompt"*），不具备结构化输出能力。**它走不了 markup 路径。**
+- **Qwen3.5-4B：只返回单个对象** `{"id":"1","text":…}`，只翻了第一段就停——不理解「返回全部 segments」。4B 撑不住本协议。
+
+**注意 `Qwen3-8B` 与 `Qwen3.5-4B` 首轮实测输出为空/乱码，是 thinking 把 token 预算吃光所致**；请求需带 `enable_thinking: false`，但 `Hunyuan-MT-7B` 不接受该参数（`code 20015`），调用层要能按模型省略。
+
+### 6.11.3 Hunyuan-MT-7B 走 runs 路径（纯文本单句，官方模板）
+
+用官方模板 `把下面的文本翻译成中文，不要额外解释。\n<text>` 翻 5 个学术句子，平均 **786 ms/句**，速度很好，但学术翻译有三处硬伤：
+
+| 原文 | 译文 | 问题 |
+|---|---|---|
+| `likelihood-based scoring` | 基于**概率**的评分 | likelihood 应为「似然」，术语错译 |
+| `exact conditioning admits a denotational semantics` | **在特定的条件框架下，该系统**能够…… | 术语 `exact conditioning` 丢失（同一批第 1 句里它还译作「精确条件化」） |
+| `…conditioning on observations in probabilistic programs.` | ……条件化处理**（即根据观测结果来调整程序的运行逻辑或行为）** | 凭空添加原文没有的解释 |
+
+**同一术语在同批次内译法不一致**，而 runs 路径接收不到 `glossary.ts` 的术语表。对论文翻译是实质缺陷。
+
+### 6.11.4 SiliconFlow 免费模型现状与服务条款
+
+- **`/v1/models` 返回 96 个在售模型；官方 pricing 页上唯一免费的文本生成模型是 `tencent/Hunyuan-MT-7B`。** issue #97 引用的 Lightrans 案例页所列另两个免费模型（`GLM-4-9B-0414`、`Qwen3.5-4B`）已不在免费行列；第三方清单仍在列的那批老免费模型（Qwen2-7B、GLM-4-9B-Chat、ChatGLM3-6B、InternLM2.5-7B、Mistral-7B）在 96 个模型里**已全部下架**，该类清单不可信。
+- **免费模型仍要求账户满足条件**：未实名认证或余额为 0 时，调用任何模型（含标价 $0 的 Hunyuan-MT-7B）返回 `{"code":30001,"message":"Sorry, your account balance is insufficient"}`。实名认证亦是开通商业使用权的前置。
+- **服务条款禁止把 key 打包进扩展给终端用户**（用户协议，2026-03-02 版）：
+  - 1.1.6「个人账户仅可供您自用……不得以任何形式赠与、借用、出租、转让、售卖或以其他方式许可第三方使用」，且「发现或者有合理理由认为使用者并非账户初始注册用户，我们有权立即暂停或终止……并有权永久禁用该账户」
+  - 2.2.2「未经我们事先书面同意，购买、出售或转让 API 密钥」
+  - 2.2.3「转售、分发、修改本服务任何部分」
+
+  Lightrans 之所以能内置，是它出现在 SiliconFlow **官方文档的案例页**里（商务合作背书），不是普通开发者可复制的路径。
+
+- **OpenRouter 条款第 7 条**同样禁止 *"access the Site or Service for purposes of reselling API access to Models or otherwise developing a competing service"*。**这条决定 gateway 不能暴露 OpenAI-compatible 透传接口**——那等于转售 API access，且必被薅；只能暴露只接受 segments 的窄接口，prompt 在服务端拼。
+
+### 6.11.5 各家免费额度换算成论文（按 6.11.1 的 26k token/篇，假设攒批后约 30 请求/篇）
+
+| 供应商 | 免费额度 | 换算 | 备注 |
+|---|---|---|---|
+| Cloudflare Workers AI | 10,000 neurons/天 | **全平台 7.8 篇/天** | Llama 3.1 8B 口径 25,608 neurons/M 输入、75,147/M 输出 → 1,278 neurons/篇 |
+| SiliconFlow 免费档 L0 | 1,000 RPM / 5–8 万 TPM | **全平台约 3 篇/分钟** | TPM 先爆，约 15 个并发读者 |
+| Gemini free（Flash-Lite） | 15 RPM / 1,000 RPD | 约 33 篇/天 | 免费档输入会被用于改进模型 |
+| OpenRouter `:free` | 20 RPM / 1,000 RPD | 约 33 篇/天 | 1,000 RPD 需先充值 $10；未充值仅 50 RPD |
+
+**都是全平台数字，不是每用户。** 纯靠免费额度支撑一个公开发布的扩展，算术上不成立。
+
+### 6.11.6 成本模型
+
+`Qwen/Qwen3.5-9B` 定价 **$0.1/M 输入、$0.15/M 输出**。按一篇论文 26k 输入（含协议块开销）+ 12.3k 输出：
+
+**≈ $0.0044/篇（约 ¥0.03）。** 对比 Cloudflare Workers AI 付费口径 $0.014/篇，便宜三倍。1,000 篇/天无缓存约 **$132/月**；arXiv 每月新增约 2 万篇，**全量翻译的理论上界约 $88/月**——这是最坏情况的天花板，不是无底洞。
+
+### 6.11.7 R2 共享缓存的额度与粒度
+
+译文体积实测：平均每篇未压缩约 88 KB（中文 UTF-8 3 字节/字），gzip 后约 30 KB。
+
+R2 免费额度 10 GB 存储 / 100 万 Class A（写）/ 1000 万 Class B（读）/ **出口流量 $0**：
+
+| 粒度 | 每篇写次数 | 10 万篇的 Class A | 结论 |
+|---|---|---|---|
+| 块级（268 块各一对象） | 268 | 2,680 万 | ❌ 超免费额度 26 倍 |
+| 篇级（整篇一对象） | 1–15 | 10–150 万 | ✅ 可行 |
+
+**必须按篇聚合。** 存储侧 30 KB/篇 → 10 GB 可存约 35 万篇（未压缩也有 12 万篇），远超可预见需求。Workers KV 每天仅 1,000 次写，不适用；D1 为 10 万行写/天、5 GB，可做索引但不宜存正文。
+
+### 6.11.8 参考项目怎么处理「provider 的 markup 能力差异」
+
+| 项目 | 发给 provider 的内容 | 占位符机制 |
+|---|---|---|
+| Read Frog | 纯文本 | 无。`provider-registry.ts` 的 `LOCAL_PROVIDER_CAPABILITY_PREDICATES` 只区分「哪些功能需要 LLM」（`noteSuggestion` / `customAction` / `languageDetection` 用 `isLLMProviderConfig`），页面翻译对所有 provider 一视同仁 |
+| FluentRead | 纯文本槽 | `core/translation/serialization.ts`：哨兵标记 `___FLUENTREAD_<nonce>_<i>_BEGIN___`，多槽打包一次请求，带 nonce 冲突检测；解析时**标记外出现正文或代码围栏则整包拒绝** |
+| KISS | **可带标签** | `config/api.js`：`BUILTIN_PLACETAGS = ["i","a","b","x","span"]`、`PLACETAG_FORMATS = ["compact","attribute"]`（`<i1>` vs `<i i=1>`），**per-API 静态配置**（如 `translateHtml` 用 `placetag:"a"` + `attribute`）；另有 `{{1}}` 形式的普通占位符与 `isPlainText` 规则开关 |
+
+**三个项目都没有做 per-model 的运行时路径分发。** KISS 是唯一处理 markup 能力差异的，做法是**把它作为 per-API 的静态配置**，不是运行时探测——与本项目 `preservesMarkup` 是 provider 静态属性的做法一致。
+
+三个可移植但**本轮不采纳**的点（记录备查）：
+
+1. **void 占位符改用非标签形式**（KISS 的 `{{1}}`）：`src/core/protector/tokens.ts` 已在容忍模型把 `<x id="1"/>` 写成 `<x id="1"></x>` 等变体，说明在与模型的「标签补全」本能搏斗；非标签形式可绕开整类问题。
+2. **compact 格式省 token**：`<t1>` 对比 `<t id="1">`，长论文数百个占位符是实打实的成本。
+3. **FluentRead 的整包拒绝语义**：段数或 id 不符即整批重试，不部分接受。
+
+不采纳的理由：本轮实测 `<x id="N"/>` 在 `Qwen3.5-9B` 上占位符保留率 **100%**；改格式意味着升 `PROMPT_VERSION` → 全站缓存失效 + 全池模型重跑准入测试。等有候选模型因格式丢占位符时再动。
+
 ## 7. DESIGN.md 修订清单
 
 按章节排列。每条只提建议，是否采纳由设计文档决定。
@@ -440,3 +556,7 @@ DESIGN §15 只记了用上的两个（`macos-vision-ocr`、`ImageTrans_chrome_e
 | 23 | §8 `google-gtx` 用 `translate_a/single`、`preservesMarkup: false` | 改用 Read Frog 的 `translate-pa.googleapis.com/v1/translateHtml`：实测保留占位符，`preservesMarkup: true`，批量 150 条 556 ms | §6.6 |
 | 20 | §15.1 SVG 图文字按普通块翻译 | 实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics` | §2.9 |
 | 24 | §8.0 请求跑在 content script | 实测 content 侧 fetch 受 CORS 与**本地网络门禁**约束（§6.7）：不带 CORS 头的端点、本机端点（Ollama；http 与 https 一样被拦）从 content 不可达，从 background 可达；连接测试走 background、正式翻译走 content，两条路径行为不一致。且 §8.0 引用的「Read Frog 在 content 发请求」核对为误读。建议：抽离 transport，默认在 background 执行请求（无 CORS 预检、不受本地网络门禁、key 不进页面世界），content 只保留调度；~~先按 issue #42 要求重测冷启动延迟，再定~~ **重测已完成**（§6.7 真实 Chrome 三轮 77–81 ms、§6.8 长请求 45 / 90 s 均存活），**已按本条实现并合并**（issue #42） | §6.7 / §6.8 |
+| 25 | §8.1 provider 清单 | 新增 `hosted`（自建 gateway 窄接口，`preservesMarkup: true`）。**已写入 DESIGN §8.1 与新增的 §16**（issue #97） | §6.11.2 / §6.11.6 |
+| 26 | §8.5 降级冷却 | `createFallbackService` 已支持 `opts.cooldownMs`，但为**整条链一个值**（`fallback.ts:68`）。配额耗尽按小时/天恢复，60 s 冷却必然再失败；调大链级默认值又会拖慢瞬时故障恢复。建议让 `demote()` 接受按次冷却时长，在 `rate-limit` 且带 `retryAfter` 时覆盖。**已写入 DESIGN §8.5 / §16.6，待实现（须带测试）** | §6.11.5 |
+| 27 | 硬规则 6「缓存键含 `model`」 | `hosted` 路径上两层缓存均不含 `model`（在 `model` 位上报固定值 `pool`）：池内模型经同一道准入测试保证输出可互换，具体模型是 gateway 实现细节。**已写入 DESIGN §16.7，仅限 `hosted`，其余 provider 不变** | §6.11.2 / §6.11.8 |
+| 28 | §6 占位符格式 `<x id="N"/>` | KISS 的 compact 格式（`<x1>`）省 token、非标签形式（`{{1}}`）可绕开模型的标签补全本能。**本轮不采纳**：`Qwen3.5-9B` 实测保留率 100%，改格式需升 `PROMPT_VERSION` 并令全站缓存失效、全池模型重跑准入测试。留待有候选模型因格式丢占位符时再议 | §6.11.8 |
