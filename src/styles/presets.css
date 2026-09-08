@@ -137,15 +137,21 @@ html[data-axt-style="colorful"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror
 }
 
 /* ── 动效与其他 ────────────────────────────────────────────────────────────── */
-/* 模糊，悬停才清晰：背诵与自测用（Read Frog 的 blur、KISS 的 fuzzy） */
-html[data-axt-style="blur"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+/* 模糊，悬停才清晰：背诵与自测用（Read Frog 的 blur、KISS 的 fuzzy）。
+   末尾那道 :not(:where(…) *) 把嵌套的译文排除掉：side 模式的 localizeNotes 会把脚注译文
+   （.axt-note-t.axt-t）插进段落译文内部，而 opacity 与 filter 都作用于整棵子树——两层都匹配的话
+   实测滑杆 0.5 会渲染成 0.375 × 0.375 ≈ 0.14，模糊也会叠成两次 blur(4px)（Codex 在 #106 指出）。
+   淡化与模糊由最外层译文一次性负责，里面的跟着走。这道闸用 :where() + * 写，特异度是 0，不影响层叠。
+   只有 blur / blink 需要它：颜色、背景、边框这些是继承或各画各的，不会相乘 */
+html[data-axt-style="blur"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split):not(:where(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)) *) {
   filter: blur(4px);
-  opacity: 0.75;
+  /* 乘上用户设定的透明度，而不是把它顶掉（Codex 在 #106 指出） */
+  opacity: calc(var(--axt-opacity, 1) * 0.75);
   transition: filter 0.15s ease-out, opacity 0.15s ease-out;
 }
-html[data-axt-style="blur"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split):hover {
+html[data-axt-style="blur"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split):hover:not(:where(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)) *) {
   filter: blur(0);
-  opacity: 1;
+  opacity: var(--axt-opacity, 1);
 }
 
 /* 发光同样静态：呼吸动画改的是 text-shadow，每帧都要重算样式并重绘，
@@ -154,7 +160,7 @@ html[data-axt-style="glow"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .a
   text-shadow: 0 0 6px color-mix(in oklab, var(--axt-green) 55%, transparent);
 }
 
-html[data-axt-style="blink"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
+html[data-axt-style="blink"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split):not(:where(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)) *) {
   animation: axt-blink 1.6s ease-in-out infinite;
 }
 
@@ -171,7 +177,8 @@ html[data-axt-style="blink"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .
 }
 
 @keyframes axt-blink {
-  50% { opacity: 0.45; }
+  /* 动画永远压过普通声明，所以谷底也要乘上用户的透明度，否则滑杆对 blink 完全失效 */
+  50% { opacity: calc(var(--axt-opacity, 1) * 0.45); }
 }
 
 /* custom 的规则不在这里：用户写的声明块由 style-preset.ts 包进

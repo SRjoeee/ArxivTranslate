@@ -29,6 +29,10 @@ export const configItem = storage.defineItem<Config>('local:config', {
     }),
     // v7 -> v8：加图片翻译的模式闸（§15），默认三种模式都开——helper 没装时它不起作用，装了就直接可用
     8: (v7: Omit<Config, 'version' | 'image'> & { version: 7 }) => ({ ...v7, version: 8 as const, image: { modes: [...MODE_VALUES] } }),
+    // v8 -> v9：译文样式加三个可调参数（§7.5）。默认值必须让外观与实现之前逐像素相同——
+    // 空颜色 = 跟随原文、opacity 1 = 不透明、空 accent = 用各预设自己的默认色
+    9: (v8: Omit<Config, 'version' | 'style'> & { version: 8; style: { preset: Config['style']['preset']; customCss: string } }) =>
+      ({ ...v8, version: 9 as const, style: { ...v8.style, color: '', opacity: 1, accent: '' } }),
   },
 })
 

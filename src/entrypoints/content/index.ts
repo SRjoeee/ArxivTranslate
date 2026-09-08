@@ -1,10 +1,11 @@
-import type { Config } from '@/config/schema'
-import { getConfig, setConfig } from '@/config/storage'
+import { DEFAULT_CONFIG, type Config } from '@/config/schema'
+import { getConfig, setConfig, watchConfig } from '@/config/storage'
 import { extract, paperContext, type Block } from '@/core/extractor'
 import { collectImageTargets, startImageTranslation, type ImageRun } from '@/core/image'
 import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
 import {
+  applyStyle,
   clearPairMargins, createModeController, createPrep, installAnchorFallback,
   restore, setImageModes,
   type Mode, type ModeController,
@@ -39,9 +40,32 @@ export default defineContentScript({
     /** 页内锚点兜底的卸载函数（issue #44）：会话开始时装、恢复原文时拆 */
     let uninstallAnchors: (() => void) | null = null
     let savedMode: Mode = 'stack'
-    /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性；开始翻译时从配置读一次 */
-    let style: Config['style'] = { preset: 'none', customCss: '' }
-    void getConfig().then(config => { savedMode = config.mode; style = config.style })
+    /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性 */
+    let style: Config['style'] = DEFAULT_CONFIG.style
+    /**
+     * 外观有三个写入点：启动时的这次读、start() 里的那次读、以及下面的 watchConfig。
+     * 前两个都是「发起时的快照」，watcher 拿到的才是最新值，所以 watcher 一旦写过，
+     * 任何配置读都不许再把 style 盖回旧快照——否则设置页刚存的外观会被一次晚到的 await 结果吞掉，
+     * 而 storage 事件已经消费过、不会再来一次（Codex 在 #106 两轮分别指出这两个读点）。
+     * 两个读点共用这一个闸，不各自判断
+     */
+    let styleFromWatcher = false
+    const adoptStyle = (next: Config['style']) => {
+      if (!styleFromWatcher) style = next
+    }
+    void getConfig().then(config => { savedMode = config.mode; adoptStyle(config.style) })
+    // 设置页改完外观立刻生效（#47）：只重算注入表与 <html data-axt-style>，一个译文节点都不碰，
+    // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
+    // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
+    watchConfig(config => {
+      // 先立闸再比值：watcher 一响就说明它拿到的是最新的存储内容，哪怕这次不需要重画。
+      // 否则「页面带着旧外观启动 + 用户点恢复默认」会走进等值快路径，闸没立起来，
+      // 随后 getConfig() 那份旧快照又把非默认外观装回去（Codex 在 #106 指出）
+      styleFromWatcher = true
+      if (JSON.stringify(config.style) === JSON.stringify(style)) return
+      style = config.style
+      applyStyle(document, style)
+    })
     // 一次会话 = 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
     let run: TranslationRun | null = null
     let title: TitleTranslator | null = null
@@ -86,7 +110,7 @@ export default defineContentScript({
 
       modes?.stop()
       modes = createModeController(document, requested ?? config.mode, { onChange: enterSide })
-      style = config.style
+      adoptStyle(config.style)
       endRun() // 上一轮停下但没恢复原文的会话（致命错误后重试）
       // 页内锚点兜底（issue #44）：only 模式下目标块被隐藏，交叉引用点了不动窝
       uninstallAnchors?.()

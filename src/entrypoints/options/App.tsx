@@ -4,7 +4,9 @@ import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/lang
 import { DEFAULT_CONFIG, MODE_VALUES, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { THINKING_HOSTS } from '@/providers/thinking'
-import { sanitizeCustomCss, type StylePreset } from '@/core/renderer/style-preset'
+import modesCss from '@/styles/modes.css?inline'
+import presetsCss from '@/styles/presets.css?inline'
+import { OPACITY_MAX, OPACITY_MIN, customStyleRule, sanitizeCustomCss, styleVarsRule, type StylePreset } from '@/core/renderer/style-preset'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 import { sendMessage } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
@@ -42,6 +44,32 @@ const PROVIDERS: [Config['provider'], string, string][] = [
 ]
 
 // Phase 2：provider 配置 + 连接测试。样式预设、术语表、缓存管理在 Phase 3。
+/**
+ * 预览：用**真实的**注入表渲染一段示例。
+ *
+ * 必须是 iframe 而不是 Shadow DOM（Codex 在 #106 指出）：预设与生成的规则都以 `html[data-axt-*]` 开头，
+ * 而 shadow 边界外的 `<html>` 是匹配不到的——放 shadow root 里等于一条规则都不生效。
+ * iframe 里有真的文档根，属性写在它的 `<html>` 上，与真实页面完全同构；顺带天然隔离，
+ * 不怕预设的规则漏到设置页自身。`modesCss` 也要带上：`--axt-color` 是由它消费的
+ */
+function StylePreview({ style }: { style: Config['style'] }) {
+  // 两段要落在预设的两侧，顺序与 renderer 的 styleSheet() 一致——拼错了预览就与真实页面不一致
+  const vars = styleVarsRule(style)
+  const srcDoc = `<!doctype html><html data-axt-on data-axt-style="${style.preset}"><head><meta charset="utf-8">`
+    + `<style>${modesCss}\n${vars.base}${presetsCss}\n${vars.overrides}${customStyleRule(style.customCss)}`
+    + 'body{margin:0;padding:10px 12px;font:14px/1.7 system-ui;color:#333}</style></head><body>'
+    // 预设只匹配 .axt-t，不需要站点类名——写 ltx_* 会违反硬规则 2（选择器只在规则模块里）
+    + '<p>The Fourier transform is bounded.</p>'
+    + '<p class="axt-t" lang="zh-CN">傅里叶变换是有界的。</p>'
+    + '</body></html>'
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>预览</div>
+      <iframe title="译文样式预览" srcDoc={srcDoc} style={{ width: '100%', height: 96, border: '1px solid #ddd', borderRadius: 4 }} />
+    </div>
+  )
+}
+
 export function App() {
   const [config, setLocal] = useState<Config>(DEFAULT_CONFIG)
   const [hasStoredKey, setHasStoredKey] = useState(false)
@@ -267,6 +295,47 @@ export function App() {
         </select>
         <small style={{ color: '#666' }}>{STYLE_NOTES[config.style.preset] ?? '译文只加装饰，字体与字号仍随论文原样'}</small>
       </label>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
+        <div style={{ ...label, marginBottom: 0 }}>
+          <label htmlFor="axt-color" style={{ display: 'block' }}>文字颜色</label>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <input type="color" id="axt-color" style={{ width: 44, height: 28, padding: 0 }}
+              value={config.style.color || '#333333'}
+              onChange={e => setLocal(c => ({ ...c, style: { ...c.style, color: e.target.value } }))} />
+            <label style={{ fontWeight: 'normal', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input type="checkbox" checked={config.style.color === ''}
+                onChange={e => setLocal(c => ({ ...c, style: { ...c.style, color: e.target.checked ? '' : '#333333' } }))} />
+              跟随原文
+            </label>
+          </span>
+        </div>
+        <div style={{ ...label, marginBottom: 0 }}>
+          <label htmlFor="axt-accent" style={{ display: 'block' }}>高亮颜色</label>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            <input type="color" id="axt-accent" style={{ width: 44, height: 28, padding: 0 }}
+              value={config.style.accent || '#808080'}
+              onChange={e => setLocal(c => ({ ...c, style: { ...c.style, accent: e.target.value } }))} />
+            <label style={{ fontWeight: 'normal', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input type="checkbox" checked={config.style.accent === ''}
+                onChange={e => setLocal(c => ({ ...c, style: { ...c.style, accent: e.target.checked ? '' : '#808080' } }))} />
+              {/* 不叫「跟随正文」：只有下划线族的 --axt-accent 是 currentColor 派生的，
+                  marker / highlight / glow 用的 --axt-green 是写死的绿，不跟正文走（Codex 在 #106 指出） */}
+              预设默认色
+            </label>
+          </span>
+        </div>
+        <label style={{ ...label, marginBottom: 0, minWidth: 180 }}>
+          透明度 {config.style.opacity.toFixed(2)}
+          <input type="range" min={OPACITY_MIN} max={OPACITY_MAX} step={0.05} value={config.style.opacity}
+            style={{ display: 'block', width: '100%', marginTop: 8 }}
+            onChange={e => setLocal(c => ({ ...c, style: { ...c.style, opacity: Number(e.target.value) } }))} />
+        </label>
+        <button type="button" style={{ alignSelf: 'end', padding: '6px 10px' }}
+          onClick={() => setLocal(c => ({ ...c, style: { ...c.style, color: '', opacity: OPACITY_MAX, accent: '' } }))}>
+          恢复默认
+        </button>
+      </div>
+      <StylePreview style={config.style} />
       {config.style.preset === 'custom' && (
         <label style={label}>
           自定义声明

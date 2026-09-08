@@ -224,7 +224,7 @@ describe('chainConfigChanged：什么样的配置改动才重建链', () => {
   it('切换显示模式、样式、预加载、术语表不重建：那时页面往往正在翻，重建会清掉令牌桶与降级记录', () => {
     const base = DEFAULT_CONFIG
     expect(chainConfigChanged(base, { ...base, mode: 'side' })).toBe(false)
-    expect(chainConfigChanged(base, { ...base, style: { preset: 'quote', customCss: '' } })).toBe(false)
+    expect(chainConfigChanged(base, { ...base, style: { ...base.style, preset: 'quote' } })).toBe(false)
     expect(chainConfigChanged(base, { ...base, preload: { margin: 42, threshold: 0.5 } })).toBe(false)
     expect(chainConfigChanged(base, { ...base, glossary: [{ term: 'token', translation: '词元' }] })).toBe(false)
     // 图片翻译的模式闸（§15）只是显示闸，用户翻着页勾掉一个模式不该把队列清掉
