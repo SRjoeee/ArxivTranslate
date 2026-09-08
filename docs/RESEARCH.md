@@ -251,13 +251,29 @@ Content-Type: application/json
 
 判定必须允许**按主语言回退**，否则会误判：表里只有 `zh-Hans` / `zh-Hant`、没有裸 `zh`，但 `to=zh` 实测返回 200 并归一成 `zh-Hans`——按精确匹配算的话中文（我们的默认目标）会被算成不支持。两个方向都实测过：`zh` / `zh-Hant` / `zh-TW` / `ja` → 200；`ckb` / `ceb` / `tl` / `nn` / `eo` → **400**（400 的响应体同样是纯文本）。
 
-不支持的 71 个里前 14 个：`jav→jv`、`sun→su`、`fuv→ff`、`ckb→ckb`、`ceb→ceb`、`skr→skr`、`tgl→tl`、`koi→koi`、`mag→mag`、`plt→plt`、`qug→qug`、`mad→mad`、`nya→ny`、`zyb→zyb` ……
+**2026-09-09 更正**：上面这个 108/71 是拿公开表 + 「按主语言回退」推出来的，**推多了一个**。把 `toBcp47` 产出的全部 179 个标签逐个打端点实测：**接受 107、拒绝 72**；公开表里的无一被拒，表外被接受的只有 4 个别名——`zh`→zh-Hans、`zh-TW`→zh-Hant、`mn`→mn-Cyrl、`sr`→sr-Latn。
+
+**2026-09-09 再补一条**：端点自己的默认归一**不一定等于我们的语言含义**。`toBcp47('srp')` 给出裸 `sr`，端点归一成 **`sr-Latn`（拉丁文）**，而 `languages.ts` 里 `srp` 写的是 **Serbian (Cyrillic)**——等于悄悄换文字，与 `ms-Arab` 同类。所以 provider 侧维护的是一张**重写表**（`zh→zh-Hans`、`zh-TW→zh-Hant`、`mn→mn-Cyrl`、`sr→sr-Cyrl`），把每个目标显式落到公开表的真实条目上，判定随之简化成「重写后在不在表里」，不做任何按主语言的推断。实测：`sr-Cyrl` → Неуронске…（西里尔）、`sr` → Neuronske…（拉丁）。
+
+**CORS**：端点实测返回 `access-control-allow-origin: *`，所以没有 host 权限也能从 background 请求成功。但那是我们控制不了的依赖——`wxt.config.ts` 的 `host_permissions` 里已按其他联网引擎的惯例补上 `https://edge.microsoft.com/*`。
+
+差的那一个是 `zlm`：`toBcp47` 特意给出 `ms-Arab`（爪夷文），实测 **400**；而 `ms` 是 200 但返回拉丁文马来语，归一过去等于悄悄换文字。**所以判定只能是「公开表精确匹配 + 实测过的别名」，不能按主语言推**（Codex 在 #115 指出）。
 
 **所以 provider 不能只做代码映射**：得带一份支持列表，在目标语言不受支持时提前退出（或在设置页把该引擎标灰），而不是等运行时 400 才发现。
 
 **占位符**：纯文本记号 `@a#` 全部存活，且发生了语序移位——`The transform @a# is bounded by @b# in @c#.` → `变换@a#被@c#中的@b#界定。`，正是记号方案要的效果。标签格式在它上面全军覆没（400 个占位符全丢，见分支 `experiment/sentence-alignment` 的数据），所以它只能进 `markers` 链（DESIGN §8.5）。
 
-**实体**：`&lt;` / `&gt;` 原样返回；**`&amp;` 会被当成词义翻译掉**（`Springer science &amp; business media` → `施普林格科学与商业媒体`）。裸的 `<` `&` 也不会被它当 HTML 解析——它不是 HTML 端点。所以 `markers` 统一转义 `& < >`（为 Google 的 `translateHtml` 而设，DESIGN §6.2）在微软这边是安全的：`&lt;/&gt;` 无损往返，`&amp;` 变成「与」属于翻译质量而非损坏。
+**实体**：`&lt;` / `&gt;` 原样返回；**`&amp;` 会被当成词义翻译掉**（`Springer science &amp; business media` → `施普林格科学与商业媒体`）。
+
+**这里我原本写错了一条**（2026-09-08 接入时更正，issue #98）：我发 `a < b & c > d` 拿回 `A < B 和 C > D`，据此写了「裸的 `<` 不会被它当 HTML 解析——它不是 HTML 端点」。**两个上游项目各自独立地说这是错的**：
+
+> The endpoint runs Microsoft's HTML tag aligner on every request, so a bare `<` in page text fuses into a pseudo-tag（`a < b and c > d` 回来是 `<B和C> d`）—— Read Frog `api/microsoft.ts@9b44f82`
+
+> Google and Microsoft **both parse the request as HTML**, so their adapters escape plain source text before sending and the response stays HTML-encoded; **decode it exactly once** —— Read Frog `translation-output-normalization.ts@9b44f82`
+
+> endpoint 始终会运行 HTML 标签对齐器 —— FluentRead `providers/translation/microsoft.ts`
+
+我那一次采样只是没触发（比较运算符两侧有空格）。结论方向不变但依据要换：`markers` 统一转义 `& < >`（DESIGN §6.2）在微软这边不是「安全」而是**必需**；`&lt;/&gt;` 无损往返，`&amp;` 变成「与」属于翻译质量而非损坏。
 
 **对 DESIGN.md 的含义**：`microsoft` 可以作为 `wireFormats: ['markers']` 的免费 provider 接入（#98）。`maxBatchChars` 应远低于 50,000（Google 用 8000），`maxBatchItems` 没有实际瓶颈。
 

@@ -33,6 +33,11 @@ export const configItem = storage.defineItem<Config>('local:config', {
     // 空颜色 = 跟随原文、opacity 1 = 不透明、空 accent = 用各预设自己的默认色
     9: (v8: Omit<Config, 'version' | 'style'> & { version: 8; style: { preset: Config['style']['preset']; customCss: string } }) =>
       ({ ...v8, version: 9 as const, style: { ...v8.style, color: '', opacity: 1, accent: '' } }),
+    // v9 -> v10：`provider` 枚举加 'microsoft'。**字段一个没变，升版本号是为了降级**——
+    // 不升的话，存了 microsoft 的用户装回旧版时版本仍是 9，下面那条 `version > CONFIG_VERSION`
+    // 的守卫不触发，zod 在枚举上解析失败，整份配置**静默重置成默认值**、设置全丢；
+    // 升到 10 之后旧版会明确报「存储里的配置是 v10，当前扩展只支持到 v9」（Codex 在 #115 指出）
+    10: (v9: Omit<Config, 'version'> & { version: 9 }) => ({ ...v9, version: 10 as const }),
   },
 })
 

@@ -3,8 +3,10 @@
 // 实测 150 条 556 ms，见 RESEARCH.md §6.6）；去掉 preserveLineBreaks 那套换行标记——
 // 我们送的是占位符标记文本，走 html 格式原样发送；去掉 escapeText 依赖（protector 已做转义）。
 import { toBcp47 } from '@/config/languages'
+import { kindOfStatus } from './http-errors'
 import { attachRequestErrorMeta } from './request/retry-policy'
-import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
+import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
+import { WIRE_FORMATS } from './wire-formats'
 
 const ENDPOINT = 'https://translate-pa.googleapis.com/v1/translateHtml'
 /** 公开常量，来自 Google 翻译网页版；不是用户凭据 */
@@ -13,20 +15,6 @@ const CLIENT = 'wt_lib'
 
 export interface GoogleWebDeps {
   fetch?: typeof globalThis.fetch
-}
-
-/**
- * HTTP 状态到错误类型（Codex 在 #17 指出）。**不能把 4xx 一律归成 `network`**：
- * retry-policy 的 `isRetryableRequestErrorMeta` 会**先看 kind 再看状态码**，`network` 直接判定可重试，
- * 于是一个永远不会成功的 400 会被重试满 3 次、再被 BatchQueue 对半拆分逐条重来——
- * 100 段的一批能放大成几十次无用请求。只有 5xx 与连接层失败才是瞬时的。
- */
-function kindOfStatus(status: number): ProviderErrorKind {
-  if (status === 429) return 'rate-limit'
-  if (status === 401 || status === 403) return 'auth'
-  // 408 超时、409 冲突照 retry-policy 的状态码表算瞬时，交给它按状态码判定
-  if (status >= 400 && status < 500 && status !== 408 && status !== 409) return 'bad-request'
-  return 'network'
 }
 
 /** 端点按 items 数组返回同长度的译文数组 */
@@ -85,7 +73,7 @@ export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationPr
     kind: 'mt',
     // 两种都保得住（实测 tags 100%、markers 98.9%），tags 排前面：它还能保住内联样式。
     // 正因为它两种都行，选微软时链上才留得住它做兜底（§8.5 的交集协商）
-    wireFormats: ['tags', 'markers'],
+    wireFormats: WIRE_FORMATS['google-web'],
     // 端点一次能吃很多条；批次给大、速率给小——免费端点经不起 8/s 的默认速率（DESIGN §8.3）
     maxBatchChars: 8000,
     maxBatchItems: 100,

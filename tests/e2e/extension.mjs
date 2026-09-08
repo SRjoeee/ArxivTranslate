@@ -433,6 +433,59 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.close()
 }
 
+// ── 微软引擎（#98）：markers 线上格式在**真实论文**上的唯一一次端到端验证 ──────────
+// #104 只在 fixture 上验过恒等译文的往返；记号能不能扛住真的机器翻译（语序移位、
+// 引擎自作主张改标点）只有这里能证。标签格式在这个端点上是 0%，所以它必须走 markers。
+{
+  await options.bringToFront()
+  await options.selectOption('select >> nth=0', 'microsoft')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
+  // 连接测试的样本要用这个引擎实际会收到的格式：微软只保得住 markers，
+  // 发标签给它会被 provider 本地挡下，测试永远失败而正常翻译其实是好的（Codex 在 #115 指出）
+  await options.getByRole('button', { name: /测试连接/ }).click()
+  const msTest = await (await options.waitForSelector('main p[style*="background"]', { timeout: 30_000 })).textContent()
+  check('微软引擎：设置页「测试连接」通过（样本按 markers 格式发，不是标签）',
+    !/失败/.test(msTest ?? '') && /ms/.test(msTest ?? ''), msTest)
+
+  const { page, logs, requests } = await openPaper(PAPER, 'edge.microsoft.com')
+  const idle = idleOf(await waitForLog(logs, IDLE, 120_000))
+  // **必须验证请求真的打到了微软**（Codex 在 #115 指出）：微软坏掉、Google 兜底成功时，
+  // 下面那些「翻完了 / 节点数对得上 / 没有记号残留」全都照样成立——Google 也保得住 markers。
+  // 不数请求的话这一轮验的就不是它声称要验的那个端点
+  check('微软引擎：请求确实打到了微软端点，不是 Google 兜底顶上的（#98）',
+    requests.length > 0, `edge.microsoft.com 请求 ${requests.length} 个`)
+  check('微软引擎：首屏翻完、没有致命错误（#98）',
+    !!idle && idle.requested > 0 && idle.done === idle.requested && idle.failed === 0 && !/fatal/.test(idle.text),
+    idle?.text ?? '(no idle line)')
+
+  // 记号方案的两条硬承诺：受保护节点一个不少，且没有记号漏进可见文字
+  const shape = await page.evaluate(() => {
+    const pairs = []
+    for (const t of document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')) {
+      const id = t.getAttribute('data-axt-for')
+      const src = id ? document.querySelector(`[data-axt-id="${id}"]`) : null
+      if (!src) continue
+      pairs.push({ src: src.querySelectorAll('math, .ltx_Math, img, a.ltx_ref').length, out: t.querySelectorAll('math, .ltx_Math, img, a.ltx_ref').length })
+    }
+    const text = [...document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')].map(t => t.textContent ?? '').join('')
+    return { pairs: pairs.length, mismatched: pairs.filter(p => p.src !== p.out).length, protectedNodes: pairs.reduce((n, p) => n + p.src, 0), markerLeak: (text.match(/@[a-z]+#/g) ?? []).length }
+  })
+  check('微软引擎：每个块的受保护节点数与原文一致（记号没丢公式 / 链接）',
+    shape.pairs > 0 && shape.mismatched === 0 && shape.protectedNodes > 0,
+    `${shape.pairs} 对配对，${shape.protectedNodes} 个受保护节点，对不上的 ${shape.mismatched} 个`)
+  check('微软引擎：译文里没有记号残留', shape.markerLeak === 0, `残留 ${shape.markerLeak} 处`)
+  await page.screenshot({ path: `${SHOTS}/microsoft.png` })
+  await page.close()
+
+  // 切回 google-web，后面的检查沿用原来的引擎
+  await options.bringToFront()
+  await options.selectOption('select >> nth=0', 'google-web')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+}
+
 // ── 论文 2：翻译中途"恢复原文"，排队与在飞的请求一起撤 ────────────────
 {
   const { page, logs, requests, originalTitle } = await openPaper(PAPER2, GOOGLE)

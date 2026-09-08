@@ -19,7 +19,7 @@
 - 译文样式预设 + 术语表
 - 图片翻译 [决定，2026-09-07]：位图 `img.ltx_graphics` 里的文字，Mac 上经 Native Messaging 调本机 Vision OCR、译文叠在图上（照 Safari 的图片翻译，见 §15）
 
-**非目标 [延后]**：其他站点、PDF、字幕、TTS、生词本、Firefox/Safari 适配、微软免费通道、DeepLX、非 Mac 平台的图片翻译退化路径（§15.1）。架构上不排斥，但 v1 一律不做。
+**非目标 [延后]**：其他站点、PDF、字幕、TTS、生词本、Firefox/Safari 适配、DeepLX、非 Mac 平台的图片翻译退化路径（§15.1）。架构上不排斥，但 v1 一律不做。（**微软免费通道已移出本表**：当初排除的依据是它的 auth 端点 404，而那条流程已被无鉴权后继取代，2026-09-08 复测可用，见 RESEARCH §5.1；issue #98 已接入。）
 
 ---
 
@@ -557,12 +557,17 @@ export interface TranslateResult {
 | `gemini` | AI SDK `@ai-sdk/google` | `['tags']` |
 | `chrome-builtin` | `Translator` API（Chrome 138+ 桌面），类型来自 `@types/dom-chromium-ai`，约定见 §8.4；2026-09-05 实现 | `['tags']`（实测保留标签与 void / paired 占位符）|
 | `google-web` | `translate-pa.googleapis.com/v1/translateHtml`，移植 Read Frog `utils/host/translate/api/google.ts`；一次请求多条，body `[[[items...], from, to], "wt_lib"]` | `['tags', 'markers']`（实测标签 100%、记号 98.9%；两种都保得住，所以选微软时它才留得住做兜底）|
+| `microsoft` | `edge.microsoft.com/translate/translatetext`（无鉴权后继端点），移植 Read Frog `utils/host/translate/api/microsoft.ts`；body 是裸字符串数组 | `['markers']`（实测标签 **0%**——400 个占位符全丢；记号 98%。RESEARCH §5.1）|
 
 声明了线上格式的免费引擎仍走 §6.3 的校验，失败后降级 runs；runs 路径退为纯兜底。`wireFormats: []` 表示一个占位符都保不住，整条会话走 runs——**这时格式护栏整个让开**，任何可用引擎都能进链兜底，因为 runs 发的是纯文本段，本来就不需要共同格式。
 
 **`anthropic` / `gemini` 暂不实现** [决定，2026-09-05]：两者与 `openai-compat` 走同一套 AI SDK 协议，而默认端点 OpenRouter 本身就代理 Claude 与 Gemini 全系模型——直连只对"手里有官方 key"的用户多一点价值，代价是两个 SDK 包、两套配置形状与设置页字段。按"搬不搬只看有无负面影响"的判据是有负担、收益小，等有人真的需要直连再加。表里保留它们作为接口形状的说明。
 
-`google-web` 取代原定的 `google-gtx`（`translate_a/single`）：2026-09-04 实测 `translateHtml` 一次请求可带 150 条、556 ms 返回且占位符完好，而 gtx 是单条接口（RESEARCH.md §6.6）。gtx 与微软 edge 通道不接（后者 auth 端点已 404，RESEARCH.md §5）。免费引擎的定位是**大批量回归测试**与视口首屏的即时译文，最终译文仍以 LLM 为准：机器翻译会把 "weights" 译成"重量"，术语准确度不够。
+**`microsoft` 只能手动选，不进 `FREE_ENGINES`** [决定，2026-09-08，issue #98]：它只保得住 `markers`，进自动降级链的话「用户选 Google + 内置没装语言包」这个最常见组合会让格式交集收缩成 `{markers}`，整个会话为一个可能用不上的兜底丢掉内联样式。反过来选微软时 Google 仍会进链兜底（它两种格式都保得住）。**注意这只绕开了症状**：§8.5 的协商是顺序相关的，#103 开放链自定义之前要先把规则改成「首选引擎决定格式、不支持该格式的候选不进链」，否则用户调一下兜底顺序就会静默改变渲染格式。
+
+**免费引擎不是每种目标语言都支持**：微软实测 179 个目标里只支持 108 个，其余直接 400（RESEARCH §5.1）。这层判定复用 `isAvailable()`——与 `chrome-builtin` 没下语言包时同一个机制，不给 provider 接口加成员。设置页在选中时就提示，不等运行时报错。
+
+`google-web` 取代原定的 `google-gtx`（`translate_a/single`）：2026-09-04 实测 `translateHtml` 一次请求可带 150 条、556 ms 返回且占位符完好，而 gtx 是单条接口（RESEARCH.md §6.6）。gtx 不接。微软 edge 通道**已接入**（#98）：当初「auth 端点已 404」的依据针对的是旧鉴权流程，它的无鉴权后继 2026-09-08 复测可用（RESEARCH.md §5.1）。免费引擎的定位是**大批量回归测试**与视口首屏的即时译文，最终译文仍以 LLM 为准：机器翻译会把 "weights" 译成"重量"，术语准确度不够。
 
 ### 8.2 LLM 调用约定
 

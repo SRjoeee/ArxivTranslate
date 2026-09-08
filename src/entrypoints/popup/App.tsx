@@ -214,7 +214,11 @@ export function App() {
               ? `${provider.providerId} 不可用，将使用${provider.fallback.displayName}`
               : provider.providerId === 'chrome-builtin'
                 ? '内置翻译的语言包还没准备好，点下面的按钮下载'
-                : '未配置 API key，请先到设置页填写'}
+                : provider.providerId === 'microsoft'
+                  // 微软不用 API key，它唯一的不可用原因就是端点不支持当前目标语言（#115）。
+                  // 落到下面那句会把人指去填一个根本不存在的 key
+                  ? '微软不支持当前的目标语言，换一个语言，或在设置页开启降级'
+                  : '未配置 API key，请先到设置页填写'}
       </p>
 
       {page === null

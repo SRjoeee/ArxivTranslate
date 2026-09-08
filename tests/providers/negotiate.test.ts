@@ -91,6 +91,26 @@ describe('buildChain 的格式协商', () => {
     }
   })
 
+  it('真的选微软：链是 [microsoft, google-web]，走 markers（#98）', async () => {
+    // 用真的 FREE_ENGINES，不注入：内置引擎只认 tags，与 markers 无交集会被剔除；
+    // Google 两种都保得住，所以留得下来做兜底——这正是 #104 把布尔位换成集合的理由
+    const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'microsoft' })
+    expect(chain.map(p => p.id)).toEqual(['microsoft', 'google-web'])
+    expect(renderPath).toBe('markers')
+  })
+
+  it('微软不在 FREE_ENGINES：选 Google 仍然走 tags，内联样式不会被它拖下水（#98）', async () => {
+    const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' })
+    expect(chain).not.toContainEqual(expect.objectContaining({ id: 'microsoft' }))
+    expect(renderPath).toBe('tags')
+  })
+
+  it('微软 + 不支持的目标语言：isAvailable 为假，但首选仍留在链首（popup 要据此提示）', async () => {
+    const { chain } = await buildChain({ ...DEFAULT_CONFIG, provider: 'microsoft', targetLanguage: 'epo' })
+    expect(chain[0]?.id).toBe('microsoft')
+    expect(await chain[0]!.isAvailable()).toBe(false)
+  })
+
   it('关掉降级就只剩首选，格式取它自己的偏好', async () => {
     const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web', fallback: { enabled: false } }, {
       freeEngines: [() => engine('microsoft-ish', ['markers'])],

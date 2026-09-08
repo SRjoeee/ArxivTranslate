@@ -8,6 +8,7 @@ import { promptKey, type PromptsConfig } from './prompt-library'
 import { attachRequestErrorMeta } from './request/retry-policy'
 import { thinkingBodyFields } from './thinking'
 import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
+import { WIRE_FORMATS } from './wire-formats'
 
 const outputSchema = z.object({
   segments: z.array(z.object({ id: z.string(), text: z.string() })),
@@ -51,7 +52,7 @@ export function createOpenAICompatProvider(
     displayName: 'OpenAI 兼容端点',
     kind: 'llm',
     // 只声明 tags：提示词里的协议块（prompt.ts 的 PROTOCOL_BLOCK）教的就是这套标签
-    wireFormats: ['tags'],
+    wireFormats: WIRE_FORMATS['openai-compat'],
     // 批次照 Read Frog 的默认值（1000 字 / 4 段）：小批高并发，首屏快、吞吐高；速率用服务默认的 8/s、突发 20（同样是它的默认值）
     maxBatchChars: 1000,
     maxBatchItems: 4,

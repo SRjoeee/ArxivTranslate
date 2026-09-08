@@ -2,6 +2,7 @@ import type { RenderPath } from '@/cache/key'
 import type { Config } from '@/config/schema'
 import { createChromeBuiltinProvider } from './chrome-builtin'
 import { createGoogleWebProvider } from './google-web'
+import { createMicrosoftProvider } from './microsoft'
 import { createOpenAICompatProvider } from './openai-compat'
 import type { TranslationProvider } from './types'
 
@@ -14,6 +15,8 @@ export function getProvider(config: Config): TranslationProvider {
       return createGoogleWebProvider()
     case 'chrome-builtin':
       return createChromeBuiltinProvider(config.targetLanguage)
+    case 'microsoft':
+      return createMicrosoftProvider(config.targetLanguage)
   }
 }
 
@@ -25,6 +28,10 @@ const FREE_ENGINES: readonly ((config: Config) => TranslationProvider)[] = [
   config => createChromeBuiltinProvider(config.targetLanguage),
   () => createGoogleWebProvider(),
 ]
+// `microsoft` **故意不在这张表里**（#98）：它只保得住 markers，进了链会让「选 Google + 内置没装语言包」
+// 这个最常见组合把交集收缩成 {markers}，整个会话为一个用不上的兜底丢掉内联样式。
+// 反过来选微软时 Google 仍会进链兜底，因为 Google 两种格式都保得住。
+// 注意这只是绕开症状：协商本身是顺序相关的，#103 开放链自定义之前要先把规则改成「首选决定格式」
 
 /**
  * 组装降级链并确定线上格式：配置里选的引擎在前，其后接不与它重复的免费引擎（DESIGN §8.5）。
