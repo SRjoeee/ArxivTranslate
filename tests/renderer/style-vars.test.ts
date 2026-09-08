@@ -43,11 +43,26 @@ describe('styleVarsRule', () => {
     }
   })
 
-  it('高亮色写在 html[data-axt-on] 上，与译文那条分开', () => {
+  it('高亮色两个角色都写：只写 --axt-accent 的话对 marker / highlight / glow 无效', () => {
     const css = styleVarsRule({ accent: '#e91e63' })
     expect(css).toContain('html[data-axt-on] {')
+    // --axt-accent 管下划线与边框族，--axt-green 管 marker / marker-gradient / highlight / glow / green。
+    // 少写一个，「高亮颜色」这个控件就对叫「高亮」的那几个预设没反应（Codex 在 #106 指出）
     expect(css).toContain('--axt-accent: #e91e63;')
+    expect(css).toContain('--axt-green: #e91e63;')
     expect(css).not.toContain('opacity:')
+  })
+
+  it('透明度用「顶层真译文」，不让嵌套的脚注译文把它乘两遍', () => {
+    const css = styleVarsRule({ opacity: 0.5 })
+    // side 模式的 localizeNotes 会把 .axt-note-t.axt-t 插进段落译文内部；两层都匹配的话
+    // 下限 0.3 会渲染成 0.09。Chrome 实测这条选择器：顶层 0.5、嵌套脚注 1、拆图副本 1、副本内真译文 0.5
+    expect(css).toContain(':not(:where(')
+    const rule = css.split('\n').find(l => l.includes('opacity'))
+    expect(rule).toBeDefined()
+    // 颜色那条不需要这道排除：--axt-color 是继承属性，嵌套不会叠加
+    const colorRule = styleVarsRule({ color: '#1565c0' })
+    expect(colorRule).not.toContain(':not(:where(')
   })
 
   it('非法颜色被丢掉而不是原样写进规则', () => {

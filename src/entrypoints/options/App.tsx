@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
 import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
 import { DEFAULT_CONFIG, MODE_VALUES, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import { THINKING_HOSTS } from '@/providers/thinking'
+import modesCss from '@/styles/modes.css?inline'
 import presetsCss from '@/styles/presets.css?inline'
 import { OPACITY_MAX, OPACITY_MIN, customStyleRule, sanitizeCustomCss, styleVarsRule, type StylePreset } from '@/core/renderer/style-preset'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
@@ -44,25 +45,25 @@ const PROVIDERS: [Config['provider'], string, string][] = [
 
 // Phase 2：provider 配置 + 连接测试。样式预设、术语表、缓存管理在 Phase 3。
 /**
- * 预览：用**真实的**注入表渲染一段示例，放进 Shadow DOM，免得预设的规则漏到设置页自身。
- * 结构照译文节点的实际形状（`.axt-t` + `data-axt-on` / `data-axt-style`），
- * 否则预设的排除列表会让预览与真实效果对不上
+ * 预览：用**真实的**注入表渲染一段示例。
+ *
+ * 必须是 iframe 而不是 Shadow DOM（Codex 在 #106 指出）：预设与生成的规则都以 `html[data-axt-*]` 开头，
+ * 而 shadow 边界外的 `<html>` 是匹配不到的——放 shadow root 里等于一条规则都不生效。
+ * iframe 里有真的文档根，属性写在它的 `<html>` 上，与真实页面完全同构；顺带天然隔离，
+ * 不怕预设的规则漏到设置页自身。`modesCss` 也要带上：`--axt-color` 是由它消费的
  */
 function StylePreview({ style }: { style: Config['style'] }) {
-  const host = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = host.current
-    if (!el) return
-    const root = el.shadowRoot ?? el.attachShadow({ mode: 'open' })
-    root.innerHTML = `<style>${presetsCss}\n${styleVarsRule(style)}${customStyleRule(style.customCss)}</style>`
-      + `<div data-axt-on data-axt-style="${style.preset}" style="padding:10px 12px;line-height:1.7">`
-      + '<span>The Fourier transform is bounded.</span><br>'
-      + '<span class="axt-t">傅里叶变换是有界的。</span></div>'
-  }, [style])
+  const srcDoc = `<!doctype html><html data-axt-on data-axt-style="${style.preset}"><head><meta charset="utf-8">`
+    + `<style>${modesCss}\n${presetsCss}\n${styleVarsRule(style)}${customStyleRule(style.customCss)}`
+    + 'body{margin:0;padding:10px 12px;font:14px/1.7 system-ui;color:#333}</style></head><body>'
+    // 预设只匹配 .axt-t，不需要站点类名——写 ltx_* 会违反硬规则 2（选择器只在规则模块里）
+    + '<p>The Fourier transform is bounded.</p>'
+    + '<p class="axt-t" lang="zh-CN">傅里叶变换是有界的。</p>'
+    + '</body></html>'
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>预览</div>
-      <div ref={host} style={{ border: '1px solid #ddd', borderRadius: 4 }} />
+      <iframe title="译文样式预览" srcDoc={srcDoc} style={{ width: '100%', height: 96, border: '1px solid #ddd', borderRadius: 4 }} />
     </div>
   )
 }
@@ -294,9 +295,9 @@ export function App() {
       </label>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
         <div style={{ ...label, marginBottom: 0 }}>
-          <span style={{ display: 'block' }}>文字颜色</span>
+          <label htmlFor="axt-color" style={{ display: 'block' }}>文字颜色</label>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-            <input type="color" style={{ width: 44, height: 28, padding: 0 }}
+            <input type="color" id="axt-color" style={{ width: 44, height: 28, padding: 0 }}
               value={config.style.color || '#333333'}
               onChange={e => setLocal(c => ({ ...c, style: { ...c.style, color: e.target.value } }))} />
             <label style={{ fontWeight: 'normal', display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -307,9 +308,9 @@ export function App() {
           </span>
         </div>
         <div style={{ ...label, marginBottom: 0 }}>
-          <span style={{ display: 'block' }}>高亮颜色</span>
+          <label htmlFor="axt-accent" style={{ display: 'block' }}>高亮颜色</label>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-            <input type="color" style={{ width: 44, height: 28, padding: 0 }}
+            <input type="color" id="axt-accent" style={{ width: 44, height: 28, padding: 0 }}
               value={config.style.accent || '#808080'}
               onChange={e => setLocal(c => ({ ...c, style: { ...c.style, accent: e.target.value } }))} />
             <label style={{ fontWeight: 'normal', display: 'flex', alignItems: 'center', gap: 4 }}>

@@ -26,6 +26,15 @@ export const STYLE_ATTR_NAME = 'data-axt-style'
 /** 「真正的译文」这条界线：与 presets.css 每一行、split-figures.ts 的 REAL_TRANSLATION 必须一致 */
 export const TRANSLATION_SELECTOR = 'html[data-axt-on] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
 
+/**
+ * 「不是任何**真**译文的后代」的真译文。透明度必须用它，不能用 TRANSLATION_SELECTOR：
+ * side 模式的 `localizeNotes()` 会把脚注译文（`.axt-note-t.axt-t`）插进段落译文内部，
+ * 两层都匹配的话 opacity 会相乘——下限 0.3 会渲染成 0.09，几乎看不见（Codex 在 #106 指出）。
+ * 内层用 :where() 压掉特异度贡献。拆图副本本身被排除，所以副本**里**的真译文仍然拿到一次透明度
+ */
+const NESTED = '.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
+export const TOP_TRANSLATION_SELECTOR = `${TRANSLATION_SELECTOR}:not(:where(${NESTED}) *)`
+
 export const CUSTOM_STYLE_SELECTOR = 'html[data-axt-style="custom"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
 
 /**
@@ -97,12 +106,16 @@ export function styleVarsRule(vars: StyleVars): string {
   const accent = sanitizeColor(vars.accent ?? '')
   const opacity = vars.opacity ?? OPACITY_MAX
   const onDecls: string[] = []
-  if (accent.ok && accent.color !== '') onDecls.push(`--axt-accent: ${accent.color};`)
-  const textDecls: string[] = []
-  if (color.ok && color.color !== '') textDecls.push(`--axt-color: ${color.color};`)
-  if (Number.isFinite(opacity) && opacity < OPACITY_MAX) textDecls.push(`opacity: ${Math.max(OPACITY_MIN, opacity)};`)
+  // 两个装饰色角色都要写：--axt-accent 管下划线与边框族，--axt-green 管 marker / highlight / glow / green。
+  // 只写前者的话，「高亮颜色」这个控件恰恰对叫「高亮」的那几个预设无效（Codex 在 #106 指出）。
+  // colorful / gradient 是刻意的多色装饰，不参与
+  if (accent.ok && accent.color !== '') onDecls.push(`--axt-accent: ${accent.color};`, `--axt-green: ${accent.color};`)
   let out = ''
   if (onDecls.length > 0) out += `html[data-axt-on] {\n${onDecls.join('\n')}\n}\n`
-  if (textDecls.length > 0) out += `${TRANSLATION_SELECTOR} {\n${textDecls.join('\n')}\n}\n`
+  if (color.ok && color.color !== '') out += `${TRANSLATION_SELECTOR} {\n--axt-color: ${color.color};\n}\n`
+  // 透明度单独一条：它用的是「顶层真译文」，比颜色那条多一道嵌套排除
+  if (Number.isFinite(opacity) && opacity < OPACITY_MAX) {
+    out += `${TOP_TRANSLATION_SELECTOR} {\nopacity: ${Math.max(OPACITY_MIN, opacity)};\n}\n`
+  }
   return out
 }
