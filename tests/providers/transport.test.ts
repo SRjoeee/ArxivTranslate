@@ -11,7 +11,7 @@ const req: TranslateRequest = { segments: [{ id: 'a', text: 'x' }], source: 'en'
 
 function mockProvider(translate: TranslationProvider['translate'], extra: Partial<TranslationProvider> = {}): TranslationProvider {
   return {
-    id: 'mock', displayName: 'Mock', kind: 'llm', preservesMarkup: true, maxBatchChars: 1000, maxBatchItems: 4,
+    id: 'mock', displayName: 'Mock', kind: 'llm', wireFormats: ['tags'] as const, maxBatchChars: 1000, maxBatchItems: 4,
     isAvailable: async () => true,
     translate,
     ...extra,
@@ -20,7 +20,7 @@ function mockProvider(translate: TranslationProvider['translate'], extra: Partia
 
 /** 链由测试直接给：不碰真的 buildChain，也就不需要真的 API key */
 const withChain = (chain: TranslationProvider[], extra: Parameters<typeof createLocalTransport>[1] = {}) =>
-  createLocalTransport(DEFAULT_CONFIG, { buildChain: async () => chain, ...extra })
+  createLocalTransport(DEFAULT_CONFIG, { buildChain: async () => ({ chain, renderPath: 'markup' as const }), ...extra })
 
 const portOf = (cache: TranslationCache): CachePort => ({
   getMany: keys => Promise.all(keys.map(key => cache.get(key))),
@@ -118,7 +118,7 @@ describe('createLocalTransport：状态', () => {
     id,
     displayName: id === 'google-web' ? 'Google 网页翻译（免费）' : id,
     kind: 'mt',
-    preservesMarkup: true,
+    wireFormats: ['tags'] as const,
     maxBatchChars: 1000,
     maxBatchItems: 4,
     isAvailable: async () => available,
@@ -133,7 +133,7 @@ describe('createLocalTransport：状态', () => {
       model: DEFAULT_CONFIG.openaiCompat.model,
       maxBatchChars: 1000,
       maxBatchItems: 4,
-      preservesMarkup: true,
+      renderPath: 'markup',
       chain: ['openai-compat', 'google-web'],
       engine: { id: 'openai-compat', displayName: 'openai-compat' },
     })

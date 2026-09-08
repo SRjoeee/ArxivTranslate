@@ -18,7 +18,7 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]).buffer
 /** 在同一份 DOM 上再开一轮：沿用第一轮的 doc / targets / fetch / ocr / translate */
 function firstOptions(first: ReturnType<typeof setup>): ImageRunOptions {
   return {
-    doc: first.doc, targets: first.targets, paper: '2507.00150', target: 'cmn', scope: 's2', preload: DEFAULT_PRELOAD,
+    doc: first.doc, targets: first.targets, paper: '2507.00150', target: 'cmn', scope: 's2', renderPath: 'markup' as const, preload: DEFAULT_PRELOAD,
     fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr: first.ocr, translate: first.translate,
     isEnabled: () => true, isCurrent: () => true,
   }
@@ -37,7 +37,7 @@ function setup(overrides: Partial<ImageRunOptions> = {}) {
   const rendered: ImageTarget[][] = []
   const progress: { requested: number; done: number; failed: number }[] = []
   const options: ImageRunOptions = {
-    doc, targets, paper: '2507.00150', target: 'cmn', scope: 's1', preload: DEFAULT_PRELOAD,
+    doc, targets, paper: '2507.00150', target: 'cmn', scope: 's1', renderPath: 'markup' as const, preload: DEFAULT_PRELOAD,
     context: { paperTitle: 'Paper' },
     fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }),
     ocr, translate,
@@ -184,7 +184,7 @@ describe('startImageTranslation', () => {
     const targets = collectImageTargets(doc)
     const ocr = vi.fn(async (_call: OcrCall) => ({ ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false }))
     const run = startImageTranslation({
-      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'markup' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }),
       ocr,
       translate: async () => ({ ok: false, error: { kind: 'auth', message: 'User not found.' } }),
@@ -204,7 +204,7 @@ describe('startImageTranslation', () => {
     const targets = collectImageTargets(doc)
     const ocr = vi.fn(async (_call: OcrCall) => ({ ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false }))
     const run = startImageTranslation({
-      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'markup' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr,
       translate: async () => ({ ok: false, error: { kind: 'network', message: 'offline' } }),
       isEnabled: () => true, isCurrent: () => true,
@@ -231,7 +231,7 @@ describe('startImageTranslation', () => {
       return { ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false }
     })
     const run = startImageTranslation({
-      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'markup' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr, maxConcurrent: 2,
       translate: async (call: { request: { segments: { id: string; text: string }[] } }) => ({ ok: true as const, result: { segments: call.request.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' }, cached: 0 }),
       isEnabled: () => true, isCurrent: () => true,
@@ -265,7 +265,7 @@ describe('startImageTranslation', () => {
       return { ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false }
     })
     const run = startImageTranslation({
-      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'markup' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr, maxConcurrent: 2,
       translate: async (call: { request: { segments: { id: string; text: string }[] } }) => ({ ok: true as const, result: { segments: call.request.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' }, cached: 0 }),
       isEnabled: () => true, isCurrent: () => true,
@@ -296,7 +296,7 @@ describe('startImageTranslation', () => {
     })
     const progress: { failed: number; fatal?: string }[] = []
     const run = startImageTranslation({
-      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'markup' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr, maxConcurrent: 2,
       translate: async () => ({ ok: false, error: { kind: 'no-key', message: '未配置 key' } }),
       isEnabled: () => true, isCurrent: () => true,
@@ -324,7 +324,7 @@ describe('startImageTranslation', () => {
     const ocr = vi.fn(async (_call: OcrCall) => { await new Promise<void>(resolve => { release = resolve }); return { ok: true as const, result: { width: 1, height: 1, lines: [] }, cached: false } })
     const fetchBytes = vi.fn(async () => ({ bytes: PNG, mime: 'image/png' }))
     const run = startImageTranslation({
-      doc, targets, paper: 'p', target: 'cmn', scope: 's', preload: DEFAULT_PRELOAD,
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'markup' as const, preload: DEFAULT_PRELOAD,
       fetchBytes, ocr, maxConcurrent: 1,
       translate: async () => ({ ok: false, error: { kind: 'network', message: 'x' } }),
       isEnabled: () => true, isCurrent: () => true,

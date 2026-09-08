@@ -144,7 +144,8 @@ export function createChromeBuiltinProvider(target: string, deps: ChromeBuiltinD
     displayName: 'Chrome 内置翻译（离线）',
     kind: 'builtin',
     // 实测保留 HTML 标签与 void / paired 占位符（RESEARCH §6.2），走 markup 路径
-    preservesMarkup: true,
+    // RESEARCH §6.2 实测保留标签与占位符
+    wireFormats: ['tags'],
     // 本地推理没有网络往返，批大一点省调度开销
     maxBatchChars: 4000,
     maxBatchItems: BUILTIN_MAX_ITEMS,

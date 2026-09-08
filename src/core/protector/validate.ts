@@ -1,29 +1,33 @@
 // 占位符完整性校验（DESIGN §6.3）。DOM-free，可在 background 里跑。
-import { tokenize } from './tokens'
+import { type WireFormat, tokenize, writeVoid } from './tokens'
 
 /**
  * 校验只需要知道「原文有哪些槽位、其中哪些是成对的」，不需要 DOM 节点。
  * `ProtectedBlock` 天然满足这个形状；跨消息边界的调用方用 `expectationsFromText` 从请求文本反推。
  */
 export interface PlaceholderExpectations {
+  format: WireFormat
   slots: ReadonlyMap<number, unknown>
   paired: ReadonlySet<number>
 }
 
 /**
- * 从请求文本反推期望。`serialize` 已经把原文里字面的 `<` `>` 转义掉（§6.1），
- * 所以请求文本里出现的每个 `<x>` / `<t>` 都必然是真占位符，扫一遍就能还原两个集合。
- * 有了它，background 不必跨消息接收 `accept` 回调也能把坏译文挡在缓存之外（issue #42）。
+ * 从请求文本反推期望。两种格式的转义都保证「线上出现的占位符必然是我们写进去的」（见 text.ts 的
+ * 不可伪造性论证），扫一遍就能还原两个集合。有了它，background 不必跨消息接收 `accept` 回调
+ * 也能把坏译文挡在缓存之外（issue #42）。
+ *
+ * **格式必须传对**：拿 tags 的分词器去扫 markers 文本会一个占位符都认不出来，
+ * `slots` 为空 → `validate` 恒真 → 被打烂的译文静默进缓存。
  */
-export function expectationsFromText(text: string): PlaceholderExpectations {
+export function expectationsFromText(text: string, format: WireFormat = 'tags'): PlaceholderExpectations {
   const slots = new Map<number, null>()
   const paired = new Set<number>()
-  for (const t of tokenize(text)) {
+  for (const t of tokenize(text, format)) {
     if (t.kind === 'text' || t.kind === 'close') continue
     slots.set(t.id, null)
     if (t.kind === 'open') paired.add(t.id)
   }
-  return { slots, paired }
+  return { format, slots, paired }
 }
 
 export type IntegrityReason = 'missing' | 'duplicate' | 'unknown' | 'unbalanced' | 'kind-mismatch'
@@ -46,7 +50,7 @@ export function validate(translated: string, block: PlaceholderExpectations): Va
   const seen = new Set<number>()
   const stack: number[] = []
 
-  for (const t of tokenize(translated)) {
+  for (const t of tokenize(translated, block.format)) {
     if (t.kind === 'text') continue
     if (t.kind === 'close') {
       if (stack.length === 0) return fail('unbalanced', '多余的 </t>')
@@ -56,7 +60,7 @@ export function validate(translated: string, block: PlaceholderExpectations): Va
     if (!block.slots.has(t.id)) return fail('unknown', `id ${t.id} 不存在于原文`)
     const isPaired = block.paired.has(t.id)
     if (t.kind === 'void' && isPaired) return fail('kind-mismatch', `id ${t.id} 应为 <t id="${t.id}">…</t>`)
-    if (t.kind === 'open' && !isPaired) return fail('kind-mismatch', `id ${t.id} 应为 <x id="${t.id}"/>`)
+    if (t.kind === 'open' && !isPaired) return fail('kind-mismatch', `id ${t.id} 应为 ${writeVoid(t.id, block.format)}`)
     if (seen.has(t.id)) return fail('duplicate', `id ${t.id} 出现多次`)
     seen.add(t.id)
     if (t.kind === 'open') stack.push(t.id)
@@ -64,6 +68,6 @@ export function validate(translated: string, block: PlaceholderExpectations): Va
 
   if (stack.length > 0) return fail('unbalanced', `<t id="${stack[stack.length - 1]}"> 未闭合`)
   const missing = [...block.slots.keys()].filter(id => !seen.has(id))
-  if (missing.length > 0) return fail('missing', `缺少 id ${missing.join(', ')}`)
+  if (missing.length > 0) return fail('missing', `缺少 ${missing.map(id => writeVoid(id, block.format)).join(', ')}`)
   return { ok: true }
 }

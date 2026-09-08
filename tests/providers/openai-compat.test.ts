@@ -40,7 +40,7 @@ describe('openai-compat provider', () => {
     const p = createOpenAICompatProvider(cfg)
     expect(p.id).toBe('openai-compat')
     expect(p.kind).toBe('llm')
-    expect(p.preservesMarkup).toBe(true)
+    expect(p.wireFormats).toEqual(['tags'])
     expect(p.maxBatchChars).toBeGreaterThan(0)
     expect(p.maxBatchItems).toBeGreaterThan(0)
   })

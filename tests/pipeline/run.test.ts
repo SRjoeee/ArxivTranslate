@@ -36,7 +36,7 @@ function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: st
 async function start(doc: Document, blocks: Block[], transport: Transport, extra: Partial<Parameters<typeof startTranslation>[0]> = {}) {
   const run = startTranslation({
     doc, blocks, target: 'zh-CN', mode: 'stack', paper: 'test', transport, preload: DEFAULT_PRELOAD,
-    capabilities: { maxBatchChars: 100_000, maxBatchItems: 100, preservesMarkup: true }, ...extra,
+    capabilities: { maxBatchChars: 100_000, maxBatchItems: 100, renderPath: 'markup' }, ...extra,
   })
   await run.ready
   return run

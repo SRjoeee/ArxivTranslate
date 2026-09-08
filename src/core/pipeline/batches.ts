@@ -1,4 +1,5 @@
 // 批次规划（DESIGN §8.2 / §6.2）：按章节与字符预算切批；公式密集块单独成批；表格整表一批。
+import { type RenderPath, wireFormatOf } from '@/cache/key'
 import type { Block, Cell, TableBlock } from '@/core/extractor'
 import { VOID_DENSE_THRESHOLD, serialize, type ProtectedBlock } from '@/core/protector'
 
@@ -41,9 +42,10 @@ export function sectionTitles(blocks: Block[]): Map<Block, string> {
 /** 不传 sectionOf 时从传入的块序列里推章节（标题块开启新批次）；传了就按它，章节变化处切批 */
 export function planBatches(
   blocks: Block[],
-  options: { maxBatchChars: number; maxBatchItems: number },
+  options: { maxBatchChars: number; maxBatchItems: number; renderPath?: RenderPath },
   sectionOf?: (block: Block) => string | undefined,
 ): Batch[] {
+  const format = wireFormatOf(options.renderPath ?? 'markup')
   const batches: Batch[] = []
   let current: Segment[] = []
   let currentChars = 0
@@ -75,14 +77,14 @@ export function planBatches(
       const segments: Segment[] = []
       block.cells.forEach((cell, i) => {
         if (cell.numeric) return
-        const protectedCell = serialize(cell.el)
+        const protectedCell = serialize(cell.el, format)
         segments.push({ id: `${block.id}#c${i}`, text: protectedCell.text, block, cell, protected: protectedCell })
       })
       batches.push({ kind: 'table', segments, sectionTitle, block })
       continue
     }
 
-    const protectedBlock = serialize(block.el)
+    const protectedBlock = serialize(block.el, format)
     const segment: Segment = { id: block.id, text: protectedBlock.text, block, protected: protectedBlock }
 
     if (protectedBlock.voidCount > VOID_DENSE_THRESHOLD) {

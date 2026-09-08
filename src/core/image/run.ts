@@ -5,6 +5,7 @@
 // 过滤数字与单字母 → 框里的原文按 translateTitle 的纯文本路径送现有 provider（同一批带图注做上下文）→
 // 插叠加层。**每个 await 之后重查会话**（与文字管线同一模式）：恢复原文 / 重开之后到达的结果一律丢弃。
 // 等待 / 失败没有 DOM 节点（§15.2）：失败记在这里，popup 显示、重试按钮管。
+import { type RenderPath, wireFormatOf } from '@/cache/key'
 import { ID_ATTR } from '@/core/extractor'
 import { decodeText, escapeText } from '@/core/protector/text'
 import { type ImageLabel, type ImageTarget, clearImage, renderImage } from '@/core/renderer/image'
@@ -42,6 +43,8 @@ export interface ImageRunOptions {
   /** 目标语言（ISO 639-3，与文字管线相同） */
   target: string
   scope: string
+  /** 会话协商出的渲染路径（§8.5）：OCR 行也走同一条线，转义与缓存键必须跟着它 */
+  renderPath: RenderPath
   preload: PreloadOptions
   context?: TranslateContext
   ocr: (call: OcrCall) => Promise<OcrMessageResponse>
@@ -226,12 +229,12 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       const context: TranslateContext = { ...options.context, ...(caption ? { sectionTitle: caption } : {}) }
       const res = await options.translate({
         request: {
-          segments: boxes.map((box, i) => ({ id: `${target.id}#L${i}`, text: escapeText(box.text) })),
+          segments: boxes.map((box, i) => ({ id: `${target.id}#L${i}`, text: escapeText(box.text, wireFormatOf(options.renderPath)) })),
           source: 'en',
           target: options.target,
           context: Object.keys(context).length ? context : undefined,
         },
-        cache: { paper: options.paper, renderPath: 'markup' },
+        cache: { paper: options.paper, renderPath: options.renderPath },
         scope: options.scope,
       })
       if (!alive()) return

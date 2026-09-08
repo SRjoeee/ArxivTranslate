@@ -76,7 +76,7 @@ describe('provider 选择', () => {
     const free = getProvider({ ...DEFAULT_CONFIG, provider: 'google-web' })
     expect(free.id).toBe('google-web')
     expect(free.kind).toBe('mt')
-    expect(free.preservesMarkup).toBe(true)
+    expect(free.wireFormats).toEqual(['tags', 'markers'])
     expect(await free.isAvailable()).toBe(true)
 
     await setConfig({ ...DEFAULT_CONFIG, provider: 'google-web' })
@@ -276,12 +276,12 @@ describe('provider 选择', () => {
     const { buildChain } = await import('@/providers')
     const withKey = { ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-x' } }
     // 没有内置翻译 API 的环境（happy-dom、旧 Chrome）：内置引擎被 isAvailable 过滤掉
-    expect((await buildChain(withKey)).map(p => p.id)).toEqual(['openai-compat', 'google-web'])
-    expect((await buildChain({ ...withKey, fallback: { enabled: false } })).map(p => p.id)).toEqual(['openai-compat'])
+    expect((await buildChain(withKey)).chain.map(p => p.id)).toEqual(['openai-compat', 'google-web'])
+    expect((await buildChain({ ...withKey, fallback: { enabled: false } })).chain.map(p => p.id)).toEqual(['openai-compat'])
     // 免费引擎自己当首选时不重复出现
-    expect((await buildChain({ ...withKey, provider: 'google-web' })).map(p => p.id)).toEqual(['google-web'])
+    expect((await buildChain({ ...withKey, provider: 'google-web' })).chain.map(p => p.id)).toEqual(['google-web'])
     // 首选没配 key 也留在链首：popup 要据此提示去设置页，而不是悄悄换引擎
-    expect((await buildChain(DEFAULT_CONFIG)).map(p => p.id)).toEqual(['openai-compat', 'google-web'])
+    expect((await buildChain(DEFAULT_CONFIG)).chain.map(p => p.id)).toEqual(['openai-compat', 'google-web'])
   })
 
   it('语言包就绪时内置引擎排在 google-web 之前；未就绪时被跳过', async () => {
@@ -290,12 +290,12 @@ describe('provider 选择', () => {
     const stub = (availability: string) => ({ availability: async () => availability, create: async () => ({ translate: async () => '' }) })
 
     vi.stubGlobal('Translator', stub('available'))
-    expect((await buildChain(withKey)).map(p => p.id)).toEqual(['openai-compat', 'chrome-builtin', 'google-web'])
+    expect((await buildChain(withKey)).chain.map(p => p.id)).toEqual(['openai-compat', 'chrome-builtin', 'google-web'])
     // 内置当首选时不在兜底里重复出现
-    expect((await buildChain({ ...withKey, provider: 'chrome-builtin' })).map(p => p.id)).toEqual(['chrome-builtin', 'google-web'])
+    expect((await buildChain({ ...withKey, provider: 'chrome-builtin' })).chain.map(p => p.id)).toEqual(['chrome-builtin', 'google-web'])
 
     vi.stubGlobal('Translator', stub('downloadable'))
-    expect((await buildChain(withKey)).map(p => p.id)).toEqual(['openai-compat', 'google-web'])
+    expect((await buildChain(withKey)).chain.map(p => p.id)).toEqual(['openai-compat', 'google-web'])
     vi.unstubAllGlobals()
   })
 

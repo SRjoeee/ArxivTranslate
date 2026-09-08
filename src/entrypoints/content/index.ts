@@ -1,3 +1,4 @@
+import { type RenderPath, wireFormatOf } from '@/cache/key'
 import { DEFAULT_CONFIG, type Config } from '@/config/schema'
 import { getConfig, setConfig, watchConfig } from '@/config/storage'
 import { extract, paperContext, type Block } from '@/core/extractor'
@@ -130,7 +131,7 @@ export default defineContentScript({
         paper,
         // 标题 + 摘要每批都带（DESIGN §8.2）
         context,
-        capabilities: { maxBatchChars: status.maxBatchChars, maxBatchItems: status.maxBatchItems, preservesMarkup: status.preservesMarkup },
+        capabilities: { maxBatchChars: status.maxBatchChars, maxBatchItems: status.maxBatchItems, renderPath: status.renderPath },
         transport: request => backend.translate(request),
         scope: session,
         preload: config.preload,
@@ -157,14 +158,14 @@ export default defineContentScript({
         isCurrent: () => getSessionId() === session,
         translate: async text => {
           const res = await backend.translate({
-            request: { segments: [{ id: 'document.title', text: escapeText(text) }], source: 'en', target: config.targetLanguage, context },
-            cache: { paper, renderPath: 'markup' },
+            request: { segments: [{ id: 'document.title', text: escapeText(text, wireFormatOf(status.renderPath)) }], source: 'en', target: config.targetLanguage, context },
+            cache: { paper, renderPath: status.renderPath },
             scope: session,
           })
-          return res.ok ? decodeText(res.result.segments[0]?.text ?? '') || null : null
+          return res.ok ? decodeText(res.result.segments[0]?.text ?? '', wireFormatOf(status.renderPath)) || null : null
         },
       })
-      startImages(session, config, context)
+      startImages(session, config, context, status.renderPath)
       return { started: true }
     }
 
@@ -172,19 +173,21 @@ export default defineContentScript({
      * 图片翻译（§15）：先问 background 本机 helper 在不在，不在就整条路径不跑，页面翻译不受影响。
      * 位图与文字块一样按视口懒加载；当前模式不在用户勾选的集合里时进入视口的图先停着，切回来再翻
      */
-    function startImages(session: string, config: Config, context: Parameters<typeof startTranslation>[0]['context']): void {
+    function startImages(session: string, config: Config, context: Parameters<typeof startTranslation>[0]['context'], renderPath: RenderPath): void {
       // 上一轮（致命错误后没恢复原文就重开）留下的叠加层与模式闸先摘掉：helper 没了、图片翻译关了、
       // 目标语言换了，旧的都不该再显示；新一轮处理到那张图时会替换它（Codex 在 #89 指出）
       setImageModes(document, [])
       if (config.image.modes.length === 0) return
-      sendMessage({ type: 'axt:helper-status' }).then(status => {
-        if (!status.available || getSessionId() !== session || !paper) return
+      // 参数叫 helper，不叫 status：外层的 status 是引擎状态，图片这段要用它的 renderPath，遮住就取不到了
+      sendMessage({ type: 'axt:helper-status' }).then(helper => {
+        if (!helper.available || getSessionId() !== session || !paper) return
         setImageModes(document, config.image.modes)
         const targets = collectImageTargets(document)
         if (targets.length === 0) return
         const t1 = performance.now()
         let wasBusy = false
         images = startImageTranslation({
+          renderPath,
           doc: document,
           targets,
           paper,
@@ -209,7 +212,7 @@ export default defineContentScript({
             prep.touch(rendered)
           },
         })
-        console.debug(`[axt] images: ${targets.length} bitmaps, helper ${status.version ?? ''}, modes ${config.image.modes.join('/')}`)
+        console.debug(`[axt] images: ${targets.length} bitmaps, helper ${helper.version ?? ''}, modes ${config.image.modes.join('/')}`)
       }).catch(e => console.debug('[axt] helper-status 失败', e))
     }
 

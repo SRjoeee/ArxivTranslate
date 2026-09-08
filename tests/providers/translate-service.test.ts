@@ -4,7 +4,7 @@ import { createTranslateService, type CacheEntry, type CachePort } from '@/provi
 import { ProviderError, type TranslationProvider } from '@/providers/types'
 
 const provider = (translate: TranslationProvider['translate'], id = 'mock', extra: Partial<TranslationProvider> = {}): TranslationProvider => ({
-  id, displayName: id, kind: 'llm', preservesMarkup: true,
+  id, displayName: id, kind: 'llm', wireFormats: ['tags'] as const,
   maxBatchChars: 1000, maxBatchItems: 4,
   isAvailable: async () => true, translate,
   ...extra,
@@ -140,6 +140,29 @@ describe('createTranslateService', () => {
     expect(res.ok && res.result.segments.map(s => s.id)).toEqual(['a', 'b'])
     expect(writes).toHaveLength(1)
     expect(writes[0]!.map(w => w.translation)).toEqual(['译:公式 <x id="1"/>。'])
+  })
+
+  it('markers 路径的校验按 renderPath 分派：拿 tags 的分词器扫会一个占位符都认不出来（#104）', async () => {
+    // 这是本次改动最容易漏的那个洞：expectationsFromText 若不按格式分派，slots 为空 → 校验恒真 →
+    // 被打烂的译文静默进缓存。b 的译文完整、a 丢了记号，只有 b 该入库
+    const { port, writes } = fakePort()
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => ({
+        segments: r.segments.map(s => ({ ...s, text: s.id === 'a' ? '译文丢了记号' : `译:${s.text}` })),
+        provider: 'mock',
+      })),
+      cache: port,
+    })
+    const call = req(['a', 'b'])
+    call.cache = { paper: '2410.00260', renderPath: 'markers' as const }
+    call.request.segments = [
+      { id: 'a', text: '公式 @a# 见此处。' },
+      { id: 'b', text: '公式 @a#。' },
+    ]
+    const res = await service.translate(call)
+    expect(res.ok && res.result.segments.map(s => s.id)).toEqual(['a', 'b'])
+    expect(writes).toHaveLength(1)
+    expect(writes[0]!.map(w => w.translation)).toEqual(['译:公式 @a#。'])
   })
 
   it('反推的期望对纯文本同样生效：runs 路径的译文凭空多出标签也不入库', async () => {

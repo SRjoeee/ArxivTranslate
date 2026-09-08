@@ -83,7 +83,9 @@ export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationPr
     id: 'google-web',
     displayName: 'Google 网页翻译（免费）',
     kind: 'mt',
-    preservesMarkup: true,
+    // 两种都保得住（实测 tags 100%、markers 98.9%），tags 排前面：它还能保住内联样式。
+    // 正因为它两种都行，选微软时链上才留得住它做兜底（§8.5 的交集协商）
+    wireFormats: ['tags', 'markers'],
     // 端点一次能吃很多条；批次给大、速率给小——免费端点经不起 8/s 的默认速率（DESIGN §8.3）
     maxBatchChars: 8000,
     maxBatchItems: 100,

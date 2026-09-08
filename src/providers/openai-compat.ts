@@ -50,7 +50,8 @@ export function createOpenAICompatProvider(
     id: 'openai-compat',
     displayName: 'OpenAI 兼容端点',
     kind: 'llm',
-    preservesMarkup: true,
+    // 只声明 tags：提示词里的协议块（prompt.ts 的 PROTOCOL_BLOCK）教的就是这套标签
+    wireFormats: ['tags'],
     // 批次照 Read Frog 的默认值（1000 字 / 4 段）：小批高并发，首屏快、吞吐高；速率用服务默认的 8/s、突发 20（同样是它的默认值）
     maxBatchChars: 1000,
     maxBatchItems: 4,

@@ -40,7 +40,7 @@ export interface RunOptions {
   /** 译文样式预设（§7.5）；不传就沿用页面上已有的属性 */
   style?: { preset: StylePreset; customCss?: string }
   paper: string
-  capabilities: { maxBatchChars: number; maxBatchItems: number; preservesMarkup: boolean }
+  capabilities: { maxBatchChars: number; maxBatchItems: number; renderPath: RenderPath }
   transport: Transport
   onProgress?: (progress: Progress) => void
   /**
@@ -181,7 +181,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
    */
   async function retrySingle(segment: Segment, sectionTitle?: string): Promise<SegmentResult> {
     if (halted()) return CANCELLED
-    const res = await send([{ id: segment.id, text: segment.text }], 'markup', sectionTitle, { bypassCache: true })
+    const res = await send([{ id: segment.id, text: segment.text }], options.capabilities.renderPath, sectionTitle, { bypassCache: true })
     if (res.ok) {
       cached += res.cached
       const text = res.result.segments[0]?.text
@@ -194,11 +194,11 @@ export function startTranslation(options: RunOptions): TranslationRun {
 
   async function translateSegments(segments: Segment[], sectionTitle: string | undefined, out: BatchResult): Promise<void> {
     if (halted()) return
-    if (!options.capabilities.preservesMarkup) {
+    if (options.capabilities.renderPath === 'runs') {
       for (const segment of segments) out.set(segment, await viaRuns(segment, sectionTitle))
       return
     }
-    const res = await send(segments.map(s => ({ id: s.id, text: s.text })), 'markup', sectionTitle)
+    const res = await send(segments.map(s => ({ id: s.id, text: s.text })), options.capabilities.renderPath, sectionTitle)
     if (stopped) return
     if (!res.ok) {
       noteFatal(res)
@@ -277,7 +277,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
     const fresh = picked.filter(block => outcome.has(block) && outcome.get(block) !== 'requested')
     if (fresh.length === 0) return
     scheduler?.claim(fresh)
-    const batches = planBatches(fresh, { maxBatchChars: options.capabilities.maxBatchChars, maxBatchItems: options.capabilities.maxBatchItems }, block => sectionOf.get(block))
+    const batches = planBatches(fresh, { maxBatchChars: options.capabilities.maxBatchChars, maxBatchItems: options.capabilities.maxBatchItems, renderPath: options.capabilities.renderPath }, block => sectionOf.get(block))
     // 批次直接交给服务：在飞数量由移植的 request-queue 按速率兜住（§8.2），这里不再有 worker 池
     await Promise.all(batches.map(processBatch))
   }
