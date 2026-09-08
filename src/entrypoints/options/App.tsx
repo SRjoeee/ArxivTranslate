@@ -3,6 +3,7 @@ import { browser } from 'wxt/browser'
 import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
 import { DEFAULT_CONFIG, MODE_VALUES, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
+import { getProvider } from '@/providers'
 import { supportsTarget } from '@/providers/microsoft'
 import { THINKING_HOSTS } from '@/providers/thinking'
 import modesCss from '@/styles/modes.css?inline'
@@ -33,7 +34,14 @@ const STYLE_NOTES: Partial<Record<StylePreset, string>> = {
   custom: '只填声明，选择器由扩展补上',
 }
 
-const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
+/**
+ * 连接测试的样本要用**这个引擎实际会收到的线上格式**（§8.5）。微软只保得住 markers，
+ * 发标签给它会被 provider 本地挡下，于是「测试连接」永远失败，而正常翻译其实是好的
+ *（Codex 在 #115 指出）。格式取引擎自己声明的偏好，不按 id 特判
+ */
+const SAMPLE_TAGS = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
+const SAMPLE_MARKERS = 'Let @a# be a connected graph; see @b#.'
+const sampleFor = (config: Config) => (getProvider(config).wireFormats[0] === 'markers' ? SAMPLE_MARKERS : SAMPLE_TAGS)
 
 /** 图片翻译的模式闸（§15）：与 popup 的模式按钮同一套叫法 */
 const IMAGE_MODES: [Config['mode'], string][] = [['side', '左右对照'], ['stack', '上下对照'], ['only', '仅译文']]
@@ -179,13 +187,15 @@ export function App() {
     setTestResult('')
     const t0 = performance.now()
     try {
+      // 已保存的那份配置：引擎与样本格式都从它取，与 background 建链时读到的一致
+      const saved = await getConfig()
       const res = await sendMessage({
         type: 'axt:translate',
         // 指名引擎：测试连接问的是「这个端点通不通」，走降级链的话端点坏了也会显示成功。
         // 用**已保存的**那个而不是表单里的——按钮上写着「用已保存的配置」，而 background 也是从
         // storage 读配置建链；拿未保存的下拉值去指名，轻则测错引擎，重则报「不在当前链上」（Codex 在 #59 指出）
-        providerId: (await getConfig()).provider,
-        request: { segments: [{ id: 'sample', text: SAMPLE }], source: 'en', target: config.targetLanguage, context: { sectionTitle: '连接测试' } },
+        providerId: saved.provider,
+        request: { segments: [{ id: 'sample', text: sampleFor(saved) }], source: 'en', target: config.targetLanguage, context: { sectionTitle: '连接测试' } },
       })
       const ms = Math.round(performance.now() - t0)
       setTestResult(res.ok
@@ -231,7 +241,11 @@ export function App() {
             popup 那句「不可用」讲不出「因为微软不支持这门语言」。179 个目标语言里它支持 108 个 */}
         {config.provider === 'microsoft' && !supportsTarget(config.targetLanguage) && (
           <small style={{ color: '#b00', display: 'block', marginTop: 4 }}>
-            微软翻译不支持当前的目标语言（{languageLabel(config.targetLanguage)}），翻译时会自动改用 Google。换一种目标语言，或直接选别的引擎。
+            微软翻译不支持当前的目标语言（{languageLabel(config.targetLanguage)}）。
+            {config.fallback.enabled
+              ? '翻译时会自动改用降级链上的免费引擎。'
+              : '而且降级链是关掉的，翻译会直接失败。'}
+            换一种目标语言，或直接选别的引擎。
           </small>
         )}
       </label>

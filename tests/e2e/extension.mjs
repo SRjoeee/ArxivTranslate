@@ -442,6 +442,13 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await options.getByRole('button', { name: '保存', exact: true }).click()
   await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 
+  // 连接测试的样本要用这个引擎实际会收到的格式：微软只保得住 markers，
+  // 发标签给它会被 provider 本地挡下，测试永远失败而正常翻译其实是好的（Codex 在 #115 指出）
+  await options.getByRole('button', { name: /测试连接/ }).click()
+  const msTest = await (await options.waitForSelector('main p[style*="background"]', { timeout: 30_000 })).textContent()
+  check('微软引擎：设置页「测试连接」通过（样本按 markers 格式发，不是标签）',
+    !/失败/.test(msTest ?? '') && /ms/.test(msTest ?? ''), msTest)
+
   const { page, logs, requests } = await openPaper(PAPER, 'edge.microsoft.com')
   const idle = idleOf(await waitForLog(logs, IDLE, 120_000))
   // **必须验证请求真的打到了微软**（Codex 在 #115 指出）：微软坏掉、Google 兜底成功时，
