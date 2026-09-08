@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { extract } from '@/core/extractor'
-import { nodeOffsetAt, serialize, spanAt, type WireSpan } from '@/core/protector'
+import { nodeOffsetAt, rangeOf, serialize, spanAt, type WireSpan } from '@/core/protector'
 import { el } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
@@ -29,6 +29,30 @@ function textOf(spans: readonly WireSpan[], from: number, to: number): string {
 }
 
 const textSpans = (spans: readonly WireSpan[]) => spans.filter(s => s.kind === 'text')
+
+/**
+ * Records which boundary calls `rangeOf` makes, so the decision can be asserted without relying on
+ * happy-dom's Range. Stubs `createRange` on the nodes' own document, which is where `rangeOf` gets
+ * it from.
+ */
+function boundaryCalls(root: Element, spans: readonly WireSpan[], from: number, to: number): string[] {
+  const calls: string[] = []
+  const name = (n: Node) => (n.nodeType === 3 ? `text(${JSON.stringify((n as Text).data.slice(0, 6))})` : (n as Element).tagName.toLowerCase())
+  const recorder = {
+    setStart: (n: Node, o: number) => calls.push(`start@${name(n)}:${o}`),
+    setEnd: (n: Node, o: number) => calls.push(`end@${name(n)}:${o}`),
+    setStartBefore: (n: Node) => calls.push(`startBefore:${name(n)}`),
+    setStartAfter: (n: Node) => calls.push(`startAfter:${name(n)}`),
+    setEndBefore: (n: Node) => calls.push(`endBefore:${name(n)}`),
+    setEndAfter: (n: Node) => calls.push(`endAfter:${name(n)}`),
+  }
+  const doc = root.ownerDocument
+  const spy = vi.spyOn(doc, 'createRange').mockReturnValue(recorder as unknown as Range)
+  rangeOf(spans, from, to)
+  spy.mockRestore()
+  return calls
+}
+
 
 describe('wire offsets to DOM (#105)', () => {
   it('emits byte-identical wire text on both paths across every fixture and format', () => {
@@ -76,16 +100,59 @@ describe('wire offsets to DOM (#105)', () => {
     expect([last?.kind, last && (last.node as Element).tagName.toLowerCase()]).toEqual(['slot', 'math'])
   })
 
-  it('marks the closing half of a paired placeholder so its boundary lands after the element', () => {
-    const block = serialize(el('<p class="ltx_p">a <em>b</em> c</p>'), 'tags', { offsets: true })
-    const slots = block.offsets!.filter(s => s.kind === 'slot')
-    expect(slots.map(s => (s.kind === 'slot' ? Boolean(s.closing) : null))).toEqual([false, true])
+  it('labels each placeholder run with what it stands for', () => {
+    // A void run stands for the whole node, so an interval ending on it ends after the node; the
+    // two halves of a pair bracket the element's content instead. Getting this wrong collapsed
+    // formula-only intervals and dropped trailing formulas (Codex on #123).
+    const paired = serialize(el('<p class="ltx_p">a <em>b</em> c</p>'), 'tags', { offsets: true })
+    expect(paired.offsets!.filter(s => s.kind === 'slot').map(s => (s.kind === 'slot' ? s.role : null))).toEqual(['open', 'close'])
+    const voids = serialize(el('<p class="ltx_p">a <math><mi>x</mi></math> b</p>'), 'tags', { offsets: true })
+    expect(voids.offsets!.filter(s => s.kind === 'slot').map(s => (s.kind === 'slot' ? s.role : null))).toEqual(['void'])
   })
 
-  it('an interval covering only a placeholder still resolves to that placeholder', () => {
-    const block = serialize(el('<p class="ltx_p"><math><mi>x</mi></math></p>'), 'tags', { offsets: true })
+  it('keeps the node offset monotone through an expanded escape', () => {
+    // `&` is one node character but five wire characters. Interpolating through them walked the
+    // node offset past the end of the escape, so a boundary at wire 4 mapped further into the node
+    // than one at wire 5 — which collapsed the range and dropped what followed (Codex on #123).
+    const block = serialize(el('<p class="ltx_p">&amp;Z</p>'), 'tags', { offsets: true })
+    expect(block.text).toBe('&amp;Z')
+    const span = block.offsets![0]!
+    expect(span.kind).toBe('text')
+    if (span.kind !== 'text') return
+    const mapped = [0, 1, 2, 3, 4, 5, 6].map(w => nodeOffsetAt(span, w))
+    expect(mapped).toEqual([...mapped].sort((a, b) => a - b))
+    // Everything inside the escape snaps to just after the character it encodes
+    expect(mapped).toEqual([0, 1, 1, 1, 1, 1, 2])
+    expect(textOf(block.offsets!, 4, 6)).toBe('Z')
+  })
+
+  it('an interval covering only a placeholder brackets that node instead of collapsing', () => {
+    // Ending *before* a void run puts both boundaries in the same place, so the formula-only
+    // interval selects nothing and a trailing formula falls outside (Codex on #123).
+    const root = el('<p class="ltx_p"><math><mi>x</mi></math></p>')
+    const block = serialize(root, 'tags', { offsets: true })
     expect(textSpans(block.offsets!)).toEqual([])
-    expect(spanAt(block.offsets!, 0)?.kind).toBe('slot')
+    expect(boundaryCalls(root, block.offsets!, 0, block.text.length)).toEqual(['startBefore:math', 'endAfter:math'])
+  })
+
+  it('ends after a trailing formula, and before the content of a paired element', () => {
+    const withFormula = el('<p class="ltx_p">value is <math><mi>x</mi></math></p>')
+    const a = serialize(withFormula, 'tags', { offsets: true })
+    expect(boundaryCalls(withFormula, a.offsets!, 0, a.text.length).at(-1)).toBe('endAfter:math')
+
+    // The open half of a pair is the opposite: an interval ending there stops before the content
+    const paired = el('<p class="ltx_p">a <em>b</em> c</p>')
+    const b = serialize(paired, 'tags', { offsets: true })
+    const openEnd = b.offsets!.find(s => s.kind === 'slot' && s.role === 'open')!
+    expect(boundaryCalls(paired, b.offsets!, 0, openEnd.to).at(-1)).toBe('endBefore:em')
+  })
+
+  it('starts after the element when the boundary lands in a closing tag', () => {
+    // A sentence beginning exactly where a paired element ends: `<em>Foo.</em>Bar.`
+    const root = el('<p class="ltx_p"><em>Foo.</em>Bar.</p>')
+    const block = serialize(root, 'tags', { offsets: true })
+    const close = block.offsets!.find(s => s.kind === 'slot' && s.role === 'close')!
+    expect(boundaryCalls(root, block.offsets!, close.from, block.text.length)[0]).toBe('startAfter:em')
   })
 
   it('keeps offsets aligned past an entity, where one character becomes five', () => {

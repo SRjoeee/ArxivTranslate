@@ -34,11 +34,25 @@ export type WireSpan =
       node: Node
       from: number
       to: number
-      /** True for `</t>`, whose boundary is *after* the element rather than before it */
-      closing?: boolean
+      /**
+       * Which part of the node this run stands for. A `void` run stands for the whole node, so an
+       * interval ending on it must end *after* the node; `open` and `close` are the two halves of a
+       * `<t id="N">` pair and bracket the element's content instead.
+       */
+      role: 'void' | 'open' | 'close'
     }
 
-/** Wire offset to offset within the node. Anchors are 1:1 in between, so take the last one at or before it. */
+/**
+ * Wire offset to offset within the node. Anchors are 1:1 in between, so take the last one at or
+ * before the offset and add the difference.
+ *
+ * The result is clamped to the next anchor because an expanded escape is indivisible: `&` occupies
+ * five wire characters but one node character, and interpolating through them walks the node
+ * offset past where the escape ends. Without the clamp the mapping is not monotone — for `&Z`,
+ * wire 4 gave node 2 while wire 5 gave node 1, which collapsed `rangeOf(4, 6)` and dropped the `Z`
+ * (Codex pointed this out on #123). Clamping snaps any offset inside an escape to the position just
+ * after the character it encodes.
+ */
 export function nodeOffsetAt(span: Extract<WireSpan, { kind: 'text' }>, wireOffset: number): number {
   const clamped = Math.max(span.from, Math.min(wireOffset, span.to))
   let lo = 0
@@ -49,7 +63,8 @@ export function nodeOffsetAt(span: Extract<WireSpan, { kind: 'text' }>, wireOffs
     else hi = mid - 1
   }
   const [wire, node] = span.anchors[lo]!
-  return Math.min(node + (clamped - wire), span.node.data.length)
+  const ceiling = span.anchors[lo + 1]?.[1] ?? span.node.data.length
+  return Math.min(node + (clamped - wire), ceiling)
 }
 
 /** The span covering this wire offset. Spans tile the wire text, so this only misses past the end. */
@@ -87,10 +102,13 @@ export function rangeOf(spans: readonly WireSpan[], from: number, to: number): R
   const range = (start.node.ownerDocument ?? end.node.ownerDocument)?.createRange()
   if (!range) return undefined
   if (start.kind === 'text') range.setStart(start.node, nodeOffsetAt(start, from))
-  else if (start.closing) range.setStartAfter(start.node)
+  else if (start.role === 'close') range.setStartAfter(start.node)
   else range.setStartBefore(start.node)
+  // A void run stands for the whole node, so ending on it has to end *after* it — ending before
+  // would collapse a formula-only interval and drop a trailing formula (Codex on #123). The `open`
+  // half of a pair is the opposite: an interval ending there stops before the element's content.
   if (end.kind === 'text') range.setEnd(end.node, nodeOffsetAt(end, to))
-  else if (end.closing) range.setEndAfter(end.node)
-  else range.setEndBefore(end.node)
+  else if (end.role === 'open') range.setEndBefore(end.node)
+  else range.setEndAfter(end.node)
   return range
 }

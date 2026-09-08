@@ -76,9 +76,9 @@ function makeTracker(format: WireFormat, parts: string[], spans: WireSpan[]) {
      * a placeholder has to resolve to that node's own boundary, otherwise a sentence opening or
      * closing on a formula would drop it (Codex pointed this out on #123).
      */
-    raw(s: string, node: Node, closing = false) {
+    raw(s: string, node: Node, role: 'void' | 'open' | 'close') {
       parts.push(s)
-      spans.push(closing ? { kind: 'slot', node, from: len, to: len + s.length, closing } : { kind: 'slot', node, from: len, to: len + s.length })
+      spans.push({ kind: 'slot', node, from: len, to: len + s.length, role })
       len += s.length
       afterSpace = false
     },
@@ -143,14 +143,14 @@ export function serialize(root: Element, format: WireFormat = 'tags', options: {
         slots.set(id, el)
         if (isVoid || format === 'markers') {
           voidCount++
-          if (tracker) tracker.raw(writeVoid(id, format), el)
+          if (tracker) tracker.raw(writeVoid(id, format), el, 'void')
           else parts.push(writeVoid(id, format))
         } else {
           paired.add(id)
-          if (tracker) tracker.raw(`<t id="${id}">`, el)
+          if (tracker) tracker.raw(`<t id="${id}">`, el, 'open')
           else parts.push(`<t id="${id}">`)
           walk(el)
-          if (tracker) tracker.raw('</t>', el, true)
+          if (tracker) tracker.raw('</t>', el, 'close')
           else parts.push('</t>')
         }
       }
