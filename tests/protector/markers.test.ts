@@ -47,18 +47,34 @@ describe('serialize（markers）', () => {
 })
 
 describe('转义的不可伪造性', () => {
-  it('只在 @ 会引起歧义时翻倍：邮箱与装饰器原样过', () => {
-    for (const s of ['a@b.com', 'sascha.kurz@uni-bayreuth.de', '@app.route', 'CORRECTNESS@SC 2018', 'x @ y', 'ends with @']) {
-      expect([s, escapeText(s, 'markers')]).toEqual([s, s])
-    }
+  it('每个 @ 无条件翻倍——转义不能依赖上下文', () => {
+    // 条件转义（「只在后面跟着 [a-z]*[#@] 时翻倍」）在单个文本节点上看着没问题，
+    // 但序列化是逐节点转义再拼接的，歧义会在拼接处产生。见下面那条边界测试
+    expect(escapeText('a@b.com', 'markers')).toBe('a@@b.com')
+    expect(escapeText('@app.route', 'markers')).toBe('@@app.route')
+    expect(escapeText('ends with @', 'markers')).toBe('ends with @@')
+    expect(escapeText('@abc#', 'markers')).toBe('@@abc#')
+    expect(escapeText('@@', 'markers')).toBe('@@@@')
+    expect(escapeText('no ats here', 'markers')).toBe('no ats here')
   })
 
-  it('形如记号的串与连续的 @ 一律翻倍', () => {
-    expect(escapeText('@abc#', 'markers')).toBe('@@abc#')
-    expect(escapeText('@@abc#', 'markers')).toBe('@@@@abc#')
-    expect(escapeText('@#', 'markers')).toBe('@@#')
-    expect(escapeText('@a@b#', 'markers')).toBe('@@a@@b#')
-    expect(escapeText('@@@', 'markers')).toBe('@@@@@')
+  it('文本节点以 @ 结尾、紧接着一个受保护节点：占位符不能被吃掉（Codex 在 #107 指出）', () => {
+    // 条件转义下这里会序列化成 `@@a#`，分词器读成字面量 @，<math> 的占位符凭空消失，
+    // 校验永远失败、runs 兜底也会把公式当文字丢掉
+    for (const html of [
+      '<p class="ltx_p">@<math class="ltx_Math"><mi>x</mi></math></p>',
+      '<p class="ltx_p">a@<math class="ltx_Math"><mi>x</mi></math>b</p>',
+      '<p class="ltx_p">@@<math class="ltx_Math"><mi>x</mi></math></p>',
+      '<p class="ltx_p">@a<math class="ltx_Math"><mi>x</mi></math>#</p>',
+    ]) {
+      const b = serialize(el(html), 'markers')
+      const voids = tokenize(b.text, 'markers').filter(t => t.kind === 'void')
+      expect([html, voids.length]).toEqual([html, b.slots.size])
+      expect([html, validate(b.text, b).ok]).toEqual([html, true])
+      const doc = el('<p></p>').ownerDocument
+      expect([html, rehydrate(b.text, b, doc).querySelectorAll('math').length]).toEqual([html, 1])
+      expect([html, rehydrate(b.text, b, doc).textContent]).toEqual([html, el(html).textContent])
+    }
   })
 
   it('转义 → 分词是恒等的：任何字面量都还原回自己，且不产生占位符', () => {
