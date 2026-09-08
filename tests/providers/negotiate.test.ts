@@ -37,22 +37,32 @@ describe('buildChain 的格式协商', () => {
     expect(renderPath).toBe('markup')
   })
 
-  it('接上只认 markers 的引擎，整条链降到 markers——这是微软能进链的原因', async () => {
+  it('首选偏好 tags 时，markers-only 的候选进不来——它救不了 tags 会话', async () => {
     const { chain, renderPath } = await chainOf([engine('microsoft-ish', ['markers'])])
-    expect(chain.map(p => p.id)).toEqual(['google-web', 'microsoft-ish'])
-    expect(renderPath).toBe('markers')
-  })
-
-  it('交集一旦收缩到 markers，后面只认 tags 的引擎就进不来了（顺序决定结果）', async () => {
-    const { chain, renderPath } = await chainOf([engine('microsoft-ish', ['markers']), engine('builtin-ish', ['tags'])])
-    expect(chain.map(p => p.id)).toEqual(['google-web', 'microsoft-ish'])
-    expect(renderPath).toBe('markers')
-  })
-
-  it('反过来：先接 tags-only，markers-only 的就被挡在外面', async () => {
-    const { chain, renderPath } = await chainOf([engine('builtin-ish', ['tags']), engine('microsoft-ish', ['markers'])])
-    expect(chain.map(p => p.id)).toEqual(['google-web', 'builtin-ish'])
+    expect(chain.map(p => p.id)).toEqual(['google-web'])
     expect(renderPath).toBe('markup')
+  })
+
+  it('**顺序无关**：候选表怎么排，格式与进链结果都一样（#103 的前置）', async () => {
+    // 这是这条规则存在的理由。旧规则让交集随迭代顺序收缩，于是一个兜底引擎能改变首选引擎的
+    // 渲染格式——用户在 #103 里只是调一下兜底优先级，整页的内联样式就会静默消失
+    const markers = () => engine('microsoft-ish', ['markers'])
+    const tags = () => engine('builtin-ish', ['tags'])
+    const a = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' }, { freeEngines: [markers, tags] })
+    const b = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' }, { freeEngines: [tags, markers] })
+    expect(a.chain.map(p => p.id)).toEqual(b.chain.map(p => p.id))
+    expect([a.renderPath, b.renderPath]).toEqual(['markup', 'markup'])
+    // 具体是：只有支持 tags 的那个进得来
+    expect(a.chain.map(p => p.id)).toEqual(['google-web', 'builtin-ish'])
+  })
+
+  it('首选是 markers-only 时锁定 markers，两种都保得住的 Google 进链兜底', async () => {
+    const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG }, {
+      primary: engine('microsoft-ish', ['markers']),
+      freeEngines: [() => engine('builtin-ish', ['tags']), () => engine('google-ish', ['tags', 'markers'])],
+    })
+    expect(chain.map(p => p.id)).toEqual(['microsoft-ish', 'google-ish'])
+    expect(renderPath).toBe('markers')
   })
 
   it('不可用的候选不参与协商，也不该把交集压窄', async () => {
