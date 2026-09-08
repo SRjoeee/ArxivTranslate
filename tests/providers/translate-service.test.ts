@@ -124,6 +124,47 @@ describe('createTranslateService', () => {
     expect(calls).toBe(afterFirst)
   })
 
+  it('同一次调用里「满批 + 欠满的尾巴」：满批失败后尾巴不许再发出去（Codex 在 #113 指出）', async () => {
+    // 图片 OCR 的行数不受 provider 的 maxBatchItems 约束，一次调用会被拆成满批 + 尾巴。
+    // 满批按条数立刻派发、秒失败，尾巴还在等 batchDelay。等 allSettled 才记状态的话，
+    // 它得先把尾巴等出来——而尾巴是**发出去**才失败的
+    let calls = 0
+    const service = createTranslateService({
+      getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }, 'mock', { maxBatchItems: 2 }),
+    })
+    const res = await service.translate({ ...req(['a', 'b', 'c', 'd', 'e']), scope: 's1' })
+    expect(res.ok).toBe(false)
+    // 5 条 / 每批 2 条 = 满批 + 满批 + 尾巴。两个满批同 tick 就按条数派发出去了，拦不住
+    //（和 8 个并发槽被占满同理）；要挡住的是还在攒的那条尾巴——它不该变成第三个请求
+    expect(calls).toBe(2)
+  })
+
+  it('新会话并进一个已致命会话的批次时，这一批照常发（Codex 在 #113 指出）', async () => {
+    // 去重按缓存键合并：被保留的 QueueItem 带的是旧（已致命的）scope，新会话只出现在 meta.scopes 里。
+    // 只看 item.scope 的话会把这一批当死的拒掉，把陈旧的 auth 回给新调用方，再把新 scope 也标成致命
+    let calls = 0
+    const { port } = fakePort()
+    const service = createTranslateService({
+      getProvider: async () => provider(async r => {
+        calls++
+        if (calls === 1) throw new ProviderError('auth', 'bad key')
+        return { segments: r.segments.map(s => ({ ...s, text: '译' })), provider: 'mock' }
+      }),
+      cache: port,
+    })
+    // 先让 s1 致命
+    expect((await service.translate({ ...req(['a']), scope: 's1' })).ok).toBe(false)
+    // s1 与 s2 同一 tick 发同一段：攒进同一批，meta.scopes = [s1, s2]
+    const [dead, live] = await Promise.all([
+      service.translate({ ...req(['b']), scope: 's1' }),
+      service.translate({ ...req(['b']), scope: 's2' }),
+    ])
+    // 批里还有活着的订阅者，就不能当死的拒掉
+    expect(live.ok && live.result.segments[0]?.text).toBe('译')
+    expect(dead.ok).toBe(true)
+    expect(calls).toBe(2)
+  })
+
   it('只有 no-key / auth 黏：别的错不该把整轮翻译废掉', () => {
     // 与 fallback.ts 的 PERMANENT_KINDS 同一份判断。bad-request 是「这一批的问题」，
     // 换一批就可能好，黏住它等于因为一个坏块放弃整篇
