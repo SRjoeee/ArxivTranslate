@@ -1,5 +1,6 @@
 // Provider 统一接口（DESIGN §8）。每个引擎一个文件，禁止跨文件共享未公开接口的细节。
 
+import type { WireFormat } from '@/core/protector/tokens'
 import { attachRequestErrorMeta, type RequestErrorMeta } from './request/retry-policy'
 
 export interface TranslateSegment {
@@ -38,8 +39,12 @@ export interface TranslationProvider {
   id: string
   displayName: string
   kind: ProviderKind
-  /** true → markup 路径；false → runs 路径 */
-  preservesMarkup: boolean
+  /**
+   * 这个引擎能保住的线上格式，**按偏好排序**，取交集与链上其他引擎协商（§8.5）。
+   * 空数组 = 一个占位符都保不住，只能走 runs。
+   * 不是布尔位：Google 两种格式都保得住，用布尔位表达不了，会逼得选了微软就没有兜底
+   */
+  wireFormats: readonly WireFormat[]
   /** 单次请求字符上限 */
   maxBatchChars: number
   /** 单次请求段落数上限 */

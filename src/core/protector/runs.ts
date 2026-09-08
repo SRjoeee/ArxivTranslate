@@ -49,7 +49,7 @@ export function splitRuns(block: ProtectedBlock): RunLayout {
   }
   // 跳过某个 paired 元素的整棵子树时要数嵌套深度，否则内层的 </t> 会提前收尾
   let skipDepth = 0
-  for (const t of tokenize(block.text)) {
+  for (const t of tokenize(block.text, block.format)) {
     if (skipDepth > 0) {
       if (t.kind === 'open') skipDepth++
       else if (t.kind === 'close') skipDepth--

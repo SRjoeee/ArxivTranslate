@@ -5,8 +5,19 @@
 // 这里不引用 ./store：content 侧要算键但不能把 Dexie 打进包（DESIGN §8.0）。
 import { RULES_VERSION } from '@/core/rules/latexml'
 import { PROMPT_VERSION } from '@/providers/prompt'
+import type { WireFormat } from '@/core/protector/tokens'
 import { sha256Hex } from '@/shared/digest'
-export type RenderPath = 'markup' | 'runs'
+
+/**
+ * 渲染路径。`markup` / `markers` 是两种线上格式（见 protector/tokens.ts），`runs` 是切段兜底。
+ * 名字与 `WireFormat` 的 `tags` 不对称是历史包袱（DESIGN §9 一直叫 markup），映射只在 `wireFormatOf` 一处。
+ */
+export type RenderPath = 'markup' | 'markers' | 'runs'
+
+/** 渲染路径 → 线上格式。`runs` 不走占位符，取 `tags` 只是给它一个确定的转义规则 */
+export function wireFormatOf(path: RenderPath): WireFormat {
+  return path === 'markers' ? 'markers' : 'tags'
+}
 
 export interface CacheContext {
   paperTitle?: string
@@ -30,8 +41,8 @@ export interface CacheIdentity {
   text: string
 }
 
-/** 改变键的算法或归一化规则时递增，旧数据自然失效 */
-export const CACHE_KEY_VERSION = 2
+/** 改变键的算法或归一化规则时递增，旧数据自然失效。3：加入 markers 路径（#104） */
+export const CACHE_KEY_VERSION = 3
 
 /** NFC + 连续空白折成一个空格 + 首尾 trim。只用于算键，不改动送翻译的文本 */
 export function normalizeText(text: string): string {

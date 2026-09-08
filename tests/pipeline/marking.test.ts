@@ -15,7 +15,7 @@ describe('块标记在第一趟 side prep 之前就是完整的（issue #67）',
     it(`${id}：startTranslation 一返回，每个块都带 data-axt-id`, () => {
       const doc = load(id)
       const blocks = extract(doc)
-      const run = startTranslation({ doc, blocks, target: 'zh-CN', mode: 'side', paper: id, transport: idle, capabilities: { maxBatchChars: 1000, maxBatchItems: 4, preservesMarkup: true }, preload: DEFAULT_PRELOAD })
+      const run = startTranslation({ doc, blocks, target: 'zh-CN', mode: 'side', paper: id, transport: idle, capabilities: { maxBatchChars: 1000, maxBatchItems: 4, renderPath: 'markup' }, preload: DEFAULT_PRELOAD })
       // 故意不 await run.ready：这正是 side prep 会插进来的窗口（enterSide 在 startTranslation 之前调用，
       // prep 是 150 ms 去抖 / 1000 ms 上限的合并器）
       const unmarked = blocks.filter(b => !b.el.hasAttribute(ID_ATTR))

@@ -1,5 +1,13 @@
-// DOM-free 分词器：把带占位符的字符串切成四种 token，validate 与 rehydrate 共用，可在 service worker 里跑。
+// DOM-free 分词器：把带占位符的字符串切成四种 token，validate / rehydrate / splitRuns 共用，可在 service worker 里跑。
 // 借鉴 Read Frog html-attribute-markers.ts 的思路（字符串级校验，不依赖 DOM），协议不同，未移植代码。
+//
+// 两种线上格式（DESIGN §6.1）：
+// - `tags`：`<x id="1"/>` / `<t id="1">…</t>`。表达力全，LLM 与 Google 都保得住内联样式。
+// - `markers`：`@a#`，纯文本、只有 void。给那些会把标签撕烂的免费引擎用——实测微软 Edge 端点
+//   在 tags 上 0%（400 个占位符全丢），在 markers 上 98% 块 / 99.3% 记号；Google 两种都 ~99%。
+//   成对记号实测只有 70.6%，不可用，所以这个格式下成对占位符一律拍平（丢内联样式，不丢内容）。
+
+export type WireFormat = 'tags' | 'markers'
 
 export type Token =
   | { kind: 'text'; text: string }
@@ -8,12 +16,46 @@ export type Token =
   | { kind: 'close' }
 
 // 容忍模型常见写法：<x id="1"/>、<x id="1" />、单引号 / 无引号、<x id="1"></x>；其余一律当文本
-const TOKEN_RE = /<x\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*(?:\/>|>\s*<\/x\s*>)|<t\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*>|<\/t\s*>/g
+const TAG_RE = /<x\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*(?:\/>|>\s*<\/x\s*>)|<t\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*>|<\/t\s*>/g
 
-export function tokenize(s: string): Token[] {
+// `@@` 是字面 `@` 的转义（见 text.ts 的 escapeText），必须排在记号之前匹配，否则 `@@a#` 会被读成记号
+const MARKER_RE = /@@|@([a-z]+)#/g
+
+/** id → 双射二十六进制字母（1→a、26→z、27→aa）。用字母而不是数字：MT 引擎会把数字重排、合并、加千分位 */
+export function toAlpha(id: number): string {
+  let n = id
+  let out = ''
+  while (n > 0) {
+    const r = (n - 1) % 26
+    out = String.fromCharCode(97 + r) + out
+    n = (n - 1 - r) / 26
+  }
+  return out
+}
+
+export function fromAlpha(s: string): number {
+  let n = 0
+  for (let i = 0; i < s.length; i++) n = n * 26 + (s.charCodeAt(i) - 96)
+  return n
+}
+
+export function tokenize(s: string, format: WireFormat = 'tags'): Token[] {
+  return format === 'markers' ? tokenizeMarkers(s) : tokenizeTags(s)
+}
+
+/**
+ * tags 与 markers 走两条显式的循环，而不是一条带回调的通用循环。
+ *
+ * 这里是最热的一段：`validate` / `rehydrate` / `splitRuns` 每个块都要跑一遍。第一版把两种格式合成
+ * 一条循环、用一个 push 闭包统一处理「合并相邻文本」，实测最重的 fixture（2609.04056）上整篇往返
+ * 从 1645 ms 涨到 1833 ms（+11%），而这条往返有 10 s 的预算断言——CI 上直接撞线。
+ * 相邻文本只有 markers 会切出来（`@@` 的反转义），tags 每次匹配前最多推一个文本 token，永远不相邻。
+ */
+function tokenizeTags(s: string): Token[] {
   const out: Token[] = []
   let last = 0
-  for (const m of s.matchAll(TOKEN_RE)) {
+  TAG_RE.lastIndex = 0
+  for (const m of s.matchAll(TAG_RE)) {
     const index = m.index ?? 0
     if (index > last) out.push({ kind: 'text', text: s.slice(last, index) })
     if (m[0].startsWith('</')) out.push({ kind: 'close' })
@@ -23,4 +65,30 @@ export function tokenize(s: string): Token[] {
   }
   if (last < s.length) out.push({ kind: 'text', text: s.slice(last) })
   return out
+}
+
+function tokenizeMarkers(s: string): Token[] {
+  const out: Token[] = []
+  let last = 0
+  // `@@` 的反转义会在真文本中间切出碎片；合并起来，下游按节点比对时不该看出差别
+  const text = (t: string) => {
+    const prev = out[out.length - 1]
+    if (prev?.kind === 'text') prev.text += t
+    else out.push({ kind: 'text', text: t })
+  }
+  MARKER_RE.lastIndex = 0
+  for (const m of s.matchAll(MARKER_RE)) {
+    const index = m.index ?? 0
+    if (index > last) text(s.slice(last, index))
+    if (m[0] === '@@') text('@')
+    else out.push({ kind: 'void', id: fromAlpha(m[1]!) })
+    last = index + m[0].length
+  }
+  if (last < s.length) text(s.slice(last))
+  return out
+}
+
+/** 写出一个 void 占位符 */
+export function writeVoid(id: number, format: WireFormat): string {
+  return format === 'markers' ? `@${toAlpha(id)}#` : `<x id="${id}"/>`
 }

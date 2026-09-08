@@ -31,7 +31,8 @@ describe('createGoogleWebProvider', () => {
     const provider = createGoogleWebProvider({ fetch: (async () => okResponse([translated])) as unknown as typeof globalThis.fetch })
     const result = await provider.translate(req([text]))
     expect(result.segments[0]?.text).toBe(translated)
-    expect(provider.preservesMarkup).toBe(true)
+    // 两种都保得住（tags 100% / markers 98.9%），tags 排前面：选微软时链上才留得住它做兜底（#104）
+    expect(provider.wireFormats).toEqual(['tags', 'markers'])
   })
 
   it('空请求不发网络请求', async () => {

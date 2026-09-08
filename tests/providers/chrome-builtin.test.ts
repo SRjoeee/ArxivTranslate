@@ -42,7 +42,7 @@ describe('createChromeBuiltinProvider', () => {
     const provider = createChromeBuiltinProvider('cmn', { translator: api })
     expect(provider.id).toBe('chrome-builtin')
     expect(provider.kind).toBe('builtin')
-    expect(provider.preservesMarkup).toBe(true) // RESEARCH §6.2 实测保留标签与占位符
+    expect(provider.wireFormats).toEqual(['tags']) // RESEARCH §6.2 实测保留标签与占位符
     expect(provider.rateLimit).toEqual({ rate: 20, capacity: 20 })
   })
 

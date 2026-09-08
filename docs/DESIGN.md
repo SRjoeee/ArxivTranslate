@@ -29,7 +29,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 
 1. **不需要通用翻译器那套启发式 DOM walker 和站点规则订阅系统**。用一套针对 LaTeXML 的确定性规则做块切分和跳过判定，规则集中在一个文件里，可版本化。
 2. **三种模式共享同一份 DOM，模式切换只改一个 CSS 属性**。译文节点永远作为原块的相邻兄弟插入，从不修改原节点子树。这是可逆性的根基。
-3. **两条渲染路径由 provider 的能力位决定，不由引擎类型决定**。markup 路径整块带占位符翻译；runs 路径按行内不可翻译节点切段。Phase 0 / Phase 3 实测 LLM、Google translateHtml、Chrome 内置 Translator 都能保留占位符，因此 v1 的所有 provider 默认走 markup，runs 是占位符校验失败后的兜底（RESEARCH.md §5 / §6）。provider 用 `preservesMarkup` 能力位声明自己走哪条。
+3. **渲染路径由 provider 的能力集协商出来，不由引擎类型决定**。`markup` 路径用标签占位符整块翻译；`markers` 路径用纯文本记号整块翻译（只有 void，成对占位符拍平）；`runs` 路径按行内不可翻译节点切段。provider 用 `wireFormats` 声明自己保得住哪些线上格式（**按偏好排序的集合，不是布尔位**——Google 两种都保得住），链在组装时取交集，一次会话只用一种格式（§8.5）。Phase 0 / Phase 3 实测 LLM、Google translateHtml、Chrome 内置 Translator 都保得住标签，所以默认协商出 `markup`；`markers` 是给那些会把标签撕烂的免费引擎准备的（#104 实测：微软 Edge 端点在标签上 0%、在记号上 98%），`runs` 是校验失败后的兜底（RESEARCH.md §5 / §6）。
 
 ---
 
@@ -39,8 +39,9 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 |---|---|
 | Block（块） | 一个翻译单元，对应一个 LaTeXML 元素，如 `.ltx_p`、`.ltx_title`、`.ltx_caption` |
 | Protected node（受保护节点） | 块内不翻译、必须原样保留的行内节点：公式、引用、代码、脚注标记等 |
-| Placeholder（占位符） | 发给模型时替代受保护节点的标签。void 型 `<x id="n"/>`，paired 型 `<t id="n">…</t>` |
-| Render path（渲染路径） | `markup`（占位符整块翻译）或 `runs`（按受保护节点切段逐段翻译） |
+| Placeholder（占位符） | 发给模型时替代受保护节点的记号。`tags` 格式下 void 型 `<x id="n"/>`、paired 型 `<t id="n">…</t>`；`markers` 格式下只有 void 型 `@a#` |
+| Wire format（线上格式） | 占位符在请求文本里的语法：`tags` 或 `markers`。provider 用 `wireFormats` 声明能保住哪些，链取交集协商出唯一一个（§8.5） |
+| Render path（渲染路径） | `markup`（tags 整块翻译）、`markers`（记号整块翻译）或 `runs`（按受保护节点切段逐段翻译）。进缓存键 |
 | Mode（模式） | `side` / `stack` / `only`，由 `html[data-axt-mode]` 控制 |
 | Provider | 一个翻译引擎适配器，实现统一接口 |
 | Fixture | 保存在仓库里的真实 arXiv HTML 页面，用于测试 |
@@ -77,7 +78,7 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 1. `extractor` 按规则收集所有 Block，打上稳定 id（`data-axt-id`）
 2. `scheduler` 只翻进入视口（加预翻译距离）的块；没滚到的块不发请求、不占资源（§10，照搬 Read Frog）
 3. 先查缓存（缓存与请求同在 background，content 不碰 IndexedDB）；命中直接渲染
-4. 未命中：`protector` 把块序列化为 `{text, slots}`；按 provider 的 `preservesMarkup` 决定走 markup 路径（整块带占位符）还是 runs 路径（切段）
+4. 未命中：`protector` 按协商出的线上格式把块序列化为 `{format, text, slots}`；渲染路径决定走 `markup` / `markers`（整块带占位符）还是 `runs`（切段）
 5. background 里移植的 `request-queue` 按 provider 的速率（令牌桶）与并发上限发请求、`batch-queue` 攒批（§8.0：2026-09-06 起请求跑在 background）；失败退避、重试、429 暂停、必要时切换 fallback provider
 6. `validator` 校验占位符完整性；失败 → 单块重试一次 → 降级 runs 路径
 7. `rehydrator` 把占位符换回受保护节点的克隆（剥掉 `id` 属性）
@@ -230,13 +231,19 @@ interface Block {
 ```ts
 interface ProtectedBlock {
   blockId: string
+  format: WireFormat                 // 'tags' | 'markers'，校验 / 回填 / 切段据此分词
   text: string                       // 带占位符的文本
   slots: Map<number, Node>           // id → 原节点引用
-  paired: Set<number>                // 哪些 id 是 paired
+  paired: Set<number>                // 哪些 id 是 paired（markers 下恒为空）
 }
 ```
 
-- 占位符 id 在块内从 1 递增
+- 占位符 id 在块内从 1 递增；`markers` 格式把 id 编成双射二十六进制字母（1→a、27→aa），因为 MT 引擎会重排、合并数字
+- **`markers` 没有成对占位符**（#104 实测成对记号在 Google 上只有 70.6%，不可用）：除了「带功能的元素」按 void 整块保留以保住可点击（与 §6.5 的 issue #44 同一条判断），其余成对元素拍平成纯文本。丢的是内联包装的样式，不是内容
+- **纯文本往返**（标题 §10、OCR 行 §15.2）没有分词器，走 `escapeText` → 翻译 → `unescapeText`。占位符路径不能用 `unescapeText`：那条线的 `@@` 已经在 `tokenize` 里还原过，再来一遍会把字面量 `@@` 吃成 `@`
+- **不可伪造性**：校验与回填的正确性依赖「线上出现的每个占位符都必然是我们写进去的」。`tags` 靠无条件转义 `& < >`；`markers` 靠**无条件**把每个 `@` 翻倍——转义后每段字面文本里的 `@` 个数必为偶数，解码器左到右先吃 `@@` 成对消耗，剩下的单个 `@` 必然是记号的开头。
+  **转义必须与上下文无关**：序列化是逐个文本节点转义再拼接的，条件转义的歧义会在拼接处产生（`<p>@<math/></p>` 的 `@` 单独看不需要转义，拼上占位符成了 `@@a#`，占位符被读成字面量而消失）。代价实测：12 篇 fixture 的 779160 个 markers 线上字符里只有 5 处 `@`，翻倍共多 5 个字符
+- `markers` **也转义 `& < >`**。曾经不转义，理由是「这条线是纯文本」——那是对引擎的假设而非事实：`google-web` 走 `translateHtml`，会把请求体当 HTML 解析。实测 markers 线上文本里有 102 个 `&`、1 个 `<`、3 个 `>`，分布在 5992 个块的 80 个里，都是正经内容（`Springer science & business media`、`Very long (>1k words) … (<500 words)`）。转义之后这条线对 HTML 与纯文本两种传输都成立，不必给 provider 单开编解码层。解实体在**分词之后**做，所以引擎回来的 `&#64;abc#` 不会被读成记号
 - 保留 `&nbsp;` 与细空格（`\u2009`）在公式两侧的位置，序列化时不 trim 内部空白
 - 一个块内 void 占位符超过阈值（初值 40）时，视为公式密集块，仍走 markup 路径但单独成批
 
@@ -259,7 +266,7 @@ interface ProtectedBlock {
 
 - **带功能的元素整块保留** [决定，2026-09-05，issue #44]：样式丢了还能读，链接丢了就点不动了——降级不能把原本可点击的内容变成纯文字。`a[href]`（`FUNCTIONAL_INLINE`）在这条路径上按 void 处理：整块原样保留、内部文字不翻，跳过时按嵌套深度数 `</t>`，免得内层的结束标记提前收尾。**实测 12 篇 fixture 的 4221 个翻译块里这种链接有 0 个**——arXiv 正文的链接全是 `.ltx_ref` 交叉引用或 mailto，规则层已当受保护节点原样保留——所以这条不是修一个正在发生的故障，而是把「降级只损样式、不损行为」变成结构保证，同时给 v2 的其他论文站点兜底
 
-`preservesMarkup: false` 的引擎专用，同时也是 markup 路径校验失败后的兜底。v1 的三个免费引擎实测都保留占位符（RESEARCH.md §5 / §6），runs 在 v1 主要以兜底身份存在，但实现不能省：
+`wireFormats: []`（一个占位符都保不住）的引擎专用，同时也是 markup / markers 路径校验失败后的兜底。v1 的三个免费引擎实测都保留占位符（RESEARCH.md §5 / §6），runs 在 v1 主要以兜底身份存在，但实现不能省：
 - 以 void 节点为分隔，把块切成若干文本段（paired 节点内的文字并入所在段，丢失其样式）
 - 每段单独翻译，按原顺序拼回，void 节点克隆插回原位
 - 已知代价：被公式打断的句子各翻各的；这是可接受的降级
@@ -515,7 +522,7 @@ export interface TranslationProvider {
   id: string                        // 'openai-compat' | 'anthropic' | 'gemini' | 'chrome-builtin' | 'google-web'
   displayName: string
   kind: 'llm' | 'mt' | 'builtin'
-  preservesMarkup: boolean          // true → markup 路径；false → runs 路径
+  wireFormats: readonly WireFormat[] // 保得住的线上格式，按偏好排序；空 = 只能走 runs
   maxBatchChars: number             // 单次请求字符上限
   maxBatchItems: number             // 单次请求段落数上限
   rateLimit?: { rate: number; capacity: number }  // 令牌桶速率；不声明用服务默认的 8/s、突发 20（Read Frog 默认值）
@@ -543,15 +550,15 @@ export interface TranslateResult {
 
 ### 8.1 v1 providers [决定]
 
-| id | 实现 | preservesMarkup |
+| id | 实现 | wireFormats |
 |---|---|---|
-| `openai-compat` | Vercel AI SDK `@ai-sdk/openai-compatible` 的 `createOpenAICompatible({ baseURL })`，覆盖 OpenRouter（默认端点）、DeepSeek、Ollama 等；默认模型取便宜快速档，设置页可改 | true |
-| `anthropic` | AI SDK `@ai-sdk/anthropic` | true |
-| `gemini` | AI SDK `@ai-sdk/google` | true |
-| `chrome-builtin` | `Translator` API（Chrome 138+ 桌面），类型来自 `@types/dom-chromium-ai`，约定见 §8.4；2026-09-05 实现 | true（实测保留标签与 void / paired 占位符）|
-| `google-web` | `translate-pa.googleapis.com/v1/translateHtml`，移植 Read Frog `utils/host/translate/api/google.ts`；一次请求多条，body `[[[items...], from, to], "wt_lib"]` | true（实测原样保留 void / paired 占位符）|
+| `openai-compat` | Vercel AI SDK `@ai-sdk/openai-compatible` 的 `createOpenAICompatible({ baseURL })`，覆盖 OpenRouter（默认端点）、DeepSeek、Ollama 等；默认模型取便宜快速档，设置页可改 | `['tags']` |
+| `anthropic` | AI SDK `@ai-sdk/anthropic` | `['tags']` |
+| `gemini` | AI SDK `@ai-sdk/google` | `['tags']` |
+| `chrome-builtin` | `Translator` API（Chrome 138+ 桌面），类型来自 `@types/dom-chromium-ai`，约定见 §8.4；2026-09-05 实现 | `['tags']`（实测保留标签与 void / paired 占位符）|
+| `google-web` | `translate-pa.googleapis.com/v1/translateHtml`，移植 Read Frog `utils/host/translate/api/google.ts`；一次请求多条，body `[[[items...], from, to], "wt_lib"]` | `['tags', 'markers']`（实测标签 100%、记号 98.9%；两种都保得住，所以选微软时它才留得住做兜底）|
 
-`preservesMarkup: true` 的免费引擎仍走 §6.3 的校验，失败后降级 runs；runs 路径退为纯兜底。
+声明了线上格式的免费引擎仍走 §6.3 的校验，失败后降级 runs；runs 路径退为纯兜底。`wireFormats: []` 表示一个占位符都保不住，整条会话走 runs——**这时格式护栏整个让开**，任何可用引擎都能进链兜底，因为 runs 发的是纯文本段，本来就不需要共同格式。
 
 **`anthropic` / `gemini` 暂不实现** [决定，2026-09-05]：两者与 `openai-compat` 走同一套 AI SDK 协议，而默认端点 OpenRouter 本身就代理 Claude 与 Gemini 全系模型——直连只对"手里有官方 key"的用户多一点价值，代价是两个 SDK 包、两套配置形状与设置页字段。按"搬不搬只看有无负面影响"的判据是有负担、收益小，等有人真的需要直连再加。表里保留它们作为接口形状的说明。
 
@@ -620,7 +627,10 @@ export interface TranslateResult {
 - **不进 `translate-service`** [决定]：那里已经是"一个 provider 一套队列 + 缓存 + 批处理"的闭包，缓存键带 `providerId | model | promptKey`，不同引擎的译文天然分开存。链做成外面薄薄一层 `providers/fallback.ts`（约 110 行）：每个步骤一个完整服务，链只管在失败时把**同一个 call** 交给下一步。塞进服务内部会把队列、攒批、缓存三件事和引擎选择耦在一起
 - **降级期限分两档**：`no-key` / `auth` 是配置问题、不会自己好，本会话内永久降级；`network` / `timeout` / `rate-limit` / `invalid-response` / `unknown` 是瞬时的，降级 60s 冷却后自动恢复，该引擎一旦成功立即清空记录。队列自己的重试（retry-policy）跑完才会走到链上，所以链不叠加重试；冷却是为了避免持续故障时每次调用都白等一遍最长 120s 的批次超时。`aborted` 永不降级也永不记账——会话取消不是引擎的错，换个引擎重来只会再被取消一次
 - **全部降级后退回最后一步**：宁可再失败一次并把错误如实报给 `run.ts`（它据此停下并画失败小部件），也不能出现"无引擎可用"的状态
-- **能力不变量**：`preservesMarkup` 决定渲染路径，而 `run.ts` 只在开始时取一次 `capabilities`；中途换路径会让先后渲染的块两套形状。因此链要求所有步骤的 `preservesMarkup` 一致，不一致的在组装时剔除并告警。v1 三个 provider 都是 `true`，这条是给将来的护栏
+- **能力不变量**：渲染路径决定块的形状，而 `run.ts` 只在开始时取一次 `capabilities`；中途换路径会让先后渲染的块两套形状。因此**一次会话只能有一种线上格式**。链在组装时取 `wireFormats` 的交集：与当前交集没有公共格式的候选剔除并告警；不可用的候选不参与，也不压窄交集；最终格式取首选引擎偏好序里第一个仍在交集中的。交集随加入的引擎收缩，所以结果依赖免费引擎表的顺序——那本来就是一份偏好排序
+  - 选 Google（`['tags','markers']`）→ 接上内置（`['tags']`）→ 交集 `{tags}` → 走 `markup`，内联样式保得住
+  - 选微软（`['markers']`）→ 内置无交集被剔除，Google 留下 → 交集 `{markers}` → 走 `markers`
+  - 这条护栏因此不是「格式必须相等」而是「交集非空」。布尔位表达不了「两种都行」，会逼得选了微软就没有兜底（#104）
 - **可见性**：`axt:provider-status` 的 `engine` 带实际引擎与降级原因（2026-09-06 起链在 background，不再挂在 `PageStatus` 上），popup 在翻译进行时随进度一起轮询、降级时显示一条提示，写明免费引擎术语准确度不如 LLM（§8.1 的"weights → 重量"）以及"修好设置后恢复原文再翻即可切回"。降级同时打一条 `console.warn`，e2e 与用户排查都靠它
 - **用户修好配置后链要回到首选**：popup 下载完语言包时发 `axt:engine-ready`，background **重建整条链**。这比"撤销降级记录"更彻底——建链时 `isAvailable()` 为假、根本没进链的引擎，撤记录是救不回来的，而链常驻之后这种情况反而更常见（链可能在用户下载语言包之前很久就建好了）。因此 `FallbackService` 没有 `reset()`
 - **开关**：配置 v5 的 `fallback.enabled`，默认开启；关掉后链只有配置的那个引擎，行为与实现之前完全一致。e2e 两条分别守住这两种行为
@@ -628,7 +638,7 @@ export interface TranslateResult {
 ## 9. 缓存与配置
 
 - 译文缓存：IndexedDB，**Dexie**，移植 FluentRead `services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层），crypto-js 换成 Web Crypto SHA-256（v0.4 修订，原定 idb-keyval）
-- 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；**`providerId` 取 `provider.cacheId ?? provider.id`** [决定，2026-09-05，issue #45]：`openai-compat` 这个 id 对所有 OpenAI 兼容端点都一样，只用 id + 模型名的话，OpenRouter 上的同名模型与本机 Ollama 上的共用缓存条目、译文互相污染。provider 自己声明身份（`openai-compat:<origin><path>`，**路径要带上**：同一域名下不同路径可能是不同网关路由、指向不同后端，只取 origin 会让两条路由共用条目；末尾斜杠归一化），**绝不放 API key**（硬规则 7）；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
+- 缓存键：`sha256(providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText)`；`renderPath` 三取值 `markup` / `markers` / `runs`——同一段没有占位符的原文在三条路径下线上文本相同，只有它能把三者分开，批次键也用同一个字段，两种格式的段落不会攒进同一批（`CACHE_KEY_VERSION` 因此升到 3）；**`providerId` 取 `provider.cacheId ?? provider.id`** [决定，2026-09-05，issue #45]：`openai-compat` 这个 id 对所有 OpenAI 兼容端点都一样，只用 id + 模型名的话，OpenRouter 上的同名模型与本机 Ollama 上的共用缓存条目、译文互相污染。provider 自己声明身份（`openai-compat:<origin><path>`，**路径要带上**：同一域名下不同路径可能是不同网关路由、指向不同后端，只取 origin 会让两条路由共用条目；末尾斜杠归一化），**绝不放 API key**（硬规则 7）；`normalizedText` = NFC 归一化 + 连续空白折成一个空格 + 首尾 trim，占位符文本参与哈希
 - 值：`{ text: string; ts: number; paper: string }`，`paper` 用 arXiv id，便于按论文清理和导出。TTL 30 天、上限 20,000 条 / 50 MB、单条 256 KB、内存热层 256 条；缓存只在 background 持有并直接读写（IndexedDB 按扩展 origin 隔离，跨论文共享）；翻译请求本身也在 background，所以 content 完全不碰缓存，每批少两次消息往返（§8.0，2026-09-06）
 - **缓存管理只在设置页做全局清空** [决定，2026-09-05]：`axt:cache-stats` 显示条数与体积，`axt:cache-clear`（不带 paper）清空整库，切回设置页时重读统计（翻译发生在别的标签页，不重读就永远显示打开那一刻的数字）。两条消息的响应都是 `{ ok: true, … } | { ok: false, message }`：**失败不能显示成「缓存是空的」或「已删除 0 条」**，IndexedDB 用不了时那是最不该骗人的地方（Codex 在 #52 指出）。统计前先跑一次 `cleanup()` 清掉过期条目——`get()` 只是把它们当未命中、从不删除，不清的话页面上会一直显示一堆用不了的条数与体积；这也是 `cleanup()` 在运行时唯一的调用点，所以它失败要抛出去而不是吞掉，否则统计会把清不掉的过期条目当成功结果报出去。**不做「只清本篇」**：设置页是独立扩展页面，没有当前论文的概念，为它绕一圈问 content script 不值当；真正需要按篇清的场景（这篇译得不好想重来）在 popup 上更顺手，留作后续。缓存键本来就带引擎、模型、提示词、术语表，换任何一样都不会命中旧译文，手动清是兜底而不是常规操作
 - **淘汰不扫全库** [决定]：条数与字节数在内存里增量维护（`byteSize` 索引，Dexie schema v2；只用 `orderBy(index).keys()` 读索引键初始化，不反序列化记录），只有真的超过上限才按 `lastAccessedAt` 批量取最旧的条目删除。原版 FluentRead 每次 `set` 都把整库记录读出来求和，一篇论文几百次写入、库到几千条后每次写入都要反序列化整库；MV3 的 service worker 是单线程，其他消息会排在后面等几十秒（实测 fake-indexeddb：2000 条时 5.5 ms/set 且随库线性增长，改后稳定在 0.11 ms/set）
@@ -838,7 +848,7 @@ content script                       background (service worker)          axt-he
 - **`nativeMessaging` 暂作必需权限** [决定，2026-09-07，Codex 在 #87 建议改可选]：必需权限会让商店安装 / 更新时弹「与本机应用通信」的警告，非 Mac 用户也看得到，更新加权限还可能让已装的扩展停用到用户接受为止。这些都只在**分发**时发生，未打包加载没有这一步；分发立项时随签名 / pkg 一起改成 `optional_permissions` + 设置页的授权按钮（`permissions.request` 要用户手势，保存按钮就是），e2e 照 local-endpoint 那样复制一份构建产物、给副本的 manifest 加上权限——原生授权弹窗 Playwright 点不到
 - **协议版本**：请求带 `v`，helper 不认就回 `unsupported-protocol`；扩展侧握手时核对回应的 `v`，对不上按握手失败处理（排队的活拒掉、断开端口），设置页显示「请重新安装 helper」。扩展与 helper 分开安装，版本会对不上
 - **首次 OCR 的超时**：本 worker 里第一次识别给 120 s（机器上第一次跑 Vision 要做一次性模型准备，实测 26.6 s，30 s 会把健康的 helper 当挂了），成功过一次之后按 30 s
-- 后话：helper 存在后可顺手加 `apple-translate` provider（`preservesMarkup: false`，Mac 专属、离线），macOS 15 上需用透明窗口承载 SwiftUI 的变通方案（参考 SystemTranslation 库），macOS 26 可直接初始化
+- 后话：helper 存在后可顺手加 `apple-translate` provider（`wireFormats: []`，Mac 专属、离线），macOS 15 上需用透明窗口承载 SwiftUI 的变通方案（参考 SystemTranslation 库），macOS 26 可直接初始化
 
 ### 15.4b helper 实测（2026-09-07，用户给的参考图 579×699，Apple Silicon，macOS 27）
 

@@ -3,6 +3,8 @@
 // 429 暂停与暂停后的单探针、401 / no-key 排空整队、按 scope 取消；BatchQueue 把同一批次键的段落攒成一批，
 // 派发闸让它在限流期间多攒少发。组装方式照 Read Frog 的 background/translation-queues.ts，只是跑在 content 侧（§8.0）。
 // 与运行上下文无关：缓存通过 CachePort 注入，background 用本地 Dexie，content 用消息代理。
+import type { WireFormat } from '@/core/protector'
+import { wireFormatOf } from '@/cache/key'
 import { cacheKeyFor, type RenderPath } from '@/cache/key'
 // 深引 validate 而不是 protector 的桶：serialize / rehydrate 要碰 DOM，那两个不该进 background 的包
 import { expectationsFromText, validate } from '@/core/protector/validate'
@@ -133,10 +135,13 @@ function uniqueIds(items: QueueItem[]): string[] {
 
 /**
  * 只有占位符校验通过的译文才写缓存：坏译文入了库，之后每次都要先读到它、再花一次请求重来
- *（Codex 在 #30 指出）。期望从**请求文本**反推——`serialize` 转义过原文里字面的 `<` `>`，
- * 请求文本里的标签必然是占位符，所以不需要把校验回调传过消息边界（issue #42）
+ *（Codex 在 #30 指出）。期望从**请求文本**反推——两种格式的转义都保证「线上出现的占位符
+ * 必然是我们写进去的」（protector/text.ts 的不可伪造性论证），所以不需要把校验回调传过消息边界（issue #42）。
+ * **格式必须跟着 renderPath 走**：拿 tags 的分词器扫 markers 文本会认不出任何占位符，
+ * 期望为空 → 校验恒真 → 被打烂的译文静默进缓存
  */
-const admits = (source: string, translated: string): boolean => validate(translated, expectationsFromText(source)).ok
+const admits = (source: string, translated: string, format: WireFormat): boolean =>
+  validate(translated, expectationsFromText(source, format)).ok
 
 /** 超预算就当全部未命中：多花一次请求，好过整页停在这里。OCR 服务读缓存也用它（Codex 在 #87 指出） */
 export async function readWithBudget(store: CachePort, keys: string[], budgetMs: number): Promise<(string | null)[]> {
@@ -298,7 +303,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           }
           translated.set(item.id, outcome.value)
           const key = keys.get(item.id)
-          if (store && cache && key && admits(item.text, outcome.value)) writes.push({ key, translation: outcome.value, paper: cache.paper })
+          if (store && cache && key && admits(item.text, outcome.value, wireFormatOf(cache.renderPath))) writes.push({ key, translation: outcome.value, paper: cache.paper })
         })
         // 写之前再查一次取消（Codex 在 #33 指出）：一次调用会被拆到多个批次，先完成的那些
         // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，

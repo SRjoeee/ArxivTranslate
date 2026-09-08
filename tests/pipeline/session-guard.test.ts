@@ -27,7 +27,7 @@ describe('启动期间恢复原文（issue #45 实验 1）', () => {
       target: 'cmn',
       mode: 'stack',
       paper: '0000.00000',
-      capabilities: { maxBatchChars: 1000, maxBatchItems: 4, preservesMarkup: true },
+      capabilities: { maxBatchChars: 1000, maxBatchItems: 4, renderPath: 'markup' },
       preload: { margin: 1000, threshold: 0 },
       transport: async () => ({ ok: false, error: { kind: 'aborted', message: '不该发出请求' } }),
     })
@@ -50,7 +50,7 @@ describe('缓存读取的等待预算：换任何 CachePort 都不会被拖死�
     const calls: string[][] = []
     const service = createTranslateService({
       getProvider: async () => ({
-        id: 'mock', displayName: 'mock', kind: 'llm', preservesMarkup: true, maxBatchChars: 1000, maxBatchItems: 4,
+        id: 'mock', displayName: 'mock', kind: 'llm', wireFormats: ['tags'] as const, maxBatchChars: 1000, maxBatchItems: 4,
         isAvailable: async () => true,
         translate: async r => { calls.push(r.segments.map(s => s.id)); return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' } },
       }),
@@ -161,7 +161,7 @@ describe('取消跨了消息边界（issue #42）', () => {
       target: 'cmn',
       mode: 'stack',
       paper: '0000.00000',
-      capabilities: { maxBatchChars: 1000, maxBatchItems: 10, preservesMarkup: true },
+      capabilities: { maxBatchChars: 1000, maxBatchItems: 10, renderPath: 'markup' },
       preload: { margin: 1000, threshold: 0 },
       scope: 'session-1',
       transport: call => transport.translate(call),
@@ -196,7 +196,7 @@ describe('取消之后不再写缓存（Codex 在 #33 指出）', () => {
     const service = createTranslateService({
       // 每批最多 1 条：a 立刻回，b 挂住，等取消之后再放行
       getProvider: async () => ({
-        id: 'mock', displayName: 'mock', kind: 'llm', preservesMarkup: true, maxBatchChars: 1000, maxBatchItems: 1,
+        id: 'mock', displayName: 'mock', kind: 'llm', wireFormats: ['tags'] as const, maxBatchChars: 1000, maxBatchItems: 1,
         isAvailable: async () => true,
         translate: async r => {
           if (r.segments[0]?.id === 'b') await held

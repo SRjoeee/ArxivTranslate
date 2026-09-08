@@ -7,7 +7,7 @@ const provider = (id: string): TranslationProvider => ({
   id,
   displayName: id.toUpperCase(),
   kind: 'llm',
-  preservesMarkup: true,
+  wireFormats: ['tags'] as const,
   maxBatchChars: 1000,
   maxBatchItems: 4,
   isAvailable: async () => true,

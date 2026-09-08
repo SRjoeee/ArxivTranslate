@@ -102,3 +102,40 @@ describe('降级不能把可点击的内容变成纯文字（issue #44）', () =
     expect(holder.textContent).toBe('译[We follow it.]')
   })
 })
+
+describe('runs 路径（markers）', () => {
+  // markers 只有 void，成对占位符在序列化时就拍平了，所以切段结果比 tags 少一个槽位
+  const para = () => el('<p class="ltx_p">Let <math class="ltx_Math"><mi>x</mi></math> be <em class="ltx_emph">bold</em> per <a class="ltx_ref" href="#S2">2</a>.</p>')
+
+  it('以 void 切段：<em> 已被拍平，链接仍是 void', () => {
+    const layout = splitRuns(serialize(para(), 'markers'))
+    expect(layout.runs).toEqual(['Let ', ' be bold per ', '.'])
+    expect(layout.items).toEqual([
+      { kind: 'text', run: 0 }, { kind: 'void', id: 1 }, { kind: 'text', run: 1 }, { kind: 'void', id: 2 }, { kind: 'text', run: 2 },
+    ])
+  })
+
+  it('切段时还原 @@：转义不该漏进送翻译的文本', () => {
+    const b = serialize(el('<p class="ltx_p">a@b.com <math class="ltx_Math"><mi>x</mi></math> @c#</p>'), 'markers')
+    expect(b.text).toBe('a@@b.com @a# @@c#')
+    const layout = splitRuns(b)
+    expect(layout.runs).toEqual(['a@b.com ', ' @c#'])
+  })
+
+  it('拼回：文字齐全、void 原样，markers 不解 HTML 实体之外的东西', () => {
+    const p = para()
+    const b = serialize(p, 'markers')
+    const layout = splitRuns(b)
+    const html = htmlOf(joinRuns(layout.runs, layout, b, document))
+    expect(html).toBe(stripIds('Let <math class="ltx_Math"><mi>x</mi></math> be bold per <a class="ltx_ref" href="#S2">2</a>.'))
+  })
+
+  it('拼回译文时实体解回来：markers 也转义 & < >', () => {
+    const b = serialize(el('<p class="ltx_p">a &lt; b <math class="ltx_Math"><mi>x</mi></math> c</p>'), 'markers')
+    expect(b.text).toBe('a &lt; b @a# c')
+    const layout = splitRuns(b)
+    // 送出去的段保持线上形态（issue #111）：markers 与 tags 在这一点上一致
+    expect(layout.runs).toEqual(['a &lt; b ', ' c'])
+    expect(htmlOf(joinRuns(['甲 &lt; 乙 ', ' 丙'], layout, b, document))).toBe('甲 &lt; 乙 <math class="ltx_Math"><mi>x</mi></math> 丙')
+  })
+})

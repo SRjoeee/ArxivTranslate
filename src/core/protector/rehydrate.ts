@@ -13,7 +13,7 @@ export function rehydrate(translated: string, block: ProtectedBlock, doc: Docume
   const stack: (DocumentFragment | Element)[] = [fragment]
   const top = () => stack[stack.length - 1]!
 
-  for (const t of tokenize(translated)) {
+  for (const t of tokenize(translated, block.format)) {
     if (t.kind === 'text') {
       top().append(doc.createTextNode(decodeText(t.text)))
     } else if (t.kind === 'void') {

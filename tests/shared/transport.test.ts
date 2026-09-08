@@ -45,7 +45,7 @@ describe('createMessageTransport', () => {
   })
 
   it('status 直接透传 axt:provider-status；失败要往上抛，start() 据此拒绝开始', async () => {
-    const { sent, send } = recorder(() => ({ providerId: 'mock', available: true, maxBatchChars: 1, maxBatchItems: 1, preservesMarkup: true, chain: ['mock'], engine: { id: 'mock', displayName: 'Mock' } }))
+    const { sent, send } = recorder(() => ({ providerId: 'mock', available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'markup' as const, chain: ['mock'], engine: { id: 'mock', displayName: 'Mock' } }))
     expect((await createMessageTransport(send).status()).providerId).toBe('mock')
     expect(sent).toEqual([{ type: 'axt:provider-status' }])
     const dead = recorder(() => { throw new Error('后台未响应') })

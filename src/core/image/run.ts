@@ -5,8 +5,9 @@
 // 过滤数字与单字母 → 框里的原文按 translateTitle 的纯文本路径送现有 provider（同一批带图注做上下文）→
 // 插叠加层。**每个 await 之后重查会话**（与文字管线同一模式）：恢复原文 / 重开之后到达的结果一律丢弃。
 // 等待 / 失败没有 DOM 节点（§15.2）：失败记在这里，popup 显示、重试按钮管。
+import { type RenderPath, wireFormatOf } from '@/cache/key'
 import { ID_ATTR } from '@/core/extractor'
-import { decodeText, escapeText } from '@/core/protector/text'
+import { escapeText, unescapeText } from '@/core/protector/text'
 import { type ImageLabel, type ImageTarget, clearImage, renderImage } from '@/core/renderer/image'
 import { DOCUMENT_ROOT, FIGURE_SELECTORS } from '@/core/rules/latexml'
 import { INJECTED_SELECTOR } from '@/core/marks'
@@ -42,6 +43,8 @@ export interface ImageRunOptions {
   /** 目标语言（ISO 639-3，与文字管线相同） */
   target: string
   scope: string
+  /** 会话协商出的渲染路径（§8.5）：OCR 行也走同一条线，转义与缓存键必须跟着它 */
+  renderPath: RenderPath
   preload: PreloadOptions
   context?: TranslateContext
   ocr: (call: OcrCall) => Promise<OcrMessageResponse>
@@ -226,12 +229,12 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       const context: TranslateContext = { ...options.context, ...(caption ? { sectionTitle: caption } : {}) }
       const res = await options.translate({
         request: {
-          segments: boxes.map((box, i) => ({ id: `${target.id}#L${i}`, text: escapeText(box.text) })),
+          segments: boxes.map((box, i) => ({ id: `${target.id}#L${i}`, text: escapeText(box.text, wireFormatOf(options.renderPath)) })),
           source: 'en',
           target: options.target,
           context: Object.keys(context).length ? context : undefined,
         },
-        cache: { paper: options.paper, renderPath: 'markup' },
+        cache: { paper: options.paper, renderPath: options.renderPath },
         scope: options.scope,
       })
       if (!alive()) return
@@ -251,7 +254,8 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
         }
         return fail(target, `翻译失败：${res.error.message}`)
       }
-      const translated = new Map(res.result.segments.map(s => [s.id, decodeText(s.text)]))
+      // 转义用的是协商出的格式，反转义必须用同一个：原来这里连格式都没传，markers 下会拿 HTML 实体规则去解一段纯文本
+      const translated = new Map(res.result.segments.map(s => [s.id, unescapeText(s.text, wireFormatOf(options.renderPath))]))
       const labels: ImageLabel[] = []
       for (const [i, box] of boxes.entries()) {
         const text = translated.get(`${target.id}#L${i}`)?.trim()

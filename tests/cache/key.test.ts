@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCacheKey, normalizeText, ocrCacheKey, type CacheIdentity } from '@/cache/key'
+import { buildCacheKey, cacheKeyFor, normalizeText, ocrCacheKey, wireFormatOf, type CacheIdentity } from '@/cache/key'
 
 const base: CacheIdentity = {
   providerId: 'openai-compat', model: 'm', promptVersion: '1', promptKey: 'default', context: { paperTitle: 'P', abstract: 'A' }, rulesVersion: '0.2.0', target: 'zh-CN', renderPath: 'markup',
@@ -75,5 +75,22 @@ describe('ocrCacheKey（DESIGN §15.2）', () => {
     expect(await ocrCacheKey('abd', '0.1.0')).not.toBe(key)
     expect(await ocrCacheKey('abc', '0.2.0')).not.toBe(key)
     expect(await buildCacheKey({ ...base, text: 'abc' })).not.toBe(key)
+  })
+})
+
+describe('renderPath 进键（#104）', () => {
+  // 大多数块在两种格式下线上文本本来就不同（记号更短、成对占位符被拍平），键自然分开；
+  // 但没有占位符的纯文字块两边文本一模一样，这时只剩 renderPath 能分开它们。
+  // 批次键也用同一个字段（translate-service 的 batchKey），两种格式的段落不会攒进同一批
+  it('同一段没有占位符的原文，三条路径算出三个不同的键', async () => {
+    const base = { providerId: 'p', model: 'm', promptKey: '', target: 'zh-CN', text: 'Hello world.' }
+    const keys = await Promise.all((['markup', 'markers', 'runs'] as const).map(renderPath => cacheKeyFor({ ...base, renderPath })))
+    expect(new Set(keys).size).toBe(3)
+  })
+
+  it('wireFormatOf：只有 markers 走记号，其余都按 tags 转义', () => {
+    expect(wireFormatOf('markers')).toBe('markers')
+    expect(wireFormatOf('markup')).toBe('tags')
+    expect(wireFormatOf('runs')).toBe('tags')
   })
 })

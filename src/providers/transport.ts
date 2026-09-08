@@ -4,6 +4,7 @@
 // - createMessageTransport（src/shared/transport.ts）：在 content / options 里把每个方法变成一条消息。
 // 两个实现分文件是为了包体积：本文件会拉进三个 provider 与 AI SDK，content script 每打开一篇论文都要解析它。
 import type { Config } from '@/config/schema'
+import type { RenderPath } from '@/cache/key'
 import { buildChain } from '.'
 import { createFallbackService } from './fallback'
 import { createTranslateService, type CachePort, type TranslateCall, type TranslateMessageResponse, type TranslateServiceDeps } from './translate-service'
@@ -30,7 +31,8 @@ export interface ProviderStatus {
   /** content 侧规划批次与选择渲染路径要用（§2 第 3 条） */
   maxBatchChars: number
   maxBatchItems: number
-  preservesMarkup: boolean
+  /** 协商出的渲染路径（§8.5）：一次会话只有一个，content 侧据此序列化与算缓存键 */
+  renderPath: RenderPath
   engine: EngineStatus
   /** 链上引擎的 id，按优先级。popup 用它判断刚下好语言包的引擎有没有进链，e2e 用它断言降级 */
   chain: string[]
@@ -47,7 +49,7 @@ export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' |
   /** 缓存端口。background 传本地 Dexie；不传就不缓存（测试） */
   cache?: CachePort
   /** 换掉建链（测试用） */
-  buildChain?: (config: Config) => Promise<TranslationProvider[]>
+  buildChain?: (config: Config) => Promise<{ chain: TranslationProvider[]; renderPath: RenderPath }>
 }
 
 /**
@@ -56,7 +58,7 @@ export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' |
  * 分享同一份并发预算，同时翻两篇的吞吐减半，但不会互相把对方打进限流。
  */
 export async function createLocalTransport(config: Config, deps: LocalTransportDeps = {}): Promise<TranslationTransport> {
-  const chain = await (deps.buildChain ?? buildChain)(config)
+  const { chain, renderPath } = await (deps.buildChain ?? buildChain)(config)
   const primary = chain[0]!
   const model = config.provider === 'openai-compat' ? config.openaiCompat.model : undefined
   const steps = chain.map(engine => ({
@@ -106,7 +108,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
       model,
       maxBatchChars: primary.maxBatchChars,
       maxBatchItems: primary.maxBatchItems,
-      preservesMarkup: primary.preservesMarkup,
+      renderPath,
       chain: chain.map(engine => engine.id),
       engine: {
         id: active.id,
