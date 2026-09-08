@@ -82,6 +82,15 @@ describe('buildChain 的格式协商', () => {
     expect(renderPath).toBe('runs')
   })
 
+  it('renderPath 就是协商出的线上格式本身，中间不做转换（#116）', async () => {
+    // 这条钉的是契约。真正的护栏是类型：`RenderPath = WireFormat | 'runs'`，所以 `renderPath: format`
+    // 能直接通过；将来加第三种 WireFormat 会自动流下去，而不是被一个 `? :` 静默改写成 tags
+    for (const fmt of ['tags', 'markers'] as const) {
+      const { renderPath } = await buildChain(DEFAULT_CONFIG, { primary: engine('x', [fmt]), freeEngines: [] })
+      expect([fmt, renderPath]).toEqual([fmt, fmt])
+    }
+  })
+
   it('关掉降级就只剩首选，格式取它自己的偏好', async () => {
     const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web', fallback: { enabled: false } }, {
       freeEngines: [() => engine('microsoft-ish', ['markers'])],
