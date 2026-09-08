@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { VOID_DENSE_THRESHOLD, joinRuns, rehydrate, serialize, splitRuns, validate } from '@/core/protector'
-import { htmlOf, stripIds } from './helpers'
+import { htmlOf, sameModuloWhitespace, stripIds } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 
@@ -26,7 +26,8 @@ describe('fixture 往返', () => {
         if (block.voidCount > VOID_DENSE_THRESHOLD) dense++
         const v = validate(block.text, block)
         expect(v.ok, `${f} 恒等校验失败：${target.id || target.className}`).toBe(true)
-        expect(htmlOf(rehydrate(block.text, block, doc)), `${f} 回填不等价：${target.id || target.className}`).toBe(stripIds(target.innerHTML))
+        const [got, want] = sameModuloWhitespace(htmlOf(rehydrate(block.text, block, doc)), stripIds(target.innerHTML))
+        expect(got, `${f} 回填不等价：${target.id || target.className}`).toBe(want)
         const layout = splitRuns(block)
         joinRuns(layout.runs, layout, block, doc)
       }

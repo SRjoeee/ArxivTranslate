@@ -76,3 +76,40 @@ describe('serialize', () => {
     expect(b.slots.size).toBe(1)
   })
 })
+
+describe('空白折叠（#119）', () => {
+  it('硬换行折成一个空格——微软把每个换行当句号', () => {
+    // LaTeXML 的 HTML 带硬换行，12 篇 fixture 的 3847 个正文块里 2373 个（62%）有。
+    // 实测同一段：带换行时 srcSentLen 切成 5 句、state explosion 译成「州级爆炸性质」；
+    // 折叠后 2 句、「状态爆炸」
+    const block = serialize(el('<p class="ltx_p">Automatic verification faces state\nexplosion due to\nthe interleavings.</p>'))
+    expect(block.text).toBe('Automatic verification faces state explosion due to the interleavings.')
+  })
+
+  it('制表符与连续空格一起折', () => {
+    expect(serialize(el('<p class="ltx_p">a \t\n  b</p>')).text).toBe('a b')
+  })
+
+  it('&nbsp; 一个都不动——它在 LaTeXML 里是禁止折行的排版，HTML 也不折叠它', () => {
+    // JS 的 \s 含 U+00A0，用 \s 折叠会把 `W.&nbsp;Arendt` 变成 `W. Arendt`（参考文献块里到处都是）
+    const block = serialize(el('<p class="ltx_p">W.\u00a0Arendt,\n  no.\u00a01, see Section\u00a01.1</p>'))
+    expect(block.text).toBe('W.\u00a0Arendt, no.\u00a01, see Section\u00a01.1')
+    expect(block.text).toContain('\u00a0')
+  })
+
+  it('首尾空白保留，不 trim——相邻行内块靠它分开', () => {
+    // `<span>A</span><span>B</span>` 渲染成 AB，`<span>A </span>` 才是 A B。
+    // 作者名与联系方式标签就是这种相邻行内块（§5.2），trim 会让相邻译文粘连
+    expect(serialize(el('<p class="ltx_p"> a b </p>')).text).toBe(' a b ')
+    // 但首尾的**换行**仍然折成空格，不是原样留着
+    expect(serialize(el('<p class="ltx_p">\n  a b\n</p>')).text).toBe(' a b ')
+  })
+
+  it('折叠不碰占位符的内部结构', () => {
+    const block = serialize(el('<p class="ltx_p">see\n<math><mi>x</mi></math>\nand\n<math><mi>y</mi></math></p>'))
+    // 不钉 id 编号（那是分配器的事），钉的是折叠没把 `<x id="N"/>` 内部的那个空格也吃掉、
+    // 也没把公式两侧的分词空格折没
+    expect(block.text).toMatch(/^see <x id="\d+"\/> and <x id="\d+"\/>$/)
+    expect(block.slots.size).toBe(2)
+  })
+})
