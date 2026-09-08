@@ -20,7 +20,7 @@ const engine = (id: string, wireFormats: readonly WireFormat[], available = true
 
 /** 首选走 google-web（两种格式都保得住），免费引擎表由测试给 */
 const chainOf = (free: TranslationProvider[]) =>
-  buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' }, free.map(p => () => p))
+  buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' }, { freeEngines: free.map(p => () => p) })
 
 describe('buildChain 的格式协商', () => {
   beforeEach(() => fakeBrowser.reset())
@@ -61,10 +61,21 @@ describe('buildChain 的格式协商', () => {
     expect(renderPath).toBe('markup')
   })
 
+  it('首选一个格式都保不住时走 runs，兜底引擎照样进链——runs 发的是纯文本，不需要共同格式', async () => {
+    // wireFormats: [] 是 DESIGN §8.1 记着的取值（将来的 apple-translate）。
+    // 空交集会把每个候选都挡掉，首选一挂就没得降级（Codex 在 #107 指出）
+    const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web', fallback: { enabled: true } }, {
+      primary: engine('runs-only', []),
+      freeEngines: [() => engine('tags-ish', ['tags']), () => engine('markers-ish', ['markers'])],
+    })
+    expect(chain.map(p => p.id)).toEqual(['runs-only', 'tags-ish', 'markers-ish'])
+    expect(renderPath).toBe('runs')
+  })
+
   it('关掉降级就只剩首选，格式取它自己的偏好', async () => {
-    const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web', fallback: { enabled: false } }, [
-      () => engine('microsoft-ish', ['markers']),
-    ])
+    const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web', fallback: { enabled: false } }, {
+      freeEngines: [() => engine('microsoft-ish', ['markers'])],
+    })
     expect(chain.map(p => p.id)).toEqual(['google-web'])
     expect(renderPath).toBe('markup')
   })

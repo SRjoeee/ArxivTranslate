@@ -30,3 +30,13 @@ export function decodeText(s: string, format: WireFormat = 'tags'): string {
     return NAMED[body.toLowerCase()] ?? match
   })
 }
+
+/**
+ * **纯文本往返专用**的反转义：标题（§10）与 OCR 行走的是「escapeText → 翻译 → 这里」，
+ * 中间没有分词器，所以 `@@` 得在这一步还原。占位符路径不要用它——那条线的 `@@` 已经在
+ * `tokenize` 里还原过，再来一遍会把字面量 `@@` 吃成 `@`（Codex 在 #107 指出这条不对称）。
+ * `replace` 与分词器一样从左到右不重叠匹配，所以 `@@@@` → `@@`、`@@@@@` → `@@@`，两边一致
+ */
+export function unescapeText(s: string, format: WireFormat = 'tags'): string {
+  return format === 'markers' ? s.replace(/@@/g, '@') : decodeText(s, format)
+}

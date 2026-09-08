@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { RenderPath } from '@/cache/key'
 import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
 import { createTranslateService, type CacheEntry, type CachePort } from '@/providers/translate-service'
 import { ProviderError, type TranslationProvider } from '@/providers/types'
@@ -24,7 +25,7 @@ function fakePort(seed: Record<string, string> = {}) {
 
 const req = (ids: string[]) => ({
   request: { segments: ids.map(id => ({ id, text: `text-${id}` })), source: 'en' as const, target: 'zh-CN' },
-  cache: { paper: '2410.00260', renderPath: 'markup' as const },
+  cache: { paper: '2410.00260', renderPath: 'markup' as RenderPath },
 })
 
 const rateLimited = () => attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
@@ -154,7 +155,7 @@ describe('createTranslateService', () => {
       cache: port,
     })
     const call = req(['a', 'b'])
-    call.cache = { paper: '2410.00260', renderPath: 'markers' as const }
+    call.cache = { paper: '2410.00260', renderPath: 'markers' }
     call.request.segments = [
       { id: 'a', text: '公式 @a# 见此处。' },
       { id: 'b', text: '公式 @a#。' },

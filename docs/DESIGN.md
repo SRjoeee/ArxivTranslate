@@ -240,6 +240,7 @@ interface ProtectedBlock {
 
 - 占位符 id 在块内从 1 递增；`markers` 格式把 id 编成双射二十六进制字母（1→a、27→aa），因为 MT 引擎会重排、合并数字
 - **`markers` 没有成对占位符**（#104 实测成对记号在 Google 上只有 70.6%，不可用）：除了「带功能的元素」按 void 整块保留以保住可点击（与 §6.5 的 issue #44 同一条判断），其余成对元素拍平成纯文本。丢的是内联包装的样式，不是内容
+- **纯文本往返**（标题 §10、OCR 行 §15.2）没有分词器，走 `escapeText` → 翻译 → `unescapeText`。占位符路径不能用 `unescapeText`：那条线的 `@@` 已经在 `tokenize` 里还原过，再来一遍会把字面量 `@@` 吃成 `@`
 - **不可伪造性**：校验与回填的正确性依赖「线上出现的每个占位符都必然是我们写进去的」。`tags` 靠转义 `& < >`；`markers` 靠「`@` 后面跟着 `[a-z]*[#@]` 时翻倍」，解码器左到右先吃 `@@` 再吃记号，因此无歧义。邮箱与 `@app.route` 都不匹配这条规则——12 篇 fixture 的 956012 个线上字符里只有 5 个 `@`，一个都不需要转义；健全性来自这条构造，不是来自这个统计
 - `markers` 不做 HTML 转义：这条线是纯文本，`<` 不是结构字符
 - 保留 `&nbsp;` 与细空格（`\u2009`）在公式两侧的位置，序列化时不 trim 内部空白
@@ -556,7 +557,7 @@ export interface TranslateResult {
 | `chrome-builtin` | `Translator` API（Chrome 138+ 桌面），类型来自 `@types/dom-chromium-ai`，约定见 §8.4；2026-09-05 实现 | `['tags']`（实测保留标签与 void / paired 占位符）|
 | `google-web` | `translate-pa.googleapis.com/v1/translateHtml`，移植 Read Frog `utils/host/translate/api/google.ts`；一次请求多条，body `[[[items...], from, to], "wt_lib"]` | `['tags', 'markers']`（实测标签 100%、记号 98.9%；两种都保得住，所以选微软时它才留得住做兜底）|
 
-声明了线上格式的免费引擎仍走 §6.3 的校验，失败后降级 runs；runs 路径退为纯兜底。
+声明了线上格式的免费引擎仍走 §6.3 的校验，失败后降级 runs；runs 路径退为纯兜底。`wireFormats: []` 表示一个占位符都保不住，整条会话走 runs——**这时格式护栏整个让开**，任何可用引擎都能进链兜底，因为 runs 发的是纯文本段，本来就不需要共同格式。
 
 **`anthropic` / `gemini` 暂不实现** [决定，2026-09-05]：两者与 `openai-compat` 走同一套 AI SDK 协议，而默认端点 OpenRouter 本身就代理 Claude 与 Gemini 全系模型——直连只对"手里有官方 key"的用户多一点价值，代价是两个 SDK 包、两套配置形状与设置页字段。按"搬不搬只看有无负面影响"的判据是有负担、收益小，等有人真的需要直连再加。表里保留它们作为接口形状的说明。
 

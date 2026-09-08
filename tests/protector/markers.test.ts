@@ -1,7 +1,7 @@
 // 纯文本记号格式（#104，DESIGN §6.1）：`@a#`，只有 void，成对占位符拍平。
 // 实测依据见 tokens.ts 的文件头：微软 Edge 端点在标签格式上 0%、在记号上 98%，Google 两种都 ~99%。
 import { describe, expect, it } from 'vitest'
-import { escapeText, expectationsFromText, fromAlpha, rehydrate, serialize, toAlpha, tokenize, validate } from '@/core/protector'
+import { escapeText, expectationsFromText, fromAlpha, rehydrate, serialize, toAlpha, tokenize, unescapeText, validate } from '@/core/protector'
 import { el, htmlOf } from './helpers'
 
 // 'Let @a# be bold per @b#.'（<em> 被拍平，<a class=ltx_ref> 是受保护节点）
@@ -121,5 +121,26 @@ describe('expectationsFromText（markers）', () => {
     expect(validate('完全没有占位符的译文', expectationsFromText(b.text, 'tags')).ok).toBe(true)
     // 传对了就挡得住
     expect(validate('完全没有占位符的译文', expectationsFromText(b.text, 'markers')).ok).toBe(false)
+  })
+})
+
+describe('纯文本往返（标题与 OCR 行）', () => {
+  // 这两条路没有分词器：escapeText → 翻译 → unescapeText。用 decodeText 会原样返回，
+  // 于是标题里会多出一个 @（Codex 在 #107 指出）
+  it('转义 → 反转义是恒等的，包括连续的 @', () => {
+    for (const s of ['@abc#', '@@abc#', '@#', '@a@b#', '@@@', '@@@@', 'a@b.com', 'plain title']) {
+      expect([s, unescapeText(escapeText(s, 'markers'), 'markers')]).toEqual([s, s])
+    }
+  })
+
+  it('markers 的反转义不解 HTML 实体：那会把 OCR 出来的字面量 &amp; 吃掉', () => {
+    expect(unescapeText('a &amp; b', 'markers')).toBe('a &amp; b')
+    expect(unescapeText('a &amp; b', 'tags')).toBe('a & b')
+  })
+
+  it('占位符路径不能用它：tokenize 已经还原过一遍，再来一次会把字面量 @@ 吃成 @', () => {
+    const escaped = escapeText('@@', 'markers')
+    expect(tokenize(escaped, 'markers').map(t => (t.kind === 'text' ? t.text : '')).join('')).toBe('@@')
+    expect(unescapeText(unescapeText(escaped, 'markers'), 'markers')).toBe('@')
   })
 })

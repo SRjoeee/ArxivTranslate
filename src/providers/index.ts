@@ -42,29 +42,33 @@ const FREE_ENGINES: readonly ((config: Config) => TranslationProvider)[] = [
  */
 export async function buildChain(
   config: Config,
-  /** 测试注入：换掉免费引擎表。协商结果依赖顺序与能力，用合成引擎才测得到还没接入的组合（如 markers-only 的微软） */
-  freeEngines: readonly ((config: Config) => TranslationProvider)[] = FREE_ENGINES,
+  /** 测试注入。协商结果依赖顺序与能力，用合成引擎才测得到还没接入的组合（markers-only 的微软、wireFormats 为空的引擎） */
+  deps: { primary?: TranslationProvider; freeEngines?: readonly ((config: Config) => TranslationProvider)[] } = {},
 ): Promise<{ chain: TranslationProvider[]; renderPath: RenderPath }> {
-  const primary = getProvider(config)
+  const freeEngines = deps.freeEngines ?? FREE_ENGINES
+  const primary = deps.primary ?? getProvider(config)
   const chain = [primary]
+  // 首选一个格式都保不住 → 整条会话走 runs。runs 发的是纯文本段，**不需要共同格式**，
+  // 所以这时格式护栏必须整个让开，否则每个候选都会被空交集挡掉、首选一挂就没得降级（Codex 在 #107 指出）
+  const runsOnly = primary.wireFormats.length === 0
   let common = [...primary.wireFormats]
   if (config.fallback.enabled) {
     for (const create of freeEngines) {
       const candidate = create(config)
       if (candidate.id === primary.id) continue
-      const next = common.filter(f => candidate.wireFormats.includes(f))
-      if (next.length === 0) {
+      const next = runsOnly ? [] : common.filter(f => candidate.wireFormats.includes(f))
+      if (!runsOnly && next.length === 0) {
         console.warn(`[axt] ${candidate.displayName} 与当前链没有共同的线上格式，不加入降级链`)
         continue
       }
       if (!(await candidate.isAvailable())) continue
       chain.push(candidate)
-      common = next
+      if (!runsOnly) common = next
     }
   }
-  // 首选一个格式都保不住（wireFormats 为空）就整条链走 runs 兜底
-  const format = primary.wireFormats.find(f => common.includes(f))
-  return { chain, renderPath: format === undefined ? 'runs' : format === 'markers' ? 'markers' : 'markup' }
+  if (runsOnly) return { chain, renderPath: 'runs' }
+  const format = primary.wireFormats.find(f => common.includes(f))!
+  return { chain, renderPath: format === 'markers' ? 'markers' : 'markup' }
 }
 
 export { PROMPT_VERSION } from './prompt'

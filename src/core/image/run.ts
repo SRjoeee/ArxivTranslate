@@ -7,7 +7,7 @@
 // 等待 / 失败没有 DOM 节点（§15.2）：失败记在这里，popup 显示、重试按钮管。
 import { type RenderPath, wireFormatOf } from '@/cache/key'
 import { ID_ATTR } from '@/core/extractor'
-import { decodeText, escapeText } from '@/core/protector/text'
+import { escapeText, unescapeText } from '@/core/protector/text'
 import { type ImageLabel, type ImageTarget, clearImage, renderImage } from '@/core/renderer/image'
 import { DOCUMENT_ROOT, FIGURE_SELECTORS } from '@/core/rules/latexml'
 import { INJECTED_SELECTOR } from '@/core/marks'
@@ -254,7 +254,8 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
         }
         return fail(target, `翻译失败：${res.error.message}`)
       }
-      const translated = new Map(res.result.segments.map(s => [s.id, decodeText(s.text)]))
+      // 转义用的是协商出的格式，反转义必须用同一个：原来这里连格式都没传，markers 下会拿 HTML 实体规则去解一段纯文本
+      const translated = new Map(res.result.segments.map(s => [s.id, unescapeText(s.text, wireFormatOf(options.renderPath))]))
       const labels: ImageLabel[] = []
       for (const [i, box] of boxes.entries()) {
         const text = translated.get(`${target.id}#L${i}`)?.trim()

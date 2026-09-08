@@ -11,7 +11,7 @@ import {
   restore, setImageModes,
   type Mode, type ModeController,
 } from '@/core/renderer'
-import { decodeText, escapeText } from '@/core/protector/text'
+import { escapeText, unescapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { beginSession, endSession, getSessionId, translateTitle, type TitleTranslator } from '@/core/scheduler'
 import { isAxtMessage, sendMessage } from '@/shared/messages'
@@ -162,7 +162,7 @@ export default defineContentScript({
             cache: { paper, renderPath: status.renderPath },
             scope: session,
           })
-          return res.ok ? decodeText(res.result.segments[0]?.text ?? '', wireFormatOf(status.renderPath)) || null : null
+          return res.ok ? unescapeText(res.result.segments[0]?.text ?? '', wireFormatOf(status.renderPath)) || null : null
         },
       })
       startImages(session, config, context, status.renderPath)
