@@ -28,11 +28,25 @@ describe('runs 路径', () => {
     expect(html).toBe(stripIds('Let <math class="ltx_Math"><mi>x</mi></math> be bold per <a class="ltx_ref" href="#S2">2</a>.'))
   })
 
-  it('拼回译文，段落里的实体正确', () => {
+  it('送出去的段保持线上形态，回来的实体在拼回时解开（issue #111）', () => {
     const b = serialize(el('<p class="ltx_p">a &lt; b <math class="ltx_Math"><mi>x</mi></math> c</p>'))
     const layout = splitRuns(b)
-    expect(layout.runs).toEqual(['a < b ', ' c'])
+    // 不在这里反转义：google-web 的端点是 translateHtml，会把请求体当 HTML 解析，
+    // `a < b` 发过去 `<` 会被当成标签开头
+    expect(layout.runs).toEqual(['a &lt; b ', ' c'])
+    // 引擎把 < 归一成实体返回：拼回时解开，读者看到的是 <，不是 &lt;
+    expect(htmlOf(joinRuns(['甲 &lt; 乙 ', ' 丙'], layout, b, document))).toBe('甲 &lt; 乙 <math class="ltx_Math"><mi>x</mi></math> 丙')
+    // 引擎原样返回裸 < 也照样对：解实体是恒等的
     expect(htmlOf(joinRuns(['甲 < 乙 ', ' 丙'], layout, b, document))).toBe('甲 &lt; 乙 <math class="ltx_Math"><mi>x</mi></math> 丙')
+  })
+
+  it('恒等往返：原文里字面写着 &amp; 的段落不会被多解一次', () => {
+    // splitRuns 反转义、joinRuns 不解的旧写法下，`&amp;` 会在送出去时变成 `&`，
+    // 再拼回就成了 `&`——少了一层。收发对称之后这条恒等成立
+    const b = serialize(el('<p class="ltx_p">写作 &amp;amp; 时 <math class="ltx_Math"><mi>x</mi></math> 成立</p>'))
+    const layout = splitRuns(b)
+    expect(htmlOf(joinRuns(layout.runs, layout, b, document)))
+      .toBe('写作 &amp;amp; 时 <math class="ltx_Math"><mi>x</mi></math> 成立')
   })
 
   it('译文段数不符时抛错', () => {

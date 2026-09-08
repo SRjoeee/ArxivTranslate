@@ -18,7 +18,13 @@ export type RunItem =
 
 export interface RunLayout {
   items: RunItem[]
-  /** 反转义后的纯文本段，按 items 里出现的顺序 */
+  /**
+   * 送翻译的文本段，按 items 里出现的顺序，**保持线上形态（`& < >` 仍是实体）**。
+   *
+   * 曾经在这里就反转义，于是 `a &lt; b` 变成 `a < b` 发出去——而 `google-web` 的端点是
+   * `translateHtml`，会把请求体当 HTML 解析；回来的 `&amp;` 又被 `joinRuns` 原样塞进文本节点，
+   * 读者看到的就是实体本身（issue #111）。收发要对称：这里保持转义，`joinRuns` 那头解回来。
+   */
   runs: string[]
 }
 
@@ -30,8 +36,9 @@ export function splitRuns(block: ProtectedBlock): RunLayout {
     if (!buffer) return
     if (/\S/.test(buffer)) {
       items.push({ kind: 'text', run: runs.length })
-      runs.push(decodeText(buffer))
+      runs.push(buffer)
     } else {
+      // raw 段不送翻译，直接进文本节点，所以在这里就解回来
       items.push({ kind: 'raw', text: decodeText(buffer) })
     }
     buffer = ''
@@ -70,7 +77,8 @@ export function joinRuns(translatedRuns: string[], layout: RunLayout, block: Pro
   }
   const fragment = doc.createDocumentFragment()
   for (const item of layout.items) {
-    if (item.kind === 'text') fragment.append(doc.createTextNode(translatedRuns[item.run]!))
+    // 译文来自线上，实体在这一步解回来（见 RunLayout.runs 上的说明）
+    if (item.kind === 'text') fragment.append(doc.createTextNode(decodeText(translatedRuns[item.run]!)))
     else if (item.kind === 'raw') fragment.append(doc.createTextNode(item.text))
     else fragment.append(cloneWithoutIds(doc, block.slots.get(item.id)!, true))
   }
