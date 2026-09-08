@@ -112,8 +112,25 @@ interface QueueItem {
   request: Pick<TranslateRequest, 'source' | 'target' | 'context'>
 }
 
+/**
+ * 会让这条链路本轮整个作废的错。与 `fallback.ts` 的 `PERMANENT_KINDS` 同一份判断：
+ * 换个 key 才可能好转，而换 key 会走 `chainConfigChanged` 重建 transport，标记随之清掉。
+ * 降级链不受影响——链上每个引擎有各自的 service 与队列表（`transport.ts` 的 steps）
+ */
+const FATAL_FOR_QUEUE: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>(['no-key', 'auth'])
+
+/**
+ * 这个引擎在**哪些会话**里已经出过不可恢复的错。粒度是会话而不是 service 生命周期：
+ * 一轮翻译死了就是这一轮死了，换个页面、或者用户改完 key 重翻，都该重新试一次。
+ * 按 service 记的话，设置页点一次「测试连接」失败就会把随后的整页翻译也堵死——e2e 抓到过。
+ */
+interface FatalState {
+  scopes: Map<string, unknown>
+}
+
 interface ProviderQueues {
   requestQueue: RequestQueue
+  fatal: FatalState
   /**
    * 每个 provider 都攒批。Read Frog 的 `shouldUseBatchQueue` 只给 LLM 攒，因为它的免费引擎是**单条接口**；
    * 我们的不是——`translateHtml` 一次能带 150 条（RESEARCH §6.6），内置引擎声明 20 条。照抄那条判断
@@ -182,7 +199,15 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       const byId = new Map(result.segments.map(s => [s.id, s.text]))
       return ids.map(id => byId.get(id) ?? '')
     } catch (e) {
-      throw asBatchError(e, items.length)
+      const error = asBatchError(e, items.length)
+      // key 没配 / 不认：这轮里再打多少次都是同一个 401。`failQueue` 只排空**那一刻**排在
+      // RequestQueue 里的任务，而占满并发槽时等待区恰好是空的——剩下的块还在 BatchQueue 里攒批，
+      // 攒完照常派发，于是有第二波（issue #96 实测 +744 ms 又发了 7 个）。在这里把状态黏住
+      if (e instanceof ProviderError && FATAL_FOR_QUEUE.has(e.kind)) {
+        const state = queuesFor(first.provider).fatal
+        for (const item of items) if (item.scope) state.scopes.set(item.scope, error)
+      }
+      throw error
     }
   }
 
@@ -200,6 +225,20 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
      * 各自重算就等于 4 次重试 4 份预算（Codex 在 #56 指出）
      */
     const deadlineOf = (meta: { startedAt: number }) => maxTotalMs === undefined ? undefined : meta.startedAt + maxTotalMs
+    const fatal: FatalState = { scopes: new Map() }
+    /**
+     * 整批都属于已致命的会话时给出那个错。带无 scope 成员的批次照常发——
+     * 与 `cancelByScope` 的混批语义一致：只要还有一个成员不属于死掉的会话，这一批就还有意义
+     */
+    const fatalFor = (items: QueueItem[]): unknown => {
+      if (fatal.scopes.size === 0) return undefined
+      let error: unknown
+      for (const item of items) {
+        if (!item.scope || !fatal.scopes.has(item.scope)) return undefined
+        error ??= fatal.scopes.get(item.scope)
+      }
+      return error
+    }
     const requestQueue = new RequestQueue(queueOptions)
     const batchQueue = new BatchQueue<QueueItem, string>({
       maxCharactersPerBatch: provider.maxBatchChars,
@@ -216,25 +255,33 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       getScope: item => item.scope,
       isScopeCancelled: scope => cancelledScopes.has(scope),
       executeBatch: (items, meta) => {
+        // 这一批所属的会话已经致命：当场拒，不进 RequestQueue、不打端点。BatchQueue 只对
+        // BatchCountMismatchError 重试或走逐条兜底，所以这里拒了就是终局，不会绕出第二条路
+        const dead = fatalFor(items)
+        if (dead !== undefined) return Promise.reject(dead)
         const ids = uniqueIds(items)
         const chars = items.reduce((n, item) => n + item.text.length, 0)
         const hash = items.map(item => item.dedupKey ?? item.uid).join('|')
         const scheduleAt = Math.min(...items.map(item => item.scheduleAt))
         return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
       },
-      executeIndividual: (item, meta) => requestQueue.enqueue(
-        async signal => (await translateItems([item], [item.id], signal))[0]!,
-        item.scheduleAt,
-        item.dedupKey ?? item.uid,
-        item.scope ? [item.scope] : undefined,
-        // 逐条兜底是同一批文本的最后一程，不能再拿一份完整预算（Codex 在 #56 指出）
-        { timeoutMs: timeoutFor(item.text.length), deadlineAt: deadlineOf(meta) },
-      ),
+      executeIndividual: (item, meta) => {
+        const dead = fatalFor([item])
+        if (dead !== undefined) return Promise.reject(dead)
+        return requestQueue.enqueue(
+          async signal => (await translateItems([item], [item.id], signal))[0]!,
+          item.scheduleAt,
+          item.dedupKey ?? item.uid,
+          item.scope ? [item.scope] : undefined,
+          // 逐条兜底是同一批文本的最后一程，不能再拿一份完整预算（Codex 在 #56 指出）
+          { timeoutMs: timeoutFor(item.text.length), deadlineAt: deadlineOf(meta) },
+        )
+      },
       onError: (error, context) => {
         console.warn(`[axt] 批次失败（${context.isFallback ? '逐条兜底' : `第 ${context.retryCount} 次重试前`}）：${error.message}`)
       },
     })
-    const pair = { requestQueue, batchQueue }
+    const pair: ProviderQueues = { requestQueue, batchQueue, fatal }
     queues.set(provider.id, pair)
     return pair
   }

@@ -82,6 +82,45 @@ describe('createTranslateService', () => {
     expect(writes).toHaveLength(0)
   })
 
+  it('auth 之后这个引擎本轮不再打端点：后到的块当场拒，不发第二波（issue #96）', async () => {
+    // `failQueue` 排空的是**那一刻**排在 RequestQueue 里的任务。并发槽占满时等待区恰好是空的，
+    // 剩下的块还在 BatchQueue 里攒批，攒完照常派发——实测第一个 401 之后 +744 ms 又发了 7 个请求
+    let calls = 0
+    const service = createTranslateService({
+      getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }),
+    })
+    expect(await service.translate({ ...req(['a']), scope: 's1' })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+    expect(calls).toBe(1)
+    // 后到的块（视口滚动、攒批攒满）：同样报 auth，但不再问端点
+    expect(await service.translate({ ...req(['b', 'c']), scope: 's1' })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+    expect(calls).toBe(1)
+    // 换一个会话（新页面，或用户改完 key 重翻）要重新试：致命是这一轮的事，不是这个引擎的事
+    await service.translate({ ...req(['d']), scope: 's2' })
+    expect(calls).toBe(2)
+    // 无 scope 的调用（设置页的「测试连接」）不受任何会话的致命状态影响
+    await service.translate(req(['e']))
+    expect(calls).toBe(3)
+  })
+
+  it('只有 no-key / auth 黏：别的错不该把整轮翻译废掉', () => {
+    // 与 fallback.ts 的 PERMANENT_KINDS 同一份判断。bad-request 是「这一批的问题」，
+    // 换一批就可能好，黏住它等于因为一个坏块放弃整篇
+    let calls = 0
+    const service = createTranslateService({
+      getProvider: async () => provider(async () => {
+        calls++
+        if (calls === 1) throw new ProviderError('bad-request', '400')
+        return { segments: [{ id: 'b', text: '译' }], provider: 'mock' }
+      }),
+    })
+    return service.translate(req(['a'])).then(async first => {
+      expect(first.ok).toBe(false)
+      const second = await service.translate(req(['b']))
+      expect(second.ok && second.result.segments[0]?.text).toBe('译')
+      expect(calls).toBe(2)
+    })
+  })
+
   it('provider 抛错转成错误响应，不抛出；auth 不重试', async () => {
     let calls = 0
     const service = createTranslateService({
