@@ -9,7 +9,7 @@ import { cacheKeyFor, type RenderPath } from '@/cache/key'
 // 深引 validate 而不是 protector 的桶：serialize / rehydrate 要碰 DOM，那两个不该进 background 的包
 import { expectationsFromText, validate } from '@/core/protector/validate'
 import { getRandomUUID } from '@/shared/uuid'
-import { BatchCountMismatchError, BatchQueue, type BatchOptions } from './request/batch-queue'
+import { BatchCountMismatchError, BatchQueue, type BatchExecutionMeta, type BatchOptions } from './request/batch-queue'
 import { CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
 import { REQUEST_TIMEOUT_ERROR_NAME, RequestQueue, type QueueOptions } from './request/request-queue'
 import { attachRequestErrorMeta } from './request/retry-policy'
@@ -112,8 +112,25 @@ interface QueueItem {
   request: Pick<TranslateRequest, 'source' | 'target' | 'context'>
 }
 
+/**
+ * 会让这条链路本轮整个作废的错。与 `fallback.ts` 的 `PERMANENT_KINDS` 同一份判断：
+ * 换个 key 才可能好转，而换 key 会走 `chainConfigChanged` 重建 transport，标记随之清掉。
+ * 降级链不受影响——链上每个引擎有各自的 service 与队列表（`transport.ts` 的 steps）
+ */
+const FATAL_FOR_QUEUE: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>(['no-key', 'auth'])
+
+/**
+ * 这个引擎在**哪些会话**里已经出过不可恢复的错。粒度是会话而不是 service 生命周期：
+ * 一轮翻译死了就是这一轮死了，换个页面、或者用户改完 key 重翻，都该重新试一次。
+ * 按 service 记的话，设置页点一次「测试连接」失败就会把随后的整页翻译也堵死——e2e 抓到过。
+ */
+interface FatalState {
+  scopes: Map<string, unknown>
+}
+
 interface ProviderQueues {
   requestQueue: RequestQueue
+  fatal: FatalState
   /**
    * 每个 provider 都攒批。Read Frog 的 `shouldUseBatchQueue` 只给 LLM 攒，因为它的免费引擎是**单条接口**；
    * 我们的不是——`translateHtml` 一次能带 150 条（RESEARCH §6.6），内置引擎声明 20 条。照抄那条判断
@@ -200,6 +217,25 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
      * 各自重算就等于 4 次重试 4 份预算（Codex 在 #56 指出）
      */
     const deadlineOf = (meta: { startedAt: number }) => maxTotalMs === undefined ? undefined : meta.startedAt + maxTotalMs
+    const fatal: FatalState = { scopes: new Map() }
+    /**
+     * 整批都属于已致命的会话时给出那个错。
+     *
+     * 判据取 `meta.scopes`——**批次在 flush 那一刻的 scope 并集**，不是成员自己的 `item.scope`：
+     * 去重会把新会话的相同段落并进一个还挂着的旧任务，此时被保留的 `QueueItem` 带的仍是旧（已致命的）
+     * scope，而新会话只出现在 `meta.scopes` 里。只看 item 的话会把这一批当成死的拒掉，把陈旧的 auth
+     * 错误回给新调用方，接着又把新 scope 也标成致命——一路串下去（Codex 在 #113 指出）。
+     * `undefined` 表示批里有不可取消（无 scope）的成员，照常发。与 `rejectIfAllScopesCancelled` 同一套语义
+     */
+    const fatalFor = (meta: BatchExecutionMeta): unknown => {
+      if (fatal.scopes.size === 0 || !meta.scopes || meta.scopes.length === 0) return undefined
+      let error: unknown
+      for (const s of meta.scopes) {
+        if (!fatal.scopes.has(s)) return undefined
+        error ??= fatal.scopes.get(s)
+      }
+      return error
+    }
     const requestQueue = new RequestQueue(queueOptions)
     const batchQueue = new BatchQueue<QueueItem, string>({
       maxCharactersPerBatch: provider.maxBatchChars,
@@ -216,25 +252,33 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       getScope: item => item.scope,
       isScopeCancelled: scope => cancelledScopes.has(scope),
       executeBatch: (items, meta) => {
+        // 这一批所属的会话已经致命：当场拒，不进 RequestQueue、不打端点。BatchQueue 只对
+        // BatchCountMismatchError 重试或走逐条兜底，所以这里拒了就是终局，不会绕出第二条路
+        const dead = fatalFor(meta)
+        if (dead !== undefined) return Promise.reject(dead)
         const ids = uniqueIds(items)
         const chars = items.reduce((n, item) => n + item.text.length, 0)
         const hash = items.map(item => item.dedupKey ?? item.uid).join('|')
         const scheduleAt = Math.min(...items.map(item => item.scheduleAt))
         return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
       },
-      executeIndividual: (item, meta) => requestQueue.enqueue(
-        async signal => (await translateItems([item], [item.id], signal))[0]!,
-        item.scheduleAt,
-        item.dedupKey ?? item.uid,
-        item.scope ? [item.scope] : undefined,
-        // 逐条兜底是同一批文本的最后一程，不能再拿一份完整预算（Codex 在 #56 指出）
-        { timeoutMs: timeoutFor(item.text.length), deadlineAt: deadlineOf(meta) },
-      ),
+      executeIndividual: (item, meta) => {
+        const dead = fatalFor(meta)
+        if (dead !== undefined) return Promise.reject(dead)
+        return requestQueue.enqueue(
+          async signal => (await translateItems([item], [item.id], signal))[0]!,
+          item.scheduleAt,
+          item.dedupKey ?? item.uid,
+          item.scope ? [item.scope] : undefined,
+          // 逐条兜底是同一批文本的最后一程，不能再拿一份完整预算（Codex 在 #56 指出）
+          { timeoutMs: timeoutFor(item.text.length), deadlineAt: deadlineOf(meta) },
+        )
+      },
       onError: (error, context) => {
         console.warn(`[axt] 批次失败（${context.isFallback ? '逐条兜底' : `第 ${context.retryCount} 次重试前`}）：${error.message}`)
       },
     })
-    const pair = { requestQueue, batchQueue }
+    const pair: ProviderQueues = { requestQueue, batchQueue, fatal }
     queues.set(provider.id, pair)
     return pair
   }
@@ -289,7 +333,20 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           provider,
           request: { source: request.source, target: request.target, context: request.context },
         }))
-        const settled = await Promise.allSettled(items.map(item => pair.batchQueue.enqueue(item)))
+        /**
+         * 一条 reject 就记，不等 `allSettled`。一次调用的段落可能被拆成「满批 + 欠满的尾巴」
+         *（图片 OCR 的行数不受 provider 的 maxBatchItems 约束），满批按条数立刻派发并秒失败，
+         * 尾巴还在等 batchDelay / 派发闸。等 `allSettled` 才记的话，它得先把尾巴也等出来——
+         * 而尾巴是**发出去**才失败的，第二波又回来了（Codex 在 #113 指出）。
+         * 记在调用方这一层的 scope 归属不受影响：这个 catch 就在调用方的闭包里
+         */
+        const noteFatal = (e: unknown) => {
+          if (scope && e instanceof ProviderError && FATAL_FOR_QUEUE.has(e.kind)) pair.fatal.scopes.set(scope, e)
+        }
+        const settled = await Promise.allSettled(items.map(item => pair.batchQueue.enqueue(item).catch(e => {
+          noteFatal(e)
+          throw e
+        })))
 
         // 3. 先把成功且放行的写缓存：一次调用的段可能横跨两批，一批失败另一批的成果不能丢，
         //    否则 run.ts 对半拆分重发是白花钱
@@ -309,7 +366,17 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，
         // 与「恢复原文之后不再写缓存」的承诺不符
         if (store && writes.length > 0 && !(scope && cancelledScopes.has(scope))) await store.putMany(writes)
-        if (failures.length > 0) return { ok: false, error: toErrorInfo(pickError(failures)) }
+        if (failures.length > 0) {
+          const error = pickError(failures)
+          // key 没配 / 不认：这轮里再打多少次都是同一个 401。`failQueue` 只排空**那一刻**排在
+          // RequestQueue 里的任务，而占满并发槽时等待区恰好是空的——剩下的块还在 BatchQueue 里攒批，
+          // 攒完照常派发，于是有第二波（issue #96 实测 +744 ms 又发了 7 个）。这里把状态黏住。
+          //
+          // 记在**调用方**这一层而不是执行路径上：去重会让两个标签页的相同段落并进同一个队列任务，
+          // 执行那头只看得见第一个调用方的 QueueItem，第二个的 scope 就漏了，它后面的批次照样发得出去
+          //（Codex 在 #113 指出）。而每个调用方都会各自拿到这个拒绝，在这里记一个都不漏
+          return { ok: false, error: toErrorInfo(error) }
+        }
       }
 
       // 4. 按原顺序合并
