@@ -5,7 +5,7 @@ import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
 import { COLOR_MAX, OPACITY_MAX, OPACITY_MIN, STYLE_PRESETS, sanitizeColor } from '@/core/renderer/style-preset'
 import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
-export const CONFIG_VERSION = 9
+export const CONFIG_VERSION = 10
 
 /** 三种阅读模式（DESIGN §7）；`mode` 与图片翻译的模式闸共用 */
 export const MODE_VALUES = ['stack', 'side', 'only'] as const

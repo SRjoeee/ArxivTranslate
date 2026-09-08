@@ -3,8 +3,8 @@ import { browser } from 'wxt/browser'
 import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
 import { DEFAULT_CONFIG, MODE_VALUES, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
-import { getProvider } from '@/providers'
 import { supportsTarget } from '@/providers/microsoft'
+import { wireFormatOfProvider } from '@/providers/wire-formats'
 import { THINKING_HOSTS } from '@/providers/thinking'
 import modesCss from '@/styles/modes.css?inline'
 import presetsCss from '@/styles/presets.css?inline'
@@ -41,7 +41,7 @@ const STYLE_NOTES: Partial<Record<StylePreset, string>> = {
  */
 const SAMPLE_TAGS = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
 const SAMPLE_MARKERS = 'Let @a# be a connected graph; see @b#.'
-const sampleFor = (config: Config) => (getProvider(config).wireFormats[0] === 'markers' ? SAMPLE_MARKERS : SAMPLE_TAGS)
+const sampleFor = (config: Config) => (wireFormatOfProvider(config.provider) === 'markers' ? SAMPLE_MARKERS : SAMPLE_TAGS)
 
 /** 图片翻译的模式闸（§15）：与 popup 的模式按钮同一套叫法 */
 const IMAGE_MODES: [Config['mode'], string][] = [['side', '左右对照'], ['stack', '上下对照'], ['only', '仅译文']]

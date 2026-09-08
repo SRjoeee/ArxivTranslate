@@ -4,6 +4,7 @@
 // 硬规则 4：免费接口视为不稳定——错误独立分类，失败可回退到链上的下一个引擎。
 import { toBcp47 } from '@/config/languages'
 import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
+import { WIRE_FORMATS } from './wire-formats'
 
 /** 只用到静态的两个方法；注入以便测试（happy-dom 里没有这个全局） */
 export interface TranslatorApi {
@@ -145,7 +146,7 @@ export function createChromeBuiltinProvider(target: string, deps: ChromeBuiltinD
     kind: 'builtin',
     // 实测保留 HTML 标签与 void / paired 占位符（RESEARCH §6.2），走 tags 路径
     // RESEARCH §6.2 实测保留标签与占位符
-    wireFormats: ['tags'],
+    wireFormats: WIRE_FORMATS['chrome-builtin'],
     // 本地推理没有网络往返，批大一点省调度开销
     maxBatchChars: 4000,
     maxBatchItems: BUILTIN_MAX_ITEMS,

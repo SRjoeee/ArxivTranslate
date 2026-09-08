@@ -6,6 +6,7 @@ import { toBcp47 } from '@/config/languages'
 import { kindOfStatus } from './http-errors'
 import { attachRequestErrorMeta } from './request/retry-policy'
 import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
+import { WIRE_FORMATS } from './wire-formats'
 
 const ENDPOINT = 'https://translate-pa.googleapis.com/v1/translateHtml'
 /** 公开常量，来自 Google 翻译网页版；不是用户凭据 */
@@ -72,7 +73,7 @@ export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationPr
     kind: 'mt',
     // 两种都保得住（实测 tags 100%、markers 98.9%），tags 排前面：它还能保住内联样式。
     // 正因为它两种都行，选微软时链上才留得住它做兜底（§8.5 的交集协商）
-    wireFormats: ['tags', 'markers'],
+    wireFormats: WIRE_FORMATS['google-web'],
     // 端点一次能吃很多条；批次给大、速率给小——免费端点经不起 8/s 的默认速率（DESIGN §8.3）
     maxBatchChars: 8000,
     maxBatchItems: 100,
