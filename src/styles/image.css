@@ -78,8 +78,20 @@
 
   /* side：插图整块拆两份（§7.2），叠加层属于「只有译文」的副本，原件那份隐藏。
      只限 side——stack 显示原件、only 显示副本，叠加层跟着显示的那份走。
-     特异度与上面的显示规则相同，必须写在后面 */
-  html[data-axt-mode="side"] [data-axt-split] .axt-img {
+     特异度与上面的显示规则相同，必须写在后面。
+
+     条件写成「在 figure 里、且不在任何 .axt-split 后代中」，而不是「在 [data-axt-split] 里」——
+     后者只在拆图**之后**成立，而叠加层是先插进原件、等 prep 的防抖合并器（故意的批处理延迟）
+     跑到才拆图的。实测那中间态有 150–166 ms：白框先按整栏宽（960 / 797px）画在左栏的图上，
+     然后整片消失、以半栏宽（468px）在右栏重现——就是用户看到的「滑到图片时闪一下」（issue #109）。
+     这条不能用「不在 .axt-split 里就藏」：figure 之外的图（collectImageTargets 扫全文，不限 figure）
+     永远不会被拆，那样它们的叠加层在 side 下会永久消失。也不能用「最近的 figure 不是 .axt-split」：
+     嵌套分图交给最外层一起复制，副本里那层嵌套 figure 自己没有 .axt-split，会被误伤。
+
+     选择器里带上 [data-axt-img-modes~="side"] 是为了**特异度**：显示规则是 (0,3,1)，
+     而 `figure` 只值 (0,0,1)，不带这个属性的话整条是 (0,2,2)，输给显示规则、一行都不生效
+     （第一版就是这么写的，实测叠加层照样以 960px 出现在原件上）。带上之后是 (0,3,2)，稳赢 */
+  html[data-axt-mode="side"][data-axt-img-modes~="side"] figure .axt-img:not(:where(.axt-split) *) {
     display: none;
   }
 }

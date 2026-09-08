@@ -30,13 +30,25 @@ describe('image.css', () => {
     }
   })
 
-  it('side 下原件里的叠加层隐藏，且这条规则写在显示规则之后（特异度相同，靠顺序赢）', () => {
+  it('side 下只有副本里的叠加层可见，且这条规则写在显示规则之后（特异度相同，靠顺序赢）', () => {
     const show = RULES.indexOf('html[data-axt-mode="side"][data-axt-img-modes~="side"] .axt-img')
-    const hide = RULES.indexOf('html[data-axt-mode="side"] [data-axt-split] .axt-img')
+    const hide = RULES.indexOf('html[data-axt-mode="side"][data-axt-img-modes~="side"] figure .axt-img:not(:where(.axt-split) *)')
     expect(show).toBeGreaterThan(-1)
     expect(hide).toBeGreaterThan(show)
     // 只限 side：stack 显示原件、only 显示副本，叠加层跟着显示的那份走
-    expect(RULES).not.toMatch(/html\[data-axt-mode="(stack|only)"\] \[data-axt-split\] \.axt-img/)
+    expect(RULES).not.toMatch(/html\[data-axt-mode="(stack|only)"\][^{]*\.axt-img[^{]*\{\s*display: none/)
+  })
+
+  it('隐藏条件不看 [data-axt-split]：那个属性要等拆图之后才有，中间态会闪（issue #109）', () => {
+    // 叠加层先插进原件，prep 的防抖合并器（delay 150 ms）跑到才拆图。实测那段中间态里
+    // 白框按整栏宽画在左栏的图上（960 / 797px），拆图后才变成半栏宽（468px）挪到右栏
+    expect(RULES).not.toContain('[data-axt-split] .axt-img')
+    // figure 之外的图永远不会被拆（collectImageTargets 扫全文），隐藏条件必须带 figure 这个前提，
+    // 否则它们的叠加层在 side 下会永久消失
+    expect(RULES).toMatch(/html\[data-axt-mode="side"\]\[data-axt-img-modes~="side"\] figure \.axt-img/)
+    // 用「不在任何 .axt-split 后代中」而不是「最近的 figure 不是 .axt-split」：
+    // 嵌套分图交给最外层一起复制，副本里那层嵌套 figure 自己没有 .axt-split
+    expect(RULES).toContain(':not(:where(.axt-split) *)')
   })
 
   it('隐藏的基线写在 @supports 之外：不支持锚点定位的浏览器上叠加层也不会掉成图下面的一段文字', () => {
