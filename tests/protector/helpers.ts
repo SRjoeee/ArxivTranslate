@@ -30,6 +30,10 @@ export function htmlOf(fragment: DocumentFragment): string {
  * 若回填成 `ab` 两侧依然不等。`</em> and` 掉成 `</em>and` 同理。
  */
 export function sameModuloWhitespace(actual: string, expected: string): [string, string] {
-  const collapse = (s: string) => s.replace(/\s+/g, ' ').trim()
+  // 只折叠 `serialize` 会折叠的那五个字符，**不能用 `\s`、也不能 trim**：`\s` 含 U+00A0 与窄空格，
+  // trim 会吃掉首尾——那样的话「把 NBSP 错折成普通空格」两侧都会变成同一个普通空格，
+  // 比较结果相等，用例就再也抓不到它了（Codex 在 #122 指出）。
+  // 这个口径下放宽的严格只有「HTML 空白的数量」，语义空白与首尾边界仍然逐字符比较
+  const collapse = (s: string) => s.replace(/[\t\n\f\r ]+/g, ' ')
   return [collapse(actual), collapse(expected)]
 }
