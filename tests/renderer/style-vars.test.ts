@@ -1,5 +1,7 @@
 // 用户可调的装饰参数（#47）：颜色、透明度、高亮色。规则由 styleVarsRule 生成、注入进那张表，
 // 不写 <html> 的内联 style——那样 restore() 的前缀通扫清不掉，§7.1 的恒等就破了。
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { applyStyle, enable, restore } from '@/core/renderer'
 import { OPACITY_MAX, TRANSLATION_SELECTOR, sanitizeColor, styleVarsRule } from '@/core/renderer/style-preset'
@@ -27,13 +29,15 @@ describe('sanitizeColor', () => {
 })
 
 describe('styleVarsRule', () => {
+  const all = (v: Parameters<typeof styleVarsRule>[0]) => { const r = styleVarsRule(v); return r.base + r.overrides }
+
   it('默认值一条声明都不产生：外观必须与这个功能实现之前逐像素相同', () => {
-    expect(styleVarsRule({ color: '', opacity: OPACITY_MAX, accent: '' })).toBe('')
-    expect(styleVarsRule({})).toBe('')
+    expect(all({ color: '', opacity: OPACITY_MAX, accent: '' })).toBe('')
+    expect(all({})).toBe('')
   })
 
   it('颜色与透明度作用在“真正的译文”上，排除圆环、失败控件、镜像与拆图副本', () => {
-    const css = styleVarsRule({ color: '#1565c0', opacity: 0.8 })
+    const css = all({ color: '#1565c0', opacity: 0.8 })
     expect(css).toContain(TRANSLATION_SELECTOR)
     expect(css).toContain('--axt-color: #1565c0;')
     expect(css).toContain('opacity: 0.8;')
@@ -44,7 +48,7 @@ describe('styleVarsRule', () => {
   })
 
   it('高亮色两个角色都写：只写 --axt-accent 的话对 marker / highlight / glow 无效', () => {
-    const css = styleVarsRule({ accent: '#e91e63' })
+    const css = all({ accent: '#e91e63' })
     expect(css).toContain('html[data-axt-on] {')
     // --axt-accent 管下划线与边框族，--axt-green 管 marker / marker-gradient / highlight / glow / green。
     // 少写一个，「高亮颜色」这个控件就对叫「高亮」的那几个预设没反应（Codex 在 #106 指出）
@@ -54,33 +58,58 @@ describe('styleVarsRule', () => {
   })
 
   it('透明度用「顶层真译文」，不让嵌套的脚注译文把它乘两遍', () => {
-    const css = styleVarsRule({ opacity: 0.5 })
     // side 模式的 localizeNotes 会把 .axt-note-t.axt-t 插进段落译文内部；两层都匹配的话
     // 下限 0.3 会渲染成 0.09。Chrome 实测这条选择器：顶层 0.5、嵌套脚注 1、拆图副本 1、副本内真译文 0.5
-    expect(css).toContain(':not(:where(')
-    const rule = css.split('\n').find(l => l.includes('opacity'))
-    expect(rule).toBeDefined()
+    expect(styleVarsRule({ opacity: 0.5 }).base).toContain(':not(:where(')
     // 颜色那条不需要这道排除：--axt-color 是继承属性，嵌套不会叠加
-    const colorRule = styleVarsRule({ color: '#1565c0' })
-    expect(colorRule).not.toContain(':not(:where(')
+    expect(styleVarsRule({ color: '#1565c0' }).overrides).not.toContain(':not(:where(')
+  })
+
+  it('透明度落在 base、颜色落在 overrides：两段要分别排在预设的两侧', () => {
+    const r = styleVarsRule({ color: '#1565c0', opacity: 0.5, accent: '#e91e63' })
+    // base 在 presets.css 之前 → blur / blink 能覆盖基线并在自己的公式里乘上 --axt-opacity
+    expect(r.base).toContain('--axt-opacity: 0.5;')
+    expect(r.base).toContain('opacity: var(--axt-opacity, 1);')
+    expect(r.base).not.toContain('--axt-color')
+    // overrides 在之后 → 赢过 muted / green 写的 --axt-color
+    expect(r.overrides).toContain('--axt-color: #1565c0;')
+    expect(r.overrides).toContain('--axt-green: #e91e63;')
+    expect(r.overrides).not.toContain('opacity:')
   })
 
   it('非法颜色被丢掉而不是原样写进规则', () => {
-    expect(styleVarsRule({ color: 'red; opacity: 0' })).toBe('')
+    expect(all({ color: 'red; opacity: 0' })).toBe('')
   })
 
   it('透明度不会低于下限：手滑调到看不见时兜住', () => {
-    expect(styleVarsRule({ opacity: 0 })).toContain('opacity: 0.3;')
+    expect(all({ opacity: 0 })).toContain('--axt-opacity: 0.3;')
   })
 })
 
 describe('注入与恢复', () => {
-  it('用户的颜色排在预设之后，覆盖 muted / green 写的 --axt-color', () => {
+  // vitest 里 `?inline` 的 CSS 导入解析成**空字符串**（vitest.config 的 css: false），
+  // 所以「生成的规则 vs presets.css 的先后」在单测里断言不了——拿 indexOf 去比会恒为 -1、断言恒真。
+  // 这里改成断言两件能真正验到的事：注入表内部 base 在 overrides 之前；presets.css 的文本契约。
+  // 真正的层叠效果由浏览器实测覆盖（blur 滑杆 0.5 → computed 0.375；blink 比值 0.5）
+  it('注入表里 base 在 overrides 之前', () => {
     const doc = docOf('<p class="ltx_p" id="p1">Hello.</p>')
-    enable(doc, 'stack', { preset: 'muted', customCss: '', color: '#1565c0', opacity: OPACITY_MAX, accent: '' })
+    enable(doc, 'stack', { ...BASE, preset: 'blur', color: '#1565c0', opacity: 0.5, accent: '#e91e63' })
     const css = doc.querySelector('style[data-axt-sheet]')!.textContent ?? ''
-    // presets.css 里 muted 也写 --axt-color，选择器形状与特异度相同，靠顺序取胜
-    expect(css.lastIndexOf('--axt-color: #1565c0')).toBeGreaterThan(css.indexOf('[data-axt-style="muted"]'))
+    expect(css.indexOf('--axt-opacity: 0.5;')).toBeGreaterThanOrEqual(0)
+    expect(css.indexOf('--axt-opacity: 0.5;')).toBeLessThan(css.indexOf('--axt-color: #1565c0;'))
+    // 把返回的对象直接塞进模板串会留下这个（实测在设置页的预览上发生过）
+    expect(css).not.toContain('[object Object]')
+  })
+
+  it('presets.css 里 blur 与 blink 消费 --axt-opacity，而不是把它顶掉', () => {
+    const css = readFileSync(join(import.meta.dirname, '../../src/styles/presets.css'), 'utf8')
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '')
+    // blur 自带 0.75、blink 的关键帧动画改 opacity（动画永远压过普通声明）：
+    // 两者都必须乘上用户的值，否则滑杆对它们无效（Codex 在 #106 指出）
+    expect(rules).toContain('calc(var(--axt-opacity, 1) * 0.75)')
+    expect(rules).toContain('calc(var(--axt-opacity, 1) * 0.45)')
+    // 不能再有写死的裸 opacity 数值，那会把用户的值顶掉
+    expect(rules).not.toMatch(/opacity:\s*0?\.\d+;/)
   })
 
   it('自定义声明块仍有最后的发言权', () => {

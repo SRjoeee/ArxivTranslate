@@ -140,12 +140,13 @@ html[data-axt-style="colorful"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror
 /* 模糊，悬停才清晰：背诵与自测用（Read Frog 的 blur、KISS 的 fuzzy） */
 html[data-axt-style="blur"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
   filter: blur(4px);
-  opacity: 0.75;
+  /* 乘上用户设定的透明度，而不是把它顶掉（Codex 在 #106 指出） */
+  opacity: calc(var(--axt-opacity, 1) * 0.75);
   transition: filter 0.15s ease-out, opacity 0.15s ease-out;
 }
 html[data-axt-style="blur"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split):hover {
   filter: blur(0);
-  opacity: 1;
+  opacity: var(--axt-opacity, 1);
 }
 
 /* 发光同样静态：呼吸动画改的是 text-shadow，每帧都要重算样式并重绘，
@@ -171,7 +172,8 @@ html[data-axt-style="blink"] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .
 }
 
 @keyframes axt-blink {
-  50% { opacity: 0.45; }
+  /* 动画永远压过普通声明，所以谷底也要乘上用户的透明度，否则滑杆对 blink 完全失效 */
+  50% { opacity: calc(var(--axt-opacity, 1) * 0.45); }
 }
 
 /* custom 的规则不在这里：用户写的声明块由 style-preset.ts 包进

@@ -46,9 +46,13 @@ export default defineContentScript({
     // 设置页改完外观立刻生效（#47）：只重算注入表与 <html data-axt-style>，一个译文节点都不碰，
     // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
     // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
+    // 监听器一旦写过值，它就是最新的：start() 在第一次 await 之后拿到的是**更早**的快照，
+    // 直接赋值会把用户刚存的外观盖掉，而 storage 事件已经消费过、不会再来一次（Codex 在 #106 指出）
+    let styleFromWatcher = false
     watchConfig(config => {
       if (JSON.stringify(config.style) === JSON.stringify(style)) return
       style = config.style
+      styleFromWatcher = true
       applyStyle(document, style)
     })
     // 一次会话 = 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
@@ -95,7 +99,7 @@ export default defineContentScript({
 
       modes?.stop()
       modes = createModeController(document, requested ?? config.mode, { onChange: enterSide })
-      style = config.style
+      if (!styleFromWatcher) style = config.style
       endRun() // 上一轮停下但没恢复原文的会话（致命错误后重试）
       // 页内锚点兜底（issue #44）：only 模式下目标块被隐藏，交叉引用点了不动窝
       uninstallAnchors?.()

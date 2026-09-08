@@ -93,29 +93,35 @@ export const OPACITY_MIN = 0.3
 export const OPACITY_MAX = 1
 
 /**
- * 拼成可注入的规则。**必须排在 presets.css 之后**：
- * `muted` / `green` 两个预设也写 `--axt-color`，选择器形状与这里相同、特异度相同，
- * 靠层叠顺序让用户的值赢（`enable()` 的拼接串里就是这个顺序）。同理 `--axt-accent`
- * 覆盖 presets.css 里 `html[data-axt-on]` 上那条默认值。
+ * 拼成可注入的规则，**分两段**——它们要落在预设的两侧（Codex 在 #106 指出）：
  *
- * 透明度用排除列表而不是裸 `.axt-t`：镜像与拆图副本是**原文**的视觉克隆、不是译文，
- * 而且克隆里嵌套的真译文仍然匹配，正好只应用一次、不会叠乘（§7.5 的同一条界线）。
+ * - `base` 排在 presets.css **之前**：`--axt-opacity` 与基线的 `opacity` 声明。这样 `blur`
+ *   （自带 `opacity: 0.75`）与 `blink`（关键帧动画改 opacity，动画永远压过普通声明）
+ *   既能覆盖基线，又能在自己的公式里乘上用户的值，而不是让滑杆对它们完全失效。
+ * - `overrides` 排在 presets.css **之后**：颜色三件套。`muted` / `green` 也写 `--axt-color`，
+ *   选择器形状与特异度相同，靠层叠顺序让用户的值赢。
+ *
+ * 透明度用 `TOP_TRANSLATION_SELECTOR`（顶层真译文），颜色用 `TRANSLATION_SELECTOR`：
+ * `--axt-color` 是继承属性，嵌套不叠加；`opacity` 会相乘。
  */
-export function styleVarsRule(vars: StyleVars): string {
+export function styleVarsRule(vars: StyleVars): { base: string; overrides: string } {
   const color = sanitizeColor(vars.color ?? '')
   const accent = sanitizeColor(vars.accent ?? '')
   const opacity = vars.opacity ?? OPACITY_MAX
+  const dimmed = Number.isFinite(opacity) && opacity < OPACITY_MAX
+  const value = Math.max(OPACITY_MIN, opacity)
+
+  const base = dimmed
+    ? `${TOP_TRANSLATION_SELECTOR} {\n--axt-opacity: ${value};\nopacity: var(--axt-opacity, 1);\n}\n`
+    : ''
+
   const onDecls: string[] = []
   // 两个装饰色角色都要写：--axt-accent 管下划线与边框族，--axt-green 管 marker / highlight / glow / green。
   // 只写前者的话，「高亮颜色」这个控件恰恰对叫「高亮」的那几个预设无效（Codex 在 #106 指出）。
   // colorful / gradient 是刻意的多色装饰，不参与
   if (accent.ok && accent.color !== '') onDecls.push(`--axt-accent: ${accent.color};`, `--axt-green: ${accent.color};`)
-  let out = ''
-  if (onDecls.length > 0) out += `html[data-axt-on] {\n${onDecls.join('\n')}\n}\n`
-  if (color.ok && color.color !== '') out += `${TRANSLATION_SELECTOR} {\n--axt-color: ${color.color};\n}\n`
-  // 透明度单独一条：它用的是「顶层真译文」，比颜色那条多一道嵌套排除
-  if (Number.isFinite(opacity) && opacity < OPACITY_MAX) {
-    out += `${TOP_TRANSLATION_SELECTOR} {\nopacity: ${Math.max(OPACITY_MIN, opacity)};\n}\n`
-  }
-  return out
+  let overrides = ''
+  if (onDecls.length > 0) overrides += `html[data-axt-on] {\n${onDecls.join('\n')}\n}\n`
+  if (color.ok && color.color !== '') overrides += `${TRANSLATION_SELECTOR} {\n--axt-color: ${color.color};\n}\n`
+  return { base, overrides }
 }

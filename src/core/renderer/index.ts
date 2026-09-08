@@ -52,14 +52,14 @@ export interface StyleOptions extends StyleVars {
 
 /**
  * 注入表的内容。顺序即层叠顺序，两处**必须**保持：
- * - `styleVarsRule` 排在 presetsCss 之后：`muted` / `green` 也写 `--axt-color`，选择器形状与特异度相同，
- *   靠顺序让用户的值赢；`--axt-accent` 同理覆盖 presets.css 里的默认强调色
+ * - `styleVarsRule` 的 `base`（透明度）排在 presetsCss **之前**，让 blur / blink 能覆盖并与之复合；
+ *   `overrides`（颜色三件套）排在**之后**，靠顺序赢过 `muted` / `green` 写的 `--axt-color`
  * - `customStyleRule` 排在最后：它是进阶逃生口，该有最后的发言权
  */
 function styleSheet(style?: StyleOptions): string {
-  const vars = style ? styleVarsRule(style) : ''
+  const vars = style ? styleVarsRule(style) : { base: '', overrides: '' }
   const custom = style ? customStyleRule(style.customCss ?? '') : ''
-  return `${modesCss}\n${presetsCss}\n${imageCss}\n${vars}${custom}`
+  return `${modesCss}\n${vars.base}${presetsCss}\n${imageCss}\n${vars.overrides}${custom}`
 }
 
 /**

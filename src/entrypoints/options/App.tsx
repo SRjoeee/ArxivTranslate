@@ -53,8 +53,10 @@ const PROVIDERS: [Config['provider'], string, string][] = [
  * 不怕预设的规则漏到设置页自身。`modesCss` 也要带上：`--axt-color` 是由它消费的
  */
 function StylePreview({ style }: { style: Config['style'] }) {
+  // 两段要落在预设的两侧，顺序与 renderer 的 styleSheet() 一致——拼错了预览就与真实页面不一致
+  const vars = styleVarsRule(style)
   const srcDoc = `<!doctype html><html data-axt-on data-axt-style="${style.preset}"><head><meta charset="utf-8">`
-    + `<style>${modesCss}\n${presetsCss}\n${styleVarsRule(style)}${customStyleRule(style.customCss)}`
+    + `<style>${modesCss}\n${vars.base}${presetsCss}\n${vars.overrides}${customStyleRule(style.customCss)}`
     + 'body{margin:0;padding:10px 12px;font:14px/1.7 system-ui;color:#333}</style></head><body>'
     // 预设只匹配 .axt-t，不需要站点类名——写 ltx_* 会违反硬规则 2（选择器只在规则模块里）
     + '<p>The Fourier transform is bounded.</p>'
