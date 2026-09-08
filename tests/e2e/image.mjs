@@ -5,7 +5,7 @@
 //
 // 守的是 §15.2 的几条结构性承诺：叠加层是图的下一个兄弟且矩形与图重合（锚点定位）；side 下叠加层只在拆图副本里且
 // 与副本的图重合；only 下可见；模式闸关着时进入视口的图不请求、切到开着的模式才翻；恢复原文一个节点、一个属性都不剩。
-import { copyFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
@@ -33,17 +33,34 @@ if (!existsSync(INSTALLED)) {
   process.exit(0)
 }
 mkdirSync(`${PROFILE}/NativeMessagingHosts`, { recursive: true })
-copyFileSync(INSTALLED, `${PROFILE}/NativeMessagingHosts/${HOST}.json`)
-
-const context = await chromium.launchPersistentContext(PROFILE, {
+/**
+ * 装好的那份 manifest 只授权给用户日常 Chrome 里的扩展 id，而 Playwright 每次从 .output 加载的
+ * 是另一个 id——直接复制过来 helper 会拒绝连接（"Access to the specified native messaging host
+ * is forbidden."），这个 e2e 在本机上就一直是 SKIP。**不动系统上那份**：读出来改掉 allowed_origins，
+ * 只写进这个一次性 profile。id 要先启动一次才知道，所以启动两次
+ */
+const writeManifest = id => {
+  const m = JSON.parse(readFileSync(INSTALLED, 'utf8'))
+  m.allowed_origins = [`chrome-extension://${id}/`]
+  mkdirSync(`${PROFILE}/NativeMessagingHosts`, { recursive: true })
+  writeFileSync(`${PROFILE}/NativeMessagingHosts/${HOST}.json`, JSON.stringify(m, null, 2))
+}
+const launch = () => chromium.launchPersistentContext(PROFILE, {
   channel: 'chromium',
   headless: !process.env.AXT_HEADED,
   args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
   viewport: { width: 1440, height: 900 },
 })
+let context = await launch()
 let [worker] = context.serviceWorkers()
 if (!worker) worker = await context.waitForEvent('serviceworker')
-const extId = worker.url().split('/')[2]
+let extId = worker.url().split('/')[2]
+writeManifest(extId)
+await context.close()
+context = await launch()
+;[worker] = context.serviceWorkers()
+if (!worker) worker = await context.waitForEvent('serviceworker')
+extId = worker.url().split('/')[2]
 
 const IDLE = /session idle: (\d+)\/(\d+) requested of (\d+)/
 const IMAGES_IDLE = /images idle: (\d+)\/(\d+) of (\d+), (\d+) failed/
