@@ -217,7 +217,49 @@ arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `
 |---|---|---|---|
 | Google gtx `GET translate.googleapis.com/translate_a/single?client=gtx&dt=t&dj=1&sl=en&tl=zh-CN&q=…` | 200 | `{sentences:[{trans,orig,backend}], src, spell}`；多句时需拼接 `sentences[].trans` | **保留**。样本：5 个 void `<x id="n"/>`、paired `<t id="1">…<x id="2"/>…</t>` 嵌套，全部 id 无增无减、嵌套合法、位置合理 |
 | Google translateHtml `POST translate-pa.googleapis.com/v1/translateHtml` | 200 | 请求 `[[[texts…], from, to], "wt_lib"]`，header `Content-Type: application/json+protobuf` + `X-Goog-API-Key`（KISS 配置内置的公开 key，见 `reference/kiss-translator/src/config/api.js`）；返回 `[[trans…]]`，天然支持批量 | 保留，但语义位置差（首个样本把 `<x id="1"/>` 挪到句尾、`</em>` 吞掉句号），译文质量明显低于 gtx |
-| 微软 `edge.microsoft.com/translate/auth` → `translatetext` | auth 404，翻译 401 | — | 未测。Read Frog 仍在用该端点，可能需要特定 header；v1 不接，仅记录 |
+| 微软 `edge.microsoft.com/translate/auth` → `translatetext` | auth 404，翻译 401 | — | **这条流程已废弃**，2026-09-08 复测见 §5.1 的无鉴权后继接口 |
+
+### 5.1 微软 Edge `translatetext`（2026-09-08 复测，issue #98）
+
+旧的 `translate/auth → translatetext` 鉴权流程没了，后继是一个**无鉴权**端点，Read Frog 现在用的也是它：
+
+```http
+POST https://edge.microsoft.com/translate/translatetext?from=en&to=zh-Hans&isEnterpriseClient=false
+Content-Type: application/json
+
+["Hello world", "Good morning"]
+```
+
+返回与输入一一对应、顺序保留：
+
+```json
+[{"translations":[{"text":"你好，世界","to":"zh-Hans","sentLen":{...}}]}, …]
+```
+
+实测（curl，2026-09-08）：
+
+| 项 | 结论 |
+|---|---|
+| 可用性 | HTTP 200，无需 key / header，单次约 290 ms |
+| **总大小上限** | **50,000 字符**（49,996 通过，50,982 被拒）。限的是**总字符数不是条数**：1000 条 / 32 KB 通过，100 条 / 52.6 KB 被拒 |
+| 超限响应 | HTTP 400，**body 是纯文本** `Request exceeds the maximum allowed translation size.`——不是 JSON，实现里不能直接 `JSON.parse` |
+| 单条长度 | 6000 字符单条通过 |
+| 语言代码 | BCP-47：`zh-Hans` / `zh-CN` / `ja` 可用；**ISO-639-3 的 `cmn` / `jpn` 一律 400**。仓库里已有 `toBcp47()`（`src/config/languages.ts`）负责这层转换，但**只够语法、不够支持范围**，见下 |
+| 自动检测 | 省略 `from` 即自动检测，响应多一个 `detectedLanguage` |
+
+**支持范围（决定 provider 能不能直接暴露给用户）**：`toBcp47()` 只保证语法合法，不保证这个端点支持。拿它的公开语言表（`api.cognitive.microsofttranslator.com/languages?api-version=3.0&scope=translation`，138 种）与我们的 179 个目标语言逐个比对：**108 个支持、71 个不支持**。
+
+判定必须允许**按主语言回退**，否则会误判：表里只有 `zh-Hans` / `zh-Hant`、没有裸 `zh`，但 `to=zh` 实测返回 200 并归一成 `zh-Hans`——按精确匹配算的话中文（我们的默认目标）会被算成不支持。两个方向都实测过：`zh` / `zh-Hant` / `zh-TW` / `ja` → 200；`ckb` / `ceb` / `tl` / `nn` / `eo` → **400**（400 的响应体同样是纯文本）。
+
+不支持的 71 个里前 14 个：`jav→jv`、`sun→su`、`fuv→ff`、`ckb→ckb`、`ceb→ceb`、`skr→skr`、`tgl→tl`、`koi→koi`、`mag→mag`、`plt→plt`、`qug→qug`、`mad→mad`、`nya→ny`、`zyb→zyb` ……
+
+**所以 provider 不能只做代码映射**：得带一份支持列表，在目标语言不受支持时提前退出（或在设置页把该引擎标灰），而不是等运行时 400 才发现。
+
+**占位符**：纯文本记号 `@a#` 全部存活，且发生了语序移位——`The transform @a# is bounded by @b# in @c#.` → `变换@a#被@c#中的@b#界定。`，正是记号方案要的效果。标签格式在它上面全军覆没（400 个占位符全丢，见分支 `experiment/sentence-alignment` 的数据），所以它只能进 `markers` 链（DESIGN §8.5）。
+
+**实体**：`&lt;` / `&gt;` 原样返回；**`&amp;` 会被当成词义翻译掉**（`Springer science &amp; business media` → `施普林格科学与商业媒体`）。裸的 `<` `&` 也不会被它当 HTML 解析——它不是 HTML 端点。所以 `markers` 统一转义 `& < >`（为 Google 的 `translateHtml` 而设，DESIGN §6.2）在微软这边是安全的：`&lt;/&gt;` 无损往返，`&amp;` 变成「与」属于翻译质量而非损坏。
+
+**对 DESIGN.md 的含义**：`microsoft` 可以作为 `wireFormats: ['markers']` 的免费 provider 接入（#98）。`maxBatchChars` 应远低于 50,000（Google 用 8000），`maxBatchItems` 没有实际瓶颈。
 
 **对 DESIGN.md 的含义**：gtx 在样本中可靠保留了占位符，`google-gtx` 有条件声明 `preservesMarkup: true` 走 markup 路径，由 validator 兜底（失败再降级 runs）；translateHtml 不值得作为独立 provider。见 §7。
 
@@ -440,3 +482,5 @@ DESIGN §15 只记了用上的两个（`macos-vision-ocr`、`ImageTrans_chrome_e
 | 23 | §8 `google-gtx` 用 `translate_a/single`、`preservesMarkup: false` | 改用 Read Frog 的 `translate-pa.googleapis.com/v1/translateHtml`：实测保留占位符，`preservesMarkup: true`，批量 150 条 556 ms | §6.6 |
 | 20 | §15.1 SVG 图文字按普通块翻译 | 实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics` | §2.9 |
 | 24 | §8.0 请求跑在 content script | 实测 content 侧 fetch 受 CORS 与**本地网络门禁**约束（§6.7）：不带 CORS 头的端点、本机端点（Ollama；http 与 https 一样被拦）从 content 不可达，从 background 可达；连接测试走 background、正式翻译走 content，两条路径行为不一致。且 §8.0 引用的「Read Frog 在 content 发请求」核对为误读。建议：抽离 transport，默认在 background 执行请求（无 CORS 预检、不受本地网络门禁、key 不进页面世界），content 只保留调度；~~先按 issue #42 要求重测冷启动延迟，再定~~ **重测已完成**（§6.7 真实 Chrome 三轮 77–81 ms、§6.8 长请求 45 / 90 s 均存活），**已按本条实现并合并**（issue #42） | §6.7 / §6.8 |
+| 25 | §2「非目标 [延后]」把「微软免费通道」列为 v1 不做；§8.1 正文写「gtx 与微软 edge 通道不接（后者 auth 端点已 404）」 | **依据已失效**：那条 auth 流程确实没了，但它的**无鉴权后继**今天可用（§5.1）。#104 已经把 `markers` 线上格式与能力协商做进 main，微软正是它存在的理由。建议：把这两处改成「可接入，`wireFormats: ['markers']`」，并在 §8.1 的 provider 表里加一行 | §5.1 |
+| 26 | §8.1 provider 表没有「支持语言范围」这一列 | 免费引擎不是每种目标语言都支持：微软实测 179 个目标里 71 个 400。建议 provider 接口增加一个「这个目标语言能不能翻」的判定，`buildChain` 与设置页据此过滤，而不是等运行时报错 | §5.1 |
