@@ -33,5 +33,6 @@
 | `src/styles/presets.css` | `reference/kiss-translator/src/config/styles.js` + `src/libs/style.js@c95bd46`；`green` / `tint` 取自 `reference/read-frog/src/assets/styles/custom-translation-node.css@9b44f82` | 2026-09-05 | 整套预设照搬 KISS：改用 `data-axt-style` 属性选择器与 `--axt-*` 变量、去掉 emotion 运行时；排除 pending / error / mirror / split 节点；gradient 与 glow 改静态、荧光笔按 `1lh` 重复；Read Frog 只取译文默认绿与淡色底两个值 |
 | `src/providers/prompt-file.ts` | `reference/read-frog/src/components/prompt-configurator/utils/prompt-file.ts@9b44f82` | 2026-09-05 | 功能重写：文件形状相同（可互相导入），校验换 zod，去掉 file-saver |
 | `src/core/scheduler/session.ts` | `reference/read-frog/src/utils/host/translate/translation-session.ts@9b44f82` | 2026-09-05 | 去掉 providerRef 的两个函数；函数改名 begin / end / getSessionId |
+| `src/providers/microsoft.ts` | `reference/read-frog/src/utils/host/translate/api/microsoft.ts@9b44f82`（另对照 `reference/FluentRead/src/providers/translation/microsoft.ts`） | 2026-09-08 | 端点、查询参数（含 `from=auto` 转空串）、裸字符串数组请求体、`translations[0].text` 的解析与逐条缺失检查照搬；**去掉它的 escapeText**（protector 已转义，再转会发出 `&amp;lt;`，与移植 google-web 时同一个改造）；`textFormat === 'html'` 的硬失败改成 `wireFormats: ['markers']` + 一道防御性检查；错误包成本项目的 `ProviderError` 分类；批量 / 并发 / 速率按我们自己实测的响应特征定（上游只有全局配置）；支持语言表是本项目的（上游没有，映射缺失就抛错） |
 
 登记格式：`src/<path>` ← `reference/<repo>/<path>@<commit>`，一句话说明改了什么（改名、去掉配置依赖、适配块模型等）。改写幅度大到不再像原文件的也要登记。

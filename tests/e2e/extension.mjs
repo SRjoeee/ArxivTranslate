@@ -433,6 +433,47 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.close()
 }
 
+// ── 微软引擎（#98）：markers 线上格式在**真实论文**上的唯一一次端到端验证 ──────────
+// #104 只在 fixture 上验过恒等译文的往返；记号能不能扛住真的机器翻译（语序移位、
+// 引擎自作主张改标点）只有这里能证。标签格式在这个端点上是 0%，所以它必须走 markers。
+{
+  await options.bringToFront()
+  await options.selectOption('select >> nth=0', 'microsoft')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
+  const { page, logs } = await openPaper(PAPER, 'edge.microsoft.com')
+  const idle = idleOf(await waitForLog(logs, IDLE, 120_000))
+  check('微软引擎：首屏翻完、没有致命错误（#98）',
+    !!idle && idle.requested > 0 && idle.done === idle.requested && idle.failed === 0 && !/fatal/.test(idle.text),
+    idle?.text ?? '(no idle line)')
+
+  // 记号方案的两条硬承诺：受保护节点一个不少，且没有记号漏进可见文字
+  const shape = await page.evaluate(() => {
+    const pairs = []
+    for (const t of document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')) {
+      const id = t.getAttribute('data-axt-for')
+      const src = id ? document.querySelector(`[data-axt-id="${id}"]`) : null
+      if (!src) continue
+      pairs.push({ src: src.querySelectorAll('math, .ltx_Math, img, a.ltx_ref').length, out: t.querySelectorAll('math, .ltx_Math, img, a.ltx_ref').length })
+    }
+    const text = [...document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')].map(t => t.textContent ?? '').join('')
+    return { pairs: pairs.length, mismatched: pairs.filter(p => p.src !== p.out).length, protectedNodes: pairs.reduce((n, p) => n + p.src, 0), markerLeak: (text.match(/@[a-z]+#/g) ?? []).length }
+  })
+  check('微软引擎：每个块的受保护节点数与原文一致（记号没丢公式 / 链接）',
+    shape.pairs > 0 && shape.mismatched === 0 && shape.protectedNodes > 0,
+    `${shape.pairs} 对配对，${shape.protectedNodes} 个受保护节点，对不上的 ${shape.mismatched} 个`)
+  check('微软引擎：译文里没有记号残留', shape.markerLeak === 0, `残留 ${shape.markerLeak} 处`)
+  await page.screenshot({ path: `${SHOTS}/microsoft.png` })
+  await page.close()
+
+  // 切回 google-web，后面的检查沿用原来的引擎
+  await options.bringToFront()
+  await options.selectOption('select >> nth=0', 'google-web')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+}
+
 // ── 论文 2：翻译中途"恢复原文"，排队与在飞的请求一起撤 ────────────────
 {
   const { page, logs, requests, originalTitle } = await openPaper(PAPER2, GOOGLE)

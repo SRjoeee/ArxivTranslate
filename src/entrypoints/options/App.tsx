@@ -3,6 +3,7 @@ import { browser } from 'wxt/browser'
 import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
 import { DEFAULT_CONFIG, MODE_VALUES, configSchema, type Config } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
+import { supportsTarget } from '@/providers/microsoft'
 import { THINKING_HOSTS } from '@/providers/thinking'
 import modesCss from '@/styles/modes.css?inline'
 import presetsCss from '@/styles/presets.css?inline'
@@ -41,6 +42,7 @@ const PROVIDERS: [Config['provider'], string, string][] = [
   ['openai-compat', 'LLM（OpenAI 兼容端点）', '译文质量最好，需要 API key'],
   ['google-web', 'Google 网页翻译（免费）', '不需要 key，整篇几秒翻完，术语准确度不如 LLM'],
   ['chrome-builtin', 'Chrome 内置翻译（离线）', '不需要 key、不联网，单句十几毫秒；术语准确度不如 LLM，首次使用要在 popup 里下载语言包'],
+  ['microsoft', '微软翻译（免费）', '不需要 key；只保得住纯文本记号，所以内联样式（斜体等）会丢，公式与链接不受影响'],
 ]
 
 // Phase 2：provider 配置 + 连接测试。样式预设、术语表、缓存管理在 Phase 3。
@@ -225,6 +227,13 @@ export function App() {
           {PROVIDERS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
         <small style={{ color: '#666' }}>{PROVIDERS.find(([id]) => id === config.provider)?.[2]}</small>
+        {/* 语言闸要在**选的时候**说清楚（#98）：isAvailable() 为假只会让链默默降级到 Google，
+            popup 那句「不可用」讲不出「因为微软不支持这门语言」。179 个目标语言里它支持 108 个 */}
+        {config.provider === 'microsoft' && !supportsTarget(config.targetLanguage) && (
+          <small style={{ color: '#b00', display: 'block', marginTop: 4 }}>
+            微软翻译不支持当前的目标语言（{languageLabel(config.targetLanguage)}），翻译时会自动改用 Google。换一种目标语言，或直接选别的引擎。
+          </small>
+        )}
       </label>
 
       <h2 style={{ fontSize: 15, marginTop: 24, opacity: config.provider === 'openai-compat' ? 1 : 0.5 }}>OpenAI 兼容端点</h2>

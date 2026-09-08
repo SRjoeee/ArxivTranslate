@@ -40,7 +40,7 @@ export function normalizeGlossary(value: unknown): { term: string; translation: 
 
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
-  provider: z.enum(['openai-compat', 'google-web', 'chrome-builtin']),
+  provider: z.enum(['openai-compat', 'google-web', 'chrome-builtin', 'microsoft']),
   openaiCompat: z.object({
     baseURL: z.url(),
     /** 只存本地，永不进日志、缓存键或 fixture */

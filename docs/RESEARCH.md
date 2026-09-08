@@ -257,7 +257,17 @@ Content-Type: application/json
 
 **占位符**：纯文本记号 `@a#` 全部存活，且发生了语序移位——`The transform @a# is bounded by @b# in @c#.` → `变换@a#被@c#中的@b#界定。`，正是记号方案要的效果。标签格式在它上面全军覆没（400 个占位符全丢，见分支 `experiment/sentence-alignment` 的数据），所以它只能进 `markers` 链（DESIGN §8.5）。
 
-**实体**：`&lt;` / `&gt;` 原样返回；**`&amp;` 会被当成词义翻译掉**（`Springer science &amp; business media` → `施普林格科学与商业媒体`）。裸的 `<` `&` 也不会被它当 HTML 解析——它不是 HTML 端点。所以 `markers` 统一转义 `& < >`（为 Google 的 `translateHtml` 而设，DESIGN §6.2）在微软这边是安全的：`&lt;/&gt;` 无损往返，`&amp;` 变成「与」属于翻译质量而非损坏。
+**实体**：`&lt;` / `&gt;` 原样返回；**`&amp;` 会被当成词义翻译掉**（`Springer science &amp; business media` → `施普林格科学与商业媒体`）。
+
+**这里我原本写错了一条**（2026-09-08 接入时更正，issue #98）：我发 `a < b & c > d` 拿回 `A < B 和 C > D`，据此写了「裸的 `<` 不会被它当 HTML 解析——它不是 HTML 端点」。**两个上游项目各自独立地说这是错的**：
+
+> The endpoint runs Microsoft's HTML tag aligner on every request, so a bare `<` in page text fuses into a pseudo-tag（`a < b and c > d` 回来是 `<B和C> d`）—— Read Frog `api/microsoft.ts@9b44f82`
+
+> Google and Microsoft **both parse the request as HTML**, so their adapters escape plain source text before sending and the response stays HTML-encoded; **decode it exactly once** —— Read Frog `translation-output-normalization.ts@9b44f82`
+
+> endpoint 始终会运行 HTML 标签对齐器 —— FluentRead `providers/translation/microsoft.ts`
+
+我那一次采样只是没触发（比较运算符两侧有空格）。结论方向不变但依据要换：`markers` 统一转义 `& < >`（DESIGN §6.2）在微软这边不是「安全」而是**必需**；`&lt;/&gt;` 无损往返，`&amp;` 变成「与」属于翻译质量而非损坏。
 
 **对 DESIGN.md 的含义**：`microsoft` 可以作为 `wireFormats: ['markers']` 的免费 provider 接入（#98）。`maxBatchChars` 应远低于 50,000（Google 用 8000），`maxBatchItems` 没有实际瓶颈。
 
