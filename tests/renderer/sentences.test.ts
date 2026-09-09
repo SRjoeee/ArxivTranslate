@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { nodeOffsetAt, rehydrate, serialize, wireOffsetAt } from '@/core/protector'
 import { registerSentences, sentenceAt, sentenceMapAt, sentenceMapOf } from '@/core/renderer'
+import { SPLIT_CLASS, splitFigures } from '@/core/renderer/split-figures'
+import { docOf } from './helpers'
 import { splitSentences } from '@/core/sentences'
 import { verifyAlignment } from '@/providers/alignment'
 
@@ -23,6 +25,27 @@ function render(html: string, fmt: 'tags' | 'markers' = 'tags') {
   return { d, source, target, block, spans: fragment.offsets }
 }
 
+/** 一张拆过图的插图：原文图注、被藏起来的译文、屏幕上那份副本 */
+function splitCaption() {
+  const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+    + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
+  const source = d.querySelector('figcaption')!
+  const block = serialize(source, 'tags')
+  const fragment = rehydrate(block.text, block, d)
+  const target = d.createElement('figcaption')
+  target.className = 'axt-t'
+  target.setAttribute('data-axt-for', 'F1.cap')
+  target.append(fragment)
+  source.after(target)
+  const lengths = splitSentences(block.text)
+  registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+  splitFigures(d)
+  const copy = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
+  Object.assign(target, { checkVisibility: () => false })
+  Object.assign(copy, { checkVisibility: () => true })
+  return { d, source, target, copy }
+}
+
 describe('sentence registry (#105)', () => {
   it('finds the block from a node on either side, and only when it was registered', () => {
     const { source, target, block, spans } = render('<p class="ltx_p">One. Two.</p>')
@@ -33,6 +56,213 @@ describe('sentence registry (#105)', () => {
     expect(sentenceMapAt(source.firstChild!)?.side).toBe('source')
     expect(sentenceMapAt(target.firstChild!)?.side).toBe('target')
     expect(sentenceMapAt(source)?.map.pairs.length).toBe(lengths.length)
+  })
+
+  it('side 模式拆图之后，高亮跟着屏幕上那份走（#139）', () => {
+    // `splitFigures` 把整张图连图注一起克隆到右栏，**读者看到的是克隆件**，而原件那份译文被藏起来了。
+    // 只登记原件的话，悬停图注时译文侧算出来的矩形是空的——用户 2026-09-10 在 2609.04987v1 上报的
+    // 拆图只在翻译根里扫，所以页面要有 `article.ltx_document`
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
+    const source = d.querySelector('figcaption')!
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('figcaption')
+    // `renderText` 打的那两个标记：拆图按 `.axt-t` 找译文，没有它这张图根本不会被拆
+    target.className = 'axt-t'
+    target.setAttribute('data-axt-for', 'F1.cap')
+    target.append(fragment)
+    source.after(target)
+    const lengths = splitSentences(block.text)
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+
+    expect(splitFigures(d)).toBe(1)
+    const clone = d.querySelector(`.${SPLIT_CLASS}`)!
+    const copy = clone.querySelector('figcaption')!
+    expect(copy.textContent).toBe(target.textContent)
+
+    // 悬停克隆件里的图注：解析得到同一个块，而且认得出这是译文那一侧
+    const inCopy = sentenceMapAt(copy.firstChild!)
+    expect(inCopy?.side).toBe('target')
+    expect(inCopy?.map.pairs.length).toBe(lengths.length)
+    // 悬停原文时，译文那侧指向的是**克隆件**——原件那份在 side 模式下没有盒子
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
+    // span 换成了克隆里的节点，不是原件的
+    const nodes = new Set(sentenceMapOf(copy)!.target.spans.map(s => s.node))
+    expect([...nodes].every(n => copy.contains(n))).toBe(true)
+    expect([...nodes].some(n => target.contains(n))).toBe(false)
+  })
+
+  it('切回 stack 时副本被藏起来，高亮回落到原件那份（#139）', () => {
+    // **切模式不会删掉副本**，只是用 CSS 把一边藏起来（stack 藏副本、only 藏原件）。
+    // 所以判据是「谁在屏幕上」而不是「谁还在文档里」——后者两边都成立，高亮会画在看不见的那份上
+    // 拆图只在翻译根里扫，所以页面要有 `article.ltx_document`
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
+    const source = d.querySelector('figcaption')!
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('figcaption')
+    // `renderText` 打的那两个标记：拆图按 `.axt-t` 找译文，没有它这张图根本不会被拆
+    target.className = 'axt-t'
+    target.setAttribute('data-axt-for', 'F1.cap')
+    target.append(fragment)
+    source.after(target)
+    const lengths = splitSentences(block.text)
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+    splitFigures(d)
+    const copy = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
+    // side：两边都在屏幕上，取副本（右栏那份就是它）
+    for (const el of [target, copy]) Object.assign(el, { checkVisibility: () => true })
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
+
+    // stack：副本被 CSS 藏了，但**还在文档里**——回落到原件那份
+    Object.assign(copy, { checkVisibility: () => false })
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(target)
+  })
+
+  it('拆图里按单元格登记的表格也跟着镜像（#148）', () => {
+    // 表格的句子是按**单元格**登记的（`renderTable` 回报「原格 → 克隆格」），格子在 `.axt-t` 表格
+    // 里面。只镜像 `.axt-t` 的话，插图里带表格时那些格子在克隆件里仍然没登记（Codex 在 #148 指出）
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption>'
+      + '<div class="axt-t" data-axt-for="F1.cap"><table><tbody><tr>'
+      + '<td class="ltx_td" id="F1.c1">One. Two.</td></tr></tbody></table></div></figure>')
+    // 「格子」这一层：源与译各一个单元格，按格子登记，正是 renderTable 的做法
+    const cell = d.getElementById('F1.c1')!
+    const block = serialize(cell, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('td')
+    target.append(fragment)
+    cell.after(target)
+    const lengths = splitSentences(block.text)
+    registerSentences(cell, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+
+    expect(splitFigures(d)).toBe(1)
+    const copy = d.querySelector(`.${SPLIT_CLASS}`)!.querySelectorAll('td')[1]!
+    for (const el of [target, copy]) Object.assign(el, { checkVisibility: () => true })
+    // 悬停克隆件里的那个格子：解析得到同一个块
+    expect(sentenceMapAt(copy.firstChild!)?.side).toBe('target')
+    // 悬停原文格子：译文那侧指向克隆里的格子
+    expect(sentenceMapAt(cell.firstChild!)?.map.target.root).toBe(copy)
+  })
+
+  it('重新翻一遍之后，还挂着的副本用的是这一版的句边界（#148）', () => {
+    // 译文正文没变时 `translationKey` 不变，副本就不会被重建——它记的还是上一轮的句边界，
+    // 而 side 模式下屏幕上正是它。正文一样时 span 仍然对得上，换掉句边界即可（Codex 在 #148 指出）
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
+    const source = d.querySelector('figcaption')!
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('figcaption')
+    target.className = 'axt-t'
+    target.setAttribute('data-axt-for', 'F1.cap')
+    target.append(fragment)
+    source.after(target)
+    const lengths = splitSentences(block.text)
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+    splitFigures(d)
+    const copy = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
+    // side 模式的样子：原件那份译文被藏起来，屏幕上是副本
+    Object.assign(target, { checkVisibility: () => false })
+    Object.assign(copy, { checkVisibility: () => true })
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
+    expect(sentenceMapAt(source.firstChild!)?.map.pairs).toHaveLength(lengths.length)
+
+    // 同一段正文重翻一遍，这次只有一句
+    const one = [block.text.length]
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: one, target: one })
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
+    expect(sentenceMapAt(source.firstChild!)?.map.pairs).toHaveLength(1)
+
+    // 这一轮完全没有对齐：副本记的那份也不能再用
+    registerSentences(source, target, block.offsets, fragment.offsets, undefined)
+    expect(sentenceMapAt(source.firstChild!)).toBeUndefined()
+  })
+
+  it('这一轮没有对齐时，副本自己那份记录也要作废（#148）', () => {
+    // 光删「原文 → 译文」的索引不够：副本自己也是记录表的键，指针直接落在副本上照样查得到
+    const { source, target, copy } = splitCaption()
+    expect(sentenceMapAt(copy.firstChild!)).toBeDefined()
+
+    const block = serialize(source, 'tags')
+    registerSentences(source, target, block.offsets, undefined, undefined)
+    expect(sentenceMapAt(copy.firstChild!)).toBeUndefined()
+    expect(sentenceMapAt(source.firstChild!)).toBeUndefined()
+  })
+
+  it('从「没有对齐」变成「有对齐」时，留着的副本会被重建并镜像（#148）', () => {
+    // 拆图按译文正文的签名决定要不要重建。正文没变、登记从无到有时，副本原样留下就永远不会被
+    // 镜像——悬停原文落到藏起来的原件上，悬停副本什么也查不到
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
+    const source = d.querySelector('figcaption')!
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('figcaption')
+    target.className = 'axt-t'
+    target.setAttribute('data-axt-for', 'F1.cap')
+    target.append(fragment)
+    source.after(target)
+
+    // 第一轮：没有对齐（谷歌 / LLM 的块就是这样）
+    registerSentences(source, target, block.offsets, fragment.offsets, undefined)
+    expect(splitFigures(d)).toBe(1)
+    const first = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
+    expect(sentenceMapAt(first.firstChild!)).toBeUndefined()
+
+    // 第二轮：同样的正文，这次有对齐了——副本必须重建并登记
+    const lengths = splitSentences(block.text)
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+    expect(splitFigures(d)).toBe(1)
+    const rebuilt = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
+    Object.assign(target, { checkVisibility: () => false })
+    Object.assign(rebuilt, { checkVisibility: () => true })
+    expect(sentenceMapAt(rebuilt.firstChild!)?.side).toBe('target')
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(rebuilt)
+  })
+
+  it('表格从「没有对齐」变成「有对齐」时，签名要走进单元格，副本才会重建（#148）', () => {
+    // 表格是唯一把句子登记在**后代**上的译文：`renderTable` 按单元格回报「原格 → 克隆格」，
+    // `.axt-t` 表格本身从来没被登记过。签名只问表格就永远是空的，这种正文不变的转换看不见，
+    // 副本原样留下、格子一格也没被镜像（Codex 在 #148 指出）。
+    // 结构照 `renderTable`：整张 `.ltx_tabular` 克隆一份带 .axt-t，格子在克隆里
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption>'
+      + '<figcaption class="ltx_caption axt-t" data-axt-for="F1.cap">图 1。</figcaption>'
+      + '<table class="ltx_tabular" id="F1.tab" data-axt-id="F1.tab"><tbody><tr>'
+      + '<td class="ltx_td">One. Two.</td></tr></tbody></table></figure>')
+    const table = d.getElementById('F1.tab')!
+    const cell = table.querySelector('td')!
+    const clone = table.cloneNode(true) as Element
+    clone.removeAttribute('id')
+    clone.removeAttribute('data-axt-id')
+    clone.classList.add('axt-t')
+    clone.setAttribute('data-axt-for', 'F1.tab')
+    table.after(clone)
+    const target = clone.querySelector('td')!
+    const block = serialize(cell, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    target.textContent = ''
+    target.append(fragment)
+
+    // 第一轮：没有对齐
+    registerSentences(cell, target, block.offsets, fragment.offsets, undefined)
+    expect(splitFigures(d)).toBe(1)
+    const first = d.querySelector(`.${SPLIT_CLASS} td`)!
+    expect(sentenceMapAt(first.firstChild!)).toBeUndefined()
+
+    // 第二轮：同样的正文，这次有对齐了——副本必须重建，格子在副本里登记好
+    const lengths = splitSentences(block.text)
+    registerSentences(cell, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+    expect(splitFigures(d)).toBe(1)
+    const rebuilt = d.querySelector(`.${SPLIT_CLASS} td`)!
+    expect(rebuilt).not.toBe(first)
+    Object.assign(target, { checkVisibility: () => false })
+    Object.assign(rebuilt, { checkVisibility: () => true })
+    expect(sentenceMapAt(rebuilt.firstChild!)?.side).toBe('target')
+    expect(sentenceMapAt(cell.firstChild!)?.map.target.root).toBe(rebuilt)
   })
 
   it('registers nothing without an alignment, so those blocks simply do not highlight', () => {

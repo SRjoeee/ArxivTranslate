@@ -830,6 +830,57 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列补上 ${q.extra} 发、其中${q.confirmed ? '有没见过的请求体（确有排队的新批次，不是同一批重发）' : '全是同一批重发——队列里没有排队的活，这条断言无效'}；导航离开再放开全部槽位后新增 ${late} 个`)
 }
 
+// ── side 模式下图注的对照高亮（issue #139）：屏幕上那份是克隆件 ──────────────
+{
+  // 只有真实浏览器能证：判据是「哪一份有盒子」，而 happy-dom 量不出任何几何。
+  // 引擎用当前配置的那个（此处是 google-web）：#137 之后谷歌也有句对齐了，图注这类块照样登记
+  const { page, logs } = await openPaper(PAPER, GOOGLE)
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await page.bringToFront()
+  await popup.getByRole('button', { name: '左右', exact: true }).click()
+  await sleep(500)
+  await popup.close()
+  await scrollThrough(page)
+  await waitForLog(logs, IDLE, 120_000)
+  // **先选中要测的那个图注，再滚它**：翻译落地会把版面顶下去，先滚一个「第一个图注」等翻完，
+  // 它未必还在视口里，而 `getClientRects()` 与 `top > 0` 对视口下方的元素照样成立（Codex 在 #148 指出）
+  await page.evaluate(() => document.querySelector('[data-axt-split] .ltx_caption[data-axt-id]')?.scrollIntoView({ block: 'center' }))
+  await sleep(1500)
+  const caption = await page.evaluate(async () => {
+    const mode = document.documentElement.getAttribute('data-axt-mode')
+    // **必须是真被拆过的那张图里的图注**：表格 / 算法的图注不走拆图这条路，它们的译文本来就不在
+    // 克隆件里，拿它来断言 `inSplit` 会得到一个假失败（换 AXT_PAPER 时尤其容易撞上，Codex 在 #148 指出）
+    const src = [...document.querySelectorAll('[data-axt-split] .ltx_caption[data-axt-id]')].find(c => c.getClientRects().length)
+    if (!src) return { mode, reason: '没有可见的、属于拆图的原文图注' }
+    const walk = document.createTreeWalker(src, NodeFilter.SHOW_TEXT)
+    let point = null
+    for (let t = walk.nextNode(); t && !point; t = walk.nextNode()) {
+      for (let i = 0; i + 1 <= t.data.length && !point; i++) {
+        if (/\s/.test(t.data[i])) continue
+        const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + 1)
+        const b = r.getBoundingClientRect()
+        if (b.width > 0 && b.height > 0 && b.top > 0 && b.bottom < innerHeight) point = { x: b.left + b.width / 2, y: b.top + b.height / 2 }
+      }
+    }
+    if (!point) return { mode, reason: '图注上找不到可瞄准的字' }
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: point.x, clientY: point.y, bubbles: true }))
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+    const bands = [...document.querySelectorAll('.axt-hl > div')]
+    const side = which => bands.filter(b => b.getAttribute('data-axt-hl-side') === which)
+    const inSplit = side('target').every(b => {
+      const r = b.getBoundingClientRect()
+      const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      return !!el?.closest('.axt-split')
+    })
+    return { mode, source: side('source').length, target: side('target').length, inSplit }
+  })
+  await page.close()
+  check('side 模式：图注的对照高亮画在右栏那份克隆件上（issue #139）',
+    caption.mode === 'side' && caption.source > 0 && caption.target > 0 && caption.inSplit === true,
+    `模式 ${caption.mode}，原文 ${caption.source} 条底、译文 ${caption.target} 条底${caption.inSplit ? '（都落在克隆件里）' : ''}${caption.reason ? ` (${caption.reason})` : ''}`)
+}
+
 // ── 摘要页的双语入口（issue #146）：点一下就进到「已经在翻」的全文页 ──────────
 {
   // 这条只有真实浏览器能证：插入点靠的是 arXiv 自己渲染的标记，而「点进去自动开始翻译」
@@ -838,6 +889,9 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const logs = []
   page.on('console', m => { const t = m.text(); if (t.includes('[axt]')) logs.push({ t: Date.now(), text: t }) })
   await page.goto(`https://arxiv.org/abs/${PAPER}`, { waitUntil: 'domcontentloaded' })
+  // content script 是 `document_idle`，`domcontentloaded` 之后它未必已经跑过：立刻读 DOM 会读到空的，
+  // 而下一步的 click 因为自动等待反而会过——一条假失败加一条假通过
+  await page.waitForSelector('.axt-abs-link', { timeout: 20_000 }).catch(() => {})
   const link = await page.evaluate(() => {
     const ours = document.querySelector('.axt-abs-link')
     const html = document.querySelector('#latexml-download-link')
