@@ -490,9 +490,16 @@ amount of `data-text` reading will reach — see point 4. OCR is what would serv
 |---|---|
 | `<use>` elements | 55064 |
 | carrying `data-text` | 55047 (**99.97%**) |
-| files where every one carries it | 248 / 281 |
+| files parsed | 281 |
+| — of those, drawing glyphs as `<use>` at all | 253 |
+| files where every `<use>` carries it | **248 / 253 (98.0%)** |
 | files where some do | 5 |
 | **files where none do** | **0** |
+| files with no `<use>` — see point 4 | 28 |
+
+The file rows are counted against the 253 that draw glyphs as `<use>`, not against all 281. The other 28
+draw their outlines directly and have nothing for this row to be true or false about; folding them into the
+denominator would report 88.3% and read as though 12% of files were partially covered (Codex on #133).
 
 All seventeen exceptions are `<use xlink:href="#pattern_tile_N">` — hatch-fill tiles, not glyphs. **Coverage of
 actual glyphs is 100%.**
@@ -557,7 +564,9 @@ Codex noticed the arithmetic on #133. Both quarter turns are handled; it is the 
 A seven-paper sample of 10465 glyphs contained only the first two, and this section previously concluded
 there were only two. There are not (Codex caught this on #133). The distinction is not cosmetic: an overlay
 describes a rotated label as an axis-aligned box plus an angle, which only *is* the label's box at multiples
-of 90°, so the other 1.27% cannot be placed that way and `src/core/svg/glyphs.ts` drops them.
+of 90°, so the other 1.27% cannot be placed that way. **The #121 implementation has to drop those runs**
+rather than approximate them — a requirement recorded here, not behaviour that exists: this PR is the survey
+and carries no code (Codex asked twice for forward references to be marked as such).
 
 **(b) Spaces that were dropped.** In a syntax-highlighted code listing, `if` and `log_counting` belong to
 differently coloured spans and the space between them has no glyph, so the run reads `"iflog_counting == 8:"`,
