@@ -232,10 +232,17 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
    * 拼回去不产出线上偏移，对齐在那里没有东西可挂。引擎自己汇报的（微软）也不插
    */
   const markedItem = (provider: TranslationProvider, renderPath: RenderPath | undefined, segment: TranslateSegment): { text: string; source: string; marks?: MarkedText } => {
+    const plain = { text: segment.text, source: segment.text }
     const cuts = segment.cuts
-    if (provider.reportsSentences || renderPath !== 'tags' || !cuts || cuts.length === 0) return { text: segment.text, source: segment.text }
+    if (provider.reportsSentences || renderPath !== 'tags' || !cuts) return plain
+    // 一句话的块：整段对整段就是安全的对齐，不必插任何标记（§8.6）
+    if (cuts.length === 0) return { ...plain, marks: { text: segment.text, source: [segment.text.length], ids: [] } }
     const marks = markSentences(segment.text, cuts)
-    return marks ? { text: marks.text, source: segment.text, marks } : { text: segment.text, source: segment.text }
+    if (!marks) return plain
+    // **单条也可能超限**：`BatchQueue` 的字符上限只拦「合批」，一条任务超了也照发不误
+    //（Codex 在 #137 指出）。插完超了就不插——没有对齐只是没有高亮，而超限是整批失败
+    if (marks.text.length > provider.maxBatchChars) return plain
+    return { text: marks.text, source: segment.text, marks }
   }
 
   const translateItems = async (items: QueueItem[], ids: string[], signal: AbortSignal | undefined): Promise<TranslationOutcome[]> => {
@@ -354,7 +361,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       const translated = new Map<string, TranslationOutcome>()
       if (store && cache) {
         const computed = await Promise.all(request.segments.map(segment =>
-          cacheKeyFor({ providerId: provider.cacheId ?? provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text }),
+          cacheKeyFor({ providerId: provider.cacheId ?? provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text, ...(segment.cuts ? { cuts: segment.cuts } : {}) }),
         ))
         request.segments.forEach((segment, i) => {
           keys.set(segment.id, computed[i]!)

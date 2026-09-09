@@ -45,6 +45,13 @@ export interface CacheIdentity {
   renderPath: RenderPath
   /** 发给模型的文本（含占位符），归一化在这里做 */
   text: string
+  /**
+   * 句子边界（§8.6）。**必须进键**：两个块可以序列化成同一份线上文本，而槽位语义不同、
+   * `cutsOf` 因此给出不同的切点——键里不带它，第二个块就会命中第一个块的条目，
+   * 连同它那份对不上的对齐一起（`verifyAlignment` 只查条数与总长，挡不住这种）
+   *（Codex 在 #137 指出）。不切句的调用不带这个字段，键与从前一致
+   */
+  cuts?: readonly number[]
 }
 
 /**
@@ -79,6 +86,7 @@ export async function buildCacheKey(identity: CacheIdentity): Promise<string> {
     identity.target,
     identity.renderPath,
     normalizeText(identity.text),
+    identity.cuts ?? null,
   ])
   return sha256Hex(payload)
 }

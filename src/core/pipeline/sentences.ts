@@ -19,7 +19,11 @@ import { wireFormatOf, type RenderPath } from '@/cache/key'
 const NO_SENTENCES = new Set(['bibblock', 'bibitem'])
 
 /**
- * 这一段的句子边界，没有就返回 undefined。
+ * 这一段的句子边界。
+ *
+ * **空数组与 undefined 不是一回事**：空数组表示「这一块该对齐，但它只有一句」——整段对整段
+ * 就是安全的对齐，不需要任何标记，而单句块占正文一大半；undefined 表示「这一块不该对齐」，
+ * 参考文献与非 `tags` 的路径属于后者（Codex 在 #137 指出我把两者混为一谈了）。
  *
  * `runs` 与 `markers` 两条路不切：前者送的是切碎的纯文本段、拼回去不产出线上偏移，
  * 后者线上没有活得下来的标记。
@@ -38,5 +42,5 @@ export function cutsOf(segment: Segment, renderPath: RenderPath): number[] | und
       return node ? visibleTextOf(node) : undefined
     },
   })
-  return cuts.length > 0 ? cuts : undefined
+  return cuts
 }

@@ -694,6 +694,47 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
     expect(res.result.segments[0]!.alignment).toBeUndefined()
   })
 
+  it('单句块不插标记，但照样给出整段对整段的对齐', async () => {
+    // 空切点数组说的是「这一块只有一句」。整段对整段是安全的对齐，不需要任何标记，
+    // 而单句块占正文一大半——把它和「不该对齐」混为一谈等于把它们全排除在高亮之外
+    let sent = ''
+    const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '一句译文。' }) })
+    const res = await service.translate({
+      request: { segments: [{ id: 'a', text: 'Only one sentence here.', cuts: [] }], source: 'en', target: 'zh-CN' },
+      cache: { paper: 'p', renderPath: 'tags' as RenderPath },
+    })
+    expect(sent).toBe('Only one sentence here.')
+    if (!res.ok) return
+    expect(res.result.segments[0]!.alignment).toEqual({ source: ['Only one sentence here.'.length], target: ['一句译文。'.length] })
+  })
+
+  it('插完会超出引擎单次上限就不插', async () => {
+    // `BatchQueue` 的字符上限只拦「合批」，一条任务超了也照发不误（Codex 在 #137 指出）。
+    // 没有对齐只是没有高亮，而超限是整批失败
+    let sent = ''
+    const text = `${'x'.repeat(40)}. ${'y'.repeat(40)}.`
+    const service = createTranslateService({
+      getProvider: async () => echoing(t => { sent = t; return '译文' }, { maxBatchChars: text.length + 5 }),
+    })
+    await service.translate({
+      request: { segments: [{ id: 'a', text, cuts: [42] }], source: 'en', target: 'zh-CN' },
+      cache: { paper: 'p', renderPath: 'tags' as RenderPath },
+    })
+    expect(sent).toBe(text)
+  })
+
+  it('切点进缓存键：同样的线上文本、不同的切点不能互相命中', async () => {
+    // 两个块可以序列化成同一份线上文本而槽位语义不同，`cutsOf` 因此给出不同切点。
+    // 键里不带它，第二个块会命中第一个的条目，连同对不上的那份对齐（Codex 在 #137 指出）
+    const { port, writes } = fakePort()
+    const service = createTranslateService({ getProvider: async () => echoing(() => '译文一。译文二。'), cache: port })
+    const text = 'One sentence here. Two sentences here.'
+    await service.translate({ request: { segments: [{ id: 'a', text, cuts: [19] }], source: 'en', target: 'zh-CN' }, cache: { paper: 'p', renderPath: 'tags' as RenderPath } })
+    await service.translate({ request: { segments: [{ id: 'b', text, cuts: [] }], source: 'en', target: 'zh-CN' }, cache: { paper: 'p', renderPath: 'tags' as RenderPath } })
+    const keys = writes.flat().map(w => w.key)
+    expect(new Set(keys).size).toBe(2)
+  })
+
   it('只有 tags 这条路插：markers 没有活得下来的标记，runs 的段拼回去没有线上偏移', async () => {
     for (const renderPath of ['markers', 'runs'] as RenderPath[]) {
       let sent = ''

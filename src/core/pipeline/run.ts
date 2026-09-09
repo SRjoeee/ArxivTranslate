@@ -160,7 +160,8 @@ export function startTranslation(options: RunOptions): TranslationRun {
    */
   const cutsFor = (segment: Segment): { cuts?: number[] } => {
     const cuts = cutsOf(segment, options.capabilities.renderPath)
-    return cuts ? { cuts } : {}
+    // 空数组要照样送：它说的是「这一块只有一句，整段对整段」，与「这一块不该对齐」不同
+    return cuts === undefined ? {} : { cuts }
   }
 
   const noteFatal = (res: Extract<TranslateMessageResponse, { ok: false }>) => {

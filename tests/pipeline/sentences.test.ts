@@ -6,6 +6,7 @@ import { cutsOf } from '@/core/pipeline/sentences'
 import { serialize } from '@/core/protector'
 import { sentenceCuts } from '@/core/sentences'
 import type { Segment } from '@/core/pipeline/batches'
+import { docOf } from '../renderer/helpers'
 
 const FIXTURE = join(import.meta.dirname, '../fixtures/arxiv/2609.00246.html')
 
@@ -33,6 +34,27 @@ describe('哪些块该切句（§8.6）', () => {
     expect(bib.filter(s => cutsOf(s.segment, 'tags') !== undefined)).toEqual([])
     // 而正文里确实有该切的
     expect(all.filter(s => s.unit === 'para' || s.unit === 'p').some(s => cutsOf(s.segment, 'tags') !== undefined)).toBe(true)
+  })
+
+  it('单句块给空数组，不该对齐的才给 undefined', () => {
+    // 空数组说的是「这一块只有一句，整段对整段」——那是安全的对齐，而且单句块占正文一大半。
+    // 与「这一块不该对齐」混为一谈，等于把它们全部排除在高亮之外（Codex 在 #137 指出）
+    const all = segmentsOf()
+    const single = all.filter(s => s.unit !== 'bibblock' && s.unit !== 'bibitem' && cutsOf(s.segment, 'tags')?.length === 0)
+    expect(single.length).toBeGreaterThan(20)
+    const bib = all.find(s => s.unit === 'bibblock' || s.unit === 'bibitem')!
+    expect(cutsOf(bib.segment, 'tags')).toBeUndefined()
+  })
+
+  it('引用不算注解——它可能是句子的主语', () => {
+    // 把 `.ltx_cite` 当注解会把它抹成空格，连带藏掉它前面那个边界。实测 1176 个正文块：
+    // 当注解会丢 3 个真实边界、一个都不多切（Codex 在 #137 指出）
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="x">We prove it. <cite class="ltx_cite">Smith et al.</cite> extend the result.</p></div>')
+    const blocks = extract(doc)
+    markBlocks(blocks)
+    const block = blocks.find(b => b.kind === 'text' && b.el.id === 'x') as TextBlock
+    const p = serialize(block.el, 'tags')
+    expect(cutsOf({ id: block.id, text: p.text, block, protected: p }, 'tags')).toHaveLength(1)
   })
 
   it('只有 tags 这条路切', () => {
