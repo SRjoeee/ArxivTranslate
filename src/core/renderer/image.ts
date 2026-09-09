@@ -25,6 +25,8 @@ export interface ImageLabel {
   source: string
   /** 译文 */
   text: string
+  /** 文字方向，弧度；不在表示横排。语料里只有 -π/2 一种（§15.5） */
+  angle?: number
 }
 
 export function setImageModes(doc: Document, modes: readonly string[]): void {
@@ -64,12 +66,30 @@ export function emWidth(text: string): number {
 }
 
 /**
- * 标签的内联样式：left / top / width / height 是图的百分比；字号 = min(按框高, 按框宽)，单位是容器查询单位
- * （叠加层是 size 容器，1cqh = 图高的 1%）。行高 1.15，一行占框高的 72% 左右；多行框按行数均摊
+ * 标签的内联样式：位置与尺寸都是图的百分比，字号 = min(按框高, 按框宽)，单位是容器查询单位
+ * （叠加层是 size 容器，1cqh = 图高的 1%，1cqw = 图宽的 1%）。行高 1.15，一行占框高的 72% 左右；
+ * 多行框按行数均摊。**不读任何几何**，整串在 JS 里算成字符串写一次。
+ *
+ * **竖排标签（`angle`）不能用百分比。** 绕中心转 90° 之后，框的 width 变成屏幕上的竖向长度、
+ * height 变成横向厚度；而 `width: X%` 是容器**宽**的百分比，容器不是正方形时长度就错了。
+ * 所以竖排的 width 写成 `cqh`（图高的百分比，文字真正延伸的那根轴）、height 写成 `cqw`，
+ * left / top 用 `calc()` 从中心减去一半 —— 两种单位在 calc 里可以相减，都是同一个容器的百分比。
  */
 export function labelStyle(label: ImageLabel): string {
   const pct = (v: number) => `${(v * 100).toFixed(3)}%`
+  const cq = (v: number, unit: 'cqw' | 'cqh') => `${(v * 100).toFixed(3)}${unit}`
   const lines = Math.max(1, label.lines)
+  if (label.angle) {
+    // 轴对齐外接框就是竖排文字自己的框（转 90° 没有斜边）：h 是文字长度、w 是行厚度
+    const cx = label.x + label.w / 2
+    const cy = label.y + label.h / 2
+    const byThickness = (72 * label.w) / lines
+    const byLength = (92 * label.h * lines) / emWidth(label.text)
+    return `left:calc(${cq(cx, 'cqw')} - ${cq(label.h / 2, 'cqh')});top:calc(${cq(cy, 'cqh')} - ${cq(label.w / 2, 'cqw')});`
+      + `width:${cq(label.h, 'cqh')};height:${cq(label.w, 'cqw')};`
+      + `transform:rotate(${((label.angle * 180) / Math.PI).toFixed(2)}deg);`
+      + `font-size:min(${byThickness.toFixed(2)}cqw,${byLength.toFixed(2)}cqh)`
+  }
   const byHeight = (72 * label.h) / lines
   // 宽度上限：整段文字分成 lines 行，每行大约 emWidth / lines 个 em；留 8% 边距
   const byWidth = (92 * label.w * lines) / emWidth(label.text)

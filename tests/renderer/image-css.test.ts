@@ -9,9 +9,12 @@ const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
 
 describe('image.css', () => {
   it('锚点定位：图声明锚点名、父元素限定作用域并做定位祖先、叠加层用 anchor() / anchor-size() 贴上去', () => {
-    expect(RULES).toMatch(/img:has\(\+ \.axt-img\) \{\s*anchor-name: --axt-img;/)
+    // 位图与 SVG 图共用一条：<object> 也是叠加层的锚（§15.5）
+    expect(RULES).toMatch(/:is\(img, object\):has\(\+ \.axt-img\) \{\s*anchor-name: --axt-img;/)
     expect(RULES).toMatch(/:has\(> \.axt-img\) \{\s*position: relative;\s*anchor-scope: --axt-img;/)
     expect(RULES).toMatch(/\.axt-img \{[^}]*position-anchor: --axt-img;[^}]*top: anchor\(top\);[^}]*width: anchor-size\(width\);/)
+    // 竖排标签绕自己的中心转，原点被站点样式改掉就会飞出图外（§15.5）
+    expect(RULES).toMatch(/\.axt-img > span \{[^}]*transform-origin: 50% 50%;/)
     // 不支持锚点定位的浏览器整段不生效，叠加层保持隐藏
     expect(RULES).toMatch(/@supports \(top: anchor\(top\)\)/)
   })

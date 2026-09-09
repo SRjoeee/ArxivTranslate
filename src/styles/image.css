@@ -16,7 +16,7 @@
 }
 
 @supports (top: anchor(top)) and (anchor-scope: --x) {
-  html[data-axt-on] img:has(+ .axt-img) {
+  html[data-axt-on] :is(img, object):has(+ .axt-img) {
     anchor-name: --axt-img;
   }
 
@@ -74,6 +74,9 @@
     overflow-wrap: anywhere;
     pointer-events: auto;
     cursor: default;
+    /* 竖排标签绕自己的中心转（§15.5）。默认值就是它，写出来是为了不被站点样式改掉——
+       原点一偏，标签就飞出图外 */
+    transform-origin: 50% 50%;
   }
 
   /* side：插图整块拆两份（§7.2），叠加层属于「只有译文」的副本，原件那份隐藏。
