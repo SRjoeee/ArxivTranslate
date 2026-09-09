@@ -152,6 +152,24 @@ describe('SVG glyph extraction (#121)', () => {
     for (const degrees of [-90, -89.5, -90.5]) expect([degrees, angleOf(degrees)]).toEqual([degrees, -Math.PI / 2])
   })
 
+  it('skips glyphs whose ancestor carries a transform of its own', () => {
+    // A glyph's matrix is relative to its parent's coordinate system, so a transformed ancestor
+    // makes the baseline, angle, size and position all wrong — the label would land somewhere
+    // arbitrary on the figure. Measured over every fetchable file (276 files, 54344 glyphs): not
+    // one glyph has one, though grouping itself is common (21.1% sit below the root, up to four
+    // deep). Skipping keeps the geometry contract true by construction (Codex asked on #133).
+    const glyph = (ch: string, x: number) => `<use data-text="${ch}" transform="matrix(10,0,0,-10,${x},50)"/>`
+    const svg = (inner: string) =>
+      new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">${inner}</svg>`, 'image/svg+xml').documentElement
+    const run = `${glyph('a', 20)}${glyph('b', 26)}`
+
+    // Plain nesting is fine — the converter groups without transforming
+    expect(runsOf(svg(`<g><g>${run}</g></g>`)).map(r => r.text)).toEqual(['ab'])
+    // A transform anywhere above it is not
+    expect(runsOf(svg(`<g transform="translate(30 40)">${run}</g>`))).toEqual([])
+    expect(runsOf(svg(`<g transform="translate(30 40)"><g>${run}</g></g>`))).toEqual([])
+  })
+
   it('reports nothing for a figure with no glyphs', () => {
     const doc = new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0H10V10H0Z"/></svg>', 'image/svg+xml')
     expect(runsOf(doc.documentElement)).toEqual([])

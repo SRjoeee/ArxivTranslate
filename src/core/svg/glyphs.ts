@@ -85,6 +85,27 @@ function decompose(transform: string | null): { x: number; y: number; size: numb
   return { x: e, y: f, size, angle: Math.atan2(b, a) }
 }
 
+/**
+ * Whether anything between this glyph and the figure's root carries a transform of its own.
+ *
+ * A glyph's own matrix is relative to its parent's coordinate system, so a transformed ancestor
+ * would make every number derived from it — baseline, angle, size, position — wrong. Measured over
+ * every fetchable file in the corpus (276 files, 54344 glyphs): **not one glyph has one**. Grouping
+ * itself is common — 21.1% of glyphs sit below the root, nested up to four deep — so the safe
+ * statement is not "the converter emits a flat tree" but "it puts the whole transform on the glyph"
+ * (Codex asked about the composition on #133).
+ *
+ * Skipping rather than composing: composition would be untested code for a case that does not occur,
+ * and a label placed from a matrix that is missing half its transform lands somewhere arbitrary on
+ * the figure. Dropping the run leaves it untranslated, which is the failure the reader can see past.
+ */
+function underTransformedAncestor(use: Element, root: Element): boolean {
+  for (let node = use.parentElement; node && node !== root; node = node.parentElement) {
+    if (node.hasAttribute('transform')) return true
+  }
+  return false
+}
+
 /** Glyphs in document order, projected onto their own baseline. */
 function glyphsOf(svg: Element): Glyph[] {
   const out: Glyph[] = []
@@ -92,6 +113,7 @@ function glyphsOf(svg: Element): Glyph[] {
     const text = use.getAttribute('data-text')
     // Entities in the attribute are already decoded by the parser; an empty one draws nothing
     if (text === null || text === '') continue
+    if (underTransformedAncestor(use, svg)) continue
     const t = decompose(use.getAttribute('transform'))
     if (!t) continue
     const cos = Math.cos(t.angle)
