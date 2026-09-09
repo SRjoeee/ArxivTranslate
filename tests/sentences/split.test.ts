@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { sentenceCuts, splitSentences, type SplitContext } from '@/core/sentences'
+import { sentenceCuts, splitSentences, visibleTextOf, type SplitContext } from '@/core/sentences'
 
 const parts = (text: string, format?: 'tags' | 'markers', context?: SplitContext) => {
   const out: string[] = []
@@ -150,10 +150,41 @@ describe('sentence splitting (#105)', () => {
     // live inside the math node, and a \\citet placeholder is the subject of its sentence — neither
     // is recoverable from a generic token (Codex on #126).
     const textOf = (m: Record<number, string>) => ({ textOf: (id: number) => m[id] })
+    // The break goes with the sentence it ends, the same convention as trailing whitespace
     expect(parts('we define <x id="1"/><x id="2"/>In the next step.', 'tags', textOf({ 1: 'f(x) = 0.', 2: '\n' })))
-      .toEqual(['we define <x id="1"/>', '<x id="2"/>In the next step.'])
+      .toEqual(['we define <x id="1"/><x id="2"/>', 'In the next step.'])
     expect(parts('may seem surprising. <x id="1"/> show that it holds.', 'tags', textOf({ 1: 'Smith et al.' })))
       .toEqual(['may seem surprising. ', '<x id="1"/> show that it holds.'])
+  })
+
+  it('keeps a line break that a slot stands for', () => {
+    // A `<br>` says nothing but separates, and Intl.Segmenter treats a newline as a boundary even
+    // without terminal punctuation. Routing whitespace-only slots to the stand-in threw that away,
+    // which merged the halves of a `<br>`-separated title (Codex on #126).
+    expect(parts('First sentence<x id="1"/>Second sentence', 'tags', { textOf: () => '\n' }))
+      .toEqual(['First sentence<x id="1"/>', 'Second sentence'])
+  })
+
+  it('lets an abbreviation begin the sentence after etc. or al.', () => {
+    // A following `Fig.` opens the next sentence rather than proving the first abbreviation was
+    // internal (Codex on #126). Narrowing this leaves the fixture measurement unchanged.
+    expect(parts('This was established by Smith et al. Fig. 2 shows the result.'))
+      .toEqual(['This was established by Smith et al. ', 'Fig. 2 shows the result.'])
+    expect(parts('as shown by Smith et al. in their paper.')).toEqual(['as shown by Smith et al. in their paper.'])
+  })
+
+  it('visibleTextOf leaves out what a reader cannot see', () => {
+    // `node.textContent` on MathML hands back the hidden TeX source, whose backslashes and braces
+    // the segmenter reads as punctuation and cuts on (Codex on #126).
+    const host = new DOMParser().parseFromString(
+      '<!doctype html><html><body><p><math><mrow><mi>F</mi></mrow>' +
+      '<annotation encoding="application/x-tex">F\\mathbin{\\sqcup\\!\\sqcup}G</annotation></math></p>' +
+      '<p id="br">a<br>b</p></body></html>', 'text/html')
+    const math = host.querySelector('math')!
+    expect(math.textContent).toContain('\\mathbin')
+    expect(visibleTextOf(math)).toBe('F')
+    // A <br> reports nothing through textContent although it separates
+    expect(visibleTextOf(host.querySelector('#br')!)).toBe('a\nb')
   })
 
   it('never cuts inside a placeholder, which would break the wire syntax', () => {

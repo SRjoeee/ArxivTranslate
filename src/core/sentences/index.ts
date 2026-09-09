@@ -71,8 +71,13 @@ const OPENING = /^<t(?:\s+id="\d+")?>$/
 
 /** Abbreviations that genuinely end sentences, so the text after them decides whether to merge */
 const TERMINAL_ABBR = /\b(?:etc|al)\.$/
-/** A continuation rather than a new sentence: lowercase, a number, or another abbreviation */
-const CONTINUES = /^\s*(?:[a-z0-9]|(?:[A-Z]|Fig|Figs|Eq|Eqs|Sec|Secs|Ref|Refs|Thm|Def|Lem|Prop|Cor|Rev|Phys|Lett|Nucl|Astron|Astrophys|Mon|Not|Proc|Conf|Int|J|vs|etc|cf|al|approx|resp|Dr|Prof|St|No|Vol|pp|Ed|Eds|Sci|Rep|e\.g|i\.e)\.)/
+/**
+ * A continuation rather than a new sentence. Only lowercase or a number: an abbreviation after
+ * `etc.` or `al.` opens the next sentence rather than proving the first was internal — "by Smith
+ * et al. Fig. 2 shows …" is two sentences (Codex on #126). Narrowing it costs nothing: the
+ * measurement over 2330 fixture blocks is unchanged at one added cut and none wrong.
+ */
+const CONTINUES = /^\s*[a-z0-9]/
 
 const VOID_TOKEN = 'Xx'
 
@@ -103,6 +108,29 @@ export type IsAnnotation = (id: number) => boolean
  * The caller has `slots`, so it can answer with `node.textContent`.
  */
 export type TextOfSlot = (id: number) => string | undefined
+
+/**
+ * The text of a node as a reader sees it, for use as `textOf`.
+ *
+ * **Not `node.textContent`.** A MathML node carries its TeX source in a hidden `<annotation>`, so
+ * textContent hands back things like `F\mathbin{\sqcup\!\sqcup}G`, whose backslashes and braces
+ * the segmenter reads as punctuation and cuts on — a half-sentence highlight from markup nobody can
+ * see (Codex on #126). A `<br>` reports nothing at all, though it separates what is around it.
+ *
+ * Element names only, no `ltx_*` selectors, so this stays out of the rules module's territory.
+ */
+export function visibleTextOf(node: Node): string {
+  if (node.nodeType === 3) return (node as Text).data
+  if (node.nodeType !== 1) return ''
+  const el = node as Element
+  const name = el.tagName.toLowerCase()
+  if (name === 'br') return '\n'
+  // The TeX source and any alternate encodings are for machines, not readers
+  if (name === 'annotation' || name === 'annotation-xml') return ''
+  let out = ''
+  for (const child of Array.from(el.childNodes)) out += visibleTextOf(child)
+  return out
+}
 
 export interface SplitContext {
   /** Placeholders that annotate the text before them — footnotes, trailing citations */
@@ -152,7 +180,12 @@ function project(text: string, format: WireFormat, context: SplitContext): { vis
       if (id !== undefined && context.isAnnotation?.(id)) token = ' '
       else {
         const own = id !== undefined ? context.textOf?.(id) : undefined
-        token = own && own.trim() ? own.replace(/[\t\n\f\r ]+/g, ' ') : VOID_TOKEN
+        if (own === undefined) token = VOID_TOKEN
+        // A `<br>` says nothing but separates: Intl.Segmenter treats a newline as a boundary even
+        // without terminal punctuation, and routing whitespace-only slots to the stand-in threw
+        // that away (Codex on #126). Collapse spaces and tabs, keep newlines.
+        else if (!own.trim()) token = /\n/.test(own) ? '\n' : ' '
+        else token = own.replace(/[\t\f\r ]+/g, ' ')
       }
     }
     for (let i = 0; i < token.length; i++) toWire.push(index)
