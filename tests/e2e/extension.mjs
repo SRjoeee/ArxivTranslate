@@ -829,8 +829,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 // ── side 模式下图注的对照高亮（issue #139）：屏幕上那份是克隆件 ──────────────
 {
   // 只有真实浏览器能证：判据是「哪一份有盒子」，而 happy-dom 量不出任何几何。
-  // 微软是眼下唯一在图注这种块上也报句边界的引擎（§8.6）
-  const { page, logs } = await openPaper(PAPER, 'edge.microsoft.com')
+  // 引擎用当前配置的那个（此处是 google-web）：#137 之后谷歌也有句对齐了，图注这类块照样登记
+  const { page, logs } = await openPaper(PAPER, GOOGLE)
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)
   await page.bringToFront()
@@ -842,8 +842,10 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await sleep(1500)
   const caption = await page.evaluate(async () => {
     const mode = document.documentElement.getAttribute('data-axt-mode')
-    const src = [...document.querySelectorAll('.ltx_caption[data-axt-id]')].find(c => c.getClientRects().length)
-    if (!src) return { mode, reason: '没有可见的原文图注' }
+    // **必须是真被拆过的那张图里的图注**：表格 / 算法的图注不走拆图这条路，它们的译文本来就不在
+    // 克隆件里，拿它来断言 `inSplit` 会得到一个假失败（换 AXT_PAPER 时尤其容易撞上，Codex 在 #148 指出）
+    const src = [...document.querySelectorAll('[data-axt-split] .ltx_caption[data-axt-id]')].find(c => c.getClientRects().length)
+    if (!src) return { mode, reason: '没有可见的、属于拆图的原文图注' }
     const walk = document.createTreeWalker(src, NodeFilter.SHOW_TEXT)
     let point = null
     for (let t = walk.nextNode(); t && !point; t = walk.nextNode()) {

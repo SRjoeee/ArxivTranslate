@@ -100,6 +100,32 @@ describe('sentence registry (#105)', () => {
     expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(target)
   })
 
+  it('拆图里按单元格登记的表格也跟着镜像（#148）', () => {
+    // 表格的句子是按**单元格**登记的（`renderTable` 回报「原格 → 克隆格」），格子在 `.axt-t` 表格
+    // 里面。只镜像 `.axt-t` 的话，插图里带表格时那些格子在克隆件里仍然没登记（Codex 在 #148 指出）
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption>'
+      + '<div class="axt-t" data-axt-for="F1.cap"><table><tbody><tr>'
+      + '<td class="ltx_td" id="F1.c1">One. Two.</td></tr></tbody></table></div></figure>')
+    // 「格子」这一层：源与译各一个单元格，按格子登记，正是 renderTable 的做法
+    const cell = d.getElementById('F1.c1')!
+    const block = serialize(cell, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('td')
+    target.append(fragment)
+    cell.after(target)
+    const lengths = splitSentences(block.text)
+    registerSentences(cell, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+
+    expect(splitFigures(d)).toBe(1)
+    const copy = d.querySelector(`.${SPLIT_CLASS}`)!.querySelectorAll('td')[1]!
+    for (const el of [target, copy]) Object.assign(el, { checkVisibility: () => true })
+    // 悬停克隆件里的那个格子：解析得到同一个块
+    expect(sentenceMapAt(copy.firstChild!)?.side).toBe('target')
+    // 悬停原文格子：译文那侧指向克隆里的格子
+    expect(sentenceMapAt(cell.firstChild!)?.map.target.root).toBe(copy)
+  })
+
   it('registers nothing without an alignment, so those blocks simply do not highlight', () => {
     // Every Google and LLM block today. A guessed pairing would light up the wrong sentence.
     const { source, target, block, spans } = render('<p class="ltx_p">One. Two.</p>')

@@ -163,7 +163,10 @@ export function splitFigures(root: Document | Element): number {
     fig.after(clone)
     // 图注的译文在右栏是这一份克隆件，原件那份被 side 模式藏起来了；不登记的话悬停时
     // 译文侧算出来的矩形是空的，一条底都画不出来（issue #139，用户 2026-09-10 反馈）
-    for (const original of Array.from(fig.querySelectorAll(REAL_TRANSLATION))) {
+    // **每一个元素都试一遍，不只是 `.axt-t`。** 表格的句子是按**单元格**登记的（`renderTable` 回报
+    // 「原格 → 克隆格」），那些格子在 `.axt-t` 表格里面，只扫 `.axt-t` 就漏掉了（Codex 在 #148 指出）。
+    // 没登记过的元素在 `mirrorSentences` 里直接返回，代价是一次 WeakMap 查询
+    for (const original of [fig, ...Array.from(fig.querySelectorAll('*'))]) {
       const copy = twins.get(original)
       if (copy?.nodeType === 1 && copy.isConnected) mirrorSentences(original, copy as Element, node => twins.get(node))
     }
