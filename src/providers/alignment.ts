@@ -42,7 +42,7 @@ export function boundariesOf(lengths: readonly number[]): number[] {
  * one, so this rejects malformed data rather than a normal case.
  */
 import { MARKER_RE, TAG_RE } from '@/core/protector'
-import { ABBR } from '@/core/sentences'
+import { ABBR, TERMINAL_ABBR } from '@/core/sentences'
 
 /**
  * A placeholder in either wire format, plus whitespace: a boundary sitting against one of these is
@@ -70,8 +70,13 @@ const SENTENCE_END = /[.!?。！？…]["'\u201d\u300d\u300f）)\]]*$/
  * never causes one.
  */
 const CONTINUATION = /^[a-z0-9]/
-/** Just the closers, for walking to the end of a terminator that is more than one character. */
-const CLOSER = /["'\u201d\u300d\u300f）)\]]/
+/**
+ * 一个终止标点可能不止一个字符：走到它的末尾要跨过的东西。
+ *
+ * 重复的终止标点（`……`、`...`）与**明确的**收尾符号。**直引号不在里面**：`"` 和 `'` 既能收也能开，
+ * `甲。|"乙。"` 里那个引号是下一句的开头，当成收尾就把它划给上一句了（Codex 在 #145 指出）
+ */
+const TERMINATOR = /[.!?。！？…\u201d\u300d\u300f）)\]]/
 
 /**
  * Whether this boundary sits right after a sentence end.
@@ -97,10 +102,14 @@ const snappable = (text: string, at: number): boolean => {
   // 公式之类；把边界拉到它后面等于把这个公式判给上一句，而指针落在公式里时又会选到错的那一对
   //（Codex 在 #145 指出）
   const before = text.slice(0, at).replace(/\s+$/, '')
-  // 缩写的句点不是句末。`U.S. D|epartment` 后面是大写，continuation 那条看不出来，
-  // 用切句器实测过的那份缩写表来判（Codex 在 #145 指出）
-  if (!SENTENCE_END.test(before) || ABBR.test(before)) return false
-  return !CONTINUATION.test(text.slice(at).replace(LEADING_FILLER, ''))
+  if (!SENTENCE_END.test(before)) return false
+  // 后面是小写字母或数字：`Vol. 2`、`3.5`，这个句点不是句末
+  if (CONTINUATION.test(text.slice(at).replace(LEADING_FILLER, ''))) return false
+  // 缩写的句点也不是句末——`U.S. D|epartment` 后面是大写，上一条看不出来。**但 `etc.` / `al.`
+  // 是真能结束句子的**，切句器对这两个就是按「后面是什么」来判的（`TERMINAL_ABBR` + `CONTINUES`），
+  // 一律否掉会让 `Tools, etc. T|he next` 修不回去（Codex 在 #145 指出）。这里的后面已经排除了
+  // 小写与数字，所以终止型缩写在这一步一律放行
+  return !ABBR.test(before) || TERMINAL_ABBR.test(before)
 }
 
 /** Whether a sentence has anything a reader can see, rather than only placeholders and spaces. */
@@ -148,7 +157,7 @@ function snapAlignment(alignment: SentenceAlignment, sourceText: string, targetT
         // 已经落在句末标点后，但可能停在多字符终止标点的中间：`甲。|”乙` 里那个引号属于上一句
         //（Codex 在 #145 指出）。只跨收尾标点，跨不到别的东西上
         let end = cut
-        while (end + 1 < text.length && CLOSER.test(text[end] ?? '') && settled(text, end + 1)) end++
+        while (end + 1 < text.length && TERMINATOR.test(text[end] ?? '') && settled(text, end + 1)) end++
         return end
       }
       for (let step = 1; step <= SNAP_WINDOW; step++) {

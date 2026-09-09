@@ -129,6 +129,29 @@ describe('alignment verification (#105)', () => {
     expect(verifyAlignment(given, 'A. B. C.', '甲。”乙。丙。')).toEqual(given)
   })
 
+  it('does not eat a straight quote that opens the next sentence', () => {
+    // `"` 与 `'` 既能收也能开。`甲。|"乙。"` 里那个引号是下一句的开头，当成收尾就划给上一句了
+    //（Codex 在 #145 指出）
+    const target = '甲。"乙。"'
+    const given = { source: [3, 2], target: [2, target.length - 2] }
+    expect(verifyAlignment(given, 'A. B.', target)).toEqual(given)
+  })
+
+  it('walks across a repeated terminator, not just closers', () => {
+    // `甲…|…乙。` 与 `甲.|..乙。`：切点停在省略号中间，只跨引号括号是跨不出去的（Codex 在 #145 指出）
+    expect(verifyAlignment({ source: [3, 2], target: [2, 3] }, 'A. B.', '甲……乙。'))
+      .toEqual({ source: [3, 2], target: [3, 2] })
+  })
+
+  it('lets an abbreviation that really ends a sentence be snapped to', () => {
+    // `etc.` 和 `al.` 是能结束句子的，切句器对这两个就是按「后面是什么」判的。一律否掉的话
+    // `Tools, etc. T|he next` 就修不回去了（Codex 在 #145 指出）
+    const source = 'Tools, etc. The next topic. Done.'
+    const cut = source.indexOf('The') + 1
+    expect(verifyAlignment({ source: [cut, source.length - cut], target: [3, 3] }, source, '第一。第二。'))
+      .toEqual({ source: [source.indexOf('The'), source.length - source.indexOf('The')], target: [3, 3] })
+  })
+
   it('rejects a source partition that does not add up to the text', () => {
     // The engine reporting boundaries for a string other than the one we sent is the failure this
     // catches — trusting it would put the highlight on the wrong characters.

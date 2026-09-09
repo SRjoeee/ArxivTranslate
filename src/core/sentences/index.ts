@@ -70,7 +70,7 @@ const STRUCTURAL = /^<\/?t(?:\s+id="\d+")?>$/
 const OPENING = /^<t(?:\s+id="\d+")?>$/
 
 /** Abbreviations that genuinely end sentences, so the text after them decides whether to merge */
-const TERMINAL_ABBR = /\b(?:etc|al)\.$/
+export const TERMINAL_ABBR = /\b(?:etc|al)\.$/
 /**
  * A continuation rather than a new sentence. Lowercase, a number, or an opening bracket: an
  * abbreviation after `etc.` or `al.` opens the next sentence rather than proving the first was
