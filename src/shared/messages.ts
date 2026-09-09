@@ -17,6 +17,14 @@ export interface PageStatus {
   progress: Progress
   /** 图片翻译的进度（§15）；helper 不可用或设置里全关时没有 */
   images?: ImageProgress
+  /**
+   * 这个页面此刻的会话 id（没在翻时为 null）。
+   *
+   * background 靠它回答「这个标签页还是不是刚才那个页面」：`tabs.onUpdated` 分不出同文档换 hash
+   * 与真的跳走，而页面自己分得出——它还在，就还答得出同一个 id（Codex 在 #143 指出「猜」不能只靠
+   * 「目的地会不会再发请求」）
+   */
+  session?: string | null
 }
 
 /** 消息表：type → { request, response } */

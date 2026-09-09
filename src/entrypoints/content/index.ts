@@ -336,7 +336,7 @@ export default defineContentScript({
           return true
         }
         case 'axt:page-status':
-          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, ...(imageProgress ? { images: imageProgress } : {}) })
+          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, session: getSessionId(), ...(imageProgress ? { images: imageProgress } : {}) })
           return true
       }
     })

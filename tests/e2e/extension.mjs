@@ -113,10 +113,11 @@ async function openPaper(id, host) {
   return { page, logs, requests, originalTitle, spinnersSeen: () => page.evaluate(() => window.__axtSpinnersSeen ?? 0).catch(() => 0) }
 }
 
-async function waitForLog(logs, pattern, timeoutMs) {
+async function waitForLog(logs, pattern, timeoutMs, predicate = () => true) {
   const t0 = Date.now()
   while (Date.now() - t0 < timeoutMs) {
-    const hit = logs.find(entry => pattern.test(entry.text))
+    // 带谓词是为了等「**这一条**之后的那条」：日志是累积的，find 默认会把早先那条交回来
+    const hit = logs.find(entry => { const m = pattern.exec(entry.text); return m && predicate(m) })
     if (hit) return hit
     await sleep(250)
   }
@@ -815,7 +816,10 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const before = stall.held.length
   // 跳到非 arXiv 页面：content script 没了，也永远不会再发新的 scope 过来
   await page.goto('https://example.com/', { waitUntil: 'domcontentloaded' })
-  await sleep(500)
+  // 撤销不再是当场发生：`tabs.onUpdated` 的 loading 分不出同文档换 hash 与真的跳走，所以按住
+  // NAVIGATION_GRACE_MS（3 秒）等这个标签页有没有新请求，没有才撤。等过这段再放开槽位——
+  // 保住的性质没变（跳走之后队列会停），只是晚 3 秒（用户 2026-09-09 报的页内跳转全失败）
+  await sleep(4_500)
   await stall.release()
   await sleep(6_000)
   const late = stall.held.length - before
@@ -875,6 +879,66 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   check('side 模式：图注的对照高亮画在右栏那份克隆件上（issue #139）',
     caption.mode === 'side' && caption.source > 0 && caption.target > 0 && caption.inSplit === true,
     `模式 ${caption.mode}，原文 ${caption.source} 条底、译文 ${caption.target} 条底${caption.inSplit ? '（都落在克隆件里）' : ''}${caption.reason ? ` (${caption.reason})` : ''}`)
+}
+
+// ── 摘要页的双语入口（issue #146）：点一下就进到「已经在翻」的全文页 ──────────
+{
+  // 这条只有真实浏览器能证：插入点靠的是 arXiv 自己渲染的标记，而「点进去自动开始翻译」
+  // 跨了一次真实导航——两头都不是 happy-dom 里演得出来的
+  const page = await context.newPage()
+  const logs = []
+  page.on('console', m => { const t = m.text(); if (t.includes('[axt]')) logs.push({ t: Date.now(), text: t }) })
+  await page.goto(`https://arxiv.org/abs/${PAPER}`, { waitUntil: 'domcontentloaded' })
+  const link = await page.evaluate(() => {
+    const ours = document.querySelector('.axt-abs-link')
+    const html = document.querySelector('#latexml-download-link')
+    return {
+      exists: !!ours,
+      href: ours?.getAttribute('href') ?? null,
+      text: ours?.textContent ?? null,
+      afterHtmlLink: html?.closest('li')?.nextElementSibling?.contains(ours) ?? false,
+      inSameList: !!ours && ours.closest('ul') === html?.closest('ul'),
+      count: document.querySelectorAll('.axt-abs-link').length,
+    }
+  })
+  check('摘要页：双语入口插在 arXiv 的 HTML 链接后面，只有一条（#146）',
+    link.exists && link.afterHtmlLink && link.inSameList && link.count === 1 && /\/html\/.*#axt-translate$/.test(link.href ?? ''),
+    `「${link.text}」→ ${link.href}；紧跟 HTML 链接 ${link.afterHtmlLink}，同一个列表 ${link.inSameList}，共 ${link.count} 条`)
+
+  await page.click('.axt-abs-link')
+  await page.waitForURL(/\/html\/.*#axt-translate/, { timeout: 30_000 })
+  const idle = idleOf(await waitForLog(logs, IDLE, 120_000))
+  const rendered = await page.evaluate(() => document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error)').length)
+  await page.close()
+  check('摘要页：点进去不碰 popup 就已经在翻了（#146）',
+    !!idle && idle.requested > 0 && rendered > 0,
+    `${idle?.text ?? '(没等到 idle)'}；页面上 ${rendered} 个译文节点`)
+}
+
+// ── 页内跳转不是导航离开（用户 2026-09-09 报的：点引用跳到参考文献，那一整块全失败）──
+{
+  // `tabs.onUpdated` 的 loading 分不出同文档换 hash 与真的跳走（实测两种情况 changeInfo 都只有
+  // {status:'loading'}），当场撤会话就把一个还活着的页面判死。只有真实浏览器能验：那个事件在
+  // 单元测试里不存在，而失败是「请求根本没发出去」，DOM 上只看得到 .axt-error
+  const { page, logs } = await openPaper(PAPER3, GOOGLE)
+  const first = idleOf(await waitForLog(logs, IDLE, 120_000))
+  // 不滚动，直接跳到参考文献区——正文里的引用链接就是这么跳的
+  const jumped = await page.evaluate(() => {
+    const item = document.querySelector('.ltx_bibitem')
+    if (!item?.id) return null
+    location.hash = `#${item.id}`
+    return item.id
+  })
+  const after = idleOf(await waitForLog(logs, IDLE, 120_000, m => Number(m[2]) > (first?.requested ?? 0)))
+  const dom = await page.evaluate(() => ({
+    errors: document.querySelectorAll('.axt-error').length,
+    aborted: [...document.querySelectorAll('.axt-error')].filter(e => /aborted/.test(e.getAttribute('title') ?? '')).length,
+    bib: document.querySelectorAll('.ltx_bibitem').length,
+  }))
+  await page.close()
+  check('页内跳转不撤会话：跳到参考文献后那一区照常翻完（用户 2026-09-09 反馈）',
+    !!jumped && !!after && after.failed === 0 && dom.aborted === 0,
+    `跳到 #${jumped}，${dom.bib} 条参考文献；${after?.text ?? '(没等到第二条 idle)'}；页面上 ${dom.errors} 个错误块、其中 ${dom.aborted} 个是 aborted`)
 }
 
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────

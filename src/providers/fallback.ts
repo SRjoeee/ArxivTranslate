@@ -4,7 +4,7 @@
 //
 // 解决的问题：key 过期、额度用尽、网络抖动时 run.ts 会把整页翻译停死（no-key / auth 触发
 // scheduler.disconnect()），读者对着半篇译文干等。硬规则 4：失败必须可恢复并触发 fallback 链。
-import type { TranslateCall, TranslateMessageResponse, TranslateService } from './translate-service'
+import type { CancelOptions, TranslateCall, TranslateMessageResponse, TranslateService } from './translate-service'
 import type { ProviderErrorKind, TranslationProvider } from './types'
 
 export interface FallbackStep {
@@ -116,7 +116,7 @@ export function createFallbackService(
   }
 
   /** 恢复原文要撤掉每套队列：漏一个就有在飞请求回来往 DOM 写 */
-  const cancel = (scope: string): number => steps.reduce((n, step) => n + step.service.cancel(scope), 0)
+  const cancel = (scope: string, options?: CancelOptions): number => steps.reduce((n, step) => n + step.service.cancel(scope, options), 0)
 
   const status = (): FallbackStatus => ({
     configuredId: steps[0]!.provider.id,
