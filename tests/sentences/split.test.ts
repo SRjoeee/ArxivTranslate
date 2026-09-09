@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { sentenceCuts, splitSentences } from '@/core/sentences'
 
-const parts = (text: string, format?: 'tags' | 'markers') => {
+const parts = (text: string, format?: 'tags' | 'markers', isAnnotation?: (id: number) => boolean) => {
   const out: string[] = []
   let at = 0
-  for (const len of splitSentences(text, format)) {
+  for (const len of splitSentences(text, format, isAnnotation)) {
     out.push(text.slice(at, at + len))
     at += len
   }
@@ -87,15 +87,22 @@ describe('sentence splitting (#105)', () => {
     expect(parts('Done. @@a# is a literal.', 'markers')).toEqual(['Done. @@a# is a literal.'])
   })
 
-  it('keeps a trailing footnote with the sentence it annotates', () => {
-    // Same shape as a formula-led sentence — terminal punctuation, placeholder, word — but the word
-    // is capitalised, so the placeholder is a footnote on the sentence that just ended rather than
-    // the subject of the next one (Codex on #126).
-    expect(parts('the method<x id="1"/>. <x id="2"/> We require more.'))
+  it('keeps a trailing footnote with the sentence it annotates, when told which slots are annotations', () => {
+    // The wire text cannot tell these apart: `… method@a#. @b# We require …` is a footnote and
+    // `… relation@a#. @b# Let @c# …` is a formula opening a sentence, and both read as
+    // "punctuation, placeholder, capitalised word". Guessing from the following word's case failed
+    // on both, so the caller answers from classify() instead (Codex on #126).
+    const annotations = (id: number) => id === 1 || id === 2
+    expect(parts('the method<x id="1"/>. <x id="2"/> We require more.', 'tags', annotations))
       .toEqual(['the method<x id="1"/>. <x id="2"/> ', 'We require more.'])
-    // The lowercase counterpart still opens a sentence
+    // A formula in the same shape opens the sentence, and needs no case check to do so
+    expect(parts('the relation <x id="1"/>. <x id="2"/> Let <x id="3"/> denote it.'))
+      .toEqual(['the relation <x id="1"/>. ', '<x id="2"/> Let <x id="3"/> denote it.'])
     expect(parts('The proof is complete. <x id="1"/> is continuous.'))
       .toEqual(['The proof is complete. ', '<x id="1"/> is continuous.'])
+    // A hyphenated formula opening a sentence needs no special case either
+    expect(parts('do not depend on <x id="1"/> or <x id="2"/>. <x id="3"/>-admissible constants follow.'))
+      .toEqual(['do not depend on <x id="1"/> or <x id="2"/>. ', '<x id="3"/>-admissible constants follow.'])
   })
 
   it('keeps an opening tag with the sentence it wraps', () => {
@@ -120,9 +127,9 @@ describe('sentence splitting (#105)', () => {
     expect(parts('One. <t id="1"> Next</t> sentence.')).toEqual(['One. ', '<t id="1"> Next</t> sentence.'])
   })
 
-  it('looks past punctuation when deciding whether a placeholder opens a sentence', () => {
-    // "… complete. @a#, however, is continuous." — the comma sits between the placeholder and the
-    // word whose case decides it (Codex on #126).
+  it('opens a sentence on a formula whatever punctuation follows it', () => {
+    // A comma, a hyphen or anything else between the placeholder and the next word used to decide
+    // the outcome, because the rule looked at that word's case (Codex on #126). It no longer does.
     expect(parts('The proof is complete. <x id="1"/>, however, is continuous.'))
       .toEqual(['The proof is complete. ', '<x id="1"/>, however, is continuous.'])
   })

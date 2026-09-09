@@ -21,7 +21,7 @@
 // larger list removes 5 cuts and adds none, and all 5 are journal abbreviations in bibliographies
 // (`Theor. Comput. Sci.`, `J. Fac. Sci. Univ. Tokyo`, `Sci. Rep. 14`).
 
-import type { WireFormat } from '@/core/protector'
+import { fromAlpha, type WireFormat } from '@/core/protector'
 
 /**
  * A period after one of these does not end a sentence. Single capitals cover initials (`A. Turing`)
@@ -57,28 +57,34 @@ const MARKERS_PLACEHOLDER = /@@|@[a-z]+#/g
  */
 const placeholderRe = (format: WireFormat) => (format === 'markers' ? MARKERS_PLACEHOLDER : TAGS_PLACEHOLDER)
 
+/** The slot id a placeholder run refers to, so its semantics can be looked up. */
+function idOf(run: string): number | undefined {
+  const tag = /id="(\d+)"/.exec(run)
+  if (tag) return Number(tag[1])
+  const marker = /^@([a-z]+)#$/.exec(run)
+  return marker ? fromAlpha(marker[1]!) : undefined
+}
+
 /** A `<t>` or `</t>` run: structural wrapping around inline markup, standing for no content itself */
 const STRUCTURAL = /^<\/?t(?:\s+id="\d+")?>$/
 const OPENING = /^<t(?:\s+id="\d+")?>$/
 
-/**
- * A void placeholder projects to a word only where it opens a sentence: preceded by terminal
- * punctuation and followed by a lowercase word, as in "… complete. @a# is continuous." There it is
- * the subject, and projecting it to whitespace hides the boundary because Intl.Segmenter reads the
- * lowercase word as a continuation.
- *
- * The same shape with a capitalised word after it — "… method@a#. @b# We require …" — is a footnote
- * annotating the sentence that just ended, and has to stay with it rather than open the next one
- * (Codex on #126). Capitalisation is what separates the two.
- *
- * Two characters, not one capital: `X.` matches the single-initial rule in ABBR and would merge the
- * sentence into the next one.
- */
-const OPENS_SENTENCE = /[.!?][)"'\]]?\s*$/
-// Punctuation and structural tags can sit between the placeholder and the word that reveals the
-// case: "… complete. @a#, however, is continuous." (Codex on #126)
-const LOWERCASE_NEXT = /^(?:\s|[,;:.)\]"']|<\/?t(?:\s+id="\d+")?>)*[a-z]/
 const VOID_TOKEN = 'Xx'
+
+/**
+ * Whether the placeholder with this id annotates the text before it — a footnote or a citation —
+ * rather than being content of its own.
+ *
+ * **This cannot be decided from the wire text.** Three rounds of review found counterexamples to
+ * guessing it from the following word's case: `… method@a#. @b# We require …` is a footnote, while
+ * `… relation@a#. @b# Let @c# …` is a formula opening a sentence, and both read as "punctuation,
+ * placeholder, capitalised word" (Codex on #126). The caller has `classify()` for every slot, so it
+ * answers rather than the splitter guessing.
+ *
+ * Without one, every placeholder counts as content: a sentence opening on a formula keeps its
+ * boundary, and a trailing footnote lands one placeholder late.
+ */
+export type IsAnnotation = (id: number) => boolean
 
 /**
  * Segmenting the wire text directly hides sentence ends that sit against a placeholder. A run-in
@@ -89,7 +95,7 @@ const VOID_TOKEN = 'Xx'
  * So segment a projection where each placeholder becomes whitespace, except a void that opens a
  * sentence, which becomes a word so the boundary stays visible.
  */
-function project(text: string, format: WireFormat): { visible: string; toWire: number[]; openEnds: Map<number, number> } {
+function project(text: string, format: WireFormat, isAnnotation?: IsAnnotation): { visible: string; toWire: number[]; openEnds: Map<number, number> } {
   let visible = ''
   // toWire[i] is the wire offset that visible offset i starts at
   const toWire: number[] = []
@@ -114,7 +120,10 @@ function project(text: string, format: WireFormat): { visible: string; toWire: n
       token = ' '
       if (OPENING.test(run)) openEnds.set(after, index)
     } else {
-      token = OPENS_SENTENCE.test(visible) && LOWERCASE_NEXT.test(text.slice(after)) ? VOID_TOKEN : ' '
+      // An annotation belongs to the text before it and must not open a sentence; content has to
+      // read as a word so a sentence starting on a formula keeps its boundary.
+      const id = idOf(run)
+      token = id !== undefined && isAnnotation?.(id) ? ' ' : VOID_TOKEN
     }
     for (let i = 0; i < token.length; i++) toWire.push(index)
     visible += token
@@ -135,9 +144,9 @@ function project(text: string, format: WireFormat): { visible: string; toWire: n
  * the text it describes, so a splitter that lost or duplicated a character would simply produce no
  * highlight. Returns a single length for text with no interior boundary.
  */
-export function splitSentences(text: string, format: WireFormat = 'tags'): number[] {
+export function splitSentences(text: string, format: WireFormat = 'tags', isAnnotation?: IsAnnotation): number[] {
   if (text.length === 0) return []
-  const cuts = sentenceCuts(text, format)
+  const cuts = sentenceCuts(text, format, isAnnotation)
   const lengths: number[] = []
   let prev = 0
   for (const cut of cuts) {
@@ -149,9 +158,9 @@ export function splitSentences(text: string, format: WireFormat = 'tags'): numbe
 }
 
 /** Cut points inside the text, i.e. the boundaries between sentences, excluding 0 and `length`. */
-export function sentenceCuts(text: string, format: WireFormat = 'tags'): number[] {
+export function sentenceCuts(text: string, format: WireFormat = 'tags', isAnnotation?: IsAnnotation): number[] {
   if (text.length === 0) return []
-  const { visible, toWire, openEnds } = project(text, format)
+  const { visible, toWire, openEnds } = project(text, format, isAnnotation)
   const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' })
   const pieces: string[] = []
   for (const { segment } of segmenter.segment(visible)) {
