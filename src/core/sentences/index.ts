@@ -28,7 +28,7 @@ import { fromAlpha, type WireFormat } from '@/core/protector'
  * and the journal-volume style that produced the only failures measured; the rest are the
  * abbreviations that actually appear in arXiv prose and bibliographies.
  */
-const ABBR =
+export const ABBR =
   /\b(?:[A-Z]|Fig|Figs|Eq|Eqs|Sec|Secs|Ref|Refs|Thm|Def|Lem|Prop|Cor|Rev|Phys|Lett|Nucl|Astron|Astrophys|Mon|Not|Proc|Conf|Int|J|vs|etc|cf|al|approx|resp|Dr|Prof|St|No|Vol|pp|Ed|Eds|Sci|Rep|e\.g|i\.e)\.$/
 
 /**
@@ -70,7 +70,7 @@ const STRUCTURAL = /^<\/?t(?:\s+id="\d+")?>$/
 const OPENING = /^<t(?:\s+id="\d+")?>$/
 
 /** Abbreviations that genuinely end sentences, so the text after them decides whether to merge */
-const TERMINAL_ABBR = /\b(?:etc|al)\.$/
+export const TERMINAL_ABBR = /\b(?:etc|al)\.$/
 /**
  * A continuation rather than a new sentence. Lowercase, a number, or an opening bracket: an
  * abbreviation after `etc.` or `al.` opens the next sentence rather than proving the first was
