@@ -65,6 +65,17 @@ export default defineBackground(() => {
      * 页面还在就答得出同一个会话 id；真跳走了 content script 已经没了，`sendMessage` 直接抛。
      * 只在宽限到点时问一次，而且只在这个标签页那段时间一个请求都没有的情况下才走到这里
      */
+    /**
+     * 这个标签页还在加载吗。`tabs.get` 的 `status` 不在需要 `tabs` 权限的那几个字段里
+     * （被挡的是 url / title / favIconUrl），所以这条不扩权限
+     */
+    stillLoading: async tabId => {
+      try {
+        return (await browser.tabs.get(tabId)).status === 'loading'
+      } catch {
+        return false
+      }
+    },
     stillThere: async (tabId, scope) => {
       try {
         const status = await browser.tabs.sendMessage(tabId, { type: 'axt:page-status' })

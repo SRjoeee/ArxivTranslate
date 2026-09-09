@@ -50,6 +50,9 @@ export interface SessionRouter {
  *   三态而不是真假：`'same'` 页面还在；`'other'` 答上来了但不是刚才那个会话——**这是确定的终结**，
  *   可以判死；`'unknown'` 连消息都没送到——可能真没了，也可能只是新文档的 content script 还没装上，
  *   所以只排空、不判死（Codex 在 #143 指出这两种要分开）
+ * @param options.stillLoading 这个标签页还在加载吗。跨文档导航提交得慢时，正在离开的旧文档还答得出
+ *   同一个会话——「还在」这个回答只有在标签页**不再加载**时才可信。还在加载就再按一次，最多几轮
+ *   （Codex 在 #143 指出不能只等 `complete`：目的地的 load 卡住时那个事件根本不会来）
  */
 /**
  * 「可能跳走了」按住多久再撤。
@@ -60,7 +63,7 @@ export interface SessionRouter {
  */
 const NAVIGATION_GRACE_MS = 3000
 
-export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string, options: { remember: boolean }) => number; stillThere?: (tabId: number, scope: string) => Promise<'same' | 'other' | 'unknown'> } = {}): SessionRouter {
+export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string, options: { remember: boolean }) => number; stillThere?: (tabId: number, scope: string) => Promise<'same' | 'other' | 'unknown'>; stillLoading?: (tabId: number) => Promise<boolean> } = {}): SessionRouter {
   /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
   const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number }>()
   /**
@@ -86,6 +89,14 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
    * @param options.remember 撤过就判死（默认 true）。猜出来的终结传 false：猜错的话页面还活着，
    *   判死等于把它后半篇永久钉在 aborted 上
    */
+  /**
+   * 「还在加载就再问一遍」最多几轮。
+   *
+   * 有上限是因为一直卡在加载中的标签页会让它变成一个永不停止的轮询。四轮 ~12 秒之后仍然
+   * 在加载、而且页面还答得出同一个会话，那就当它确实是同一个文档
+   */
+  const LOADING_RETRIES = 3
+
   const drop = async (scopes: readonly string[], { remember = true }: { remember?: boolean } = {}): Promise<number> => {
     let cancelled = 0
     for (const scope of scopes) {
@@ -107,6 +118,37 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
       cancelled += await transport.cancel(scope, { remember })
     }
     return cancelled
+  }
+
+  /**
+   * 按住一次撤销，到点问页面自己。
+   *
+   * 「还在加载」时页面的回答不可信——正在离开的旧文档也还答得出同一个会话——所以那时不下结论，
+   * 再按一次（有上限，见 `LOADING_RETRIES`）
+   */
+  const arm = (tabId: number, scopes: readonly string[], attempt: number): void => {
+    stayed(tabId)
+    if (scopes.length === 0) return
+    leaving.set(tabId, setTimeout(() => {
+      leaving.delete(tabId)
+      void (async () => {
+        // 没有探针时按原来的判断走：证据仍然只有「这段时间没有请求」，那只够软撤
+        const answers = options.stillThere
+          ? await Promise.all(scopes.map(s => options.stillThere!(tabId, s)))
+          : scopes.map(() => 'unknown' as const)
+        const live = scopes.filter((_, i) => answers[i] === 'same')
+        if (live.length > 0 && attempt < LOADING_RETRIES && await options.stillLoading?.(tabId)) {
+          arm(tabId, scopes, attempt + 1)
+          return
+        }
+        // 答上来了但换了会话：页面确实走了，这是确定的终结，判死——否则挂在 helper 握手上、
+        // 还没进任何队列的那些请求醒来之后照发不误（Codex 在 #143 指出）
+        const confirmed = scopes.filter((_, i) => answers[i] === 'other')
+        const unsure = scopes.filter((_, i) => answers[i] === 'unknown')
+        if (confirmed.length > 0) await drop(confirmed)
+        if (unsure.length > 0) await drop(unsure, { remember: false })
+      })()
+    }, NAVIGATION_GRACE_MS))
   }
 
   const scopesOfTab = (tabId: number): string[] =>
@@ -155,26 +197,9 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
       return drop(scopesOfTab(tabId))
     },
     mayHaveLeft(tabId) {
-      stayed(tabId)
       // 现在挂在这个标签页上的会话，取的是**按住那一刻**的：页面自己第一次加载也会报 loading，
       // 那时它还没有会话，到点再取就会把这中间刚开起来的那个会话撤掉
-      const scopes = scopesOfTab(tabId)
-      if (scopes.length === 0) return
-      leaving.set(tabId, setTimeout(() => {
-        leaving.delete(tabId)
-        void (async () => {
-          // 没有探针时按原来的判断走：证据仍然只有「这段时间没有请求」，那只够软撤
-          const answers = options.stillThere
-            ? await Promise.all(scopes.map(s => options.stillThere!(tabId, s)))
-            : scopes.map(() => 'unknown' as const)
-          // 答上来了但换了会话：页面确实走了，这是确定的终结，判死——否则挂在 helper 握手上、
-          // 还没进任何队列的那些请求醒来之后照发不误（Codex 在 #143 指出）
-          const confirmed = scopes.filter((_, i) => answers[i] === 'other')
-          const unsure = scopes.filter((_, i) => answers[i] === 'unknown')
-          if (confirmed.length > 0) await drop(confirmed)
-          if (unsure.length > 0) await drop(unsure, { remember: false })
-        })()
-      }, NAVIGATION_GRACE_MS))
+      arm(tabId, scopesOfTab(tabId), 0)
     },
     rebindAll(transport) {
       for (const [scope, session] of sessions) sessions.set(scope, { ...session, transport })

@@ -93,6 +93,50 @@ describe('createSessionRouter', () => {
     expect(transport.cancelled).toEqual(['链:session-1'])
   })
 
+  it('标签页还在加载时不采信「还在」，等它落定再问', async () => {
+    // 跨文档导航提交得慢时，正在离开的旧文档也答得出同一个会话。只等 `complete` 不行——
+    // 目的地的 load 卡住时那个事件根本不会来（Codex 在 #143 指出）。判据换成「标签页还在加载吗」
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    let loading = true
+    let answer: 'same' | 'other' | 'unknown' = 'same'
+    const asked: string[] = []
+    const router = createSessionRouter(async () => transport, {
+      stillThere: async () => { asked.push(answer); return answer },
+      stillLoading: async () => loading,
+    })
+    await router.forCall('session-1', 7)
+
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(transport.cancelled).toEqual([]) // 还在加载，不下结论
+    expect(asked).toHaveLength(1)
+
+    // 导航终于提交了：新文档答的是别的会话
+    loading = false
+    answer = 'other'
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(transport.cancelled).toEqual(['链:session-1'])
+  })
+
+  it('一直卡在加载中也不会无限问下去', async () => {
+    // 有上限，否则一个永远加载不完的标签页会把它变成一个不停的轮询
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    const asked: number[] = []
+    const router = createSessionRouter(async () => transport, {
+      stillThere: async () => { asked.push(Date.now()); return 'same' },
+      stillLoading: async () => true,
+    })
+    await router.forCall('session-1', 7)
+
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(asked.length).toBeLessThanOrEqual(4)
+    // 问到上限之后按页面说的算：它一直说「还在」，就不撤
+    expect(transport.cancelled).toEqual([])
+  })
+
   it('页面答不上来：排空，但不判死', async () => {
     // 消息没送到可能是真没了，也可能是新文档的 content script 还没装上——分不清就不能判死，
     // 判错了那个还活着的页面后半篇会永久 aborted（Codex 在 #143 指出两种情况要分开）
