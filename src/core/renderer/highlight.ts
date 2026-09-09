@@ -141,10 +141,10 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
       doc.removeEventListener('pointerleave', onLeave)
       if (frame !== 0) doc.defaultView?.cancelAnimationFrame(frame)
       hit()
-      // `clear` is a no-op when nothing is shown, but the registries may hold entries from a run
-      // that was stopped mid-fade
-      shown = { root: doc.documentElement, index: -1 }
-      clear()
+      shown = null
+      // Unconditionally, not through `clear`: another run of this document may have left entries
+      // behind, and stopping should leave the page clean either way
+      clearSentenceHighlights(doc)
     },
   }
 }
