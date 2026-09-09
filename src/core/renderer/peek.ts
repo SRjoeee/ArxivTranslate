@@ -52,6 +52,13 @@ export interface PeekAnchor {
   /** The article's right edge, where the margin begins; undefined when there is no article root */
   articleRight: number | undefined
   viewport: { width: number; height: number }
+  /**
+   * How the page sets its own text, so the panel reads as part of it. Taken from the visible block
+   * and the page background rather than from system colours: arXiv sets its type on the article,
+   * not on `<body>`, and switches its dark theme itself, not with the OS — `Canvas` went black on
+   * a page that had stayed white. Empty strings leave the stylesheet's fallbacks in place.
+   */
+  type: { font: string; color: string; background: string }
 }
 
 export interface Peek {
@@ -112,6 +119,10 @@ export function createPeek(doc: Document): Peek {
       at = 'above'
       css = `left:${a.block.left}px;bottom:${a.viewport.height - a.top + GAP_PX}px;width:${a.block.width}px;max-height:${a.top - 2 * GAP_PX}px`
     }
+    const { font, color, background } = a.type
+    if (font) css += `;font:${font}`
+    if (color) css += `;color:${color}`
+    if (background) css += `;background-color:${background}`
     el.setAttribute(AT_ATTR, at)
     el.setAttribute('style', css)
   }

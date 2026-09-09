@@ -720,7 +720,7 @@ describe('source peek through the pointer (#141)', () => {
   const live = () => page(TWO, document)
   /** Only mode: the original is `display: none`, so it reports itself as not rendered */
   const hide = (el: Element) => Object.assign(el, { checkVisibility: () => false })
-  const panel = (doc: Document) => doc.querySelector('.axt-peek')
+  const panel = (doc: Document) => doc.querySelector<HTMLElement>('.axt-peek')
 
   it('shows the hidden side\'s sentence after the dwell, and tints only the visible side', () => {
     const { doc, source } = live()

@@ -26,8 +26,11 @@ function rangeOver(node: Node): Range {
   return r
 }
 
+/** What the page sets its text in; the panel repeats it inline */
+const TYPE = { font: '16px sans-serif', color: 'rgb(0, 0, 0)', background: 'rgb(255, 255, 255)' }
+const TYPED = ';font:16px sans-serif;color:rgb(0, 0, 0);background-color:rgb(255, 255, 255)'
 /** A 1440×900 viewport with the article spanning 304–1136 (52rem centred) and a block inside it. */
-const wide: PeekAnchor = { top: 400, bottom: 425, block: { left: 320, width: 800 }, articleRight: 1136, viewport: { width: 1440, height: 900 } }
+const wide: PeekAnchor = { top: 400, bottom: 425, block: { left: 320, width: 800 }, articleRight: 1136, viewport: { width: 1440, height: 900 }, type: TYPE }
 /** 1100 wide: 134px beside the article, no room for a panel */
 const narrow: PeekAnchor = { ...wide, block: { left: 150, width: 800 }, articleRight: 966, viewport: { width: 1100, height: 900 } }
 
@@ -44,7 +47,7 @@ describe('source peek (#141)', () => {
     const ranges = () => { built++; return [rangeOver(src)] }
 
     peek.show(KEY(src), ranges, wide)
-    expect(d.querySelector('.axt-peek')).toBeNull()
+    expect(d.querySelector<HTMLElement>('.axt-peek')).toBeNull()
     expect(built).toBe(0) // nothing is cloned for a sentence the pointer merely passed
     expect(t.delays()).toEqual([PEEK_DWELL_MS])
     // The pointer wobbles within the sentence: the same key again does not restart the wait
@@ -52,7 +55,7 @@ describe('source peek (#141)', () => {
     expect(t.delays()).toEqual([PEEK_DWELL_MS])
 
     t.fire()
-    const panel = d.querySelector('.axt-peek')!
+    const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(panel).not.toBeNull()
     expect(panel.parentElement).toBe(d.body)
     expect(panel.getAttribute('aria-hidden')).toBe('true')
@@ -70,20 +73,20 @@ describe('source peek (#141)', () => {
     const peek = createPeek(d)
     peek.show(KEY(a), () => [rangeOver(a)], wide)
     t.fire()
-    expect(d.querySelector('.axt-peek')!.textContent).toBe('One.')
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.textContent).toBe('One.')
 
     // Warm: the next sentence needs no second wait
     peek.show(KEY(b), () => [rangeOver(b)], wide)
     expect(t.delays()).toEqual([])
-    expect(d.querySelector('.axt-peek')!.textContent).toBe('Two.')
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.textContent).toBe('Two.')
 
     // Closed — a page scroll, say — and the dwell is cold again
     peek.hide()
-    expect(d.querySelector('.axt-peek')!.hidden).toBe(true)
-    expect(d.querySelector('.axt-peek')!.textContent).toBe('')
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.hidden).toBe(true)
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.textContent).toBe('')
     peek.show(KEY(a), () => [rangeOver(a)], wide)
     expect(t.delays()).toEqual([PEEK_DWELL_MS])
-    expect(d.querySelector('.axt-peek')!.hidden).toBe(true)
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.hidden).toBe(true)
   })
 
   it('hiding during the dwell cancels it', () => {
@@ -96,7 +99,7 @@ describe('source peek (#141)', () => {
     peek.hide()
     expect(t.delays()).toEqual([])
     t.fire()
-    expect(d.querySelector('.axt-peek')).toBeNull()
+    expect(d.querySelector<HTMLElement>('.axt-peek')).toBeNull()
   })
 
   it('clones carry no id, no data-axt-*, no injected node and no footnote', () => {
@@ -109,7 +112,7 @@ describe('source peek (#141)', () => {
     const peek = createPeek(d)
     peek.show(KEY(src), () => [rangeOver(src)], wide)
     t.fire()
-    const panel = d.querySelector('.axt-peek')!
+    const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(panel.querySelector('math')).not.toBeNull() // the formula lives
     expect(panel.querySelectorAll('[id]')).toHaveLength(0)
     expect(panel.querySelectorAll('[data-axt-id], [data-axt-for]')).toHaveLength(0)
@@ -130,7 +133,7 @@ describe('source peek (#141)', () => {
     const peek = createPeek(d)
     peek.show(KEY(src), () => [rangeOver(d.getElementById('x')!), rangeOver(d.getElementById('y')!)], wide)
     t.fire()
-    expect(d.querySelector('.axt-peek')!.textContent).toBe('before after.')
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.textContent).toBe('before after.')
   })
 
   it('goes in the margin when it fits, top-aligned to the sentence', () => {
@@ -141,10 +144,10 @@ describe('source peek (#141)', () => {
     const peek = createPeek(d)
     peek.show(KEY(a), () => [rangeOver(a)], wide)
     t.fire()
-    const panel = d.querySelector('.axt-peek')!
+    const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(panel.getAttribute(AT_ATTR)).toBe('margin')
     // 1440 − 1136 = 304 free, minus the gap on each side → 288 = 18rem exactly
-    expect(panel.getAttribute('style')).toBe('left:1144px;top:400px;width:288px;max-height:492px')
+    expect(panel.getAttribute('style')).toBe('left:1144px;top:400px;width:288px;max-height:492px' + TYPED)
   })
 
   it('in the margin, hangs from the sentence when little room is left below it', () => {
@@ -155,9 +158,9 @@ describe('source peek (#141)', () => {
     const peek = createPeek(d)
     peek.show(KEY(a), () => [rangeOver(a)], { ...wide, top: 850, bottom: 875 })
     t.fire()
-    const panel = d.querySelector('.axt-peek')!
+    const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(panel.getAttribute(AT_ATTR)).toBe('margin')
-    expect(panel.getAttribute('style')).toBe('left:1144px;bottom:25px;width:288px;max-height:867px')
+    expect(panel.getAttribute('style')).toBe('left:1144px;bottom:25px;width:288px;max-height:867px' + TYPED)
   })
 
   it('floats below the sentence when the margin is too narrow, as wide as the block', () => {
@@ -168,9 +171,9 @@ describe('source peek (#141)', () => {
     const peek = createPeek(d)
     peek.show(KEY(a), () => [rangeOver(a)], narrow)
     t.fire()
-    const panel = d.querySelector('.axt-peek')!
+    const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(panel.getAttribute(AT_ATTR)).toBe('below')
-    expect(panel.getAttribute('style')).toBe('left:150px;top:433px;width:800px;max-height:459px')
+    expect(panel.getAttribute('style')).toBe('left:150px;top:433px;width:800px;max-height:459px' + TYPED)
   })
 
   it('floats above the sentence when there is no room below, anchored by its bottom edge', () => {
@@ -181,10 +184,21 @@ describe('source peek (#141)', () => {
     const peek = createPeek(d)
     peek.show(KEY(a), () => [rangeOver(a)], { ...narrow, top: 850, bottom: 875 })
     t.fire()
-    const panel = d.querySelector('.axt-peek')!
+    const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(panel.getAttribute(AT_ATTR)).toBe('above')
     // Never measured: `bottom` puts its lower edge 8px over the sentence whatever its height
-    expect(panel.getAttribute('style')).toBe('left:150px;bottom:58px;width:800px;max-height:834px')
+    expect(panel.getAttribute('style')).toBe('left:150px;bottom:58px;width:800px;max-height:834px' + TYPED)
+  })
+
+  it('leaves the stylesheet fallbacks alone when the page reports no type', () => {
+    const d = doc()
+    const t = timers(d)
+    d.body.innerHTML = '<p id="a">One.</p>'
+    const a = d.getElementById('a')!
+    const peek = createPeek(d)
+    peek.show(KEY(a), () => [rangeOver(a)], { ...wide, type: { font: '', color: '', background: '' } })
+    t.fire()
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute('style')).toBe('left:1144px;top:400px;width:288px;max-height:492px')
   })
 
   it('has no margin tier without an article root', () => {
@@ -195,7 +209,7 @@ describe('source peek (#141)', () => {
     const peek = createPeek(d)
     peek.show(KEY(a), () => [rangeOver(a)], { ...wide, articleRight: undefined })
     t.fire()
-    expect(d.querySelector('.axt-peek')!.getAttribute(AT_ATTR)).toBe('below')
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute(AT_ATTR)).toBe('below')
   })
 
   it('re-showing the same sentence only moves the panel', () => {
@@ -208,11 +222,11 @@ describe('source peek (#141)', () => {
     const ranges = () => { built++; return [rangeOver(a)] }
     peek.show(KEY(a), ranges, wide)
     t.fire()
-    const before = d.querySelector('.axt-peek')!.firstChild
+    const before = d.querySelector<HTMLElement>('.axt-peek')!.firstChild
     peek.show(KEY(a), ranges, { ...wide, top: 500, bottom: 525 })
     expect(built).toBe(1)
-    expect(d.querySelector('.axt-peek')!.firstChild).toBe(before)
-    expect(d.querySelector('.axt-peek')!.getAttribute('style')).toContain('top:500px')
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.firstChild).toBe(before)
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute('style')).toContain('top:500px')
   })
 
   it('starts cold again after the panel was removed from outside', () => {
@@ -225,12 +239,12 @@ describe('source peek (#141)', () => {
     const peek = createPeek(d)
     peek.show(KEY(a), () => [rangeOver(a)], wide)
     t.fire()
-    d.querySelector('.axt-peek')!.remove()
+    d.querySelector<HTMLElement>('.axt-peek')!.remove()
     peek.show(KEY(b), () => [rangeOver(b)], wide)
-    expect(d.querySelector('.axt-peek')).toBeNull() // not warm: the dwell runs again
+    expect(d.querySelector<HTMLElement>('.axt-peek')).toBeNull() // not warm: the dwell runs again
     expect(t.delays()).toEqual([PEEK_DWELL_MS])
     t.fire()
-    expect(d.querySelector('.axt-peek')!.textContent).toBe('Two.')
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.textContent).toBe('Two.')
   })
 
   it('is one of ours: swept by the injected selector, and recognised as such', () => {
@@ -241,12 +255,12 @@ describe('source peek (#141)', () => {
     const peek = createPeek(d)
     peek.show(KEY(a), () => [rangeOver(a)], wide)
     t.fire()
-    const panel = d.querySelector('.axt-peek')!
+    const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(isInjected(panel)).toBe(true)
     expect(d.querySelector(INJECTED_SELECTOR)).toBe(panel)
     expect(peek.contains(panel.firstChild!)).toBe(true)
     expect(peek.contains(a)).toBe(false)
     peek.remove()
-    expect(d.querySelector('.axt-peek')).toBeNull()
+    expect(d.querySelector<HTMLElement>('.axt-peek')).toBeNull()
   })
 })

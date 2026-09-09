@@ -133,6 +133,21 @@ function bandsOf(origin: { left: number; top: number }, ranges: readonly Range[]
 /** Viewport-space bounds a side's bands may paint in. */
 interface Clip { left: number; top: number; right: number; bottom: number }
 
+/** A computed background that paints nothing. */
+const NO_BACKGROUND = /^(?:transparent|rgba\(0, 0, 0, 0\)|)$/
+
+/**
+ * The colour the page actually paints behind its text: the body's background, the root's when
+ * the body has none, and the UA canvas when neither sets one.
+ */
+function pageBackground(doc: Document, view: Window): string {
+  for (const el of [doc.body, doc.documentElement]) {
+    const background = el ? view.getComputedStyle(el).backgroundColor : ''
+    if (!NO_BACKGROUND.test(background)) return background
+  }
+  return 'Canvas'
+}
+
 /** The `overflow` values that clip. Anything else — `visible`, or nothing at all — does not. */
 const CLIPS = /^(?:hidden|clip|scroll|auto)$/
 
@@ -369,12 +384,14 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
       const last = own[own.length - 1]
       if (first && last) {
         const block = map[side].root.getBoundingClientRect()
+        const type = view.getComputedStyle(map[side].root)
         anchor = {
           top: first.top + origin.top,
           bottom: last.top + last.height + origin.top,
           block: { left: block.left, width: block.width },
           articleRight: article?.getBoundingClientRect().right,
           viewport: { width: view.innerWidth, height: view.innerHeight },
+          type: { font: type.font, color: type.color, background: pageBackground(doc, view) },
         }
       }
     }

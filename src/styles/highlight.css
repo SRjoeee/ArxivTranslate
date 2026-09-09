@@ -50,10 +50,13 @@
    floating next to the sentence when it does not; `data-axt-peek-at` says which.
 
    **On `<body>`, outside the article, not in a shadow root**: the cloned MathML and `ltx_*` nodes
-   need the page's own stylesheet. Set in the page's body type, untinted — the band answers "which
-   sentence", the panel answers "what it says". Positioned entirely by the controller and never
-   measured: an `above` panel is anchored by its bottom edge and grows upward. `pointer-events:
-   none` so moving toward it does not read as leaving the sentence. */
+   need the page's own stylesheet. Untinted — the band answers "which sentence", the panel answers
+   "what it says". Its type and colours are written inline by the controller, read from the page:
+   arXiv sets its font on the article rather than on `<body>`, so inheriting here gave the UA
+   serif, and it switches its dark theme itself rather than with the OS, so `Canvas` went black on
+   a page that had stayed white. The values below are only the fallbacks. Positioned entirely by
+   the controller and never measured: an `above` panel is anchored by its bottom edge and grows
+   upward. `pointer-events: none` so moving toward it does not read as leaving the sentence. */
 
 .axt-peek {
   position: fixed;
@@ -62,8 +65,6 @@
   overflow: hidden;
   padding: 0.5em 0.75em;
   pointer-events: none;
-  /* System colours follow the same light / dark preference the site's own theme does */
-  color-scheme: light dark;
   background: Canvas;
   color: CanvasText;
   border: 1px solid color-mix(in oklab, currentColor 25%, transparent);
