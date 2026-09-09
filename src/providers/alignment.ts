@@ -69,7 +69,7 @@ const SENTENCE_END = /[.!?。！？…]["'\u201d\u300d\u300f）)\]]*$/
  * An English sentence that really does open with a digit is left unsnapped, which costs a fix and
  * never causes one.
  */
-const CONTINUATION = /^[a-z0-9]/
+const CONTINUATION = /^[a-z0-9([]/
 /**
  * 一个终止标点可能不止一个字符：走到它的末尾要跨过的东西。
  *
@@ -152,23 +152,30 @@ function snapAlignment(alignment: SentenceAlignment, sourceText: string, targetT
       at += n
       cuts.push(at)
     }
-    const moved = cuts.map(cut => {
-      if (settled(text, cut)) {
-        // 已经落在句末标点后，但可能停在多字符终止标点的中间：`甲。|”乙` 里那个引号属于上一句
-        //（Codex 在 #145 指出）。只跨收尾标点，跨不到别的东西上
-        let end = cut
-        while (end + 1 < text.length && TERMINATOR.test(text[end] ?? '') && settled(text, end + 1)) end++
-        return end
-      }
+    /**
+     * 走到整段终止标点的末尾。
+     *
+     * 无论候选是往回还是往前找到的都要走这一趟，**吸附才是幂等的**：否则往回落在标点串中间
+     * （`Wait..|.`）的结果会在下一次校验时再往前挪一格，而 `verifyAlignment` 会跑不止一次
+     *（微软在 provider 里校验一次、服务层再一次，缓存命中还要再来一次），同一份对齐就会因为
+     * 走了哪条路而给出不同的高亮（Codex 在 #145 指出）
+     */
+    const walk = (at: number): number => {
+      let end = at
+      while (end + 1 < text.length && TERMINATOR.test(text[end] ?? '') && settled(text, end + 1)) end++
+      return end
+    }
+    const moved: (number | undefined)[] = cuts.map(cut => {
+      if (settled(text, cut)) return walk(cut)
       for (let step = 1; step <= SNAP_WINDOW; step++) {
-        if (cut - step > 0 && snappable(text, cut - step)) return cut - step
-        if (cut + step < text.length && snappable(text, cut + step)) {
-          // Past the *whole* terminator, not its first character: `。”` and `...` are one ending, and
-          // stopping inside leaves the rest of it opening the next sentence (Codex on #145)
-          let end = cut + step
-          while (end + 1 < text.length && snappable(text, end + 1)) end++
-          return end
-        }
+        const back = cut - step > 0 && snappable(text, cut - step) ? cut - step : undefined
+        const forward = cut + step < text.length && snappable(text, cut + step) ? cut + step : undefined
+        // 两边一样近：既可能是引擎多切了一点、也可能是少切了一点，**没有证据偏向哪一边**
+        //（Codex 在 #145 指出）。而且边界之间是有关系的——留一个不动、邻居却动了，切出来的划分
+        //（实测 `[3, 1, 3]`）比引擎给的还糟。有一个说不准，这一侧就整个不动
+        if (back !== undefined && forward !== undefined) return undefined
+        if (back !== undefined) return walk(back)
+        if (forward !== undefined) return walk(forward)
       }
       return cut
     })
@@ -176,6 +183,7 @@ function snapAlignment(alignment: SentenceAlignment, sourceText: string, targetT
     // 后一个再拿这个**已经退回**的值当邻居去校验，于是两个候选吸到同一个标点上时会切出
     // `[1, 2, 4]` 这种错位（Codex 在 #145 指出）。对着候选的快照整体校验一次，不满足就整侧不动
     const ok = moved.every((cut, i) => {
+      if (cut === undefined) return false
       const low = moved[i - 1] ?? 0
       const high = moved[i + 1] ?? text.length
       return cut > low && cut < high && visible(text.slice(low, cut)) && visible(text.slice(cut, high))
@@ -184,8 +192,8 @@ function snapAlignment(alignment: SentenceAlignment, sourceText: string, targetT
     const out: number[] = []
     let prev = 0
     for (const cut of moved) {
-      out.push(cut - prev)
-      prev = cut
+      out.push(cut! - prev)
+      prev = cut!
     }
     out.push(text.length - prev)
     return out

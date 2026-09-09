@@ -152,6 +152,41 @@ describe('alignment verification (#105)', () => {
       .toEqual({ source: [source.indexOf('The'), source.length - source.indexOf('The')], target: [3, 3] })
   })
 
+  it('stops the forward walk before a quote that opens the next sentence', () => {
+    // 前向那一支原来只看 `snappable`，而 `甲。"` 在它眼里是「落在句末标点后」，于是照样跨过去——
+    // 把直引号从终止标点里拿掉保护不了这条路（Codex 在 #145 指出）
+    const target = '甲。"乙。"'
+    expect(verifyAlignment({ source: [3, 2], target: [1, target.length - 1] }, 'A. B.', target))
+      .toEqual({ source: [3, 2], target: [2, target.length - 2] })
+  })
+
+  it('reads an opening bracket after et al. as a continuation', () => {
+    // `by Smith et al. [|GHSY12]` 是一句话。切句器的 `CONTINUES` 为这个实测过的场景专门收了
+    // `[` 和 `(`，这边漏了就会把边界吸回 `al. ` 后面（Codex 在 #145 指出）
+    const source = 'by Smith et al. [GHSY12], which reduces to it. Next.'
+    const cut = source.indexOf('[') + 1
+    const given = { source: [cut, source.length - cut], target: [3, 3] }
+    expect(verifyAlignment(given, source, '第一。第二。')).toEqual(given)
+  })
+
+  it('lands at the end of a punctuation run, and stays there on a second pass', () => {
+    // **幂等**：`verifyAlignment` 会跑不止一次（provider 一次、服务层一次、缓存命中再一次），
+    // 落在标点串中间的结果会在下一次再往前挪一格，同一份对齐就会因为走了哪条路给出不同的高亮
+    //（Codex 在 #145 指出）
+    const source = 'Wait... and then. Next.'
+    const cut = source.indexOf('and') + 1
+    const once = verifyAlignment({ source: [cut, source.length - cut], target: [3, 3] }, source, '第一。第二。')!
+    expect(once.source[0]).toBe(source.indexOf(' and'))
+    expect(verifyAlignment(once, source, '第一。第二。')).toEqual(once)
+  })
+
+  it('leaves the side alone when a boundary is equally close to two sentence ends', () => {
+    // 两边一样近，没有证据偏向哪一边。而且边界之间有关系——留一个不动、邻居却动了，
+    // 切出来的划分比引擎给的还糟（Codex 在 #145 指出）
+    const given = { source: [3, 2], target: [3, 3] }
+    expect(verifyAlignment(given, 'A. B.', '甲。乙。丙。')).toEqual(given)
+  })
+
   it('rejects a source partition that does not add up to the text', () => {
     // The engine reporting boundaries for a string other than the one we sent is the failure this
     // catches — trusting it would put the highlight on the wrong characters.
