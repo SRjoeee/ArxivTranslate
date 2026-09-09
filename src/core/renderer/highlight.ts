@@ -191,6 +191,21 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
    */
   let shown: { root: Element; index: number; at: number } | null = null
 
+  /**
+   * Marks what is painted as stale without forgetting that it is painted.
+   *
+   * **Not `shown = null`.** The miss path returns early when nothing is on screen, so forgetting the
+   * entry means a repaint that finds no sentence under the pointer — a reflow moved it away, a
+   * scroll brought blank space under the cursor — leaves the bands there for good (Codex on #138).
+   * An impossible epoch makes the cache compare unequal, which is what invalidation needs, while
+   * `miss()` still sees that there is something to fade out.
+   */
+  const STALE = -1
+  const invalidate = () => {
+    if (shown) shown = { ...shown, at: STALE }
+    if (frame === 0) frame = view?.requestAnimationFrame(update) ?? 0
+  }
+
   const view = doc.defaultView
   const clearTimer = (id: number) => { if (id !== 0) view?.clearTimeout(id) }
 
@@ -329,10 +344,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
    * which is where the reader is looking; a reflow that moved that sentence out from under it
    * fades out through the ordinary miss path.
    */
-  const onResize = () => {
-    shown = null
-    if (frame === 0) frame = view?.requestAnimationFrame(update) ?? 0
-  }
+  const onResize = invalidate
 
   /**
    * A container scrolling its own content moves the text out from under the bands.
@@ -350,8 +362,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   const onScroll = (event: Event) => {
     const target = event.target
     if (target === doc || target === doc.documentElement || target === doc.body) return
-    shown = null
-    if (frame === 0) frame = view?.requestAnimationFrame(update) ?? 0
+    invalidate()
   }
 
   doc.addEventListener('pointermove', onMove, { passive: true })

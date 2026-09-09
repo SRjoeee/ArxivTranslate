@@ -221,6 +221,28 @@ describe('hover sentence highlight (§7.7)', () => {
     hl.stop()
   })
 
+  it('fades out when a reflow moves the sentence away from the pointer', () => {
+    // Invalidating by forgetting what is painted breaks the miss path — it returns early when
+    // nothing is on screen, so the bands would sit there for good once the repaint found no
+    // sentence under the pointer (Codex on #138). The entry has to survive as stale.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    expect(browser.bands().length).toBe(2)
+
+    // The reflow put blank space under the pointer
+    browser.caret.mockReturnValue(null)
+    browser.resize()
+    expect(browser.bands().length).toBe(2) // held through the grace period, as a pointer crossing a gap is
+    browser.flushTimers()
+
+    expect(browser.bands()).toEqual([])
+    hl.stop()
+  })
+
   it('keeps a band inside the container that clips its text', () => {
     // The layer hangs off `<body>`, outside whatever clipped the text — and `getClientRects()`
     // reports the whole layout box, including the part scrolled out of sight. A wide table in side
