@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { IMG_CLASS, T_CLASS } from '@/core/marks'
 import {
-  FOR_ATTR, IMG_MODES_ATTR, LANG_ATTR, MIRROR_CLASS, type ImageLabel, clearImage, emWidth, enable, labelStyle, overlayOf, renderImage, restore, setImageModes,
+  FOR_ATTR, IMG_MODES_ATTR, LANG_ATTR, MIRROR_CLASS, type ImageLabel, clearImage, clearImageEverywhere, emWidth, enable, labelStyle, overlayOf, renderImage, restore, setImageModes,
 } from '@/core/renderer'
 import { docOf } from './helpers'
 
@@ -137,5 +137,28 @@ describe('rotated labels (§15.5)', () => {
     const style = labelStyle(label())
     expect(style).toBe('left:10.000%;top:20.000%;width:5.000%;height:40.000%;font-size:min(28.80cqh,1.15cqw)')
     expect(style).not.toContain('transform')
+  })
+})
+
+describe('clearImageEverywhere（§15.5）', () => {
+  it('连 side 模式拆图副本里的那一份也摘掉', () => {
+    // `clearImage` 只看图自己的兄弟位置。副本里那份在 only 模式下是**唯一可见的**——
+    // 原件被藏起来了——所以「不再翻这张图」时它必须一起走，否则读者看到的是上一轮的译文
+    const doc = docOf('<figure class="ltx_figure"><img class="ltx_graphics" id="g1"></figure>')
+    const img = doc.getElementById('g1') as HTMLImageElement
+    const target = { id: 'g1', el: img, kind: 'raster' as const }
+    renderImage(target, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static', text: '静态' }])
+    // 拆图副本：整张图连叠加层一起复制到别处
+    const clone = img.closest('figure')!.cloneNode(true) as Element
+    clone.classList.add('axt-split')
+    img.closest('figure')!.after(clone)
+    expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(2)
+
+    expect(clearImage(target)).toBe(true)
+    expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(1) // 副本里那份还在
+
+    renderImage(target, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static', text: '静态' }])
+    expect(clearImageEverywhere(target)).toBe(2)
+    expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(0)
   })
 })

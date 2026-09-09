@@ -540,18 +540,38 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 固定睡 3 秒在慢一点或被限流的端点上会让合法的叠加层晚于断言到达，测试就间歇性失败
   //（Codex 在 #134 指出）
   await scrollThrough(page)
-  const imagesIdle = await waitForLog(logs, /\[axt\] images idle: (\d+)\/(\d+) of (\d+), (\d+) failed/, 120_000)
-  // 图是分批放出来的，**第一条 idle 不是最后一条**（实测跑出过 `1/1 of 9`）。
-  // 等叠加层数量连着两次不变，才算这一轮真的落定
-  let stable = -1
-  for (let i = 0; i < 40; i++) {
+  /**
+   * 等到**每一张有字的 SVG 图都拿到叠加层**，而不是等一个日志或者等计数「看起来稳了」。
+   *
+   * 前一版等 `images idle` 再看计数连着两次不变：图是分批放出来的，`waitForLog` 用 `find` 扫全表、
+   * 会匹配到更早的那次部分完成（实测跑出过 `1/1 of 9`），而两次采样之间如果完成间隔超过 500ms
+   * 也会提前退出（Codex 在 #134 指出）。应有的数量能在页内按图自己算出来，就不必猜
+   */
+  const expected = await page.evaluate(() => {
+    const CODE = /->|=>|==|!=|::|>>|<<|&&|\|\||\w_\w|[;{}]\s*$|^\d+\s{2,}/
+    let n = 0
+    for (const o of document.querySelectorAll('object[type="image/svg+xml"]')) {
+      const d = o.contentDocument
+      if (!d) continue
+      const words = [...d.querySelectorAll('use[data-text]')].map(u => u.getAttribute('data-text') ?? '').join('')
+      if (/\p{L}{2,}/u.test(words) && !CODE.test(words)) n++
+    }
+    return n
+  })
+  // 两个条件都要：**至少**达到这个下界，**并且**连着两次采样不再变。
+  // 页内那个判断是把整张图的 data-text 拼起来一把过的粗判，会少数（实测 5 张图它只算出 4 张），
+  // 所以它只是下界；而单靠「稳定」在完成间隔大于采样间隔时会提前退出。两条一起才夹得住
+  let overlays = -1
+  let stable = 0
+  for (let i = 0; i < 80; i++) {
     const now = await page.evaluate(() => document.querySelectorAll('.axt-img').length)
-    if (now === stable && now > 0) break
-    stable = now
-    await sleep(500)
+    stable = now === overlays ? stable + 1 : 0
+    overlays = now
+    if (overlays >= expected && stable >= 2) break
+    await sleep(800)
   }
-  check('SVG 图：图片这一轮跑完了（下面的断言以它为前提）',
-    !!imagesIdle && stable > 0, `${imagesIdle?.text ?? '(没有等到 images idle)'}；叠加层稳定在 ${stable} 个`)
+  check('SVG 图：每张有字的图都拿到了叠加层（下面的断言以它为前提）',
+    expected > 0 && overlays >= expected && stable >= 2, `${overlays} 个叠加层，下界 ${expected}，稳定 ${stable} 次`)
 
   const svg = await page.evaluate(() => {
     const objs = [...document.querySelectorAll('object[type="image/svg+xml"]')]

@@ -8,7 +8,7 @@ import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } 
 import {
   applyStyle,
   clearPairMargins, createModeController, createPrep, installAnchorFallback,
-  clearImage, restore, setImageModes, startSentenceHighlight,
+  clearImageEverywhere, restore, setImageModes, startSentenceHighlight,
   type Mode, type ModeController, type SentenceHighlight,
 } from '@/core/renderer'
 import { escapeText, unescapeText } from '@/core/protector/text'
@@ -236,7 +236,7 @@ export default defineContentScript({
         if (getSessionId() !== session) return
         helperReady = available
         if (available) images?.resume()
-        else for (const t of targets) if (t.kind === 'raster') clearImage(t)
+        else for (const t of targets) if (t.kind === 'raster') clearImageEverywhere(t)
       }
       sendMessage({ type: 'axt:helper-status' })
         .then(helper => settleRaster(helper.available))

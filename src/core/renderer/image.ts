@@ -57,6 +57,20 @@ export function clearImage(target: ImageTarget): boolean {
 }
 
 /**
+ * 这张图在**整个文档里**的叠加层，包括 side 模式拆图副本里的那一份。
+ *
+ * `clearImage` 只看图自己的兄弟位置，够用于「换一份新的」——副本会在整理时按签名重建。
+ * 但「不再翻这张图了」的场合不够：副本里那份还挂着，而 only 模式下**原件是藏起来的**，
+ * 读者看到的正是副本里那份上一轮、甚至上一种目标语言的译文（Codex 在 #134 指出）
+ */
+export function clearImageEverywhere(target: ImageTarget): number {
+  const doc = target.el.ownerDocument
+  const stale = Array.from(doc.querySelectorAll(`.${IMG_CLASS}[${FOR_ATTR}="${CSS.escape(target.id)}"]`))
+  for (const node of stale) node.remove()
+  return stale.length
+}
+
+/**
  * 一段文字大约占多少 em 宽：CJK 一字一 em，其余按 0.55 em 估（西文平均字宽），空格 0.3 em。
  * 只用来给字号一个宽度上限，不求精确——译文多半是中文，通常比原文短，字号由框高决定
  */
