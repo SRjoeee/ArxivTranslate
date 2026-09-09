@@ -108,6 +108,21 @@ describe('SVG glyph extraction (#121)', () => {
     expect(shifted[1]).toBeCloseTo(origin[1] - 200 / 400, 6)
   })
 
+  it('drops runs that are neither upright nor square to the axis', () => {
+    // Their box is described downstream as an AABB plus an angle, which is only the label's own box
+    // at multiples of 90°. Over the whole corpus 1.27% of glyphs sit at one of 38 other angles, the
+    // commonest -30°; approximating those would put an overlay across the plot.
+    const at = (a: number, b: number) => `<use data-text="A" transform="matrix(${a},${b},0,0,50,50)"/>`
+    const parse = (markup: string) =>
+      new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${markup}</svg>`, 'image/svg+xml').documentElement
+    // 0°, -90°, and -30°
+    expect(linesOf(parse(at(10, 0)))).toHaveLength(1)
+    expect(linesOf(parse(at(0, -10)))).toHaveLength(1)
+    expect(linesOf(parse(at(10 * Math.cos(-Math.PI / 6), 10 * Math.sin(-Math.PI / 6))))).toEqual([])
+    // runsOf still reports it — the angle is read correctly, it is the overlay that cannot place it
+    expect(runsOf(parse(at(10 * Math.cos(-Math.PI / 6), 10 * Math.sin(-Math.PI / 6))))).toHaveLength(1)
+  })
+
   it('reports nothing for a figure with no glyphs', () => {
     const doc = new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0H10V10H0Z"/></svg>', 'image/svg+xml')
     expect(runsOf(doc.documentElement)).toEqual([])

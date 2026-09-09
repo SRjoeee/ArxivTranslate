@@ -157,6 +157,24 @@ export function viewBoxOf(svg: Element): { x: number; y: number; w: number; h: n
 }
 
 /**
+ * Whether a run runs along one of the two axes.
+ *
+ * Everything downstream describes a rotated label by its axis-aligned bounding box plus an angle,
+ * and that only *is* the label's own box at multiples of 90° — at 30° the bounding box is much
+ * larger than the text and rotating it would put the overlay in the wrong place at the wrong size.
+ *
+ * Measured over the whole corpus (55047 glyphs, 253 files): 90.61% upright, 8.01% at -90°, and
+ * **1.27% at 38 other angles**, the commonest being -30°. An earlier seven-paper sample contained
+ * none of them and the survey wrongly concluded there were only two (Codex caught this on #133).
+ * Those runs are dropped rather than approximated: the label stays as the figure drew it, which is
+ * what happens today for every figure.
+ */
+function axisAligned(angle: number): boolean {
+  const quarters = angle / (Math.PI / 2)
+  return Math.abs(quarters - Math.round(quarters)) < 0.02
+}
+
+/**
  * A run's four corners in the figure's own coordinates, before normalising.
  *
  * The box is the text's own: `from`..`to` along the baseline plus one advance for the last glyph,
@@ -186,6 +204,7 @@ export function linesOf(svg: Element): OcrLine[] {
   if (!box) return []
   const out: OcrLine[] = []
   for (const run of runsOf(svg)) {
+    if (!axisAligned(run.angle)) continue
     const quad = cornersOf(run).map(([x, y]) => [(x - box.x) / box.w, (y - box.y) / box.h] as [number, number])
     // 横排的不带 angle，与 OCR 后端产出的行形状完全一致
     out.push(run.angle === 0 ? { text: run.text, quad: quad as Quad, conf: 1 } : { text: run.text, quad: quad as Quad, conf: 1, angle: run.angle })
