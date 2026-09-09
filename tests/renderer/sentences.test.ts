@@ -25,6 +25,27 @@ function render(html: string, fmt: 'tags' | 'markers' = 'tags') {
   return { d, source, target, block, spans: fragment.offsets }
 }
 
+/** 一张拆过图的插图：原文图注、被藏起来的译文、屏幕上那份副本 */
+function splitCaption() {
+  const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+    + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
+  const source = d.querySelector('figcaption')!
+  const block = serialize(source, 'tags')
+  const fragment = rehydrate(block.text, block, d)
+  const target = d.createElement('figcaption')
+  target.className = 'axt-t'
+  target.setAttribute('data-axt-for', 'F1.cap')
+  target.append(fragment)
+  source.after(target)
+  const lengths = splitSentences(block.text)
+  registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+  splitFigures(d)
+  const copy = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
+  Object.assign(target, { checkVisibility: () => false })
+  Object.assign(copy, { checkVisibility: () => true })
+  return { d, source, target, copy }
+}
+
 describe('sentence registry (#105)', () => {
   it('finds the block from a node on either side, and only when it was registered', () => {
     const { source, target, block, spans } = render('<p class="ltx_p">One. Two.</p>')
@@ -158,6 +179,48 @@ describe('sentence registry (#105)', () => {
     // 这一轮完全没有对齐：副本记的那份也不能再用
     registerSentences(source, target, block.offsets, fragment.offsets, undefined)
     expect(sentenceMapAt(source.firstChild!)).toBeUndefined()
+  })
+
+  it('这一轮没有对齐时，副本自己那份记录也要作废（#148）', () => {
+    // 光删「原文 → 译文」的索引不够：副本自己也是记录表的键，指针直接落在副本上照样查得到
+    const { source, target, copy } = splitCaption()
+    expect(sentenceMapAt(copy.firstChild!)).toBeDefined()
+
+    const block = serialize(source, 'tags')
+    registerSentences(source, target, block.offsets, undefined, undefined)
+    expect(sentenceMapAt(copy.firstChild!)).toBeUndefined()
+    expect(sentenceMapAt(source.firstChild!)).toBeUndefined()
+  })
+
+  it('从「没有对齐」变成「有对齐」时，留着的副本会被重建并镜像（#148）', () => {
+    // 拆图按译文正文的签名决定要不要重建。正文没变、登记从无到有时，副本原样留下就永远不会被
+    // 镜像——悬停原文落到藏起来的原件上，悬停副本什么也查不到
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
+    const source = d.querySelector('figcaption')!
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('figcaption')
+    target.className = 'axt-t'
+    target.setAttribute('data-axt-for', 'F1.cap')
+    target.append(fragment)
+    source.after(target)
+
+    // 第一轮：没有对齐（谷歌 / LLM 的块就是这样）
+    registerSentences(source, target, block.offsets, fragment.offsets, undefined)
+    expect(splitFigures(d)).toBe(1)
+    const first = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
+    expect(sentenceMapAt(first.firstChild!)).toBeUndefined()
+
+    // 第二轮：同样的正文，这次有对齐了——副本必须重建并登记
+    const lengths = splitSentences(block.text)
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+    expect(splitFigures(d)).toBe(1)
+    const rebuilt = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
+    Object.assign(target, { checkVisibility: () => false })
+    Object.assign(rebuilt, { checkVisibility: () => true })
+    expect(sentenceMapAt(rebuilt.firstChild!)?.side).toBe('target')
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(rebuilt)
   })
 
   it('registers nothing without an alignment, so those blocks simply do not highlight', () => {

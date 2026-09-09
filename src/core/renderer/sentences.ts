@@ -108,7 +108,12 @@ function remember(source: Element, target: Element): void {
 export function registerSentences(source: Element, target: Element, sourceSpans: readonly WireSpan[], targetSpans: readonly WireSpan[] | undefined, alignment: SentenceAlignment | undefined): void {
   if (!alignment || !targetSpans) {
     // 这一轮没有对齐，之前登记过的（包括还挂在屏幕上的拆图副本）就都作废了：它们记的是上一轮的
-    // 句边界，留着会让悬停按上一轮的配对高亮（Codex 在 #148 指出）
+    // 句边界。**光删索引不够**——副本自己也是 `maps` 的键，指针直接落在副本上时照样查得到那份
+    // 陈旧的记录（Codex 在 #148 指出）
+    for (const ref of targetsOf.get(source) ?? []) {
+      const previous = ref.deref()
+      if (previous) maps.delete(previous)
+    }
     targetsOf.delete(source)
     return
   }
@@ -160,6 +165,18 @@ export function mirrorSentences(target: Element, copy: Element, twin: (node: Nod
   const spans = map.target.spans.map(moved)
   maps.set(copy, { pairs: map.pairs, source: map.source, target: { root: copy, spans, index: indexSpans(spans) } })
   remember(map.source.root, copy)
+}
+
+/**
+ * 这个译文节点此刻的句子登记状况，给拆图的签名用。
+ *
+ * 拆图按译文正文的签名决定要不要重建副本。正文没变、但句子登记从「没有」变成「有」时，副本会被
+ * 原样留下，而它从来没被镜像过——悬停原文落到藏起来的原件上、悬停副本什么也查不到（Codex 在 #148
+ * 指出这个反向的转换）。把登记状况编进签名，这种转换就会走正常的重建 + 镜像那条路
+ */
+export function sentenceSignatureOf(el: Element): string {
+  const map = maps.get(el)
+  return map ? String(map.pairs.length) : ''
 }
 
 /** The record for an element, or undefined if this block has no usable alignment. */

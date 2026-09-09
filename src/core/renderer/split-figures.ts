@@ -14,7 +14,7 @@ import { ID_ATTR } from '@/core/extractor'
 import { IMG_CLASS } from '@/core/marks'
 import { hashText } from '@/shared/hash'
 import { MIRROR_CLASS } from './mirror'
-import { mirrorSentences } from './sentences'
+import { mirrorSentences, sentenceSignatureOf } from './sentences'
 import { PENDING_CLASS } from './pending'
 import { FOR_ATTR, T_CLASS } from './index'
 
@@ -38,7 +38,9 @@ const KEY_ATTR = 'data-axt-split-key'
 
 /** 译文的签名：数量相同但内容变了（换目标语言重翻）也要重建，只数个数会一直用陈旧的副本（Codex 在 #26 指出） */
 function translationKey(fig: Element): string {
-  const texts = Array.from(fig.querySelectorAll(REAL_OR_IMAGE), t => t.textContent ?? '')
+  // 正文之外还要看**句子登记**：正文一样但登记从「没有」变成「有」时，副本原样留下就永远不会被
+  // 镜像，悬停它什么也查不到（Codex 在 #148 指出）
+  const texts = Array.from(fig.querySelectorAll(REAL_OR_IMAGE), t => `${t.textContent ?? ''}\u0000${sentenceSignatureOf(t)}`)
   return `${texts.length}:${hashText(JSON.stringify(texts))}`
 }
 
