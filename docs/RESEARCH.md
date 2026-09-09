@@ -477,41 +477,49 @@ stands for inline SVG.
 
 **Sample.** Recent papers from eight arXiv categories: 178 with an HTML version. **99 of them (55.6%) carry
 at least one SVG figure**, and counting figures rather than papers, **880 of 1792 (49.1%) are SVG** against
-912 bitmaps. 281 SVG files were fetched and parsed (40 unreachable to curl, see below), plus an in-browser
-pass reading every figure's `contentDocument`, which is what the extension will actually see.
+912 bitmaps. **All 321 SVG assets the crawl discovered were measured**, over two channels: 281 fetched and
+parsed over HTTP, and the 40 that answer 406 to curl (see below) read in a real browser through their
+`<object>`'s `contentDocument`, which is what the extension will actually see. Every glyph-level figure below
+is the sum of the two, so the denominator is the whole discovered set rather than the part curl could reach
+(Codex asked on #133 for the 406 group to be counted, not set aside). Two further in-browser passes — 84
+figures for `<foreignObject>`, 44 for reachability — answer narrower questions and are labelled as the
+sub-samples they are where they are used.
 
 **The headline holds only where glyphs are drawn as `<use>`.** That is every figure that draws them at all,
-but 10% draw letter outlines straight into `<path>` instead, and a third of those carry real words that no
-amount of `data-text` reading will reach — see point 4. OCR is what would serve them.
+but 10.3% draw letter outlines straight into `<path>` instead, and nearly a third of those carry real words
+that no amount of `data-text` reading will reach — see point 4. OCR is what would serve them.
 
 ### 1. `data-text` is reliable — coverage of real glyphs is 100%
 
-| | |
-|---|---|
-| `<use>` elements | 55064 |
-| carrying `data-text` | 55047 (**99.97%**) |
-| files parsed | 281 |
-| — of those, drawing glyphs as `<use>` at all | 253 |
-| files where every `<use>` carries it | **248 / 253 (98.0%)** |
-| files where some do | 5 |
-| **files where none do** | **0** |
-| files with no `<use>` — see point 4 | 28 |
+| | over HTTP | 406 group, in browser | all |
+|---|---|---|---|
+| files measured | 281 | 40 | **321** |
+| `<use>` elements | 55064 | 3684 | 58748 |
+| carrying `data-text` | 55047 | 3684 (**100%**) | 58731 (**99.97%**) |
+| — of those files, drawing glyphs as `<use>` at all | 253 | 35 | 288 |
+| files where every `<use>` carries it | 248 | 35 | **283 / 288 (98.3%)** |
+| files where some do | 5 | 0 | 5 |
+| **files where none do** | 0 | 0 | **0** |
+| files with no `<use>` — see point 4 | 28 | 5 | 33 |
 
-The file rows are counted against the 253 that draw glyphs as `<use>`, not against all 281. The other 28
-draw their outlines directly and have nothing for this row to be true or false about; folding them into the
-denominator would report 88.3% and read as though 12% of files were partially covered (Codex on #133).
+The file rows are counted against the 288 that draw glyphs as `<use>`, not against all 321. The other 33
+draw their outlines directly and have nothing for those rows to be true or false about; folding them into the
+denominator would report 88.2% and read as though 12% of files were partially covered (Codex on #133).
 
-All seventeen exceptions are `<use xlink:href="#pattern_tile_N">` — hatch-fill tiles, not glyphs. **Coverage of
-actual glyphs is 100%.**
+All seventeen exceptions are `<use xlink:href="#pattern_tile_N">` — hatch-fill tiles, not glyphs, and all
+seventeen are in the HTTP group; the 40 read in the browser contain no non-glyph `<use>` at all. **Coverage of
+actual glyphs is 100%, on every asset the crawl found.**
 
-**No text lives outside the glyphs.** Not one file has a `<text>` element (0/281), and an in-browser pass over
-84 figures found **zero `<foreignObject>` nodes** — so the "HTML labels inside SVG" representation §2.9
-records for inline TikZ does not occur here, and `data-text` really is the only channel (Codex raised this on
-#133; the check is what makes the claim sound, not the absence of `<text>` alone).
+**No text lives outside the glyphs.** Not one file has a `<text>` element or a `<tspan>` (0/321, both
+channels), and an in-browser pass over 84 figures found **zero `<foreignObject>` nodes**, as did all 40 of the
+406 group — so the "HTML labels inside SVG" representation §2.9 records for inline TikZ does not occur here,
+and `data-text` really is the only channel (Codex raised this on #133; the check is what makes the claim
+sound, not the absence of `<text>` alone).
 
-**The id suffix is not a usable fallback.** A suffix like `font_2_99` equals the codepoint in only 21.75% of
-cases (11568/53196), and bimodally by file: 62 files where it always does, 185 where it never does (there it
-is a font-internal glyph index). Issue #121's observation on three files holds on the larger sample.
+**The id suffix is not a usable fallback.** A suffix like `font_2_99` equals the codepoint in only 21.59% of
+cases (12283/56880 over both channels), and bimodally by file: 67 files where it always does, 213 where it
+never does (there it is a font-internal glyph index), 8 mixed. Issue #121's observation on three files holds
+on the larger sample.
 
 ### 2. Spaces are mostly explicit glyphs, so word segmentation is not the main problem
 
@@ -549,14 +557,14 @@ the first attempt:
 Superscripts separate onto their own baselines, which is right for `10^15`. **Rotation must come out of that
 decomposition** rather than from reading `a` as the size.
 
-Angles over the **whole corpus** — all 253 files, 55047 glyphs:
+Angles over the **whole corpus** — all 288 glyph-bearing files, 58731 glyphs:
 
 | | | |
 |---|---|---|
-| 0° | 49876 | 90.606% |
-| -90° | 4409 | 8.010% |
-| +90° | 62 | 0.113% |
-| **38 other values** | **700** | **1.272%**, commonest -30° |
+| 0° | 52996 | 90.235% |
+| -90° | 4959 | 8.444% |
+| +90° | 62 | 0.106% |
+| **42 other values** | **714** | **1.216%**, commonest -30° |
 
 (The first version of this table omitted the +90° row and totalled 99.89%, leaving 62 glyphs unexplained —
 Codex noticed the arithmetic on #133. Both quarter turns are handled; it is the last row that is dropped.)
@@ -564,7 +572,7 @@ Codex noticed the arithmetic on #133. Both quarter turns are handled; it is the 
 A seven-paper sample of 10465 glyphs contained only the first two, and this section previously concluded
 there were only two. There are not (Codex caught this on #133). The distinction is not cosmetic: an overlay
 describes a rotated label as an axis-aligned box plus an angle, which only *is* the label's box at multiples
-of 90°, so the other 1.27% cannot be placed that way. **The #121 implementation has to drop those runs**
+of 90°, so the other 1.22% cannot be placed that way. **The #121 implementation has to drop those runs**
 rather than approximate them — a requirement recorded here, not behaviour that exists: this PR is the survey
 and carries no code (Codex asked twice for forward references to be marked as such).
 
@@ -584,31 +592,33 @@ this out on #133). So the SVG path has to recognise code itself — from the sha
 no markup left to go on — or it will send code for translation with its spaces missing. That is a
 requirement on the #121 implementation, not something the existing rules give for free.
 
-### 4. One figure in ten carries no readable glyphs, and a third of those still carry words
+### 4. One figure in ten carries no readable glyphs, and nearly a third of those still carry words
 
-28 of 281 files (10%, 27 distinct) have neither `<use>` nor `<text>`. **They are not pure graphics.** An
-exporter can put letter outlines straight into `<path>`, and rendering **all 27** shows that most of them do:
+33 of 321 files (10.3%, 32 distinct — 28 from the HTTP group, 5 from the 406 group) have neither `<use>` nor
+`<text>`. **They are not pure graphics.** An exporter can put letter outlines straight into `<path>`, and
+rendering **all 32** shows that most of them do:
 
 | | |
 |---|---|
 | no text at all — polyhedra, line diagrams, random walks | 11 |
-| mathematics only — Feynman momentum labels, `Φ`, `x₁` | 6 |
+| mathematics only — Feynman momentum labels, `Φ`, `x₁` | 10 |
 | logos — a `K`, an `AI` wordmark | 2 |
-| **word labels — legends (`revival`, `extinction`), block-diagram boxes, axis titles on small multiples** | **8** |
+| **word labels — legends (`revival`, `extinction`), block-diagram boxes, axis titles, `cw: clockwise`** | **9** |
 
 The first three groups lose nothing by being skipped: `isTranslatable` rejects single-letter mathematics
-anyway and a logo should not be translated. **The last eight are a real gap** — v1 leaves them untranslated
+anyway and a logo should not be translated. **The last nine are a real gap** — v1 leaves them untranslated
 and cannot tell the reader why. They are the population an OCR fallback would serve, and they are the reason
 that fallback is worth keeping rather than a hypothetical.
 
-An earlier revision of this section called all 28 pure graphics, then called them mathematics and logos after
-inspecting four. Both were generalisations from a part of the set; Codex asked twice for the whole set, and
-the whole set says something different from either.
+An earlier revision of this section called every file in this group pure graphics, then called them
+mathematics and logos after inspecting four. Both were generalisations from a part of the set; Codex asked
+twice for the whole set, and the whole set says something different from either.
 
 ### 5. `contentDocument` is reachable, and does not even need a scroll
 
 Measured across four papers and 44 figures with explicit waits and `load` listeners: **44/44 reachable, all of
-them already reachable before scrolling anything into view**. An earlier probe in this survey reported 19/27
+them already reachable before scrolling anything into view**. The 406-group pass adds **40/40 reachable**
+across 23 further papers under the same explicit `load` wait. An earlier probe in this survey reported 19/27
 for one paper; that probe raced its own measurement and the number is withdrawn.
 
 This matters because it settles the fourth of issue #121's "what is actually hard" list. Combined with the
@@ -633,23 +643,29 @@ That removes issue #121's fourth difficulty outright: §7.1's DOM invariant is u
 new semantics for embedded documents, and the nested browsing context problem shared with #109 reduces to
 "can we read it", which point 5 answers.
 
-### Incidentally: the 40 files curl could not fetch are not missing
+### The 40 files curl could not fetch encode their text no differently
 
 `https://arxiv.org/html/<id>/<file>.svg` answers **406** for some papers regardless of `Accept` or user agent,
-and their `.png` assets do too — while the same figures render and read fine in the page (2609.09114v1: 3
-figures, all reachable, 213 glyphs, 100% `data-text`). The extension reads through `contentDocument`, so this
-affects crawling surveys, not the product.
+and their `.png` assets do too — while the same figures render and read fine in the page. All 40, across 23
+papers, were therefore read in a browser through `contentDocument`: **40/40 reachable, 3684 `<use>` elements,
+3684 carrying `data-text` (100%), zero `<text>`, zero `<tspan>`, zero `<foreignObject>`**, and 5 files drawing
+outlines directly with no `<use>` at all (12.5%, against 10.0% in the HTTP group). Rendering those 5 puts four
+in "mathematics only" and one — `cw: clockwise` / `ccw: counterclockwise` — in "word labels".
+
+So the 406 is a property of arXiv's asset serving and not of a different encoding; it affects crawling
+surveys, not the product. This is why the tables above are totals over 321 files rather than 281 (Codex on
+#133).
 
 ### Revisions to issue #121
 
 - "Grouping glyphs into semantic runs is the bulk of the work" — **not so**. Spaces are mostly explicit and
   document order is exact. The work is geometric line segmentation (verified feasible) and, only for code,
   restoring dropped spaces from a per-run advance estimate.
-- "The id suffix is a usable fallback" — **not so**, 21.75%.
+- "The id suffix is a usable fallback" — **not so**, 21.59%.
 - "Survey coverage before building anything" — **`data-text` can be relied on** wherever glyphs are drawn as
-  `<use>`, which is every figure that uses them. The 10% that draw outlines directly are the population a
-  fallback would serve, and 8 of those 27 carry real word labels, so that fallback has a job rather than a
-  theoretical one.
+  `<use>`, which is every figure that uses them — measured over all 321 assets the crawl found, not only the
+  281 curl could fetch. The 10.3% that draw outlines directly are the population a fallback would serve, and
+  9 of those 32 carry real word labels, so that fallback has a job rather than a theoretical one.
 
 ### Revision to DESIGN.md §15.1
 
