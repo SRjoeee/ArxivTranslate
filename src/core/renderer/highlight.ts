@@ -334,16 +334,38 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     if (frame === 0) frame = view?.requestAnimationFrame(update) ?? 0
   }
 
+  /**
+   * A container scrolling its own content moves the text out from under the bands.
+   *
+   * The page's own scroll does not: the bands are absolute boxes in document coordinates and are
+   * carried along with everything else, which is why this deliberately ignores it — repainting on
+   * every frame of ordinary reading would cost a hit test and a set of geometry reads for nothing.
+   * An element scrolling inside `overflow`, though, moves its text relative to the document while
+   * the bands stay put, and nothing about that produces a pointer event (Codex on #138). Those are
+   * the same containers `clipOf` bounds the bands to.
+   *
+   * Capture phase: `scroll` does not bubble, so a listener on the document only sees an element's
+   * scroll on the way down.
+   */
+  const onScroll = (event: Event) => {
+    const target = event.target
+    if (target === doc || target === doc.documentElement || target === doc.body) return
+    shown = null
+    if (frame === 0) frame = view?.requestAnimationFrame(update) ?? 0
+  }
+
   doc.addEventListener('pointermove', onMove, { passive: true })
   // Leaving the window keeps no pointer events coming, so the tint would stay behind
   doc.addEventListener('pointerleave', onLeave)
   view?.addEventListener('resize', onResize)
+  doc.addEventListener('scroll', onScroll, { capture: true, passive: true })
 
   return {
     stop() {
       doc.removeEventListener('pointermove', onMove)
       doc.removeEventListener('pointerleave', onLeave)
       view?.removeEventListener('resize', onResize)
+      doc.removeEventListener('scroll', onScroll, { capture: true })
       if (frame !== 0) view?.cancelAnimationFrame(frame)
       hit()
       // Unconditionally, not conditioned on anything being shown: another run of this document may

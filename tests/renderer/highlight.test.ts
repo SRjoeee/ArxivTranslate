@@ -88,6 +88,11 @@ function stubBrowser(doc: Document) {
       doc.dispatchEvent(Object.assign(new Event('pointermove'), { clientX, clientY }))
       for (const fn of frames.splice(0)) fn()
     },
+    /** A scroll dispatched from `el` (capture phase) plus the frame it schedules */
+    scrollOn: (el: EventTarget) => {
+      el.dispatchEvent(new Event('scroll'))
+      for (const fn of frames.splice(0)) fn()
+    },
     /** A window resize plus the frame it schedules */
     resize: () => {
       doc.defaultView?.dispatchEvent(new Event('resize'))
@@ -178,6 +183,38 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.nextLines(r(300))
     browser.resize()
+
+    expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
+    expect(browser.bands().every(b => (b.getAttribute('style') ?? '').includes('top:300.0px'))).toBe(true)
+    hl.stop()
+  })
+
+  it('repaints when a container scrolls its own text, and not when the page does', () => {
+    // The bands are absolute boxes in document coordinates, so the page's own scroll carries them
+    // along — repainting for that would cost a hit test and a set of geometry reads on every frame
+    // of ordinary reading. An element scrolling inside `overflow` is the opposite: its text moves
+    // relative to the document while the bands stay put, and it produces no pointer event either
+    // (Codex on #138).
+    const { doc, source, target } = page(TWO)
+    // The pair inside a scroller of its own — `<body>` scrolling is the page scrolling
+    const scroller = doc.createElement('div')
+    source.before(scroller)
+    scroller.append(source, target)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const r = (top: number) =>
+      ({ left: 0, top, right: 200, bottom: top + 20, width: 200, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    const before = browser.bands().map(b => b.getAttribute('style'))
+
+    browser.starts()
+    browser.scrollOn(doc)
+    expect(browser.starts()).toEqual([]) // the page scrolling rebuilds nothing
+
+    browser.nextLines(r(300))
+    browser.scrollOn(scroller)
 
     expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
     expect(browser.bands().every(b => (b.getAttribute('style') ?? '').includes('top:300.0px'))).toBe(true)
