@@ -63,7 +63,7 @@ const targetsOf = new WeakMap<Element, WeakRef<Element>[]>()
  * `checkVisibility` can, and is Chrome 105+ against a floor of 131. Where it does not exist, being
  * in the document is the best available answer.
  */
-const rendered = (el: Element): boolean =>
+export const rendered = (el: Element): boolean =>
   typeof el.checkVisibility === 'function' ? el.checkVisibility() : el.isConnected
 
 /** The record reachable from either side of a block, or undefined once the translation is gone. */

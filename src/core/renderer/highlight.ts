@@ -16,10 +16,16 @@
 // `article.ltx_document` entirely: the original subtree is not touched, nothing is inserted between
 // the paired nodes, and `restore()` removes the container with every other injected node because it
 // carries `HL_CLASS`.
+//
+// **A side with no boxes is shown instead of tinted** (issue #141). Only mode hides the original,
+// so its bands would be empty; after a dwell its sentence is cloned into a panel beside or next to
+// the visible one (`peek.ts`). Same hit test, same registry, same read-then-write frame.
 
-import { HL_CLASS } from '@/core/marks'
+import { HL_CLASS, PEEK_CLASS } from '@/core/marks'
 import { rangesOf, wireOffsetAt } from '@/core/protector'
-import { sentenceAt, sentenceMapAt } from './sentences'
+import { DOCUMENT_ROOT } from '@/core/rules/latexml'
+import { createPeek, type PeekAnchor } from './peek'
+import { rendered, sentenceAt, sentenceMapAt } from './sentences'
 
 /** Which side a band belongs to, so the stylesheet can tell them apart if it ever needs to. */
 const SIDE_ATTR = 'data-axt-hl-side'
@@ -173,6 +179,7 @@ function clipOf(root: Element, view: Window): Clip {
 export function clearSentenceHighlights(doc: Document): void {
   epoch++
   doc.body?.querySelector(`:scope > .${HL_CLASS}`)?.remove()
+  doc.body?.querySelector(`:scope > .${PEEK_CLASS}`)?.remove()
 }
 
 export interface SentenceHighlight {
@@ -231,6 +238,9 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
 
   const view = doc.defaultView
   const clearTimer = (id: number) => { if (id !== 0) view?.clearTimeout(id) }
+  const peek = createPeek(doc)
+  /** The article root, whose right edge is where the margin begins. Static for the page's life. */
+  const article = doc.querySelector(DOCUMENT_ROOT)
 
   /**
    * Drops what is painted, keeping the (empty) layer.
@@ -242,6 +252,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   const clearNow = () => {
     shown = null
     doc.body?.querySelector(`:scope > .${HL_CLASS}`)?.replaceChildren()
+    peek.hide()
   }
 
   const miss = () => {
@@ -339,13 +350,34 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     // write followed by reads.
     layer = layerOf(doc)
     const origin = layer.getBoundingClientRect()
-    // Both sides are measured before anything is written: reads and writes never interleave
-    const sides = view
-      ? ([
-          { side: 'source', bands: bandsOf(origin, rangesOf(map.source.spans, sentence.source.from, sentence.source.to), clipOf(map.source.root, view)) },
-          { side: 'target', bands: bandsOf(origin, rangesOf(map.target.spans, sentence.target.from, sentence.target.to), clipOf(map.target.root, view)) },
-        ] as const)
-      : []
+    // The side the pointer is not on. When it is not rendered — only mode hides the original — its
+    // bands would come out empty, so they are not measured at all; its ranges go to the panel
+    // instead, built only once the panel actually renders (issue #141)
+    const other = side === 'source' ? 'target' : 'source'
+    const hidden = !rendered(map[other].root)
+    const bandsFor = (which: 'source' | 'target') =>
+      view ? bandsOf(origin, rangesOf(map[which].spans, sentence[which].from, sentence[which].to), clipOf(map[which].root, view)) : []
+    // Every side is measured before anything is written: reads and writes never interleave
+    const sides = [{ side, bands: bandsFor(side) }, ...(hidden ? [] : [{ side: other, bands: bandsFor(other) }])]
+    // What the panel needs is read in the same pass — the sentence's own lines, the block they sit
+    // in and the article's edge, in viewport coordinates. The bands were shifted to the layer's
+    // origin, so it is added back here
+    let anchor: PeekAnchor | undefined
+    if (hidden && view) {
+      const own = sides[0]!.bands
+      const first = own[0]
+      const last = own[own.length - 1]
+      if (first && last) {
+        const block = map[side].root.getBoundingClientRect()
+        anchor = {
+          top: first.top + origin.top,
+          bottom: last.top + last.height + origin.top,
+          block: { left: block.left, width: block.width },
+          articleRight: article?.getBoundingClientRect().right,
+          viewport: { width: view.innerWidth, height: view.innerHeight },
+        }
+      }
+    }
     layer.textContent = ''
     for (const { side, bands } of sides) {
       for (const band of bands) {
@@ -355,6 +387,8 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
         layer.append(el)
       }
     }
+    if (anchor) peek.show({ root: map.source.root, index: sentence.index }, () => rangesOf(map[other].spans, sentence[other].from, sentence[other].to), anchor)
+    else peek.hide()
   }
 
   const onMove = (event: PointerEvent) => {
@@ -405,6 +439,11 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     // sentence is no longer the one under the pointer, and nothing else will notice until the
     // pointer moves (Codex on #138). Re-testing every frame of a scroll is what this deliberately
     // does not do; once it settles is enough, and that is also when the reader looks again.
+    //
+    // The panel, though, closes at once: the sentence it showed is on its way out, and the
+    // sentences the pointer crosses while the page moves must not each get their turn — the dwell
+    // starts over once the page has settled (issue #141)
+    peek.hide()
     clearTimer(settleTimer)
     settleTimer = view?.setTimeout(() => {
       settleTimer = 0
@@ -446,7 +485,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   const mutations = view?.MutationObserver
     ? new view.MutationObserver(records => {
         for (const record of records) {
-          if (record.target !== layer) {
+          if (record.target !== layer && !peek.contains(record.target)) {
             invalidate()
             return
           }
@@ -455,7 +494,9 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     : undefined
   // `attributes` as well as `childList`: a class or inline style toggled on an ancestor re-lays out
   // its subtree without inserting anything, and `characterData` because the text of a translation
-  // node is set in place after its node is inserted (Codex on #138)
+  // node is set in place after its node is inserted (Codex on #138). The panel's own writes are
+  // skipped the same way as the layer's; it is `position: fixed` and never changes the body's box
+  // either, so the size observer does not see it
   if (doc.body) mutations?.observe(doc.body, { childList: true, subtree: true, attributes: true, characterData: true })
   /**
    * A font swapping under the text.
@@ -480,6 +521,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
       if (frame !== 0) view?.cancelAnimationFrame(frame)
       hit()
       shown = null
+      peek.remove()
       // Unconditionally, not conditioned on anything being shown: another run of this document may
       // have left entries behind, and stopping should leave the page clean either way
       clearSentenceHighlights(doc)

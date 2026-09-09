@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { rehydrate, serialize } from '@/core/protector'
 import { clearSentenceHighlights, registerSentences, restore, setMode, startSentenceHighlight } from '@/core/renderer'
+import { PEEK_DWELL_MS } from '@/core/renderer/peek'
 import { splitSentences } from '@/core/sentences'
 
 /**
@@ -145,9 +146,15 @@ function stubBrowser(doc: Document) {
   }
 }
 
-/** A block with its translation beside it, registered with a real alignment. */
-function page(html: string) {
-  const doc = new DOMParser().parseFromString('<html><body></body></html>', 'text/html')
+/**
+ * A block with its translation beside it, registered with a real alignment.
+ *
+ * On a parsed document by default. The peek tests pass the window's own `document`: on a
+ * `DOMParser` document happy-dom moves a range's start to its end (`setStart(text, 0)` then
+ * `setEnd(text, 20)` reports 20/20), so `cloneContents()` comes back empty there — the same
+ * limitation the `starts` recorder in the stub works around for the bands.
+ */
+function page(html: string, doc = new DOMParser().parseFromString('<html><body></body></html>', 'text/html')) {
   doc.body.innerHTML = html
   const source = doc.body.firstElementChild!
   const block = serialize(source, 'tags')
@@ -704,6 +711,166 @@ describe('hover sentence highlight (§7.7)', () => {
 
     restore(doc)
     expect(browser.bands().length).toBe(0)
+    hl.stop()
+  })
+})
+
+describe('source peek through the pointer (#141)', () => {
+  /** The window's own document: see `page()` */
+  const live = () => page(TWO, document)
+  /** Only mode: the original is `display: none`, so it reports itself as not rendered */
+  const hide = (el: Element) => Object.assign(el, { checkVisibility: () => false })
+  const panel = (doc: Document) => doc.querySelector('.axt-peek')
+
+  it('shows the hidden side\'s sentence after the dwell, and tints only the visible side', () => {
+    const { doc, source } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    // The pointer is on the translation; the original has no boxes
+    const text = doc.querySelector('p:not([class]) , p + p')!.firstChild as Text
+    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
+    browser.move()
+
+    // One side painted: the hidden one is not even measured
+    expect(browser.bands().map(b => b.getAttribute('data-axt-hl-side'))).toEqual(['target'])
+    expect(panel(doc)).toBeNull()
+    expect(browser.delays()).toContain(PEEK_DWELL_MS)
+    browser.flushTimers(PEEK_DWELL_MS)
+
+    expect(panel(doc)?.textContent?.trim()).toBe('First sentence here.')
+    expect(panel(doc)?.parentElement).toBe(doc.body)
+    expect(panel(doc)?.getAttribute('data-axt-peek-at')).toBe('below')
+    hl.stop()
+    expect(panel(doc)).toBeNull()
+  })
+
+  it('shows nothing while both sides are rendered', () => {
+    const { doc, source } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    expect(browser.delays()).not.toContain(PEEK_DWELL_MS)
+    browser.flushTimers()
+    expect(panel(doc)).toBeNull()
+    hl.stop()
+  })
+
+  it('works the other way round too: a hidden translation is shown when the original is pointed at', () => {
+    // The trigger is "the counterpart is not rendered", whichever side that is
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(target)
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(browser.bands().map(b => b.getAttribute('data-axt-hl-side'))).toEqual(['source'])
+    expect(panel(doc)?.textContent?.trim()).toBe('First sentence here.')
+    hl.stop()
+  })
+
+  it('switches at once to the next sentence while open, and closes with the tint on a miss', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    const text = target.firstChild as Text
+    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.textContent?.trim()).toBe('First sentence here.')
+
+    browser.caret.mockReturnValue({ offsetNode: text, offset: text.data.length - 3 })
+    browser.move()
+    expect(panel(doc)?.textContent?.trim()).toBe('Second sentence here.') // no second wait
+
+    browser.caret.mockReturnValue(null)
+    browser.move()
+    expect(panel(doc)?.hidden).toBe(false) // the 120ms grace holds the panel with the bands
+    browser.flushTimers(120)
+    expect(panel(doc)?.hidden).toBe(true)
+    expect(browser.bands().length).toBe(0)
+    hl.stop()
+  })
+
+  it('closes at once when the page scrolls, and waits the full dwell again once it settles', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.hidden).toBe(false)
+
+    browser.scrollOn(doc)
+    expect(panel(doc)?.hidden).toBe(true)
+    // The page settles, the pointer is found on the same sentence: a fresh dwell, not an instant panel
+    browser.flushTimers(120)
+    for (const fn of browser.frames.splice(0)) fn()
+    expect(panel(doc)?.hidden).toBe(true)
+    expect(browser.delays()).toContain(PEEK_DWELL_MS)
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.hidden).toBe(false)
+    hl.stop()
+  })
+
+  it('stays open when a container scrolls its own text; the panel just moves', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    const content = panel(doc)!.firstChild
+
+    browser.scrollOn(target)
+    expect(panel(doc)?.hidden).toBe(false)
+    expect(panel(doc)?.firstChild).toBe(content) // repositioned, not rebuilt
+    hl.stop()
+  })
+
+  it('does not take its own content for a reflow', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    browser.starts()
+
+    // A record inside the panel: no repaint, so no range is built
+    browser.mutate(panel(doc)!.firstChild!)
+    expect(browser.starts()).toEqual([])
+    // A record anywhere else still is one
+    browser.mutate(doc.body)
+    expect(browser.starts().length).toBeGreaterThan(0)
+    hl.stop()
+  })
+
+  it('is taken away by clearSentenceHighlights and restore, and comes back cold', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)).not.toBeNull()
+
+    clearSentenceHighlights(doc) // what setMode() and applyStyle() do
+    expect(panel(doc)).toBeNull()
+    browser.move()
+    expect(panel(doc)).toBeNull() // a dwell again, not an instant panel
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)).not.toBeNull()
+
+    restore(doc)
+    expect(panel(doc)).toBeNull()
     hl.stop()
   })
 })

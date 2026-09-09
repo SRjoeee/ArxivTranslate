@@ -41,3 +41,36 @@
   /* A hair of rounding so the band reads as a wash rather than a table cell */
   border-radius: 2px;
 }
+
+/* Source peek for a hidden counterpart (DESIGN §7.7, issue #141).
+
+   Only mode hides the original, so the sentence under the pointer has nothing to tint on the
+   source side; after a dwell its original is shown here instead — the sentence's own DOM, cloned,
+   so formulas and links render as on the page. Beside the column when the margin has room,
+   floating next to the sentence when it does not; `data-axt-peek-at` says which.
+
+   **On `<body>`, outside the article, not in a shadow root**: the cloned MathML and `ltx_*` nodes
+   need the page's own stylesheet. Set in the page's body type, untinted — the band answers "which
+   sentence", the panel answers "what it says". Positioned entirely by the controller and never
+   measured: an `above` panel is anchored by its bottom edge and grows upward. `pointer-events:
+   none` so moving toward it does not read as leaving the sentence. */
+
+.axt-peek {
+  position: fixed;
+  box-sizing: border-box;
+  z-index: 2147483000;
+  overflow: hidden;
+  padding: 0.5em 0.75em;
+  pointer-events: none;
+  /* System colours follow the same light / dark preference the site's own theme does */
+  color-scheme: light dark;
+  background: Canvas;
+  color: CanvasText;
+  border: 1px solid color-mix(in oklab, currentColor 25%, transparent);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+}
+
+.axt-peek[hidden] {
+  display: none;
+}

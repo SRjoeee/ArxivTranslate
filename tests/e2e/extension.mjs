@@ -1117,6 +1117,105 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     r.candidates > 0 && r.moved > 0 && r.landedOnTranslation && r.hash === r.href,
     `${r.candidates} 个目标不可见的锚点；点 ${r.href} 滚了 ${r.moved}px，落在译文上 ${r.landedOnTranslation}，hash ${r.hash}`)
   check('译文克隆没有制造重复 id（issue #44）', Array.isArray(r.duplicateIds) && r.duplicateIds.length === 0, `重复 id: ${JSON.stringify(r.duplicateIds)}`)
+
+  // ── only 模式的原文悬浮对照（issue #141）────────────────────────────────
+  // only 把原块藏了，悬停时原文侧没有盒子可染色；停够 600 ms 后原文那一句会克隆进一块面板：
+  // 边距放得下就在边距里，否则贴句浮出。单元测试把几何全打了桩，「面板真的出现在该在的位置、
+  // 内容真是那一句原文、正文一个节点都没碰」只能在这里验。
+  // 页面还在 only 模式；先在前几段里找一段悬停能出色带的（有色带 = 登记了句边界），再看面板
+  const peekAt = async (forId, width) => {
+    await page.setViewportSize({ width, height: 900 })
+    await sleep(300)
+    return page.evaluate(async forId => {
+      const sleep = ms => new Promise(r => setTimeout(r, ms))
+      const norm = s => (s ?? '').replace(/\s+/g, ' ').trim()
+      const glyphOf = host => {
+        const walk = document.createTreeWalker(host, NodeFilter.SHOW_TEXT)
+        for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+          for (let i = 0; i + 1 <= t.data.length; i++) {
+            if (/\s/.test(t.data[i])) continue
+            const r = document.createRange()
+            r.setStart(t, i); r.setEnd(t, i + 1)
+            const b = r.getBoundingClientRect()
+            if (b.width > 0 && b.height > 0 && b.top > 0) return { x: b.left + b.width / 2, y: b.top + b.height / 2 }
+          }
+        }
+        return null
+      }
+      const hover = async host => {
+        const pt = glyphOf(host)
+        if (!pt) return false
+        document.dispatchEvent(new PointerEvent('pointermove', { clientX: pt.x, clientY: pt.y, bubbles: true }))
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+        return true
+      }
+      const article = document.querySelector('article.ltx_document')
+      const before = article.outerHTML
+      const ids = document.querySelectorAll('[id]').length
+      const all = [...document.querySelectorAll('p.ltx_p.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')]
+      const candidates = forId ? all.filter(t => t.getAttribute('data-axt-for') === forId) : all.slice(0, 12)
+      let target = null
+      let tried = 0
+      for (const t of candidates) {
+        tried++
+        t.scrollIntoView({ block: 'center' })
+        await sleep(250) // 页面滚动会关面板、120 ms 后再问一次指针在哪；等它静下来
+        if (!(await hover(t))) continue
+        if (document.querySelectorAll('.axt-hl > div').length > 0) { target = t; break }
+      }
+      if (!target) return { reason: `${tried} 段里没有一段登记了句边界（悬停没有色带）` }
+      // 色带立刻有，面板要等驻留
+      const early = document.querySelector('.axt-peek')
+      const earlyShown = !!early && !early.hidden
+      await sleep(900)
+      const panel = document.querySelector('.axt-peek')
+      if (!panel || panel.hidden) return { reason: '停了 900 ms 面板没出现' }
+      const src = document.querySelector(`[data-axt-id="${target.getAttribute('data-axt-for')}"]`)
+      const text = norm(panel.textContent)
+      const box = panel.getBoundingClientRect()
+      const lines = [...document.querySelectorAll('.axt-hl > div')].map(b => b.getBoundingClientRect())
+      const top = Math.min(...lines.map(b => b.top))
+      const bottom = Math.max(...lines.map(b => b.bottom))
+      const art = article.getBoundingClientRect()
+      const at = panel.getAttribute('data-axt-peek-at')
+      const placed = at === 'margin' ? box.left >= art.right - 1 : at === 'below' ? box.top >= bottom - 1 : at === 'above' ? box.bottom <= top + 1 : false
+      // 克隆成本：整段原文（比一句只多不少）克隆 20 次取均值
+      const range = document.createRange()
+      range.selectNodeContents(src)
+      const t0 = performance.now()
+      for (let i = 0; i < 20; i++) range.cloneContents()
+      const cloneMs = (performance.now() - t0) / 20
+      // 页面一滚面板立即关
+      scrollBy(0, 40)
+      await sleep(50)
+      const afterScroll = document.querySelector('.axt-peek')?.hidden === true
+      return {
+        forId: target.getAttribute('data-axt-for'), at, placed, earlyShown, afterScroll, cloneMs,
+        textLen: text.length, srcHas: text.length > 0 && norm(src.textContent).includes(text),
+        onBody: panel.parentElement === document.body,
+        visible: box.width > 0 && box.height > 0 && box.top >= 0 && box.bottom <= innerHeight,
+        width: Math.round(box.width), blockWidth: Math.round(target.getBoundingClientRect().width),
+        margin: Math.round(innerWidth - art.right), viewport: innerWidth,
+        domUnchanged: article.outerHTML === before,
+        idsUnchanged: document.querySelectorAll('[id]').length === ids,
+      }
+    }, forId)
+  }
+  // 1600 宽：文章 52rem 居中，两侧各 ≈ 384px，面板该在边距里
+  const wide = await peekAt(null, 1600)
+  check('only 模式：停 600 ms 后原文那一句浮出，内容是原块的子串、挂在 body 上（issue #141）',
+    !!wide.at && wide.srcHas && wide.onBody && wide.visible && !wide.earlyShown,
+    wide.reason ?? `档位 ${wide.at}，${wide.textLen} 字，是原文子串 ${wide.srcHas}，在 body 上 ${wide.onBody}，可见 ${wide.visible}，未到驻留就出现 ${wide.earlyShown}`)
+  check('only 模式：宽窗口下面板在文章右侧边距里，且不碰正文（§7.1）',
+    wide.at === 'margin' && wide.placed && wide.domUnchanged && wide.idsUnchanged,
+    wide.reason ?? `视口 ${wide.viewport}，边距 ${wide.margin}px，档位 ${wide.at}，位置对 ${wide.placed}，正文未变 ${wide.domUnchanged}，id 数未变 ${wide.idsUnchanged}`)
+  check('only 模式：页面一滚面板立即关', wide.afterScroll === true, wide.reason ?? `滚动后 hidden=${wide.afterScroll}`)
+  check('only 模式：整段原文克隆一次不到 10 ms', typeof wide.cloneMs === 'number' && wide.cloneMs < 10, wide.reason ?? `${wide.cloneMs?.toFixed(3)} ms / 次`)
+  // 1100 宽：边距只剩 ≈ 134px，面板贴句浮出、与所在块同宽
+  const narrow = await peekAt(wide.forId ?? null, 1100)
+  check('only 模式：窄窗口下面板贴句浮出，与所在块同宽（issue #141）',
+    (narrow.at === 'below' || narrow.at === 'above') && narrow.placed && Math.abs(narrow.width - narrow.blockWidth) <= 2 && narrow.srcHas,
+    narrow.reason ?? `视口 ${narrow.viewport}，边距 ${narrow.margin}px，档位 ${narrow.at}，位置对 ${narrow.placed}，宽 ${narrow.width} vs 块 ${narrow.blockWidth}`)
   await page.close()
 }
 
