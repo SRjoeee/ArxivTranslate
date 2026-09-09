@@ -70,6 +70,15 @@ function needsSplit(fig: Element): boolean {
 
 /** 克隆件里记着自己对应原件的哪个 id：页内锚点靠它找到克隆中对应的那一处（issue #44） */
 export const SPLIT_OF_ATTR = 'data-axt-split-of'
+/**
+ * 副本里的图片叠加层记着它翻的是哪张图。
+ *
+ * 与 `SPLIT_OF_ATTR` 同一个手法：`data-axt-for` 会被 `stripIds` 一起抹掉，于是
+ * `clearImageEverywhere` 按 `data-axt-for` 找不到副本里那一份，「不再翻这张图」之后
+ * only 模式下读者看到的仍是上一轮的译文（Codex 在 #134 指出）。换个名字留下来——
+ * 不是 `data-axt-for`，配对规则不会把副本里的叠加层当成另一份译文
+ */
+export const SPLIT_FOR_ATTR = 'data-axt-split-for'
 
 /**
  * 克隆件不能带原件的 id 与块标记（会造成重复 id）。但**对应关系不能一起丢**：
@@ -81,9 +90,11 @@ export const SPLIT_OF_ATTR = 'data-axt-split-of'
 function stripIds(root: Element): void {
   for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
     const id = el.getAttribute('id')
+    const forId = el.classList.contains(IMG_CLASS) ? el.getAttribute(FOR_ATTR) : null
     el.removeAttribute('id')
     for (const name of el.getAttributeNames()) if (name.startsWith('data-axt-')) el.removeAttribute(name)
     if (id) el.setAttribute(SPLIT_OF_ATTR, id)
+    if (forId) el.setAttribute(SPLIT_FOR_ATTR, forId)
   }
 }
 

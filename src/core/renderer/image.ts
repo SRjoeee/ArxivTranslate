@@ -5,6 +5,7 @@
 import { IMG_CLASS } from '@/core/marks'
 import { FOR_ATTR, LANG_ATTR } from './index'
 import { MIRROR_CLASS } from './mirror'
+import { SPLIT_FOR_ATTR } from './split-figures'
 
 /** <html> 上的模式闸：用户勾选的模式集合，空格分隔，CSS 用 ~= 匹配当前模式（§15 的设置项） */
 export const IMG_MODES_ATTR = 'data-axt-img-modes'
@@ -65,7 +66,10 @@ export function clearImage(target: ImageTarget): boolean {
  */
 export function clearImageEverywhere(target: ImageTarget): number {
   const doc = target.el.ownerDocument
-  const stale = Array.from(doc.querySelectorAll(`.${IMG_CLASS}[${FOR_ATTR}="${CSS.escape(target.id)}"]`))
+  // 副本里那份认的是 `data-axt-split-for`：`stripIds` 会把克隆件上的每个 `data-axt-*` 抹掉，
+  // 只按 `data-axt-for` 找的话副本里那份永远留着（Codex 在 #134 指出）
+  const id = CSS.escape(target.id)
+  const stale = Array.from(doc.querySelectorAll(`.${IMG_CLASS}[${FOR_ATTR}="${id}"], .${IMG_CLASS}[${SPLIT_FOR_ATTR}="${id}"]`))
   for (const node of stale) node.remove()
   return stale.length
 }

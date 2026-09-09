@@ -3,6 +3,7 @@ import { IMG_CLASS, T_CLASS } from '@/core/marks'
 import {
   FOR_ATTR, IMG_MODES_ATTR, LANG_ATTR, MIRROR_CLASS, type ImageLabel, clearImage, clearImageEverywhere, emWidth, enable, labelStyle, overlayOf, renderImage, restore, setImageModes,
 } from '@/core/renderer'
+import { splitFigures } from '@/core/renderer/split-figures'
 import { docOf } from './helpers'
 
 // 图片叠加层（DESIGN §15.2）：<img> 的下一个兄弟、不带 axt-t、<img> 一个属性都不加、恢复原文整层删掉
@@ -144,15 +145,16 @@ describe('clearImageEverywhere（§15.5）', () => {
   it('连 side 模式拆图副本里的那一份也摘掉', () => {
     // `clearImage` 只看图自己的兄弟位置。副本里那份在 only 模式下是**唯一可见的**——
     // 原件被藏起来了——所以「不再翻这张图」时它必须一起走，否则读者看到的是上一轮的译文
-    const doc = docOf('<figure class="ltx_figure"><img class="ltx_graphics" id="g1"></figure>')
+    const doc = docOf('<figure class="ltx_figure"><img class="ltx_graphics" id="g1"><figcaption class="ltx_caption" data-axt-id="c1">Fig 1.</figcaption><figcaption class="axt-t" data-axt-for="c1">图 1。</figcaption></figure>')
     const img = doc.getElementById('g1') as HTMLImageElement
     const target = { id: 'g1', el: img, kind: 'raster' as const }
     renderImage(target, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static', text: '静态' }])
-    // 拆图副本：整张图连叠加层一起复制到别处
-    const clone = img.closest('figure')!.cloneNode(true) as Element
-    clone.classList.add('axt-split')
-    img.closest('figure')!.after(clone)
+    // 副本必须由 `splitFigures` 真的拆出来：手搓一个 clone 会把 `data-axt-for` 留在叠加层上，
+    // 而真的拆图会被 `stripIds` 抹掉——按 `data-axt-for` 找副本的写法在手搓的副本上照样通过
+    //（Codex 在 #134 指出）
+    expect(splitFigures(doc)).toBe(1)
     expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(2)
+    expect(doc.querySelector(`.axt-split .${IMG_CLASS}`)?.getAttribute(FOR_ATTR)).toBeNull()
 
     expect(clearImage(target)).toBe(true)
     expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(1) // 副本里那份还在
