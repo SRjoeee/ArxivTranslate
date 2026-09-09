@@ -1150,8 +1150,6 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
         return true
       }
       const article = document.querySelector('article.ltx_document')
-      const before = article.outerHTML
-      const ids = document.querySelectorAll('[id]').length
       const all = [...document.querySelectorAll('p.ltx_p.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')]
       const candidates = forId ? all.filter(t => t.getAttribute('data-axt-for') === forId) : all.slice(0, 12)
       let target = null
@@ -1164,13 +1162,17 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
         if (document.querySelectorAll('.axt-hl > div').length > 0) { target = t; break }
       }
       if (!target) return { reason: `${tried} 段里没有一段登记了句边界（悬停没有色带）` }
+      const src = document.querySelector(`[data-axt-id="${target.getAttribute('data-axt-for')}"]`)
+      // §7.1 的对照只看这一对：整篇 article 在等驻留的这段时间里还在陆续插进懒加载的译文，
+      // 拿整篇做前后快照量到的是翻译进度，不是面板
+      const before = src.outerHTML + target.outerHTML
+      const ids = document.querySelectorAll('[id]').length
       // 色带立刻有，面板要等驻留
       const early = document.querySelector('.axt-peek')
       const earlyShown = !!early && !early.hidden
       await sleep(900)
       const panel = document.querySelector('.axt-peek')
       if (!panel || panel.hidden) return { reason: '停了 900 ms 面板没出现' }
-      const src = document.querySelector(`[data-axt-id="${target.getAttribute('data-axt-for')}"]`)
       const text = norm(panel.textContent)
       const box = panel.getBoundingClientRect()
       const lines = [...document.querySelectorAll('.axt-hl > div')].map(b => b.getBoundingClientRect())
@@ -1196,7 +1198,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
         visible: box.width > 0 && box.height > 0 && box.top >= 0 && box.bottom <= innerHeight,
         width: Math.round(box.width), blockWidth: Math.round(target.getBoundingClientRect().width),
         margin: Math.round(innerWidth - art.right), viewport: innerWidth,
-        domUnchanged: article.outerHTML === before,
+        domUnchanged: src.outerHTML + target.outerHTML === before && !article.contains(panel),
         idsUnchanged: document.querySelectorAll('[id]').length === ids,
       }
     }, forId)
