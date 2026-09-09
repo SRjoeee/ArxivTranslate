@@ -1,4 +1,4 @@
-// 会话边界的回归测试（issue #45）。原文是三个「断言缺陷存在」的诊断探针，这里改写成期望行为。
+// Session-boundary regressions (issue #45). Three original diagnostic probes asserting defects are rewritten here as expected behavior.
 import { describe, expect, it, vi } from 'vitest'
 import { extract } from '@/core/extractor'
 import { startTranslation } from '@/core/pipeline'
@@ -14,8 +14,8 @@ const docWith = (html: string) => new DOMParser().parseFromString(
 
 const paragraphs = (n: number) => Array.from({ length: n }, (_, i) => `<p class="ltx_p">Sentence ${i}.</p>`).join('')
 
-describe('启动期间恢复原文（issue #45 实验 1）', () => {
-  it('让出主线程后不再写任何标记：restore 清干净之后不能留下孤儿 data-axt-*', async () => {
+describe('restoring originals during startup (issue #45, experiment 1)', () => {
+  it('writes no markers after yielding once stopped, leaving no orphan data-axt-* attributes after restore', async () => {
     const doc = docWith(paragraphs(40))
     const before = doc.documentElement.outerHTML
     const blocks = extract(doc)
@@ -29,22 +29,22 @@ describe('启动期间恢复原文（issue #45 实验 1）', () => {
       paper: '0000.00000',
       capabilities: { maxBatchChars: 1000, maxBatchItems: 4, preservesMarkup: true },
       preload: { margin: 1000, threshold: 0 },
-      transport: async () => ({ ok: false, error: { kind: 'aborted', message: '不该发出请求' } }),
+      transport: async () => ({ ok: false, error: { kind: 'aborted', message: 'Request should not be sent' } }),
     })
-    // 标记循环刚开始就停：初始化在让出主线程时被打断
+    // Stop just as marking begins, interrupting initialization at the main-thread yield.
     run.stop()
     restore(doc)
     await run.ready
 
     expect(doc.querySelectorAll('[data-axt-id]')).toHaveLength(0)
     expect(doc.querySelectorAll('[data-axt-state]')).toHaveLength(0)
-    // DOM 逐节点回到最初（§7.1）
+    // The DOM returns node-for-node to its initial state (§7.1).
     expect(doc.documentElement.outerHTML).toBe(before)
   })
 })
 
-describe('缓存读取的等待预算：换任何 CachePort 都不会被拖死（issue #45 实验 2）', () => {
-  /** 只做缓存断言的最小服务：provider 原样回声，记下每次真发出去的段落 */
+describe('cache-read budget prevents any CachePort from stalling translation (issue #45, experiment 2)', () => {
+  /** Minimal cache-testing service: an echo provider records segments actually sent */
   const serviceWith = async (cache: CachePort, cacheReadBudgetMs = 20) => {
     const { createTranslateService } = await import('@/providers/translate-service')
     const calls: string[][] = []
@@ -61,40 +61,40 @@ describe('缓存读取的等待预算：换任何 CachePort 都不会被拖死�
   }
   const call = { request: { segments: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], source: 'en' as const, target: 'cmn' }, cache: { paper: '0000.00000', renderPath: 'markup' as const } }
 
-  it('正常返回时不受预算影响，命中的段落不再发给 provider', async () => {
+  it('normal responses are unaffected by the budget and cache hits are not sent to the provider', async () => {
     const { service, calls } = await serviceWith({ getMany: async keys => keys.map((_, i) => (i === 0 ? '甲' : null)), putMany: async () => undefined })
     const res = await service.translate(call)
     expect(res.ok && res.cached).toBe(1)
     expect(calls).toEqual([['b']])
   })
 
-  it('条数对不上按全未命中处理：按索引取会张冠李戴', async () => {
+  it('mismatched result counts become all misses to avoid assigning hits by the wrong index', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const { service, calls } = await serviceWith({ getMany: async () => ['甲'], putMany: async () => undefined })
     const res = await service.translate(call)
     expect(res.ok && res.cached).toBe(0)
     expect(calls).toEqual([['a', 'b']])
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('条数'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('different item count'))
     warn.mockRestore()
   })
 
-  it('预算是常量，改动要显式：默认 2 秒远大于实测的命中往返（36 ms 量级）', async () => {
+  it('the budget is an explicit constant: 2 seconds comfortably exceeds the measured roughly 36 ms cache round trip', async () => {
     const { CACHE_READ_BUDGET_MS } = await import('@/providers/translate-service')
     expect(CACHE_READ_BUDGET_MS).toBe(2_000)
   })
 
-  it('CachePort 永不返回时，超过预算就当未命中，照常发出请求，不把翻译卡死', async () => {
+  it('a CachePort that never returns times out as a miss and requests proceed without stalling translation', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const { service, calls } = await serviceWith({ getMany: () => new Promise(() => undefined), putMany: async () => undefined })
     const res = await service.translate(call)
     expect(res.ok).toBe(true)
     expect(calls).toEqual([['a', 'b']])
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('未返回'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('did not return'))
     warn.mockRestore()
   })
 })
 
-describe('缓存身份包含端点（issue #45 实验 3）', () => {
+describe('cache identity includes the endpoint (issue #45, experiment 3)', () => {
   const keyOf = (provider: { id: string; cacheId?: string; promptKey?: string }) => cacheKeyFor({
     providerId: provider.cacheId ?? provider.id,
     model: 'same-model',
@@ -104,31 +104,31 @@ describe('缓存身份包含端点（issue #45 实验 3）', () => {
     text: 'Hello',
   })
 
-  it('同模型名、不同 Base URL 不能命中同一条缓存', async () => {
+  it('the same model at different Base URLs cannot share a cache entry', async () => {
     const a = createOpenAICompatProvider({ baseURL: 'https://one.example/v1', apiKey: 'dummy', model: 'same-model' })
     const b = createOpenAICompatProvider({ baseURL: 'https://two.example/v1', apiKey: 'dummy', model: 'same-model' })
     expect(await keyOf(a)).not.toBe(await keyOf(b))
   })
 
-  it('同一域名下的不同路径是不同身份：网关路由可能指向不同后端（Codex 在 #54 指出）', async () => {
+  it('different paths on one domain have different identities because gateways may route to different backends (Codex #54)', async () => {
     const a = createOpenAICompatProvider({ baseURL: 'https://one.example/v1', apiKey: 'dummy', model: 'same-model' })
     const b = createOpenAICompatProvider({ baseURL: 'https://one.example/tenant-b/v1', apiKey: 'dummy', model: 'same-model' })
     expect(await keyOf(a)).not.toBe(await keyOf(b))
   })
 
-  it('只有末尾斜杠之差仍是同一身份', async () => {
+  it('a trailing slash alone does not change identity', async () => {
     const a = createOpenAICompatProvider({ baseURL: 'https://one.example/v1', apiKey: 'dummy', model: 'same-model' })
     const b = createOpenAICompatProvider({ baseURL: 'https://one.example/v1/', apiKey: 'dummy', model: 'same-model' })
     expect(await keyOf(a)).toBe(await keyOf(b))
   })
 
-  it('缓存身份里不含 API key（硬规则 7）', () => {
+  it('cache identity excludes API keys (hard rule 7)', () => {
     const provider = createOpenAICompatProvider({ baseURL: 'https://one.example/v1', apiKey: 'sk-secret-value', model: 'm' })
     expect(provider.cacheId).not.toContain('sk-secret-value')
     expect(provider.cacheId).toBe('openai-compat:https://one.example/v1')
   })
 
-  it('没声明 cacheId 的 provider 仍用 id：免费引擎不受影响', async () => {
+  it('providers without cacheId still use id, preserving free-engine behavior', async () => {
     const { createGoogleWebProvider } = await import('@/providers/google-web')
     const google = createGoogleWebProvider()
     expect(google.cacheId).toBeUndefined()
@@ -136,8 +136,8 @@ describe('缓存身份包含端点（issue #45 实验 3）', () => {
   })
 })
 
-describe('取消跨了消息边界（issue #42）', () => {
-  it('恢复原文：cancel 带着会话 scope 发给 background，晚到的成功译文也不再落到 DOM 上', async () => {
+describe('cancellation crosses the messaging boundary (issue #42)', () => {
+  it('restore sends cancel with the session scope to background and prevents late successful translations from reaching the DOM', async () => {
     const { createMessageTransport } = await import('@/shared/transport')
     const doc = docWith(paragraphs(3))
     const before = doc.documentElement.outerHTML
@@ -146,7 +146,7 @@ describe('取消跨了消息边界（issue #42）', () => {
     const sent: { type: string }[] = []
     let release: (() => void) | null = null
     const held = new Promise<void>(resolve => { release = resolve })
-    // background 替身：翻译请求挂住不回，取消请求立刻回
+    // Background stub: translation requests stay pending; cancellation returns immediately.
     const send = (async (message: { type: string; request?: { segments: { id: string; text: string }[] } }) => {
       sent.push(message)
       if (message.type === 'axt:cancel-scope') return { cancelled: 2 }
@@ -168,16 +168,16 @@ describe('取消跨了消息边界（issue #42）', () => {
     })
     await run.ready
     const pending = run.translate(blocks)
-    // 请求已经发出去、还挂在 background 那头
+    // The request has been sent and remains pending in background.
     await Promise.resolve()
     expect(sent.map(m => m.type)).toEqual(['axt:translate'])
 
-    // 用户点「恢复原文」：content 停会话、发取消、清 DOM
+    // The user restores originals: content stops the session, sends cancellation, and clears the DOM.
     run.stop()
     expect(await transport.cancel('session-1')).toBe(2)
     restore(doc)
 
-    // 撤不掉的那次请求这时才回来
+    // The uncancellable request finally returns.
     release!()
     await pending
 
@@ -187,14 +187,14 @@ describe('取消跨了消息边界（issue #42）', () => {
     expect(doc.documentElement.outerHTML).toBe(before)
   })
 })
-describe('取消之后不再写缓存（Codex 在 #33 指出）', () => {
-  it('一次调用横跨两批，先完成的那批在取消后也不入库', async () => {
+describe('no cache writes after cancellation (Codex #33)', () => {
+  it('when a call spans two batches, even the earlier successful batch is not cached after cancellation', async () => {
     const { createTranslateService } = await import('@/providers/translate-service')
     const writes: string[][] = []
     let release: (() => void) | null = null
     const held = new Promise<void>(resolve => { release = resolve })
     const service = createTranslateService({
-      // 每批最多 1 条：a 立刻回，b 挂住，等取消之后再放行
+      // One segment per batch: a returns immediately; b waits until after cancellation.
       getProvider: async () => ({
         id: 'mock', displayName: 'mock', kind: 'llm', preservesMarkup: true, maxBatchChars: 1000, maxBatchItems: 1,
         isAvailable: async () => true,
@@ -211,12 +211,12 @@ describe('取消之后不再写缓存（Codex 在 #33 指出）', () => {
       cache: { paper: '0000.00000', renderPath: 'markup' },
       scope: 'session-1',
     })
-    // 等 a 那批落地，再取消整个 scope，然后放行 b
+    // Wait for batch a, cancel the whole scope, then release b.
     await new Promise(r => setTimeout(r, 200))
     service.cancel('session-1')
     release!()
     await pending
-    // a 早就成功了，但会话已经撤销：不该有任何写入
+    // Although a succeeded earlier, the cancelled session must perform no writes.
     expect(writes).toEqual([])
   })
 })

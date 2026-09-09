@@ -1,26 +1,26 @@
-// 移植自 reference/read-frog/src/utils/host/translate/ui/spinner.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：
-// class 改 axt-spinner、颜色变量改 --axt-muted（由 modes.css 在 html[data-axt-on] 上定义，不需要它的 ensurePresetStyles）；
-// 去掉 getTranslatedTextAndRemoveSpinner——那是它的请求胶水（含 React 错误组件），我们的请求胶水在 pipeline/run.ts；
-// 加 cancelSpinnersIn：删任何含圆环的节点前先取消动画（DESIGN §7.6）。
+// Ported from reference/read-frog/src/utils/host/translate/ui/spinner.ts@9b44f82 (GPL-3.0), 2026-09-05; modified:
+// class → axt-spinner, color → --axt-muted (defined on html[data-axt-on] in modes.css; no ensurePresetStyles needed);
+// removed getTranslatedTextAndRemoveSpinner (upstream request glue with React errors; ours lives in pipeline/run.ts);
+// added cancelSpinnersIn to cancel animations before removing any spinner-containing node (DESIGN §7.6).
 
 export const SPINNER_CLASS = 'axt-spinner'
 
 /**
- * 同时转动的圆环上限。几千个 WAAPI 动画每帧都触发整页样式重算，长页面会把主线程吃满
- *（它的 #1881：实测 2400 多个并发圆环）。超出上限的段落用静止的灰环。
+ * Cap simultaneously animated spinners. Thousands of WAAPI animations trigger page-wide style recalculation every frame,
+ * saturating the main thread on long pages (Read Frog #1881 measured over 2,400 concurrent spinners). Excess spinners stay gray and static.
  */
 export const MAX_ANIMATED_SPINNERS = 60
 
 /**
- * 每个圆环的动画句柄。文档里有几千个动画时 Element.getAnimations() 很贵
- *（#1881 的采样里占 10% CPU），存下来取消就是 O(1)。
+ * Animation handles per spinner. Element.getAnimations() is costly with thousands of animations
+ * (10% CPU in #1881 samples); stored handles allow O(1) cancellation.
  */
 const spinnerAnimations = new WeakMap<HTMLElement, Animation>()
 let activeSpinnerAnimationCount = 0
 
 /**
- * 取消圆环的旋转动画。跑着的动画会把已脱离文档的目标钉在渲染器里，每个翻译过的段落漏一个节点（#1831），
- * 所以每条删节点的路径都要先调这个。
+ * Cancel rotation before every removal path. Active animations retain detached targets in the renderer,
+ * leaking one node per translated paragraph (#1831).
  */
 export function cancelSpinnerAnimation(spinner: HTMLElement): void {
   const animation = spinnerAnimations.get(spinner)
@@ -30,18 +30,18 @@ export function cancelSpinnerAnimation(spinner: HTMLElement): void {
     animation.cancel()
     return
   }
-  // 兜底：注册表里没有的（happy-dom / jsdom 没有 getAnimations，所以 ?.）
+  // Fallback for unregistered animations; happy-dom / jsdom lack getAnimations, hence optional chaining.
   for (const live of spinner.getAnimations?.() ?? []) live.cancel()
 }
 
 /**
- * 轻量圆环：不用 React / Shadow DOM，用 Web Animations API 而不是 CSS keyframes，不往页面注入样式。
- * 内联 !important 样式，站点 CSS 盖不掉。细的灰色弧线加透明的其余边，整页几百个也不会刺眼。
+ * Lightweight spinner: native DOM, no React / Shadow DOM. Use WAAPI instead of CSS keyframes; inject no stylesheets.
+ * Inline !important prevents site overrides. A thin gray arc with transparent remaining borders stays unobtrusive even in hundreds.
  */
 export function createLightweightSpinner(ownerDoc: Document): HTMLElement {
   const spinner = ownerDoc.createElement('span')
   spinner.className = SPINNER_CLASS
-  // 纯装饰：等待状态由 popup 的进度显示承担，逐块的圆环不该被逐个念出来
+  // Decorative only: popup progress announces pending state; do not read every block's spinner aloud.
   spinner.setAttribute('aria-hidden', 'true')
   spinner.style.cssText = `
     display: inline-block !important;
@@ -64,7 +64,7 @@ export function createLightweightSpinner(ownerDoc: Document): HTMLElement {
     align-self: center !important;
   `
 
-  // 尊重用户的减少动效设置
+  // Respect reduced-motion preferences.
   const prefersReducedMotion = ownerDoc.defaultView?.matchMedia
     ? ownerDoc.defaultView.matchMedia('(prefers-reduced-motion: reduce)').matches
     : false
@@ -73,32 +73,32 @@ export function createLightweightSpinner(ownerDoc: Document): HTMLElement {
       [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }],
       { duration: 600, iterations: Infinity, easing: 'linear' },
     )
-    // 取消时 finished 会以 AbortError 拒绝：规范把它标成已处理，happy-dom 没有，会当未处理的拒绝报出来
+    // Cancellation rejects finished with AbortError. The spec marks it handled; happy-dom does not, causing unhandled-rejection reports.
     animation.finished?.catch(() => undefined)
     spinnerAnimations.set(spinner, animation)
     activeSpinnerAnimationCount++
   } else {
-    // 减少动效 / 没有 WAAPI / 超过上限：保留一段静止的灰弧，等待态仍可见
+    // Reduced motion / missing WAAPI / cap exceeded: keep a static gray arc so pending state remains visible.
     spinner.style.borderTopColor = 'var(--axt-muted)'
   }
 
   return spinner
 }
 
-/** 在宿主节点末尾放一个圆环 */
+/** Append a spinner to the host. */
 export function createSpinnerInside(host: HTMLElement): HTMLElement {
   const spinner = createLightweightSpinner(host.ownerDocument)
   host.appendChild(spinner)
   return spinner
 }
 
-/** 删掉一棵子树之前调用：把里面（含根自己）所有圆环的动画取消 */
+/** Before removing a subtree, cancel every spinner animation in it, including the root. */
 export function cancelSpinnersIn(root: Element): void {
   if (root.classList.contains(SPINNER_CLASS)) cancelSpinnerAnimation(root as HTMLElement)
   for (const spinner of Array.from(root.querySelectorAll<HTMLElement>(`.${SPINNER_CLASS}`))) cancelSpinnerAnimation(spinner)
 }
 
-/** 当前在转的圆环数（测试用） */
+/** Number of currently animated spinners (tests). */
 export function activeSpinnerAnimations(): number {
   return activeSpinnerAnimationCount
 }

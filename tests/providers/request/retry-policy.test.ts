@@ -1,4 +1,4 @@
-// 移植自 reference/read-frog/src/utils/request/__tests__/retry-policy.test.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：仅改 import 路径。
+// Ported from reference/read-frog/src/utils/request/__tests__/retry-policy.test.ts@9b44f82 (GPL-3.0), 2026-09-05, modified import paths only.
 import { describe, expect, it } from "vitest"
 import {
   attachRequestErrorMeta,

@@ -1,10 +1,10 @@
-// OCR 行 → 译文框（DESIGN §15.1）。纯函数，happy-dom 与真机同一份。
+// OCR lines → translation boxes (DESIGN §15.1). Pure functions shared by happy-dom and real browsers.
 //
-// Vision 按行返回；图里换行的标签（"Dynamical / charge"、"Pair / Production"）是两行，翻译要当一句送，
-// 所以竖直相邻、水平对齐（左缘或中线）、横向有重叠的行合成一个框。
-// 过滤照 §6 的保留规则：纯数字（刻度）、不含两个连续字母的（单字母面板标号 "B"、"(a)"、"E=+1"）不翻，
-// 置信度太低的也不要——Vision 对这些给 0.5，真正的词几乎都是 1.0。
-// 规则参数对着 tests/fixtures/ocr/qed3d-string-breaking.json 里的真实坐标定的。
+// Vision returns lines; wrapped labels ("Dynamical / charge", "Pair / Production") span two lines but need translation as one phrase.
+// Merge vertically adjacent lines that align at the left edge or center and overlap horizontally.
+// Filter per §6: do not translate numbers (ticks) or text without two consecutive letters (panel labels "B", "(a)", "E=+1").
+// Also reject low confidence: Vision gives these 0.5, while real words are usually near 1.0.
+// Parameters are calibrated against real coordinates in tests/fixtures/ocr/qed3d-string-breaking.json.
 import { isNumericCell } from '@/core/rules/latexml'
 import type { OcrLine, Quad } from '@/shared/ocr'
 
@@ -13,18 +13,18 @@ export interface Box {
   y: number
   w: number
   h: number
-  /** 合并后的原文（行之间空格相连） */
+  /** Merged source text, with spaces between lines. */
   text: string
-  /** 合并进来的行数，字号按它均摊 */
+  /** Number of merged lines; divide box height by this count for font sizing. */
   lines: number
 }
 
 export interface BoxOptions {
-  /** 低于这个置信度的行丢掉 */
+  /** Discard lines below this confidence. */
   minConf?: number
 }
 
-/** 四角的轴对齐外接框：旋转的坐标轴标签四角不是轴对齐的，先按外接框画 */
+/** Axis-aligned bounding box of the quad; rotated axis labels are initially rendered using their enclosing box. */
 export function quadBounds(quad: Quad): { x: number; y: number; w: number; h: number } {
   const xs = quad.map(([x]) => x)
   const ys = quad.map(([, y]) => y)
@@ -33,14 +33,14 @@ export function quadBounds(quad: Quad): { x: number; y: number; w: number; h: nu
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
 }
 
-/** 值得翻的文字：至少两个连续字母（任何文字），且不是数值 */
+/** Translatable text: at least two consecutive letters in any script, and not numeric. */
 export function isTranslatable(text: string): boolean {
   const trimmed = text.trim()
   if (!/\p{L}{2,}/u.test(trimmed)) return false
   return !isNumericCell(trimmed)
 }
 
-/** 同一列：左缘或中线相差不到四分之三行高 */
+/** Same column: left edges or centers differ by less than three quarters of a line height. */
 function aligned(a: Box, b: { x: number; w: number; h: number }): boolean {
   const tolerance = 0.75 * Math.min(a.h / a.lines, b.h)
   const leftClose = Math.abs(a.x - b.x) <= tolerance
@@ -49,7 +49,7 @@ function aligned(a: Box, b: { x: number; w: number; h: number }): boolean {
   return overlapX && (leftClose || centerClose)
 }
 
-/** 竖直相邻：下一行的顶到上一框的底不超过 0.6 行高（允许轻微重叠） */
+/** Vertically adjacent: next line starts within 0.6 line heights of the previous box's bottom; slight overlap allowed. */
 function adjacent(a: Box, b: { y: number; h: number }): boolean {
   const gap = b.y - (a.y + a.h)
   return gap <= 0.6 * Math.min(a.h / a.lines, b.h) && gap >= -0.5 * b.h

@@ -1,53 +1,53 @@
-// 一次性视口调度（DESIGN §10）：Read Frog PageTranslationManager 的观察器骨架，改绑我们的 Block[]。
+// One-shot viewport scheduling (DESIGN §10): Read Frog PageTranslationManager observer structure adapted to our Block[].
 //
-// 块第一次进入视口加预翻译距离时才交出去翻，同时 unobserve——一次性；视口外的块永远不会被请求。
-// 同一次 IO 回调里进入的块作一批交给 onEnter（它的 #1881：一次密集进入几百条也只处理一次）。
-// IO 的首次回调是异步的，创建时先按 getBoundingClientRect 同步播种一次首屏（我们原 viewport.ts 的做法）。
+// Dispatch a block once it enters the viewport plus prefetch margin, then unobserve. Offscreen blocks are never requested.
+// Pass entries from one IO callback as one onEnter batch (Read Frog #1881: process hundreds of simultaneous entries once).
+// IO's initial callback is asynchronous; synchronously seed the first viewport with getBoundingClientRect (from our former viewport.ts).
 //
-// 锚点（FluentRead resolveFullPageVisibilityAnchor 的思路）：没有布局盒的块永远进不了视口——
-// 脚注正文在 ar5iv 里 height: 0 或折叠成 display: none——改观察它最近的祖先块，祖先进入时一起进入。
+// Anchors (inspired by FluentRead resolveFullPageVisibilityAnchor): blocks without layout boxes cannot enter the viewport.
+// Footnotes in ar5iv have height: 0 or display: none. Observe their nearest ancestor block and dispatch both when it enters.
 import { ID_ATTR, type Block } from '@/core/extractor'
 
 export interface PreloadOptions {
-  /** 视口下方多少像素算"临近"（Read Frog 默认 1000） */
+  /** Pixels below the viewport considered near (Read Frog default: 1000). */
   margin: number
-  /** 块露出多少比例算进入（Read Frog 默认 0） */
+  /** Visible fraction required for entry (Read Frog default: 0). */
   threshold: number
 }
 
 /**
- * 注册给 IntersectionObserver 的比例点。**判定不在这里做**（回调里按逐元素的有效阈值判），
- * 这串数字只决定「在哪些比例上把回调发给我们」——而这一点是硬约束：观察器**只在跨越注册值时**回调。
+ * Ratios registered with IntersectionObserver. These do not decide entry (the callback uses each element's effective threshold);
+ * they decide when we get callbacks. The observer only notifies when a registered ratio is crossed.
  *
- * 只注册 `[0, threshold]` 会让钳过阈值的超大块永远收不到够用的那次通知（Codex 在 #76 指出）。
- * Chromium 实测（元素 3000 px、root 900 px，比例上限 0.3，threshold 1）：
- * 注册 `[0, 1]` 全程只回调一次、ratio 0.267，之后一路滚到底再无回调，钳到 0.3 的判定永不通过；
- * 换成 5% 一档的细网格后拿到了 ratio 0.3 的那一次。
+ * Registering only `[0, threshold]` can leave oversized blocks with clamped thresholds waiting forever (Codex #76).
+ * Chromium measurement: 3000 px element, 900 px root, maximum ratio 0.3, threshold 1.
+ * `[0, 1]` yielded only one callback at ratio 0.267, even after scrolling to the bottom; the clamped 0.3 check never passed.
+ * A grid in 5% increments produced the required callback at ratio 0.3.
  *
- * 步长 5%：任何元素的可达上限与某个注册点相差不超过 5%，够精细；一个元素最多 21 次回调，
- * 且命中即 `unobserve`，回调里只做几次比较，代价可忽略。threshold 为 0 时退回单个 0——
- * 那是默认值，任何相交都算进入，没必要多注册 20 个点
+ * A 5% step is sufficiently fine: any attainable maximum is within 5% of a registered ratio. At most 21 callbacks per element,
+ * unobserved immediately on entry, each doing only a few comparisons; negligible cost. For threshold 0, register only 0:
+ * this default accepts any intersection, so the other 20 ratios are unnecessary.
  */
 export const THRESHOLD_STEP = 0.05
 
 export function observerThresholds(threshold: number): number | number[] {
   if (threshold <= 0) return 0
   const grid = Array.from({ length: Math.round(1 / THRESHOLD_STEP) + 1 }, (_, i) => i * THRESHOLD_STEP)
-  // 用户配的值本身可能不在网格上（schema 只要求 0–1，设置页也收得下 0.33）。
-  // 不把它一起注册的话，一个上限落在「配置值与下一个网格点之间」的元素同样收不到能过关的回调：
-  // 跨越 0.30 那次报 0.30 < 0.33 被拒，0.35 又够不着（Codex 在 #81 指出）
+  // A user value may fall between grid points (schema accepts 0–1; the options UI accepts 0.33).
+  // Register it too: an element capped between that value and the next grid point otherwise gets no qualifying callback.
+  // Crossing 0.30 reports 0.30 < 0.33 and is rejected, while 0.35 is unreachable (Codex #81).
   if (!grid.some(g => Math.abs(g - threshold) < 1e-9)) grid.push(threshold)
   return grid.sort((a, b) => a - b)
 }
 
 /**
- * 把阈值向下对齐到注册网格。**判定必须和注册用同一套刻度**（Codex 在 #81 指出）：
- * 观察器只在跨越注册点时通知，通知里带的是**当时的真实比例**，所以一个可达上限落在
- * 两个网格点**之间**的元素，永远拿不到「比例等于上限」的那一次。
+ * Round the threshold down to the registered grid. Entry and registration must use the same scale (Codex #81):
+ * callbacks occur only at registered crossings and report the actual ratio at that moment. An element capped
+ * between grid points never receives a callback at its exact maximum.
  *
- * Chromium 实测（元素 2700 px、root 900 px，上限 0.3333，网格 0.30 / 0.35，10 px 一步慢滚）：
- * 跨越 0.30 的那次报告 0.30000001，此后再没有回调（够不着 0.35）。
- * 拿精确的 0.3333 去比就永远不通过，块一辈子不翻；对齐到 0.30 才收得下这一次。
+ * Chromium measurement: 2700 px element, 900 px root, maximum 0.3333, grid 0.30 / 0.35, scrolling in 10 px steps.
+ * Crossing 0.30 reported 0.30000001, then no further callbacks (0.35 was unreachable).
+ * Comparing against exact 0.3333 would leave the block untranslated forever; rounding to 0.30 accepts this callback.
  */
 export function quantizeThreshold(value: number): number {
   return Math.floor(value / THRESHOLD_STEP + 1e-9) * THRESHOLD_STEP
@@ -56,11 +56,11 @@ export function quantizeThreshold(value: number): number {
 export const DEFAULT_PRELOAD: PreloadOptions = { margin: 1000, threshold: 0 }
 
 export interface LazyScheduler<T extends { el: Element } = Block> {
-  /** 手动把块交出去（无 IntersectionObserver 的环境、重试）；已交过的不再交 */
+  /** Manually dispatch blocks (no IntersectionObserver, or retry); do not redispatch claimed blocks. */
   trigger(blocks: T[]): void
-  /** 只认领不回调：调用方自己去翻这些块，观察器不再管它们 */
+  /** Claim without a callback: the caller translates these blocks; the observer no longer manages them. */
   claim(blocks: T[]): void
-  /** 还没进入视口的块数 */
+  /** Number of blocks that have not entered the viewport. */
   waiting(): number
   disconnect(): void
 }
@@ -70,10 +70,10 @@ function hasLayoutBox(el: Element): boolean {
   return rect.width > 0 || rect.height > 0
 }
 
-/** 调度的对象只要有 `el`：文字块（Block）与图片目标（§15）共用同一套观察器 */
+/** Scheduled targets need only `el`: text blocks and image targets (§15) share the observer. */
 export function createLazyScheduler<T extends { el: Element } = Block>(blocks: T[], options: PreloadOptions & { onEnter: (blocks: T[]) => void }): LazyScheduler<T> {
   const waiting = new Set<T>(blocks)
-  // 锚点 → 它带着的块。有布局盒的块观察自己；没有的挂到最近的祖先块上
+  // Anchor → associated blocks. Observe blocks with layout boxes directly; attach others to their nearest ancestor block.
   const byAnchor = new Map<Element, T[]>()
   for (const block of blocks) {
     const anchor = hasLayoutBox(block.el) ? block.el : block.el.parentElement?.closest(`[${ID_ATTR}]`) ?? block.el
@@ -89,20 +89,20 @@ export function createLazyScheduler<T extends { el: Element } = Block>(blocks: T
   const enterAnchors = (anchors: Element[]) => fire(anchors.flatMap(anchor => byAnchor.get(anchor) ?? []))
 
   /**
-   * 这个锚点实际能达到的**有效阈值**。两条修正叠在一起（Codex 在 #32 / #36 指出）：
+   * Effective threshold attainable by this anchor, with two adjustments (Codex #32 / #36):
    *
-   * 1. `isIntersecting` 的定义是「相交比例 > 0」，**不是**「≥ threshold」。observe 之后浏览器
-   *    立刻发一次初始通知，一个刚露出一成的块在 threshold=0.5 下照样报 isIntersecting，
-   *    于是这个设置根本不生效。所以回调里要自己比 `intersectionRatio`。
-   * 2. 比高不下的块**永远达不到**高阈值：root（视口 + 上下 margin）装不下它，比例封顶在
-   *    `root 高 ÷ 元素高`。设计上又明确不拆超大表格，于是 threshold=1 时那张表一辈子不翻。
-   *    把阈值按这个上限钳一下，够得着多少就要求多少。
+   * 1. `isIntersecting` means an intersection ratio > 0, not ≥ threshold. The browser sends an initial notification
+   *    immediately after observe; a 10%-visible block still reports isIntersecting at threshold=0.5.
+   *    Without our own intersectionRatio comparison, the setting has no effect.
+   * 2. Very tall blocks can never reach high thresholds: the root (viewport plus vertical margins) cannot contain them.
+   *    Their ratio is capped at root height / element height. Oversized tables must not be split, so threshold=1 would never translate them.
+   *    Clamp to this maximum, requiring only the attainable ratio.
    */
   const effectiveThreshold = (elHeight: number, rootHeight: number) => {
     if (elHeight <= 0) return options.threshold
     const reachable = Math.min(1, rootHeight / elHeight)
-    // 够得着配置值就按配置值判——它本身也在注册列表里（见 observerThresholds），回调到得了；
-    // 够不着才降到上限，而降下来的那个数要**对齐到网格**，否则同样等不到能过关的回调
+    // Use the configured value if attainable; it is registered too (observerThresholds), so a callback can reach it.
+    // Otherwise lower to the maximum and round down to the grid; without rounding, no callback may ever qualify.
     return options.threshold <= reachable ? options.threshold : quantizeThreshold(reachable)
   }
 
@@ -112,10 +112,10 @@ export function createLazyScheduler<T extends { el: Element } = Block>(blocks: T
         const anchors: Element[] = []
         for (const entry of entries) {
           if (!entry.isIntersecting) continue
-          // rootBounds 在跨文档场景下可能为 null；拿不到就退回只看 isIntersecting，宁可早翻不可不翻
+          // rootBounds can be null across documents. Fall back to isIntersecting: early translation is better than none.
           const rootHeight = entry.rootBounds?.height
           const elHeight = entry.boundingClientRect.height
-          // 容差：浏览器报的比例是浮点，跨越 0.30 时可能报 0.2999999
+          // Tolerance: floating-point ratios may report 0.2999999 when crossing 0.30.
           if (rootHeight !== undefined && entry.intersectionRatio < effectiveThreshold(elHeight, rootHeight) - 1e-6) continue
           io.unobserve(entry.target)
           anchors.push(entry.target)
@@ -124,9 +124,9 @@ export function createLazyScheduler<T extends { el: Element } = Block>(blocks: T
       }, { rootMargin: `${options.margin}px 0px`, threshold: observerThresholds(options.threshold) })
     : null
 
-  // 播种：首屏及边距内的锚点先同步触发一次，其余交给观察器。
-  // **要和观察器用同一个 threshold**（Codex 在 #35 指出）：只判矩形相交的话，配了 threshold 的用户
-  // 会看到「刚露出一像素的块立刻就翻」，而同一个块要是晚一点才进视口反而得等够比例，两条路径不一致
+  // Seed anchors in the first viewport plus margins synchronously; leave the rest to the observer.
+  // Use the same threshold as the observer (Codex #35). Rectangle intersection alone would translate a one-pixel sliver immediately,
+  // while the same block entering later would wait for the configured ratio, making the two paths inconsistent.
   const height = globalThis.innerHeight ?? 0
   const seeded: Element[] = []
   for (const anchor of byAnchor.keys()) {
@@ -135,7 +135,7 @@ export function createLazyScheduler<T extends { el: Element } = Block>(blocks: T
     const top = Math.max(rect.top, -options.margin)
     const bottom = Math.min(rect.bottom, height + options.margin)
     const visible = Math.max(0, bottom - top)
-    // 与 IntersectionObserver 的 intersectionRatio 同义：相交高度 ÷ 元素自身高度
+    // Same meaning as IntersectionObserver's intersectionRatio: intersecting height / element height.
     if (visible > 0 && visible / rect.height >= effectiveThreshold(rect.height, height + 2 * options.margin) - 1e-6) seeded.push(anchor)
     else observer?.observe(anchor)
   }

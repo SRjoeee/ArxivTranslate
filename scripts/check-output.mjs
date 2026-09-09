@@ -1,6 +1,6 @@
-// 构建产物体检：Chrome 加载 content script 前会做严格的 UTF-8 校验，
-// 文件里出现 Unicode 非字符（U+FFFF 等）就整个扩展拒绝加载，报 "It isn't UTF-8 encoded"。
-// 2026-09-04 踩过：content 侧误引入 @/cache/index 把 Dexie 打进包，Dexie 用 "￿" 作键区间上界。
+// Build-output check: Chrome strictly validates content-script UTF-8 before loading.
+// Unicode noncharacters such as U+FFFF make it reject the extension with "It isn't UTF-8 encoded".
+// Observed 2026-09-04: importing @/cache/index in content bundled Dexie, which uses "￿" as a key-range upper bound.
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -13,17 +13,17 @@ const isNoncharacter = code =>
 function scan(path) {
   const bytes = readFileSync(path)
   const problems = []
-  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) problems.push('文件以 BOM 开头')
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) problems.push('File starts with a BOM')
   let text
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   } catch {
-    problems.push('不是合法的 UTF-8')
+    problems.push('Invalid UTF-8')
     return problems
   }
   const found = new Set()
   for (const ch of text) if (isNoncharacter(ch.codePointAt(0))) found.add(`U+${ch.codePointAt(0).toString(16).toUpperCase()}`)
-  if (found.size > 0) problems.push(`含 Unicode 非字符 ${[...found].join(', ')}，Chrome 会拒绝加载`)
+  if (found.size > 0) problems.push(`Contains Unicode noncharacters ${[...found].join(', ')}; Chrome will refuse to load it`)
   return problems
 }
 
@@ -40,6 +40,6 @@ for (const name of readdirSync(CONTENT_DIR)) {
   }
 }
 if (failed) {
-  console.error('\ncontent script 无法被 Chrome 加载。常见原因：content 侧引入了只应在 background 使用的模块（如 @/cache 的 Dexie 实现）。')
+  console.error('\nChrome cannot load the content script. Common cause: content imports a background-only module, such as the Dexie implementation in @/cache.')
   process.exit(1)
 }

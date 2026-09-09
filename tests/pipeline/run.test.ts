@@ -16,7 +16,7 @@ const PAGE =
 
 const docOf = (page = PAGE) => new DOMParser().parseFromString(`<!doctype html><html><head></head><body><article class="ltx_document">${page}</article></body></html>`, 'text/html')
 
-/** 恒等 transport：原样返回；可用 mutate 篡改某些段 */
+/** Identity transport returns input unchanged; mutate can corrupt selected segments */
 function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: string }, calls: number) => string | { error: string }) {
   const requests: TranslateCall[] = []
   const transport: Transport = async req => {
@@ -32,7 +32,7 @@ function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: st
   return { transport, requests }
 }
 
-/** 开始会话并等标记完成；happy-dom 没有 IntersectionObserver，块要靠 translate 手动交出去 */
+/** Start a session and wait for marking; happy-dom lacks IntersectionObserver, so translate submits blocks explicitly */
 async function start(doc: Document, blocks: Block[], transport: Transport, extra: Partial<Parameters<typeof startTranslation>[0]> = {}) {
   const run = startTranslation({
     doc, blocks, target: 'zh-CN', mode: 'stack', paper: 'test', transport, preload: DEFAULT_PRELOAD,
@@ -44,7 +44,7 @@ async function start(doc: Document, blocks: Block[], transport: Transport, extra
 const byId = (blocks: Block[], id: string) => blocks.find(b => b.id === id)!
 
 describe('startTranslation', () => {
-  it('开始只打标记不发请求；交出去的块攒批翻完，进度与缓存计数正确', async () => {
+  it('startup marks without requests; submitted blocks translate in batches with accurate progress and cache counts', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport, requests } = makeTransport()
@@ -56,7 +56,7 @@ describe('startTranslation', () => {
     expect(run.progress()).toEqual({ state: 'on', total: 6, requested: 6, done: 6, failed: 0, cached: 3, inFlight: 0 })
     expect(doc.querySelectorAll(`.${T_CLASS}`)).toHaveLength(6)
     expect(doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
-    // 两个章节各一批文本 + 表格一批
+    // One text batch per section plus one table batch
     expect(requests).toHaveLength(3)
     expect(requests[0]?.cache).toEqual({ paper: 'test', renderPath: 'markup' })
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)?.querySelector('math')).not.toBeNull()
@@ -64,7 +64,7 @@ describe('startTranslation', () => {
     expect(doc.documentElement.hasAttribute('data-axt-on')).toBe(true)
   })
 
-  it('只翻交出去的块；章节标题来自开始时对整篇算好的表，不在这一批里的标题也算数（§10）', async () => {
+  it('translates only submitted blocks; section titles come from the whole-paper map even when the heading is outside the batch (§10)', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport, requests } = makeTransport()
@@ -75,12 +75,12 @@ describe('startTranslation', () => {
     expect(requests[0]!.request.context?.sectionTitle).toBe('Method')
     expect(doc.getElementById('s2')?.getAttribute(STATE_ATTR)).toBe('pending')
     expect(run.progress()).toMatchObject({ requested: 1, done: 1 })
-    // 再交一次同一块：请求中的跳过，已完成的当作重试再翻一次
+    // resubmitting a block skips in-flight work and retries completed work
     await run.translate([byId(blocks, 'p3')])
     expect(requests).toHaveLength(2)
   })
 
-  it('请求期间原块后面是带圆环的 pending 节点，进度里算 inFlight；译文到达后被替换', async () => {
+  it('requests insert a pending spinner after the original and count as inFlight; translations replace it on arrival', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     let release!: () => void
@@ -104,7 +104,7 @@ describe('startTranslation', () => {
     expect(seen.at(-1)).toMatchObject({ inFlight: 0, done: 1 })
   })
 
-  it('占位符破坏一次：单块重发（只写不读缓存）后成功', async () => {
+  it('one placeholder corruption retries the block with cache writes only and succeeds', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     let corrupted = false
@@ -120,7 +120,7 @@ describe('startTranslation', () => {
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)?.querySelector('math')).not.toBeNull()
   })
 
-  it('占位符始终破坏：走 runs 兜底；请求里不再带校验回调（issue #42 改由服务端从请求文本反推）', async () => {
+  it('persistent placeholder corruption falls back to runs; requests carry no validation callback because the service infers expectations from input (issue #42)', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport, requests } = makeTransport((req, seg) => {
@@ -133,14 +133,14 @@ describe('startTranslation', () => {
     const runsReq = requests.find(r => r.cache?.renderPath === 'runs')
     expect(runsReq?.request.segments.map(s => s.id)).toEqual(['p2#r0', 'p2#r1'])
     const markup = requests.find(r => r.cache?.renderPath === 'markup')!
-    // 请求只带得走的东西：段落、缓存参数、scope。校验回调过不了消息边界，也不再需要
+    // Requests contain only serializable segments, cache parameters, and scope; validation callbacks cannot cross messaging and are no longer needed.
     expect(Object.keys(markup).sort()).toEqual(['cache', 'request'])
     const node = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)
     expect(node?.querySelector('math')).not.toBeNull()
     expect(node?.textContent).toContain('Two')
   })
 
-  it('批次报错：对半拆分到单段，只标记真正失败的块，pending 随之删掉', async () => {
+  it('batch errors recursively split down to one segment, marking only failed blocks and removing their pending nodes', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     let fail = true
@@ -149,13 +149,13 @@ describe('startTranslation', () => {
     await run.translate(blocks)
     expect(run.progress()).toMatchObject({ failed: 1, done: 5, inFlight: 0 })
     expect(doc.getElementById('p1')?.getAttribute(STATE_ATTR)).toBe('failed')
-    // 失败块旁是带原因的小部件（§7.6），不是译文
+    // The failed block has a reason widget (§7.6), not a translation.
     const widget = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)!
     expect(widget.classList.contains(ERROR_CLASS)).toBe(true)
     expect(widget.getAttribute('title')).toBe('unknown: unknown')
     expect(doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)?.classList.contains(ERROR_CLASS)).toBe(false)
-    // failed() 列出失败块；再交给 translate 就是重试，成功后小部件换成译文
+    // failed() returns failed blocks; translate retries them and replaces the widget on success
     expect(run.failed().map(b => b.id)).toEqual(['p1'])
     fail = false
     await run.translate(run.failed())
@@ -164,7 +164,7 @@ describe('startTranslation', () => {
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)?.querySelector('math')).not.toBeNull()
   })
 
-  it('小部件上的"重试"按钮走同一条重试路径', async () => {
+  it('the widget Retry button uses the same retry path', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     let fail = true
@@ -179,7 +179,7 @@ describe('startTranslation', () => {
     expect(doc.querySelector(`.${ERROR_CLASS}`)).toBeNull()
   })
 
-  it('no-key：致命错误后会话停下，不再发新批次', async () => {
+  it('no-key is fatal: the session stops dispatching new batches', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport, requests } = makeTransport(() => ({ error: 'no-key' }))
@@ -193,7 +193,7 @@ describe('startTranslation', () => {
     expect(doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
   })
 
-  it('stop：删掉 pending、之后回来的译文不渲染、进度不再上报', async () => {
+  it('stop removes pending nodes, discards late translations, and stops progress reports', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     let release!: () => void
@@ -218,7 +218,7 @@ describe('startTranslation', () => {
     expect(doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
   })
 
-  it('取消范围 scope 透传给每一次调用；没给就不带', async () => {
+  it('forwards scope on every call and omits it when unspecified', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport, requests } = makeTransport()
@@ -233,7 +233,7 @@ describe('startTranslation', () => {
     for (const r of bare.requests) expect(r.scope).toBeUndefined()
   })
 
-  it('论文级上下文（标题、摘要）带到每一批，并与批次的章节标题合并', async () => {
+  it('every batch combines paper title and abstract with its section title', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport, requests } = makeTransport()
@@ -246,7 +246,7 @@ describe('startTranslation', () => {
     expect(requests.map(r => r.request.context?.sectionTitle)).toContain('Introduction')
   })
 
-  it('表格翻了一半：已翻出的格照常显示，原表保持 translated 另加 partial 标记，计入 failed', async () => {
+  it('partial tables display successful cells, retain translated state with a partial marker, and count as failed', async () => {
     const doc = docOf('<table class="ltx_tabular" id="T2"><tbody><tr><td class="ltx_td">Alpha</td><td class="ltx_td">Beta</td></tr></tbody></table>')
     const blocks = extract(doc)
     const { transport } = makeTransport((_req, seg) => (seg.id === 'T2#c1' ? { error: 'unknown' } : undefined as unknown as string))
@@ -262,7 +262,7 @@ describe('startTranslation', () => {
     expect(original.hasAttribute(PARTIAL_ATTR)).toBe(false)
   })
 
-  it('短标题再翻失败：删译文的同时摘掉同行标记；再翻成功加回', async () => {
+  it('a failed short-heading retry removes translation and inline markers; a successful retry restores them', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     await (await start(doc, blocks, makeTransport().transport)).translate(blocks)
@@ -272,13 +272,13 @@ describe('startTranslation', () => {
     await (await start(doc, blocks, transport)).translate(blocks)
     expect(title.getAttribute(STATE_ATTR)).toBe('failed')
     expect(title.hasAttribute(INLINE_ATTR)).toBe(false)
-    // 旁边只剩失败态小部件，没有译文
+    // Only the failure widget remains beside the block.
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="s1"]`)?.classList.contains(ERROR_CLASS)).toBe(true)
     await (await start(doc, blocks, makeTransport().transport)).translate(blocks)
     expect(title.hasAttribute(INLINE_ATTR)).toBe(true)
   })
 
-  it('再翻失败的块要删掉上一轮的译文，不能挂着旧译文冒充这一轮', async () => {
+  it('failed retries remove the previous translation so stale output cannot masquerade as the current result', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     await (await start(doc, blocks, makeTransport().transport)).translate(blocks)
@@ -295,14 +295,14 @@ describe('startTranslation', () => {
   })
 })
 
-describe('onRendered：每批交出刚动过 DOM 的块（issue #46）', () => {
-  it('每批两次：插圆环后一次、渲染结果后一次，两次都是这批的块', async () => {
+describe('onRendered receives blocks whose DOM changed in each batch (issue #46)', () => {
+  it('Two calls per batch: after inserting spinners and after rendering results, both with that batch of blocks.', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport } = makeTransport()
     const seen: Block[][] = []
     const run = await start(doc, blocks, transport, { onRendered: b => seen.push(b) })
-    expect(seen).toEqual([]) // 标记阶段不算"渲染"
+    expect(seen).toEqual([]) // Marking does not count as rendering.
     const p1 = byId(blocks, blocks[1]!.id)
     await run.translate([p1])
     expect(seen).toHaveLength(2)
@@ -310,7 +310,7 @@ describe('onRendered：每批交出刚动过 DOM 的块（issue #46）', () => {
     expect(seen[1]).toEqual([p1])
   })
 
-  it('stop() 之后不再交出', async () => {
+  it('does not emit rendered blocks after stop()', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     let release!: () => void
@@ -322,14 +322,14 @@ describe('onRendered：每批交出刚动过 DOM 的块（issue #46）', () => {
     const seen: Block[][] = []
     const run = await start(doc, blocks, transport, { onRendered: b => seen.push(b) })
     const pending = run.translate([blocks[1]!])
-    expect(seen).toHaveLength(1) // 圆环那一次已经发出
+    expect(seen).toHaveLength(1) // The spinner callback has already fired.
     run.stop()
     release()
     await pending
-    expect(seen).toHaveLength(1) // 结果那一次没有
+    expect(seen).toHaveLength(1) // The result callback has not.
   })
 
-  it('重试路径同样交出', async () => {
+  it('the retry path also emits rendered blocks', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     let calls = 0
@@ -340,7 +340,7 @@ describe('onRendered：每批交出刚动过 DOM 的块（issue #46）', () => {
     await run.translate([p1])
     expect(run.progress().failed).toBe(1)
     expect(seen).toHaveLength(2)
-    await run.translate([p1]) // 失败的块可以再交
+    await run.translate([p1]) // Failed blocks can be resubmitted.
     expect(seen).toHaveLength(4)
     expect(seen[3]).toEqual([p1])
   })

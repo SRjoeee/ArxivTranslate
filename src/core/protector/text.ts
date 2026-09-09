@@ -1,5 +1,5 @@
-// 文本节点的转义 / 反转义。只转义 & < > 三个字符；反转义额外认模型常写的几种命名实体与数字实体。
-// 不折叠任何空白（§6.2 要求保留公式两侧的细空格）。
+// Text escaping / unescaping. Escape only & < >; unescape common model-generated named and numeric entities too.
+// Never collapse whitespace (§6.2 requires preserving thin spaces around formulas).
 
 export function escapeText(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

@@ -1,135 +1,142 @@
 # CLAUDE.md — arXiv HTML Translator
 
-面向 `https://arxiv.org/html/*` 的 Chrome 翻译扩展：保结构、可逆、适合长期阅读的双语翻译。
+A Chrome translation extension for `https://arxiv.org/html/*`: structural preservation, reversible bilingual translation, and comfortable long-form reading.
 
-**开工前必读 `docs/DESIGN.md`**，它是唯一事实来源。任何与它冲突的实现都是错的；要改设计，先改文档再改代码。
-`docs/RESEARCH.md` 存放 Phase 0 的实测结论（选择器校订、参考文件地图、接口存活状态）。
+**Read `docs/DESIGN.md` before starting.** It is the single source of truth. Implementations that conflict with it are incorrect; change the design document before changing the implementation.
+`docs/RESEARCH.md` records Phase 0 measurements: corrected selectors, reference-file map, and endpoint availability.
 
 ---
 
-## 技术栈（固定，不要另选）
+## Fixed technology stack
 
-| 用途 | 选择 |
+| Purpose | Choice |
 |---|---|
-| 扩展框架 | WXT + TypeScript，pnpm |
-| UI | React；注入页面的浮层用 WXT `createShadowRootUi` 做 Shadow DOM 隔离；popup / options 是独立扩展页面，无需隔离 |
-| LLM 调用 | Vercel AI SDK（`ai` + `@ai-sdk/openai-compatible`（OpenRouter / DeepSeek / Ollama）/ `@ai-sdk/anthropic` / `@ai-sdk/google`），结构化输出用 `generateText` + `Output.object` + zod（AI SDK 7，`generateObject` 已被取代）；请求拼装、流式、错误分类交给 SDK，不自己维护接口 |
-| 校验 | zod |
-| 队列 / 重试 | 移植 Read Frog `utils/request/`（`request-queue` 令牌桶 + `batch-queue` 攒批 + `retry-policy`），见 DESIGN.md §8.2 |
-| 缓存 | Dexie（IndexedDB），移植 FluentRead 的缓存实现 |
-| 配置 | WXT storage（带 schema 版本与迁移） |
-| hash | Web Crypto SHA-256 |
-| Chrome 内置翻译类型 | `@types/dom-chromium-ai` |
-| 测试 | Vitest + happy-dom |
-| Lint | Biome（只开 linter；formatter 关着，长行与移植文件不重排；`src/providers/request/**` 等整目录移植的代码用 biome.json 的 override 放宽规则，不为 lint 改移植原文） |
+| Extension framework | WXT + TypeScript, pnpm |
+| UI | React; injected overlays use WXT `createShadowRootUi` for Shadow DOM isolation; popup / options are standalone extension pages and need no isolation |
+| LLM calls | Vercel AI SDK (`ai` + `@ai-sdk/openai-compatible` for OpenRouter / DeepSeek / Ollama, `@ai-sdk/anthropic`, `@ai-sdk/google`); structured output uses `generateText` + `Output.object` + zod (AI SDK 7 replaces `generateObject`). Let the SDK handle request construction, streaming, and error classification; do not maintain custom API clients |
+| Validation | zod |
+| Queue / retry | Port Read Frog `utils/request/`: `request-queue` token bucket, `batch-queue` batching, `retry-policy`; see DESIGN.md §8.2 |
+| Cache | Dexie (IndexedDB), port FluentRead's cache implementation |
+| Configuration | WXT storage with schema versions and migrations |
+| Hashing | Web Crypto SHA-256 |
+| Chrome Translator types | `@types/dom-chromium-ai` |
+| Tests | Vitest + happy-dom |
+| Lint | Biome linter only, formatter disabled. Do not reflow long lines or ported files. Use biome.json overrides for ported directories such as `src/providers/request/**`; do not rewrite upstream code merely for lint |
 
-不从零实现：请求队列、重试退避、hash、存储封装、JSON 解析容错。一律用上表的库，或移植参考仓库里已经成熟的实现（如 Read Frog 的 `utils/request/*`、FluentRead 的 `services/translation/cache.ts`，后者带 Dexie，允许）。
+Do not implement request queues, retry backoff, hashing, storage wrappers, or tolerant JSON parsing from scratch. Use the libraries above or mature reference implementations, such as Read Frog `utils/request/*` and FluentRead `services/translation/cache.ts` (including its Dexie dependency).
 
 ---
 
-## 目录结构
+## Directory structure
 
 ```
 src/
   entrypoints/
-    content.ts          # 注入 arxiv.org/html/*
-    background.ts       # 队列、providers、缓存
+    content.ts          # Inject into arxiv.org/html/*
+    background.ts       # Queues, providers, cache
     popup/              # React
     options/            # React
   core/
-    rules/latexml.ts    # 所有 ltx_* 选择器只能出现在这里，导出 RULES_VERSION
-    extractor/          # 块提取
-    protector/          # 占位符：序列化、校验、回填、runs 切段
-    renderer/           # 兄弟节点插入、模式切换、恢复
-    scheduler/          # 按视口触发的一次性观察器、会话 id、标题翻译、主线程切片
+    rules/latexml.ts    # All ltx_* selectors; exports RULES_VERSION
+    extractor/          # Block extraction
+    protector/          # Placeholders: serialize, validate, rehydrate, split runs
+    renderer/           # Sibling insertion, mode switching, restoration
+    scheduler/          # One-shot viewport observer, session IDs, title translation, main-thread slicing
   providers/
-    types.ts            # TranslationProvider 接口（见 DESIGN.md §8）
+    types.ts            # TranslationProvider interface (DESIGN.md §8)
     openai-compat.ts  anthropic.ts  gemini.ts  chrome-builtin.ts  google-gtx.ts
-    prompt.ts           # LLM prompt，导出 PROMPT_VERSION
+    prompt.ts           # LLM prompt; exports PROMPT_VERSION
   cache/
   config/
   styles/
     modes.css           # side / stack / only
-    presets.css         # 译文样式预设
+    presets.css         # Translation style presets
 docs/
   DESIGN.md  RESEARCH.md
 tests/
   fixtures/arxiv/<arxiv-id>.html
-reference/              # 参考仓库，gitignore，只读
+reference/              # Reference repositories, ignored by Git, read-only
 ```
 
 ---
 
-## 硬规则
+## Hard rules
 
-1. **DOM 不变量**（DESIGN.md §7.1）：译文节点只作为原块的下一个兄弟插入；原节点只允许追加 `data-axt-*` 属性，不改子树；全局状态只在 `<html>` 上；恢复后 DOM 必须与翻译前逐节点相等。有测试守护，不许绕。
-2. **选择器只在一处**：任何 `ltx_*` 选择器只能写在 `src/core/rules/latexml.ts`，其他 TS 文件通过规则模块的函数访问。唯一例外是 `src/styles/*.css`：布局要声明式地写在样式表里，不能靠运行时给节点打标记，那会把排版和 JS 生命周期耦在一起。样式表里的 `ltx_*` 只用于布局，规则模块仍是「哪些内容要翻译」的唯一事实来源。
-3. **两条渲染路径**：provider 的 `preservesMarkup` 决定走 markup 还是 runs，不要在渲染层写 provider 特判。
-4. **免费接口视为不稳定**：`chrome-builtin`、`google-gtx` 各自独立文件、独立错误类型；失败必须可恢复并触发 fallback 链，不能让扩展整体挂掉。
-5. **前缀**：所有注入的 class / data 属性 / CSS 变量以 `axt-` / `data-axt-` / `--axt-` 开头。
-6. **缓存键**必须包含 `providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText`。改了 prompt 或规则就要升版本号。
-7. **敏感信息**：API key 只存 WXT storage，永不进日志、缓存键、测试 fixture、git。
-
----
-
-## 参考代码使用边界
-
-`reference/` 下是 KISS Translator、Read Frog、FluentRead 的源码（GPL-3.0，与本项目同许可证），**只读**。
-
-- **默认优先移植**：它们已经迭代多年，能整段拿来用的就拿来用（provider 请求拼装、队列 / 重试 / 批处理、缓存、配置迁移、占位符校验、视口调度、样式预设、UI 组件），移植后按本项目的命名与目录改造，不引入它们的配置体系。参考文件地图见 `docs/RESEARCH.md` §4。**搬不搬只看有无负面影响**：暂时用不上但没有额外负担的部分随模块一起搬（按目录搬，不按函数挑），功能稳定后统一清理；会让性能或效果变差的才单独讨论取舍，并把理由写进 DESIGN.md。
-- **原创的例外**只有三种：(1) arXiv 适配——`rules/latexml.ts`、`extractor` 的 LaTeXML 路径与 `protector` 占位符引擎（Phase 1 / 2 已完成，DESIGN.md §6）；(2) `renderer`——三个项目都改动、包裹或替换原节点，与 DESIGN.md §7.1 的 DOM 不变量冲突；(3) 移植会与 DESIGN.md 的不变量冲突或让代码变乱时改写，并在 PR 里说明理由。
-- **来源标注（GPL §5）**：每个移植文件的文件头写 `// 移植自 reference/<repo>/<path>@<commit>（GPL-3.0），<YYYY-MM-DD> 移植、有修改`（GPL §5(a) 要求修改声明带日期），并在 `docs/THIRD_PARTY.md` 登记；改写幅度大的也要登记。
-- 面向未来：extractor 以"站点适配器"接口组织，LaTeXML 是第一个适配器；通用启发式 walker（Read Frog `dom/filter.ts`、`dom/traversal.ts`）移植后作为 v2 的第二个适配器接入其他论文站点，v1 仍只做 arXiv。
+1. **DOM invariants** (DESIGN.md §7.1): insert translations only as the original block's next sibling. Original nodes may receive only `data-axt-*` attributes; never modify their subtrees. Global state belongs only on `<html>`. Restoration must reproduce the pretranslation DOM node-for-node. Tests guard this; never bypass them.
+2. **Centralized selectors**: all `ltx_*` selectors belong in `src/core/rules/latexml.ts`; other TS files access them through the rules module. The sole exception is `src/styles/*.css`: layout must remain declarative, without runtime node markers coupling CSS to JS lifecycle. Stylesheet `ltx_*` selectors serve layout only; the rules module remains the authority on what to translate.
+3. **Two rendering paths**: provider `preservesMarkup` selects markup or runs. Do not special-case providers in rendering.
+4. **Treat free endpoints as unstable**: `chrome-builtin` and `google-gtx` have separate files and error types. Failures must be recoverable and trigger fallback, never disable the whole extension.
+5. **Prefixes**: injected classes / data attributes / CSS variables start with `axt-` / `data-axt-` / `--axt-`.
+6. **Cache keys** must include `providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText`. Increment versions when prompt or rule behavior changes.
+7. **Secrets**: API keys belong only in WXT storage, never logs, cache keys, test fixtures, or Git.
 
 ---
 
-## 工作流
+## Reference-code boundaries
 
-- 任何超过 100 行的模块，先用 plan mode 给出方案再写代码；方案要引用 DESIGN.md 的对应章节。
-- 一个模块一个分支 / PR。`rules`、`protector`、`renderer` 的改动必须附带测试。
-- 结束前必须通过：`pnpm lint && pnpm test && pnpm build`。
-- **PR 开出或 push 后，等 Codex 审完再合并**：它先打 👀 反应表示审查中，结束时留 👍 反应（无建议）、一条 review + 行内评论（有建议）或限额提示，三种终态信号之一出现前不要合。评论逐条核实（fixture / 实测 / 读代码）再采纳，没采纳的写明理由。See `docs/agents/codex-review.md`。
-- 遇到 DESIGN.md 里标 **[待验证]** 的内容，先用 fixture 或 curl 实测，把结论写进 `docs/RESEARCH.md`，再实现。
-- 发现 DESIGN.md 与实测不符：停下，在 RESEARCH.md 记录差异并提出修改建议，不要默默改设计。
-- 代码标识符英文，注释和文档中文。commit message 英文，格式 `type(scope): summary`。
+`reference/` contains KISS Translator, Read Frog, and FluentRead source (GPL-3.0, the same license as this project). It is **read-only**.
 
----
-
-## Phase 0 任务（按顺序做，产出全部写入 `docs/RESEARCH.md`）
-
-1. **抓 fixture**：从 arXiv 选 8–10 篇 HTML 存入 `tests/fixtures/arxiv/`，覆盖：
-   - 行内公式密集的（数学 / 理论 CS）
-   - 有算法框和代码块的
-   - 有大表格、数值表的
-   - 有脚注、定理环境的
-   - 2023 年（早期 LaTeXML 版本）和 2026 年各至少两篇
-   - 至少一篇含 `.ltx_ERROR`
-2. **规则覆盖率审计**：写一个脚本，对每个 fixture 列出所有带文本的元素及其 `ltx_*` 类名与出现次数，再用 DESIGN.md §5 的翻译单元和跳过规则做匹配，输出三类结果：(a) 规则中不存在于任何 fixture 的类名，(b) 未被任何规则覆盖的带文本元素（漏网），(c) 只在部分年份出现的类名（版本差异）。目标是"每个文本节点恰好落在一条规则下"。顺带统计 SVG 图占比（见 DESIGN.md §15.1）。
-3. **容器与导航**：确认 arXiv 主容器（预期 `.ltx_page_main` / `.ltx_page_content`）、左侧导航 `.ltx_page_navbar`、arXiv 自己注入的页头页脚元素的选择器；记录 arXiv 页面自带 JS 的行为（脚注弹出、导航切换、是否有 MathJax 回退）。
-4. **参考文件地图**：clone 三个仓库到 `reference/`，为 DESIGN.md §4 的每个模块写一行"参考 `<repo>/<path>`"，重点找：Read Frog 的 DOM walker 与仅译文模式标记处理、KISS 的富文本翻译与 Google 适配器、FluentRead 的渐进翻译与缓存。
-5. **接口存活性**：用 curl 验证今天是否可用、返回格式、是否保留 HTML 标签：
-   - Google `translate.googleapis.com/translate_a/single?client=gtx`
-   - 微软 `edge.microsoft.com/translate/translatetext`（仅记录，v1 不接）
-   - Google `translateHtml` 接口（在参考仓库里 grep `translateHtml` 找到用法）
-6. **Translator API**：写一个最小 content script 验证 `'Translator' in self`、`Translator.availability()`、`create()` 是否需要用户手势，以及模型下载体验。
-7. 最后给出：DESIGN.md 需要修订的条目清单（不要直接改 DESIGN.md）。
+- **Prefer porting by default**: reuse mature request construction, queues / retries / batching, caching, config migration, placeholder validation, viewport scheduling, presets, and UI components. Adapt names and paths to this project without importing upstream configuration systems. See `docs/RESEARCH.md` §4 for the file map. **Decide based on negative impact**: retain currently unused code with no extra burden when porting a module (whole directories, not selected functions), then clean up after stabilization. Discuss only parts that harm performance or quality and record the rationale in DESIGN.md.
+- **Original implementations have only three exceptions**: (1) arXiv adaptation: `rules/latexml.ts`, LaTeXML extraction, and the placeholder engine (Phases 1 / 2 complete, DESIGN.md §6); (2) renderer: all three references modify, wrap, or replace original nodes, violating §7.1; (3) a port would violate design invariants or make code harder to maintain. Explain rewrites in the PR.
+- **Attribution (GPL §5)**: each ported file needs a header: `// Ported from reference/<repo>/<path>@<commit> (GPL-3.0), <YYYY-MM-DD>; modified.` GPL §5(a) requires a dated modification notice. Register it in `docs/THIRD_PARTY.md`, including substantial rewrites. Preserve the actual upstream license, copyright, version, and modification history.
+- Future direction: organize extraction around a site-adapter interface, with LaTeXML first. Port Read Frog `dom/filter.ts` / `dom/traversal.ts` as a second, generic heuristic adapter for other paper sites in v2; v1 remains arXiv-only.
 
 ---
 
-## 常用命令
+## Workflow
+
+- For modules exceeding 100 lines, first present a plan in plan mode, citing the relevant DESIGN.md sections.
+- One module per branch / PR. Changes to rules, protector, or renderer require tests.
+- Before finishing, pass `pnpm typecheck && pnpm check:language && pnpm lint && pnpm test && pnpm build`.
+- **After opening a PR or pushing, wait for Codex review before merging**: 👀 means in progress. Wait for one terminal signal: 👍 (no suggestions), a review with inline comments, or a rate-limit notice. Verify each comment using fixtures, measurements, or code before accepting it; explain rejected suggestions. See `docs/agents/codex-review.md`.
+- For DESIGN.md items marked **[To verify]**, first measure with fixtures or curl and record results in `docs/RESEARCH.md`, then implement.
+- If measurements contradict DESIGN.md, stop, record the discrepancy in RESEARCH.md, and propose a revision. Never silently change the design.
+- Use English identifiers and commit messages in `type(scope): summary` format. Follow the engineering-language policy below for all project-authored text.
+
+### Engineering language
+
+Use accurate, natural, concise English for project-authored documentation, comments, test names and explanations, logs, errors, CLI help, configuration guidance, and UI copy / accessibility text. Extension-owned HTML pages use English language metadata. This supersedes the former Chinese-comment and Chinese-documentation rule; all unrelated constraints remain in force.
+
+- Preserve technical meaning, mandatory constraints, rationale, uncertainty, measurements, and attribution. Do not rewrite already clear English.
+- Preserve translation inputs / expected outputs, real paper fixtures, multilingual / Unicode cases, native language names, user prompt / glossary data, and required third-party text when their original form matters. Engineering comments and test names are not data exceptions.
+- Register retained Han text or CJK punctuation in `scripts/language-exceptions.json` with an exact file, exact line content, occurrence count, and specific reason. No directory exemptions, automatic allowlisting, Unicode escaping, transliteration, deleted data, or weaker tests to pass the check. Remove stale entries when their data changes.
+- `pnpm check:language` scans tracked text and validates those exact exceptions; CI runs it. It detects likely regressions, not English quality or semantic correctness. Review wording, mixed-language fragments, punctuation, links / anchors, and length-sensitive UI manually too.
+- English UI does not change the translation target. Keep saved settings, language codes, storage / cache keys, message types, selectors, public interfaces, and multilingual behavior compatible.
+- Actual model prompts affect behavior. Keep existing English prompts unchanged. Translate Chinese instructions only with their protocols, placeholders, boundaries, and version / cache rules intact. Comment or UI translations alone must not bump prompt / rule versions or invalidate caches.
+- Update text-dependent locators, regexes (including negative matches), reports, and assertions together, preserving their strength. Check longer English text for clipping, wrapping, and accessibility. Never change the host paper's language metadata to match extension UI.
+
+---
+
+## Phase 0 tasks
+
+Complete in order; record all outputs in `docs/RESEARCH.md`.
+
+1. **Fetch 8–10 HTML fixtures** into `tests/fixtures/arxiv/`, covering dense inline math (mathematics / theoretical CS), algorithm / code blocks, large / numeric tables, footnotes / theorems, at least two papers each from 2023 (early LaTeXML) and 2026, and at least one `.ltx_ERROR`.
+2. **Audit rule coverage**: list every text-bearing element with its `ltx_*` classes and counts. Match DESIGN.md §5 translation / skip rules and report (a) rule classes absent from all fixtures, (b) uncovered text-bearing elements, and (c) classes found only in some years. Goal: every text node matches exactly one rule. Also count SVG figures (§15.1).
+3. **Containers and navigation**: verify main containers (expected `.ltx_page_main` / `.ltx_page_content`), left `.ltx_page_navbar`, and arXiv-injected headers / footers. Record page JS behavior: footnote popups, navigation toggles, MathJax fallback.
+4. **Reference map**: clone the three references into `reference/`. Map each DESIGN.md §4 module to `<repo>/<path>`, especially Read Frog DOM walking / only-mode markers, KISS rich-text translation / Google adapter, and FluentRead progressive translation / caching.
+5. **Endpoint availability**: use curl to test current availability, response format, and HTML-tag preservation for Google `translate.googleapis.com/translate_a/single?client=gtx`, Microsoft `edge.microsoft.com/translate/translatetext` (record only; not v1), and Google `translateHtml` (find usage in references).
+6. **Translator API**: use a minimal content script to test `'Translator' in self`, `Translator.availability()`, whether `create()` needs a user gesture, and model-download behavior.
+7. Finally, list proposed DESIGN.md revisions without changing DESIGN.md directly.
+
+---
+
+## Common commands
 
 ```
 pnpm install
-pnpm dev            # WXT 开发模式，自动加载到 Chrome
+pnpm dev            # WXT development mode; load automatically in Chrome
 pnpm build
 pnpm test
 pnpm test:watch
-pnpm lint           # Biome linter；pnpm lint:fix 应用安全修复
-pnpm e2e            # 真实浏览器端到端（Playwright 起带扩展的 Chromium，先 pnpm build；首次 npx playwright install chromium）
-pnpm e2e:layout     # 真实浏览器的 side 模式布局断言（宽度契约、列表标记槽、flex 图配对、边注位置）
-pnpm e2e:a11y       # A/B 无障碍审计：同一篇跑两次 axe，只报由扩展引入的差集（§7.4b）
-pnpm e2e:local-endpoint  # 不返 CORS 头的 http 本机端点能翻整页（issue #42 的收益回归）
-pnpm fixtures:stats # Phase 0 的类名直方图脚本（待创建）
+pnpm typecheck
+pnpm check:language # Tracked engineering text and exact data exceptions
+pnpm lint           # Biome linter; pnpm lint:fix applies safe fixes
+pnpm e2e            # Playwright Chromium with extension; build first, install Chromium on first use
+pnpm e2e:layout     # Side layout: width contract, marker slots, flex figures, margin notes
+pnpm e2e:a11y       # A/B axe audit; report extension-introduced differences only (§7.4b)
+pnpm e2e:local-endpoint # Full-page translation through a local HTTP endpoint without CORS headers (issue #42)
+pnpm fixtures:stats # Phase 0 class histogram script (to be created)
 ```
 
 ---
@@ -138,16 +145,16 @@ pnpm fixtures:stats # Phase 0 的类名直方图脚本（待创建）
 
 ### Issue tracker
 
-Issues 与 spec 记录在本仓库的 GitHub Issues，通过 `gh` CLI 读写。See `docs/agents/issue-tracker.md`.
+Issues and specs live in this repository's GitHub Issues; access via `gh`. See `docs/agents/issue-tracker.md`.
 
 ### Codex review
 
-合并前必须等 Codex 的终态信号（👍 / 行内评论 / 限额提示；👀 表示还在审），评论逐条核实。See `docs/agents/codex-review.md`.
+Wait for a terminal signal before merging (👍 / inline comments / rate-limit notice; 👀 means still reviewing). Verify comments individually. See `docs/agents/codex-review.md`.
 
 ### Triage labels
 
-使用默认的五个 triage 标签（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`），标签字符串与角色名一致。See `docs/agents/triage-labels.md`.
+Use the five standard labels: `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`. Labels match role names. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-单上下文布局：仓库根 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
+Single-context layout: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.

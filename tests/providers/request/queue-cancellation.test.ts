@@ -1,4 +1,4 @@
-// 移植自 reference/read-frog/src/utils/request/__tests__/queue-cancellation.test.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：仅改 import 路径。
+// Ported from reference/read-frog/src/utils/request/__tests__/queue-cancellation.test.ts@9b44f82 (GPL-3.0), 2026-09-05, modified import paths only.
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { BatchCountMismatchError, BatchQueue } from "@/providers/request/batch-queue"
 import { isTranslationCancelledError, TranslationCancelledError } from "@/providers/request/cancellation"

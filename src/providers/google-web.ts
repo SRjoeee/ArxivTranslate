@@ -1,13 +1,13 @@
-// 移植自 reference/read-frog/src/utils/host/translate/api/google.ts@9b44f82（GPL-3.0），2026-09-04 移植、有修改：
-// 端点、API key 常量、请求体形状与响应解析照搬；改为一次请求多条（原版一次一条，端点本身支持数组，
-// 实测 150 条 556 ms，见 RESEARCH.md §6.6）；去掉 preserveLineBreaks 那套换行标记——
-// 我们送的是占位符标记文本，走 html 格式原样发送；去掉 escapeText 依赖（protector 已做转义）。
+// Ported from reference/read-frog/src/utils/host/translate/api/google.ts@9b44f82 (GPL-3.0), 2026-09-04; modified:
+// Kept endpoint, public API-key constant, request shape and response parsing. Added multi-item requests (upstream sends one; endpoint accepts arrays:
+// 150 items in 556 ms, RESEARCH.md §6.6). Removed preserveLineBreaks markers:
+// our placeholder text is sent unchanged as HTML. Removed escapeText (protector already escapes text).
 import { toBcp47 } from '@/config/languages'
 import { attachRequestErrorMeta } from './request/retry-policy'
 import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 
 const ENDPOINT = 'https://translate-pa.googleapis.com/v1/translateHtml'
-/** 公开常量，来自 Google 翻译网页版；不是用户凭据 */
+/** Public constant from Google Translate's web client; not a user credential. */
 const API_KEY = 'AIzaSyATBXajvzQLTDHEQbcpq0Ihe0vWDHmO520'
 const CLIENT = 'wt_lib'
 
@@ -16,20 +16,20 @@ export interface GoogleWebDeps {
 }
 
 /**
- * HTTP 状态到错误类型（Codex 在 #17 指出）。**不能把 4xx 一律归成 `network`**：
- * retry-policy 的 `isRetryableRequestErrorMeta` 会**先看 kind 再看状态码**，`network` 直接判定可重试，
- * 于是一个永远不会成功的 400 会被重试满 3 次、再被 BatchQueue 对半拆分逐条重来——
- * 100 段的一批能放大成几十次无用请求。只有 5xx 与连接层失败才是瞬时的。
+ * Map HTTP status to error kind (Codex #17). **Do not classify all 4xx as `network`**:
+ * retry-policy checks kind before status, and treats network as retryable.
+ * An unrecoverable 400 would be retried three times, then split into smaller batches and individual requests by BatchQueue,
+ * multiplying a 100-segment batch into dozens of useless calls. Only 5xx and connection failures are transient.
  */
 function kindOfStatus(status: number): ProviderErrorKind {
   if (status === 429) return 'rate-limit'
   if (status === 401 || status === 403) return 'auth'
-  // 408 超时、409 冲突照 retry-policy 的状态码表算瞬时，交给它按状态码判定
+  // Treat 408 timeout and 409 conflict as transient per retry-policy; let it decide by status code.
   if (status >= 400 && status < 500 && status !== 408 && status !== 409) return 'bad-request'
   return 'network'
 }
 
-/** 端点按 items 数组返回同长度的译文数组 */
+/** The endpoint returns a translation array matching the items array length. */
 async function translateHtml(items: string[], from: string, to: string, deps: GoogleWebDeps, signal?: AbortSignal): Promise<string[]> {
   const doFetch = deps.fetch ?? globalThis.fetch
   let response: Response
@@ -41,9 +41,9 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
       signal,
     })
   } catch (error) {
-    if (signal?.aborted) throw new ProviderError('aborted', '请求已取消', { cause: error })
+    if (signal?.aborted) throw new ProviderError('aborted', 'Request cancelled', { cause: error })
     throw attachRequestErrorMeta(
-      new ProviderError('network', `网络错误：${error instanceof Error ? error.message : String(error)}`, { cause: error }),
+      new ProviderError('network', `Network error: ${error instanceof Error ? error.message : String(error)}`, { cause: error }),
       { kind: 'network', isRetryable: true },
     )
   }
@@ -51,7 +51,7 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
     throw attachRequestErrorMeta(
-      new ProviderError(kindOfStatus(response.status), `translateHtml ${response.status} ${response.statusText}${detail ? `：${detail.slice(0, 200)}` : ''}`),
+      new ProviderError(kindOfStatus(response.status), `translateHtml ${response.status} ${response.statusText}${detail ? `: ${detail.slice(0, 200)}` : ''}`),
       { statusCode: response.status, responseHeaders: response.headers },
     )
   }
@@ -60,42 +60,42 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
   try {
     payload = await response.json()
   } catch (error) {
-    // 整个响应就不是 JSON：拆小批次重来也是一样的结果（§8.3）
-    throw new ProviderError('invalid-response', 'translateHtml 返回的不是 JSON', { cause: error, isolatable: false })
+    // A non-JSON response is systemic; smaller batches cannot fix it (§8.3).
+    throw new ProviderError('invalid-response', 'translateHtml returned non-JSON data', { cause: error, isolatable: false })
   }
 
   const translated = Array.isArray(payload) ? payload[0] : undefined
   if (!Array.isArray(translated) || translated.some(item => typeof item !== 'string')) {
-    throw new ProviderError('invalid-response', `translateHtml 响应格式异常：${JSON.stringify(payload).slice(0, 200)}`, { isolatable: false })
+    throw new ProviderError('invalid-response', `Unexpected translateHtml response format: ${JSON.stringify(payload).slice(0, 200)}`, { isolatable: false })
   }
   if (translated.length !== items.length) {
-    throw new ProviderError('invalid-response', `translateHtml 返回 ${translated.length} 条，期望 ${items.length} 条`)
+    throw new ProviderError('invalid-response', `translateHtml returned ${translated.length} items; expected ${items.length}`)
   }
   return translated as string[]
 }
 
 /**
- * Google 网页版翻译的免费端点。视为随时会断（DESIGN §8.3）：错误独立分类，失败可回退到别的 provider。
- * 保留占位符标记，所以走 markup 路径（RESEARCH.md §6.6）。
+ * Free Google web translation endpoint. Treat it as unstable (DESIGN §8.3): classify errors separately and allow provider fallback.
+ * Preserves placeholders, so it uses the markup path (RESEARCH.md §6.6).
  */
 export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationProvider {
   return {
     id: 'google-web',
-    displayName: 'Google 网页翻译（免费）',
+    displayName: 'Google web translation (free)',
     kind: 'mt',
     preservesMarkup: true,
-    // 端点一次能吃很多条；批次给大、速率给小——免费端点经不起 8/s 的默认速率（DESIGN §8.3）
+    // The endpoint accepts large batches; use large batches and a restrained rate, since the default 8/s is too aggressive (DESIGN §8.3).
     maxBatchChars: 8000,
     maxBatchItems: 100,
-    // 原本是 p-queue 的 concurrency: 2（同时 2 个在飞，不限速率）。2026-09-05 移植 RequestQueue 时
-    // 误写成 rate: 2（每秒 2 个）——Google 响应中位只有 63 ms，却被令牌桶按 500 ms 一个卡着，
-    // 整篇 216 块要 29.6 秒（实测，§8.3）。并发上限回到 2，速率只作突发的安全闸：
-    // 速率闸只兜病态情况，**不该成为常态约束**：响应 63 ms、并发 2，自然吞吐约 30/s，
-    // 20/s 基本碰不到；先设 4/s 时它又变成了新瓶颈（24 个请求跑满 5.3 秒），正是同一个错误
+    // Originally p-queue concurrency: 2 (two in flight, no rate limit). The 2026-09-05 RequestQueue port mistakenly used rate: 2
+    // (two/second): Google's median response was 63 ms, but the token bucket allowed only one request every 500 ms.
+    // A 216-block paper took 29.6s (§8.3). Restore concurrency 2; rate is only a burst safety gate.
+    // The rate gate should cover pathological cases, **not constrain normal traffic**: at 63 ms and concurrency 2, throughput is about 30/s.
+    // 20/s is rarely reached; initially using 4/s repeated the same mistake, bottlenecking 24 requests at 5.3s.
     rateLimit: { rate: 20, capacity: 8 },
     maxConcurrent: 2,
     async isAvailable() {
-      // 免费端点不需要凭据；是否可达留给实际请求，失败走 fallback 链
+      // No credentials needed; actual requests test reachability, with failures handled by the fallback chain.
       return true
     },
     async translate(request: TranslateRequest): Promise<TranslateResult> {
@@ -103,7 +103,7 @@ export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationPr
       const texts = await translateHtml(
         request.segments.map(segment => segment.text),
         request.source,
-        // 端点按 BCP-47 收目标语言；配置里存的是 ISO 639-3
+        // The endpoint accepts BCP-47 targets; configuration stores ISO 639-3.
         toBcp47(request.target),
         deps,
         request.signal,

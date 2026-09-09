@@ -1,18 +1,18 @@
-// LaTeXML 规则模块。所有 ltx_* 选择器只能出现在本文件（CLAUDE.md 硬规则 2）。
-// 依据 DESIGN.md §5.1 / §5.2 / §5.3 / §5.6 / §6.1，实测依据见 docs/RESEARCH.md §2。
-// 本文件只放数据表与纯函数，不含遍历；遍历在 src/core/extractor。
+// LaTeXML rules. All ltx_* selectors belong here (CLAUDE.md hard rule 2).
+// Based on DESIGN.md §5.1 / §5.2 / §5.3 / §5.6 / §6.1; measurements in docs/RESEARCH.md §2.
+// Data tables and pure functions only; traversal lives in src/core/extractor.
 
 /**
- * 任何表或函数的行为变化都要递增；进缓存键。0.5.0：单元格取任意深度、格内单元走进去序列化（§5.3）。
- * 0.6.2：带环境名的 tag 改为可翻，纯标识符（`(a)`、`(ii)`）仍保护——分类语义变了，
- * 旧缓存不该跨过去（Codex 在 #53 指出）
+ * Increment on behavior changes to any table / function; included in cache keys. 0.5.0: all cell depths, serialize units within cells (§5.3).
+ * 0.6.2: named tags become translatable; plain identifiers such as (a) / (ii) stay protected. Classification semantics changed,
+ * so old caches must not carry over (Codex #53).
  */
 export const RULES_VERSION = '0.10.0'
 
-/** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
+/** LaTeXML class prefix, used to identify paper-body elements. */
 export const LTX_CLASS_PREFIX = 'ltx_'
 
-/** 翻译根：根之外（导航栏、arXiv 注入的页头页脚与弹窗）一律不提取 */
+/** Translation root: exclude everything outside it, including navigation, arXiv headers / footers, and dialogs. */
 export const DOCUMENT_ROOT = 'article.ltx_document'
 
 export interface Rule {
@@ -21,88 +21,88 @@ export interface Rule {
   note: string
 }
 
-/** descend：对外层单元是 void，但内部仍可能含独立块（脚注），extractor 要继续下钻 */
+/** descend: void to its outer unit, but may contain independent blocks such as footnotes; extraction must descend. */
 export interface ProtectRule extends Rule {
   descend?: boolean
 }
 
-/** §5.1 翻译单元：命中且含可翻译文本即成块，并继续下钻发现嵌套单元 */
+/** Translation units (§5.1): a match with translatable text becomes a block; descend to discover nested units. */
 export const UNIT_RULES: readonly Rule[] = [
-  { id: 'p', selector: '.ltx_p', note: '正文段落，可能是 <span>；摘要、列表项、定理内的段落都由本条覆盖' },
-  // 致谢、关键词的 run-in 标题不单独成块：它们所在的容器本身就是一个单元（正文是容器里的裸文本），
-  // 标题若也成块，外层块会把它当 void 占位符克隆一份英文，页面上就出现两个英文标题
-  // 加一段中文正文的错乱布局（实测 2609.00095）。不成块时它是成对占位符，随外层一起翻、原位还原
-  { id: 'title', selector: '.ltx_title:not(.ltx_title_acknowledgements):not(.ltx_title_keywords), .ltx_subtitle', note: '各级标题、副标题、定理 run-in 标题；内含 .ltx_tag 作 void' },
-  { id: 'caption', selector: '.ltx_caption', note: '图表说明；内含 .ltx_tag 作 void' },
-  { id: 'footnote', selector: '.ltx_note_content', note: '脚注正文，独立成块；位于 .ltx_note 容器内部' },
-  // 参考文献：条目内按 .ltx_bibblock 分段翻，译文只跟在对应的那一行下面（§5.4）；作者段 2026-09-06 起
-  // 不再单独跳过——单段条目里的作者名本来就随整条翻，跳过只让两种模板表现不一致（§5.4）；
-  // 没有分段的条目（natbib 等样式）整条作一个单元兜底
-  { id: 'bibblock', selector: '.ltx_bibblock', note: '参考文献条目内的片段（作者 / 标题 / 出处），见 §5.4' },
-  { id: 'bibitem', selector: '.ltx_bibitem:not(:has(.ltx_bibblock))', note: '没有分段的参考文献条目，整条一个单元' },
-  { id: 'ack', selector: '.ltx_acknowledgements', note: '致谢' },
-  { id: 'keywords', selector: '.ltx_keywords', note: '关键词' },
-  // 作者区默认翻译（§5.2 修订）：机构、联系方式、日期都是有信息量的文字；邮箱另由 protect 的 mailto 排除。
-  // 姓名 2026-09-06 起也翻（§5.2 的决定）：原来挡着的理由是「音译后引用检索会失效」，但双语阅读器里
-  // 原名就在译名旁边，只有 only 模式会藏起原文，那是该模式对所有内容的固有取舍
-  { id: 'personname', selector: '.ltx_personname', note: '作者姓名；.ltx_creator 里的 span，译文作兄弟节点天然行内' },
-  { id: 'authorinfo', selector: '.ltx_contact, .ltx_role_affiliation, .ltx_role_address, .ltx_dates, .ltx_date', note: '作者的机构、联系方式、日期' },
-  // 以下结构没在抓过的真实论文里出现，靠 tests/fixtures/arxiv/synthetic-structures.html 守护（RESEARCH.md §2.12）
-  { id: 'dedicatory', selector: '.ltx_role_dedicatory', note: '献词' },
-  { id: 'item', selector: '.ltx_item', note: '列表项 / description 术语的裸文本；项内有 .ltx_p 时由 p 规则接管' },
-  { id: 'marginal', selector: '.ltx_marginpar', note: '边注' },
-  { id: 'indexentry', selector: '.ltx_indexentry', note: '索引词条；页码由 .ltx_indexrefs 作占位符' },
-  { id: 'cv', selector: '.ltx_cv_item_label, .ltx_cv_item_content, .ltx_cv_entry_date', note: 'CV 模板的条目字段' },
+  { id: 'p', selector: '.ltx_p', note: 'Body paragraphs, possibly <span>; covers abstracts, lists, and theorem paragraphs' },
+  // Run-in acknowledgement / keyword titles are not separate blocks: their containers already form units with bare body text.
+  // A title block would become a void placeholder in the outer block, cloning its English text and producing two English titles
+  // plus Chinese body text (2609.00095). Keeping it paired translates it with the container and restores it in place.
+  { id: 'title', selector: '.ltx_title:not(.ltx_title_acknowledgements):not(.ltx_title_keywords), .ltx_subtitle', note: 'Headings, subtitles, and theorem run-in titles; contained .ltx_tag nodes are void' },
+  { id: 'caption', selector: '.ltx_caption', note: 'Figure / table captions; contained .ltx_tag nodes are void' },
+  { id: 'footnote', selector: '.ltx_note_content', note: 'Independent footnote-body blocks inside .ltx_note containers' },
+  // Translate bibliography entries by .ltx_bibblock segment (§5.4). Since 2026-09-06, author segments are no longer skipped:
+  // authors already translate with single-segment entries, so skipping made templates inconsistent (§5.4).
+  // Entries without segments (e.g. natbib) fall back to one unit each.
+  { id: 'bibblock', selector: '.ltx_bibblock', note: 'Bibliography segment: authors / title / source (§5.4)' },
+  { id: 'bibitem', selector: '.ltx_bibitem:not(:has(.ltx_bibblock))', note: 'Unsegmented bibliography entry, one unit each' },
+  { id: 'ack', selector: '.ltx_acknowledgements', note: 'Acknowledgements' },
+  { id: 'keywords', selector: '.ltx_keywords', note: 'Keywords' },
+  // Translate author metadata by default (§5.2 revision): affiliations, contacts, dates; protect mailto addresses separately.
+  // Translate names too since 2026-09-06 (§5.2). The old objection was that transliteration breaks citation lookup,
+  // but bilingual views keep originals beside translations. Only mode hides them, its inherent tradeoff for all content.
+  { id: 'personname', selector: '.ltx_personname', note: 'Author-name span inside .ltx_creator; translated sibling is naturally inline' },
+  { id: 'authorinfo', selector: '.ltx_contact, .ltx_role_affiliation, .ltx_role_address, .ltx_dates, .ltx_date', note: 'Author affiliations, contacts, and dates' },
+  // Not seen in downloaded papers; guarded by tests/fixtures/arxiv/synthetic-structures.html (RESEARCH.md §2.12).
+  { id: 'dedicatory', selector: '.ltx_role_dedicatory', note: 'Dedication' },
+  { id: 'item', selector: '.ltx_item', note: 'Bare list-item / description-term text; p rule handles nested .ltx_p' },
+  { id: 'marginal', selector: '.ltx_marginpar', note: 'Margin note' },
+  { id: 'indexentry', selector: '.ltx_indexentry', note: 'Index entry; .ltx_indexrefs page numbers are placeholders' },
+  { id: 'cv', selector: '.ltx_cv_item_label, .ltx_cv_item_content, .ltx_cv_entry_date', note: 'CV template entry fields' },
 ]
 
-/** §5.3 表格：最外层 .ltx_tabular 作为一个单元（遍历不下钻即取到最外层），单元格是块内的段，th 也带 ltx_td */
+/** Tables (§5.3): outermost .ltx_tabular is one unit (no descent). Cells are segments within it; th also carries ltx_td. */
 export const TABLE_RULES = { root: '.ltx_tabular', cell: '.ltx_td' } as const
 
-/** 行间公式的表：单式与 align 组都是它，组里的行是 tr.ltx_equation（不单独算） */
+/** Display-equation tables: single equations and align groups; tr.ltx_equation rows are not separate tables. */
 export const EQUATION_TABLE = 'table.ltx_eqn_table'
-/** 公式表两侧的填充单元格：吸收 width: 100% 的富余，ar5iv 给它们 min-width: 2em，量内容宽度时按 min-width 计 */
+/** Equation-table filler cells absorb width: 100% slack; ar5iv gives them min-width: 2em, used when measuring content width. */
 export const EQUATION_PAD_CELL = '.ltx_eqn_center_padleft, .ltx_eqn_center_padright, .ltx_eqn_left_padleft, .ltx_eqn_right_padright'
-/** side 模式要装进一栏的宽内容（renderer/table-fit.ts）：表格与行间公式 */
+/** Wide content fitted into side-mode columns (renderer/table-fit.ts): tables and display equations. */
 export const FIT_TARGETS = `${TABLE_RULES.root}, ${EQUATION_TABLE}`
 
-/** 表格块的全部单元格，按文档序、任意深度：嵌套 tabular 的格也是外层块的格（§5.3） */
+/** All table-block cells, in document order at any depth; nested tabular cells belong to the outer block too (§5.3). */
 export function tableCells(table: Element): Element[] {
   return Array.from(table.querySelectorAll(TABLE_RULES.cell))
 }
 
-/** protector 序列化时要知道根是不是单元格：格里的翻译单元不另成块，要走进去（§5.3） */
+/** The protector needs to identify cell roots: descend into their units, which are not separate blocks (§5.3). */
 export function isTableCell(el: Element): boolean {
   return el.matches(TABLE_RULES.cell)
 }
 
-/** §5.2 块级整体跳过：不产出、不下钻。出现在翻译单元内部时（如段落里的 .ltx_ERROR）对该单元等价于 void */
+/** Block-level skip (§5.2): neither emit nor descend. Within units (e.g. inline .ltx_ERROR), equivalent to void. */
 export const SKIP_RULES: readonly Rule[] = [
-  { id: 'equation', selector: '.ltx_equation, .ltx_equationgroup', note: '行间公式，含其对齐表格与 .ltx_eqn_cell' },
-  { id: 'listing', selector: '.ltx_listing, .ltx_listingline, .ltx_listing_data, .ltx_verbatim, pre, code', note: '代码、算法框内的行、verbatim、隐藏的代码数据' },
-  // 作者区不再整块跳过（§5.2 修订）；姓名 2026-09-06 起也翻（见 UNIT_RULES 的 personname），
-  // 只剩连接词还挡着：它们单独成块会把姓名列表打断成一行一个词
-  { id: 'author-glue', selector: '.ltx_author_before, .ltx_author_after', note: '作者之间的连接词（“ and ”“, ”）' },
-  { id: 'classification', selector: '.ltx_classification', note: 'MSC / ACM 分类号，如“Primary: 11L07”' },
-  { id: 'pubnotes', selector: '.ltx_pubnotes', note: '出版元数据（ACM 模板的 CCS / DOI / 期刊）' },
-  { id: 'picture', selector: 'svg, .ltx_picture', note: 'TikZ 图，实测无可翻译文字（§15.1）' },
-  { id: 'error', selector: '.ltx_ERROR, .ltx_FATAL, .ltx_WARNING, .ltx_INFO', note: 'LaTeXML 的转换错误与提示，不是论文内容' },
-  { id: 'nav', selector: '.ltx_page_navbar, .ltx_TOC', note: '导航栏与目录；位于翻译根之外，供渲染层隐藏用' },
+  { id: 'equation', selector: '.ltx_equation, .ltx_equationgroup', note: 'Display equations including alignment tables and .ltx_eqn_cell' },
+  { id: 'listing', selector: '.ltx_listing, .ltx_listingline, .ltx_listing_data, .ltx_verbatim, pre, code', note: 'Code, algorithm lines, verbatim, hidden code data' },
+  // No longer skip all author metadata (§5.2); names translate since 2026-09-06 (UNIT_RULES personname).
+  // Only separators remain excluded; separate blocks would break name lists into one word per line.
+  { id: 'author-glue', selector: '.ltx_author_before, .ltx_author_after', note: 'Author separators (" and ", ", ")' },
+  { id: 'classification', selector: '.ltx_classification', note: 'MSC / ACM classification codes, e.g. "Primary: 11L07"' },
+  { id: 'pubnotes', selector: '.ltx_pubnotes', note: 'Publication metadata (ACM CCS / DOI / journal)' },
+  { id: 'picture', selector: 'svg, .ltx_picture', note: 'TikZ graphics; no translatable text found in measurements (§15.1)' },
+  { id: 'error', selector: '.ltx_ERROR, .ltx_FATAL, .ltx_WARNING, .ltx_INFO', note: 'LaTeXML conversion errors / notices, not paper content' },
+  { id: 'nav', selector: '.ltx_page_navbar, .ltx_TOC', note: 'Navigation / TOC outside the translation root; used by rendering to hide them' },
 ]
 
 /**
- * **带环境名的 tag**：LaTeXML 把定理环境、图表、算法、附录的**名字**也放进 .ltx_tag，
- * 于是「Definition 1.1.」整体被当编号保护，中文读者看到的还是英文（用户反馈，2026-09-05）。
- * 这几类要翻，其余的 tag 是纯编号与符号，必须保持原样。
+ * Named tags: LaTeXML includes environment names for theorems, figures, algorithms, and appendices in .ltx_tag.
+ * Protecting all tags left "Definition 1.1." in English for Chinese readers (user report, 2026-09-05).
+ * Translate these names; all other tags are identifiers / symbols and must remain unchanged.
  *
- * 依据是全部 12 篇 fixture 的实测（`.ltx_tag` 共 1241 个）：
- * theorem 246 个全部形如 "Definition 1" / "Example 1"；table 43 个全是 "Table 1:"；
- * figure 63 个里 58 个是 "Figure 1."；appendix 20 个全是 "Appendix A"；float 13 个全是 "Algorithm 1"；
- * part / chapter 各 1 个。反过来 equation 的 344 个里只有 13 个带字母（"(let.lin)" 这类 LaTeX 标签，不能动），
- * section / subsection / ref 的 439 个里带字母的都是罗马数字（II、III.1），note 的 54 个是脚注标记。
+ * Measurements from all 12 fixtures (1,241 .ltx_tag nodes):
+ * all 246 theorem tags resemble "Definition 1" / "Example 1"; all 43 table tags are "Table 1:";
+ * 58 of 63 figure tags are "Figure 1."; all 20 appendix tags are "Appendix A"; all 13 float tags are "Algorithm 1";
+ * one part and one chapter tag. Conversely, only 13 of 344 equation tags contain letters (LaTeX labels such as "(let.lin)", which must stay unchanged),
+ * lettered tags among 439 section / subsection / ref tags are Roman numerals (II, III.1); 54 note tags are footnote markers.
  *
- * **光看类名不够**：LaTeXML 给子图面板的标签也用 `.ltx_tag_figure`，内容是纯标识符 `(a)` `(b)` `(c)`
- *（387 个带名 tag 里有 5 个，实测于 2410.00260 与 2312.17141；Codex 在 #53 指出）。
- * 这类翻了会被模型改写或重排，与面板的对应关系就断了。所以再加一道内容判定：要含**词**才翻。
+ * Class names alone are insufficient: .ltx_tag_figure also labels panels with plain identifiers (a), (b), (c),
+ * five of 387 named tags in 2410.00260 and 2312.17141 (Codex #53).
+ * Translating can rewrite / reorder these and break panel correspondence. Require actual words as an additional check.
  */
 export const NAMED_TAGS = [
   '.ltx_tag_theorem', // Definition 1.1 / Theorem 2 / Lemma 3
@@ -111,47 +111,47 @@ export const NAMED_TAGS = [
   '.ltx_tag_float', // Algorithm 1
   '.ltx_tag_appendix', // Appendix A
   '.ltx_tag_part', // Part I
-  // description 列表的术语（`\item[Compactness]`）也放在 tag 里，是真正的正文（Codex 在 #18 指出）：
-  // 不放开的话整个 `.ltx_item` 没有自有文本、根本不成块，术语永远不翻。12 篇 fixture 共 371 个
-  // `.ltx_tag_item`，含词的只有 8 个（Markov categories: / CD categories: / Compactness. / RQ1–RQ5），
-  // 其余 363 个是 `(1)` `•` 这类标记，由下面的内容判定挡住。google-web 实测把 RQ1 原样返回，
-  // 标识符不会被改写
+  // Description-list terms (\item[Compactness]) are tags too, and are real body content (Codex #18).
+  // Without this exception, .ltx_item has no own text and never becomes a block, leaving terms untranslated. Of 371
+  // .ltx_tag_item nodes across 12 fixtures, only eight contain words (Markov categories: / CD categories: / Compactness. / RQ1–RQ5).
+  // Content checks below exclude the other 363 markers such as (1) / •. google-web returned RQ1 unchanged in measurements,
+  // preserving its identifier.
   '.ltx_tag_item', // Compactness. / Markov categories:
   '.ltx_tag_chapter', // Chapter 1
 ].join(', ')
 
-/** §6.1 受保护的行内节点：作 void 占位符，不产出；默认不下钻 */
+/** Protected inline nodes (§6.1): void placeholders, not blocks; do not descend by default. */
 export const PROTECT_RULES: readonly ProtectRule[] = [
-  { id: 'math', selector: 'math, .ltx_Math', note: '行内公式；行间公式已被 equation 整块跳过' },
-  { id: 'ref', selector: '.ltx_ref', note: '交叉引用，含内部 .ltx_ref_tag' },
-  { id: 'cite', selector: '.ltx_cite', note: '引用标记' },
-  { id: 'tag', selector: '.ltx_tag', note: '编号与符号：章节号、公式编号、列表符号、脚注标记、代码行号；带环境名的除外，见 isNamedTag' },
-  { id: 'tt', selector: '.ltx_text.ltx_font_typewriter', note: '等宽文本，视为代码' },
-  { id: 'note', selector: '.ltx_note', descend: true, note: '脚注容器：对外层段落是 void，内部的 .ltx_note_content 仍要被发现为块' },
-  { id: 'note-mark', selector: '.ltx_note_mark, .ltx_note_type', note: '脚注标记与类型标签（容器外层与正文内各一次）' },
-  { id: 'mailto', selector: 'a[href^="mailto:"]', note: '邮箱地址原样保留' },
-  // LaTeXML 生成的联系方式标签（"Affiliation: " / "Email: "），arXiv 的样式表把它 display:none。
-  // 不挡住的话，邮箱那条 .ltx_contact 里唯一可翻的就是这个隐藏标签，译文出来是一行看不见的
-  // 「电子邮件：」加一份原样的地址——页面上就是两行一样的邮箱（§5.2 的决定）
-  { id: 'contact-label', selector: '.ltx_contact_name', note: '联系方式标签，模板生成且站点隐藏' },
-  // 引文年份（Codex 在 #74 指出）：`.ltx_bibblock` 放开作者段之后（§5.4），年份跟着一起被送去翻。
-  // 它在序列化里本来是**成对**占位符，协议保的是标签、**内容照样可翻**——`(2024)` 可以被
-  // 换成全角括号或加上「年」，而校验只看占位符包装，一个字都不会拦。only 模式下原块隐藏，
-  // 剩下的就是被改写过的引文元数据。59 个实测形状都是 `<span class="ltx_text ltx_bib_year"> (2024)</span>`，
-  // 纯数字没有可翻的词，作 void 保留最省事
-  { id: 'bib-year', selector: '.ltx_bib_year', note: '引文年份，原样保留（§5.4）' },
-  { id: 'indexrefs', selector: '.ltx_indexrefs', note: '索引词条后面的页码列表' },
-  { id: 'img', selector: 'img', note: '行内图片' },
-  { id: 'br', selector: 'br', note: '换行' },
+  { id: 'math', selector: 'math, .ltx_Math', note: 'Inline math; display math is already skipped by equation' },
+  { id: 'ref', selector: '.ltx_ref', note: 'Cross-references including nested .ltx_ref_tag' },
+  { id: 'cite', selector: '.ltx_cite', note: 'Citation markers' },
+  { id: 'tag', selector: '.ltx_tag', note: 'Section / equation / list / footnote / code-line markers; named tags excluded via isNamedTag' },
+  { id: 'tt', selector: '.ltx_text.ltx_font_typewriter', note: 'Monospaced text treated as code' },
+  { id: 'note', selector: '.ltx_note', descend: true, note: 'Void to the outer paragraph; nested .ltx_note_content must still be discovered as a block' },
+  { id: 'note-mark', selector: '.ltx_note_mark, .ltx_note_type', note: 'Footnote markers / type labels, both outside and inside content' },
+  { id: 'mailto', selector: 'a[href^="mailto:"]', note: 'Preserve email addresses unchanged' },
+  // LaTeXML contact labels ("Affiliation: " / "Email: ") are display:none in arXiv CSS.
+  // Otherwise a mailto .ltx_contact has only that hidden label to translate, yielding an invisible translated label
+  // plus the unchanged address, visibly duplicating the email (§5.2 decision).
+  { id: 'contact-label', selector: '.ltx_contact_name', note: 'Template-generated contact label hidden by site CSS' },
+  // Citation years (Codex #74): after enabling author segments (§5.4), .ltx_bibblock sends years for translation too.
+  // Paired placeholders preserve tags but allow content translation, so (2024) could gain fullwidth parentheses
+  // or a localized year suffix; placeholder validation would accept it. Only mode hides the original,
+  // leaving rewritten citation metadata. All 59 observed forms were <span class="ltx_text ltx_bib_year"> (2024)</span>.
+  // These contain no translatable words; void protection is simplest.
+  { id: 'bib-year', selector: '.ltx_bib_year', note: 'Citation year, preserved unchanged (§5.4)' },
+  { id: 'indexrefs', selector: '.ltx_indexrefs', note: 'Page-number list following an index entry' },
+  { id: 'img', selector: 'img', note: 'Inline image' },
+  { id: 'br', selector: 'br', note: 'Line break' },
 ]
 
 /**
- * §7.2 side 模式的镜像目标：没有译文、但会独占一行的块级内容。
- * 左右对照时右栏也要有一份，否则公式和插图会横跨两栏、打断阅读节奏。
- * 只镜像**图形本身**而不是整个 figure：figure 里的 .ltx_caption 是可翻译块，
- * 整体镜像会让右栏那份带着英文说明（实测）。figure 作为网格容器时，
- * 图形与镜像占一行、说明与译文占下一行，左右各自完整。
- * 表格不在此列——整表克隆已经是它的译文（§5.3）。
+ * Side-mode mirror targets (§7.2): untranslated block content occupying a full row.
+ * The right column needs a copy too, or formulas / figures span both columns and disrupt reading.
+ * Mirror graphics only, not entire figures: .ltx_caption is translatable,
+ * so whole-figure mirroring would put English captions in the right column (observed). With a grid figure,
+ * graphics / mirrors occupy one row and captions / translations the next, keeping both columns complete.
+ * Exclude tables; their whole-table clone is already the translation (§5.3).
  */
 
 
@@ -159,51 +159,51 @@ export type RuleKind = 'skip' | 'table' | 'unit' | 'protect'
 
 export interface Classification {
   kind: RuleKind
-  /** 命中的规则 id；table 恒为 'table' */
+  /** Matched rule ID; always table for tables. */
   rule: string
-  /** extractor 是否继续下钻发现嵌套块 */
+  /** Whether extraction should descend to find nested blocks. */
   descend: boolean
 }
 
 const TABLE_CLASSIFICATION: Classification = { kind: 'table', rule: 'table', descend: false }
 
-/** §5.6：同一元素命中多类时取 skip > table > unit > protect；都不命中返回 null */
+/** Classification priority (§5.6): skip > table > unit > protect; null when nothing matches. */
 
-/** 括号里的整段标识符：子图面板的 `(a)` `(ii)` `(iii)`、公式标签的 `(let.lin)` 都是这个形状 */
+/** Parenthesized identifiers, including panel labels (a) / (ii) / (iii) and equation labels (let.lin). */
 const PARENTHESIZED = /[(（][^)）]*[)）]/g
 
 /**
- * 罗马数字编号的 tag 一律不翻：机器翻译会把它**本地化**，而指向它的 `.ltx_ref` 是受保护的原文，
- * 一翻正文与交叉引用就对不上。2026-09-05 用 google-gtx 实测（Codex 在 #53 指出）：
+ * Never translate Roman-numbered tags: engines localize their numbers, while protected .ltx_ref links retain the source,
+ * breaking correspondence. google-gtx measurements, 2026-09-05 (Codex #53):
  *
- * | 原文 | 译文 |     | 原文 | 译文 |
+ * | Source | Translation |     | Source | Translation |
  * |---|---|---|---|---|
  * | `Table IV:` | 表四： |  | `Table 4:` | 表 4： |
  * | `Table X:` | 表十： |  | `Appendix A` | 附录A |
  * | `Part I` | 第一部分 |  | `Appendix C` / `D` | 附录C / 附录D |
  *
- * 阿拉伯数字、字母编号、括号面板都原样保留，只有罗马数字会被改写；Google 自己也只把
- * I / V / X / L / M 当数字，单个 C、D 当字母，这里照此判定。同一篇论文的编号风格是一致的，
- * 所以读者不会同时看到「表 4」与「Table IV」
+ * Arabic numbers, letter IDs, and parenthesized panels stay unchanged; only Roman numerals are rewritten. Google treats
+ * I / V / X / L / M as numbers but standalone C / D as letters; match that behavior. Numbering style is consistent within each paper,
+ * so readers do not see a mixture of localized Arabic-numbered tags and English Roman-numbered tags.
  */
-// 复合编号也算：`Table IV.1:` 的末尾 token 是 `IV.1`、`Theorem IV-A` 是 `IV-A`，首段是罗马数字就会被本地化
-// （2026-09-05 实测 google-gtx：`Table IV.1` → 表四.1）。LaTeX 的 \roman 给出小写，同样会被本地化
-// （`Table iv:` → 表四：、`Theorem ii.3` → 定理二.3），所以不分大小写（Codex 在 #53 指出）
+// Compound IDs count too: Table IV.1: ends in IV.1, Theorem IV-A in IV-A; a Roman first component is localized.
+// Measured google-gtx on 2026-09-05: `Table IV.1` → 表四.1. LaTeX \roman emits lowercase, which is localized too
+// (`Table iv:` → 表四：, `Theorem ii.3` → 定理二.3), so match case-insensitively (Codex #53).
 const ROMAN_ID = /^(?:[IVXLCDM]{2,}|[IVXLM])(?:[.\-–][A-Za-z0-9]+)*$/i
 
 /**
- * 带环境名、且确实含词的 tag：`Definition 1.1` 要翻，子图面板的 `(a)` `(ii)` 不能翻。
+ * Named tags containing words: translate Definition 1.1, but never panel identifiers (a) / (ii).
  *
- * 判定分三步：**先去掉括号里的整段内容**，再看剩下的有没有连续两个及以上字母，
- * 最后排除罗马数字编号（见 ROMAN_ID）。
- * 只看字母数不够——面板标识符可以是 `(ii)` `(iii)` 这种多字母罗马数字（Codex 在 #53 指出）；
- * 而括号本来就是 LaTeXML 给标识符的形状，环境名从不带括号（`Definition 1.2 (Hall set)` 去掉括号后
- * 仍有 "Definition"，照样判为要翻）
+ * Three steps: remove parenthesized content, check for at least two consecutive letters,
+ * then exclude Roman-numbered tags (ROMAN_ID).
+ * Letter count alone is insufficient: panels can use multi-letter Roman IDs such as (ii) / (iii) (Codex #53).
+ * LaTeXML uses parentheses for identifiers, never environment names. Removing parentheses from Definition 1.2 (Hall set)
+ * still leaves Definition and qualifies for translation.
  */
 /**
- * 括号里是不是「词」而不是标识符：`(Hall set)`、`(Figure 1)` 里有非罗马数字的词，保留；
- * `(a)`、`(ii)`、`(A.1)` 只有标识符，去掉。整段去掉会把 `(Figure 1)` 这种整体带括号的标签
- * 连环境名一起丢掉，于是永远不翻（Codex 在 #53 指出）
+ * Parenthesized words vs. identifiers: retain (Hall set) / (Figure 1), which contain non-Roman words;
+ * remove identifier-only (a) / (ii) / (A.1). Removing every group would lose the environment name
+ * in fully parenthesized tags such as (Figure 1), preventing translation (Codex #53).
  */
 const hasNonRomanWord = (inner: string): boolean =>
   (inner.match(/[A-Za-z]{2,}/g) ?? []).some(word => !ROMAN_ID.test(word))
@@ -212,8 +212,8 @@ export function isNamedTag(el: Element): boolean {
   if (!el.matches(NAMED_TAGS)) return false
   const text = (el.textContent ?? '').replace(PARENTHESIZED, group => (hasNonRomanWord(group) ? group : ''))
   if (!/[A-Za-z]{2,}/.test(text)) return false
-  // 末尾的编号 token：`Table XIII:` → `XIII`。先去标点再 trim：`Table IV :` 去掉冒号后尾巴是空格，
-  // 不 trim 的话 pop() 拿到空串、罗马数字判定被绕过（Codex 在 #53 指出）
+  // Final numbering token: Table XIII: → XIII. Remove punctuation before trimming: Table IV : leaves trailing whitespace after colon removal.
+  // Without trim, pop() returns an empty string and bypasses the Roman-numeral guard (Codex #53).
   const last = text.replace(/[\s.:：。()（）]+$/, '').trim().split(/\s+/).pop() ?? ''
   return !ROMAN_ID.test(last)
 }
@@ -225,22 +225,22 @@ export function classify(el: Element): Classification | null {
   const unit = UNIT_RULES.find(r => el.matches(r.selector))
   if (unit) return { kind: 'unit', rule: unit.id, descend: true }
   const protect = PROTECT_RULES.find(r => el.matches(r.selector))
-  // 带环境名的 tag 不作 void：它内含 Definition / Table / Algorithm 这类要翻的词
+  // Named tags are not void: words such as Definition / Table / Algorithm need translation.
   if (protect?.id === 'tag' && isNamedTag(el)) return null
   if (protect) return { kind: 'protect', rule: protect.id, descend: protect.descend ?? false }
   return null
 }
 
 /**
- * **带功能的行内元素**：丢了它内容还在，但行为没了。runs 降级路径要整块保留这类节点（§6.5，issue #44）。
- * arXiv 正文里的链接几乎全是 .ltx_ref 或 mailto，已被 PROTECT_RULES 挡住；这条是给普通 <a> 与 v2 的其他站点兜底
+ * Functional inline elements lose behavior if only their text survives. Preserve entire nodes in runs fallback (§6.5, issue #44).
+ * Almost all arXiv body links are .ltx_ref or mailto and already protected; this guards ordinary <a> and other sites in v2.
  */
 export const FUNCTIONAL_INLINE = 'a[href]'
 
-/** 插图与图形（Phase 0 统计脚本用） */
+/** Figures and graphics, used by Phase 0 statistics. */
 export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics' } as const
 
-/** 脚注（§7.2 两栏归位用）：容器、正文、正文的 class 名、自带的标号 */
+/** Footnotes for §7.2 alignment: container, body, body class, own marker. */
 export const NOTE = {
   root: '.ltx_note',
   content: '.ltx_note_content',
@@ -248,67 +248,67 @@ export const NOTE = {
   marks: '.ltx_note_mark, .ltx_tag',
 } as const
 
-/** 插图整块拆分（§7.2）：没有译文、也翻不了的媒体——两栏各需要一份的正是这些 */
+/** Whole-figure splitting (§7.2): untranslatable media needs a copy in each column. */
 export const FIGURE_MEDIA = 'img, svg, object, math, canvas, video, .ltx_picture'
 
 /**
- * ar5iv 自己把这些挂到页面外缘：出版元数据（DOI / 期刊 / CCS）与脚注的内容都是
- * `float: inline-end` 加负边距浮出文章的。它们没有译文，镜像只会在另一栏多出一份重复，
- * 而左栏那份的浮动内容还会落到隔壁栏上（实测 2312.17141：原件的内容浮到 1320→1752，压在右栏）。
- * 不镜像时它自然通栏，浮动内容落回页面右缘（实测 2084→2516，与原版式一致）。
+ * ar5iv places publication metadata (DOI / journal / CCS) and footnotes outside the article using
+ * float: inline-end with negative margins. They have no translations; mirroring duplicates them in the other column,
+ * while the original's float overlaps its neighbor (2312.17141: 1320→1752, over the right column).
+ * Without mirrors, they naturally span both columns and float back to the page edge (2084→2516, matching the original layout).
  */
 export const MARGIN_ASIDE = '.ltx_pubnotes, .ltx_note'
 
-/** 文档主标题：靠 text-align:center 居中，不能与译文同行（§7.3） */
+/** Main document title: centered via text-align:center; never pair inline with its translation (§7.3). */
 /**
- * side 模式的结构判定要用到的 LaTeXML 选择器（DESIGN §7.2）。规则表回答的是「哪些内容要翻译」，
- * 这几条回答的是「这些内容长成什么结构」——同样是 LaTeXML 的知识，按 CLAUDE.md 硬规则 2 一并放这里，
- * 渲染层（`renderer/side-layout.ts`）只做组合、不写 `ltx_`（Codex 在 #22 指出）。
- * `styles/modes.css` 里有同一份清单（那是硬规则允许的唯一例外），测试守着两边一致。
+ * LaTeXML selectors for side-layout classification (DESIGN §7.2). Rule tables identify what to translate;
+ * these describe its structure. Both are LaTeXML knowledge, centralized here per CLAUDE.md hard rule 2.
+ * renderer/side-layout.ts only composes these selectors, without ltx_ literals (Codex #22).
+ * styles/modes.css has the same list (the sole permitted exception); tests enforce consistency.
  */
 export const SIDE_LAYOUT = {
-  /** 多面板 flex 图：有任何一个格子不是整栏（`ltx_flex_size_1`）的 `.ltx_flex_figure` */
+  /** Multi-panel flex figures: any direct cell not full-width (ltx_flex_size_1). */
   multiPanelFlex: '.ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1))',
   /**
-   * 行内与预格式化上下文：改成网格会毁掉它们。
-   * **`\resizebox` 的包裹层除外**（`.ltx_transformed_outer`，2026-09-07 实测 2606.07636v2）：它虽然带着
-   * `.ltx_inline-block`，却不是行内上下文，而是一个只装一件东西的块级壳子——ar5iv 自己的样式表把它的
-   * `width` / `height` / 内层 `transform` 全 `!important` 抹平了（`.ltx_table > .ltx_transformed_outer >
-   * .ltx_transformed_inner { width: initial !important; transform: none !important }`），缩放根本没生效。
-   * 把它当行内上下文排除，里面的表格配对就够不到两条列线：原表与译表成了两个 `inline-table`，
-   * 在通栏的壳子里居中排成一行、横跨分割线（实测 5 张表全部越界；宽表则换行、各占整幅）
+   * Inline / preformatted contexts would break if changed to grids.
+   * Exclude resizebox wrappers from this category (.ltx_transformed_outer, measured 2026-09-07 in 2606.07636v2). Despite
+   * .ltx_inline-block, they are single-content block shells. ar5iv overrides width / height / inner transform with !important:
+   * .ltx_table > .ltx_transformed_outer >
+   * .ltx_transformed_inner { width: initial !important; transform: none !important }, so scaling is already disabled.
+   * Treating them as inline exclusions leaves inner table pairs unable to reach grid tracks. Both become inline-table,
+   * centered in one full-width shell across the divider (all five measured tables overflowed; wide tables wrapped full-width).
    */
   atomicContext: '.ltx_inline-block:not(.ltx_transformed_outer), .ltx_note, .ltx_listing',
-  /** 配对成员本身：内部出现的译文是脚注那种嵌套，不是它自己的对照 */
+  /** Pair members themselves; internal translations are nested units such as footnotes, not their own counterparts. */
   pairMember: '.ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock',
-  /** 脚注：折叠状态写在 `.ltx_note_outer` 的 display 上，整棵子树排除 */
+  /** Footnote collapse uses .ltx_note_outer display; exclude the entire subtree. */
   note: '.ltx_note',
-  /** 堆叠区：这些格子里没有右栏，配对降级为上下堆叠。`\resizebox` 的包裹层同样除外，理由见 atomicContext */
+  /** Stacked regions have no right column. Exclude resizebox wrappers as explained in atomicContext. */
   stack: '.ltx_td, .ltx_inline-block:not(.ltx_transformed_outer)',
 } as const
 
 export const DOCUMENT_TITLE = '.ltx_title_document'
-/** 文档副标题（`\subtitle`）：与文档标题同属居中的标题区，同样不作同行候选 */
+/** Document subtitle (\subtitle), centered with the main title; not an inline candidate either. */
 export const DOCUMENT_SUBTITLE = '.ltx_subtitle'
 
-/** 摘要块与它自己的标题（"Abstract"）；论文级上下文取正文时要把标题去掉 */
+/** Abstract and its own heading; remove the heading when extracting paper context. */
 export const ABSTRACT = { root: '.ltx_abstract', title: '.ltx_title' } as const
 
-/** 短标题同行的候选：title 单元里除文档主标题外的标题（长度另由渲染层判断） */
+/** Inline-title candidates: title units except main document title; rendering checks length separately. */
 /**
- * 短标题能否与译文同行（§7.3）。排除文档标题**与文档副标题**（Codex 在 #13 指出）：
- * 它们都是居中的，压成 inline-block 会缩成内容宽度、贴到左边——
- * 2026-09-06 在真实页面上量过 2609.00246 的 `(Extended Version)`：原本 `display: block`、
- * `text-align: center`、占满 800px 栏宽，文本居中在 x≈720；改成 inline-block 后盒子只剩 176px、
- * 落在 l=320，因为父元素 `<article>` 是 `text-align: start`。LaTeXML 的 `.ltx_subtitle` 来自 `\subtitle`，
- * 只出现在标题区（12 篇 fixture 里两处都紧跟 `.ltx_title_document`），章节的 run-in 标题是 `.ltx_title_*`，不受影响
+ * Inline title eligibility (§7.3): exclude document title and subtitle (Codex #13).
+ * Both are centered; inline-block shrinks them to content width and left-aligns them.
+ * Measured 2026-09-06 on 2609.00246's (Extended Version): originally display:block,
+ * text-align:center, full 800 px column, text centered at x≈720; inline-block shrank the box to 176 px
+ * at l=320 because article uses text-align:start. LaTeXML .ltx_subtitle comes from \subtitle,
+ * only in title areas (both examples in 12 fixtures follow .ltx_title_document). Section run-in .ltx_title_* is unaffected.
  */
 export function isInlineTitleCandidate(el: Element): boolean {
   return classify(el)?.rule === 'title' && !el.matches(`${DOCUMENT_TITLE}, ${DOCUMENT_SUBTITLE}`)
 }
 
 export function documentRoot(doc: Document | Element): Element | null {
-  // 传进来的若已经是翻译根本身，querySelector 只搜后代会漏掉它（Codex 在 #2 / #3 指出）
+  // Accept the translation root itself; querySelector only searches descendants and would miss it (Codex #2 / #3).
   if ('matches' in doc && doc.matches(DOCUMENT_ROOT)) return doc
   return doc.querySelector(DOCUMENT_ROOT)
 }
@@ -317,8 +317,8 @@ const ELEMENT_NODE = 1
 const TEXT_NODE = 3
 
 /**
- * 排除 protect / skip 子树后的文本，不 trim（§6.2 要求保留公式两侧的细空格）。
- * 不看 descend 标志：脚注正文对外层段落不是可见文本，descend 只影响 extractor 的块发现。
+ * Text excluding protect / skip subtrees, without trimming (§6.2 preserves thin spaces around formulas).
+ * Ignore descend: footnote bodies are not visible text of outer paragraphs; descend controls block discovery only.
  */
 export function visibleText(el: Element): string {
   const parts: string[] = []
@@ -338,17 +338,17 @@ export function visibleText(el: Element): string {
 
 const LETTER = /\p{L}/u
 
-/** 可翻译 = 可见文本里至少有一个 Unicode 字母；只含公式、编号、标点的块不成块 */
+/** Translatable = visible text contains a Unicode letter; formula / number / punctuation-only blocks do not qualify. */
 export function hasTranslatableText(el: Element): boolean {
   return LETTER.test(visibleText(el))
 }
 
-// §5.3 数值格：必须含数字（避免 ERROR 这类以 E 开头的词被当成指数）；纯符号格；N/A；空格
+// Numeric cells (§5.3): require a digit (avoid interpreting E-prefixed words such as ERROR as exponents); also accept symbols, N/A, whitespace.
 const NUMERIC_CELL = /^(?=.*\d)[\s\d.,+\-±×^%()/*eE−–—:;~<>=≤≥∼]+(\s*[a-zA-Zμ°%]{1,4})?$/
 const SYMBOL_CELL = /^[✓✗✔✘–—−\-·×*]+$/
 const NA_CELL = /^N\/A$/
 
-/** 输入应为 visibleText 的结果（已排除公式）；命中即原样复制，不翻译 */
+/** Input is visibleText output (formulas excluded); matches are copied unchanged without translation. */
 export function isNumericCell(text: string): boolean {
   const t = text.replace(/\s+/g, ' ').trim()
   return t === '' || NUMERIC_CELL.test(t) || SYMBOL_CELL.test(t) || NA_CELL.test(t)

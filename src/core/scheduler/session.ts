@@ -1,10 +1,10 @@
-// 移植自 reference/read-frog/src/utils/host/translate/translation-session.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：
-// 去掉 providerRef 的两个函数（那是它的 hosted 状态，我们的 provider 在 start() 里一次取好）。
+// Ported from reference/read-frog/src/utils/host/translate/translation-session.ts@9b44f82 (GPL-3.0), 2026-09-05; modified:
+// removed two providerRef functions (upstream hosted state; our start() resolves the provider once).
 //
-// 当前页面翻译会话的身份。模块级变量是对的：一个 frame 只有一个会话。
-// 每个请求都带这个 id 作 scope，用户取消时 translate-service 按它撤掉排队与在飞的请求（它的 #1881）；
-// 每次会话一个新 id，撤销旧的一波绝不会影响重开后的请求。
-// id 只是关联键不是密码学材料——故意不用 getRandomUUID，与 walk id 不共用来源；随机段保证同一标签页多个 frame 互不相同。
+// Current page translation session identity. Module state is appropriate: one session per frame.
+// Every request carries this ID as scope; translate-service cancels queued and in-flight requests by scope (Read Frog #1881).
+// Each session gets a fresh ID, so cancellation of old requests never affects a restarted session.
+// This ID is a correlation key, not cryptographic material. Deliberately separate from getRandomUUID and walk IDs; randomness distinguishes frames in one tab.
 
 let currentSessionId: string | null = null
 let sessionCounter = 0

@@ -1,26 +1,26 @@
 import { defineConfig } from 'wxt'
 
-// WXT 工程配置。host_permissions 等到 Phase 3 接网络引擎时再加。
+// WXT project configuration. Add host_permissions in Phase 3 when integrating network engines.
 export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
-  // 扩展页面里 <link rel="modulepreload" crossorigin> 会触发 Chrome 的 "cross-world extension resource mismatch" 告警（无害但刷屏），关掉预加载
+  // Disable module preload: <link rel="modulepreload" crossorigin> on extension pages causes noisy, harmless Chrome "cross-world extension resource mismatch" warnings.
   vite: () => ({ build: { modulePreload: false } }),
   manifest: {
     name: 'arXiv HTML Translator',
-    // 图片叠加层用 CSS 锚点定位，`anchor-scope` 要 Chrome 131（§15.2）。文档一直这么写，但没落到
-    // manifest 上，低于这个版本的 Chrome 照样装得上、拿到一个错位的叠加层，而且滚动容器也不进
-    // 顺序焦点（Codex 在 #99 指出）。声明出来，让文档写的下限真正生效
+    // Overlays use CSS anchors; anchor-scope needs Chrome 131 (§15.2). The documented requirement was missing from
+    // the manifest, allowing older Chrome to install with misaligned overlays and scroll containers outside sequential
+    // focus order (Codex #99). Declare the minimum so the documented requirement is enforced.
     minimum_chrome_version: '131',
-    description: '面向 arxiv.org/html 的保结构、可逆双语翻译',
-    // nativeMessaging：Mac 上的图片翻译经本机 helper 做 OCR（DESIGN §15）；没装 helper 时这条权限闲着，不弹窗
+    description: 'Reversible bilingual translation for arxiv.org/html that preserves paper structure',
+    // nativeMessaging: Mac image translation uses the local OCR helper (§15); unused without a helper, with no prompt.
     permissions: ['storage', 'nativeMessaging'],
-    // background 向 LLM 端点 fetch 需要 host 权限；默认只给 OpenRouter，自定义 baseURL 在设置页保存时按 origin 申请。
-    // google-web 的端点也列进来（Codex 在 #59 指出）：它眼下返 CORS 头，普通跨域就能过，
-    // 但那正是这次搬迁想摆脱的依赖——对方哪天不发这个头，免费引擎就整个不可用了
+    // Background LLM fetches need host permissions. Default to OpenRouter; request custom baseURL origins when saving options.
+    // Include google-web too (Codex #59). It currently sends CORS headers, allowing ordinary cross-origin requests,
+    // but this migration removes that dependency: losing those headers must not disable the free engine.
     host_permissions: ['https://openrouter.ai/*', 'https://translate-pa.googleapis.com/*'],
-    // 自定义端点可能是 http 的 127.0.0.1 / 局域网（Ollama、LM Studio）；只写 localhost 字面量时申请会直接失败（Codex 在 #6 指出）。
-    // 这里只是"允许申请"的范围，真正授权仍在设置页按 origin 逐个请求
+    // Custom endpoints may use HTTP at 127.0.0.1 / LAN addresses (Ollama, LM Studio); literal localhost alone rejects permission requests (Codex #6).
+    // This only defines requestable origins; options still requests each origin separately.
     optional_host_permissions: ['https://*/*', 'http://*/*'],
   },
 })

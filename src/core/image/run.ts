@@ -1,10 +1,10 @@
-// 图片翻译的小管线（DESIGN §15）：位图不进 Block 联合（七处穷举 switch、renderPending 会按原标签造出
-// <img class="axt-pending">），自己一条流水线，只复用视口调度器、会话 id 与纯文本翻译路径。
+// Image pipeline (DESIGN §15): keep bitmaps outside the Block union (seven exhaustive switches; renderPending would create
+// <img class="axt-pending">). Reuse only viewport scheduling, session IDs, and the plain-text translation path.
 //
-// 每张图：取字节（同源、走 HTTP 缓存）→ SHA-256 → background 做 OCR（按 imageHash 缓存）→ 行合成框、
-// 过滤数字与单字母 → 框里的原文按 translateTitle 的纯文本路径送现有 provider（同一批带图注做上下文）→
-// 插叠加层。**每个 await 之后重查会话**（与文字管线同一模式）：恢复原文 / 重开之后到达的结果一律丢弃。
-// 等待 / 失败没有 DOM 节点（§15.2）：失败记在这里，popup 显示、重试按钮管。
+// Per image: fetch bytes (same-origin HTTP cache) → SHA-256 → background OCR (cached by imageHash) → merge lines into boxes,
+// filter numbers and single letters → send box text through translateTitle's plain-text provider path (caption context in each batch) →
+// insert overlay. Recheck the session after every await, as in the text pipeline; discard results arriving after restore or restart.
+// No pending / failed DOM nodes (§15.2): record failures here for popup counts and retry.
 import { ID_ATTR } from '@/core/extractor'
 import { decodeText, escapeText } from '@/core/protector/text'
 import { type ImageLabel, type ImageTarget, clearImage, renderImage } from '@/core/renderer/image'
@@ -19,15 +19,15 @@ import { linesToBoxes } from './boxes'
 
 export type { ImageTarget } from '@/core/renderer/image'
 
-/** 位图上限：arXiv 的图通常几百 KB，6 MB 已经很宽；再大的 base64 过消息通道不值得 */
+/** Bitmap cap: arXiv images are usually hundreds of KB; 6 MB is generous. Larger base64 messages are not worthwhile. */
 export const MAX_IMAGE_BYTES = 6 * 1024 * 1024
-/** helper 能解的位图类型；SVG 与未知类型不送（§15.1：SVG 整体跳过） */
+/** Bitmap types the helper can decode; exclude SVG and unknown types (§15.1). */
 const IMAGE_TYPES = /^image\/(png|jpe?g|gif|webp|bmp|tiff)$/i
-/** 图注做上下文时的长度上限：进 prompt 也进缓存键 */
+/** Caption context length cap; included in both prompt and cache key. */
 const CAPTION_MAX_CHARS = 300
-/** 配置级错误（与文字管线的 FATAL_KINDS 同一套）：第一次遇到就停调度，别让之后进入视口的每张图都去取图、识别、再撞一次 */
+/** Configuration errors match text FATAL_KINDS: stop at the first one, avoiding repeated fetch / OCR / failure for later images. */
 const FATAL_KINDS = new Set(['no-key', 'auth'])
-/** 同时在处理的图：取字节、base64、消息载荷都占内存，helper 又是顺序的，多开只是把 6 MB 一张的图囤在那里 */
+/** Concurrent images: bytes, base64, and messages all consume memory. The helper is sequential; more work just queues 6 MB images in memory. */
 const MAX_CONCURRENT = 2
 
 export interface ImageBytes {
@@ -39,31 +39,31 @@ export interface ImageRunOptions {
   doc: Document
   targets: ImageTarget[]
   paper: string
-  /** 目标语言（ISO 639-3，与文字管线相同） */
+  /** Target language (ISO 639-3, as in the text pipeline). */
   target: string
   scope: string
   preload: PreloadOptions
   context?: TranslateContext
   ocr: (call: OcrCall) => Promise<OcrMessageResponse>
   translate: (call: TranslateCall) => Promise<TranslateMessageResponse>
-  /** 当前生效的模式在用户勾选的集合里；不在时进入视口的图先停着，resume 时再翻 */
+  /** Whether the active mode is selected; hold entering images otherwise, until resume. */
   isEnabled: () => boolean
-  /** 会话还是当前这一个（恢复原文 / 重开之后为假） */
+  /** Whether this session is still current (false after restore / restart). */
   isCurrent: () => boolean
-  /** 测试注入：并发上限 */
+  /** Test injection: concurrency cap. */
   maxConcurrent?: number
-  /** 测试注入：取字节 */
+  /** Test injection: byte fetcher. */
   fetchBytes?: (url: string) => Promise<ImageBytes>
   onProgress?: (progress: ImageProgress) => void
   onRendered?: (targets: ImageTarget[]) => void
 }
 
 export interface ImageRun {
-  /** 配置级错误（auth / no-key）之后停下的原因；停下后 translate / resume 都不再动 */
+  /** Stop reason after a configuration error (auth / no-key); translate / resume do nothing afterward. */
   fatal(): string | undefined
-  /** 手动把目标交出去翻（重试）；已在请求中的不重复 */
+  /** Manually dispatch targets for retry; do not duplicate in-flight requests. */
   translate(targets: ImageTarget[]): Promise<void>
-  /** 模式闸打开了：把停着的目标放出去 */
+  /** Mode enabled: release held targets. */
   resume(): void
   stop(): void
   failed(): ImageTarget[]
@@ -73,8 +73,8 @@ export interface ImageRun {
 type Outcome = 'waiting' | 'requested' | 'done' | 'failed'
 
 /**
- * 翻译根内的位图，不含块内的（块内的图会随占位符克隆进译文、only 模式下原块整个隐藏，叠加层无处可挂；
- * 与拆图的"游离媒体"同一判定）与我们自己节点里的。要在块标记写完之后调用
+ * Bitmaps inside the translation root, excluding block contents (cloned through placeholders; only mode hides the entire original block,
+ * leaving nowhere for an overlay, as with split-figure unowned media) and injected nodes. Call after all block markers are written.
  */
 export function collectImageTargets(doc: Document): ImageTarget[] {
   const root = doc.querySelector(DOCUMENT_ROOT)
@@ -93,12 +93,12 @@ export function collectImageTargets(doc: Document): ImageTarget[] {
 }
 
 /**
- * 按上限读响应体：Content-Length 可信就先看它，没有或不准的经流式读取、超过上限立刻取消——
- * `arrayBuffer()` 会把整个响应先分配出来再判大小，上限就形同虚设（Codex 在 #89 指出）
+ * Read with a size cap: check Content-Length when reliable, then stream and cancel immediately at the limit if absent or inaccurate.
+ * arrayBuffer() allocates the whole response before checking, defeating the cap (Codex #89).
  */
 export async function readImageResponse(res: Response, max = MAX_IMAGE_BYTES): Promise<ImageBytes> {
   const mime = (res.headers.get('content-type') ?? '').split(';')[0]?.trim() ?? ''
-  const tooBig = () => new Error(`图片超过 ${max / 1024 / 1024} MB`)
+  const tooBig = () => new Error(`Image exceeds ${max / 1024 / 1024} MB`)
   const declared = Number(res.headers.get('content-length') ?? Number.NaN)
   if (Number.isFinite(declared) && declared > max) throw tooBig()
   if (!res.body) {
@@ -129,13 +129,13 @@ export async function readImageResponse(res: Response, max = MAX_IMAGE_BYTES): P
 }
 
 async function defaultFetchBytes(url: string): Promise<ImageBytes> {
-  // force-cache：页面已经加载过这张图，复用浏览器的图片缓存，不再下载一次
+  // force-cache: reuse the image the page already loaded instead of downloading it again.
   const res = await fetch(url, { cache: 'force-cache' })
-  if (!res.ok) throw new Error(`取图失败：HTTP ${res.status}`)
+  if (!res.ok) throw new Error(`Image fetch failed: HTTP ${res.status}`)
   return readImageResponse(res)
 }
 
-/** ArrayBuffer → base64，分块避免 String.fromCharCode 的参数上限 */
+/** ArrayBuffer → base64, chunked to avoid String.fromCharCode's argument limit. */
 export function toBase64(bytes: ArrayBuffer): string {
   const view = new Uint8Array(bytes)
   let binary = ''
@@ -143,17 +143,17 @@ export function toBase64(bytes: ArrayBuffer): string {
   return btoa(binary)
 }
 
-/** 译文与原文是不是一回事：折叠空白、忽略大小写与首尾标点 */
+/** Compare source and translation, collapsing whitespace and ignoring case and surrounding punctuation. */
 export function sameText(a: string, b: string): boolean {
   const norm = (t: string) => t.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase().replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, '')
   return norm(a) === norm(b)
 }
 
 /**
- * 图注文字做上下文（§15.1：Safari 逐行无上下文的翻法是质量差的原因）。
- * 取**离图最近**的那一层 figure 自己的说明（`:scope > figcaption`），没有再往外层找：多面板插图里
- * 每个分图各有说明，从最外层 `querySelector('figcaption')` 会把第一个分图的说明给所有分图
- *（2410.00260 的 A2.F4：(b) 会拿到 (a) 的 "Classifier confusion matrix"，Codex 在 #89 指出）
+ * Caption context (§15.1): Safari's context-free line translation harms quality.
+ * Use the nearest figure's own caption (`:scope > figcaption`), then search outward if absent. In multi-panel figures,
+ * an outer querySelector('figcaption') would give every panel the first panel's caption
+ * (2410.00260 A2.F4: (b) would get (a)'s "Classifier confusion matrix"; Codex #89).
  */
 export function captionOf(el: Element): string | undefined {
   for (let fig = el.closest('figure'); fig; fig = fig.parentElement?.closest('figure') ?? null) {
@@ -168,14 +168,14 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
   const fetchBytes = options.fetchBytes ?? defaultFetchBytes
   const outcome = new Map<ImageTarget, Outcome>(options.targets.map(t => [t, 'waiting']))
   const reasons = new Map<ImageTarget, string>()
-  /** 进入过视口但模式闸关着的目标 */
+  /** Targets that entered the viewport while their mode was disabled. */
   const parked = new Set<ImageTarget>()
   let stopped = false
   let fatal: string | undefined
   const alive = () => !stopped && fatal === undefined && options.isCurrent()
   /**
-   * run 级的队列与 worker 池：并发上限对整个 run 生效，不是对每次 translate() 调用各算一份——
-   * 观察器每次回调、每次重试都会调 translate()，各开一池的话上限形同虚设（Codex 在 #89 指出）
+   * Run-wide queue and worker pool: the cap applies to the entire run, not each translate() call.
+   * Every observer callback and retry calls translate(); separate pools would defeat the cap (Codex #89).
    */
   const maxConcurrent = options.maxConcurrent ?? MAX_CONCURRENT
   const queue: { target: ImageTarget; done: () => void }[] = []
@@ -204,24 +204,24 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
     try {
       const { bytes, mime } = await fetchBytes(target.el.currentSrc || target.el.src)
       if (!alive()) return
-      if (!IMAGE_TYPES.test(mime)) return fail(target, `不是位图（${mime || '未知类型'}）`)
-      if (bytes.byteLength > MAX_IMAGE_BYTES) return fail(target, `图片超过 ${MAX_IMAGE_BYTES / 1024 / 1024} MB`)
+      if (!IMAGE_TYPES.test(mime)) return fail(target, `Not a bitmap (${mime || 'unknown type'})`)
+      if (bytes.byteLength > MAX_IMAGE_BYTES) return fail(target, `Image exceeds ${MAX_IMAGE_BYTES / 1024 / 1024} MB`)
       const imageHash = await sha256Hex(bytes)
       if (!alive()) return
       const ocr = await options.ocr({ imageHash, image: toBase64(bytes), mime, paper: options.paper, scope: options.scope })
       if (!alive()) return
-      if (!ocr.ok) return fail(target, `识别失败：${ocr.error.message}`)
-      // 没有标签就算完成，但上一轮留下的叠加层要清掉（换了目标语言后旧译文不该一直挂着，Codex 在 #89 指出）
+      if (!ocr.ok) return fail(target, `OCR failed: ${ocr.error.message}`)
+      // No labels counts as complete, but clear old overlays so a target-language change cannot leave stale text (Codex #89).
       const finishEmpty = () => {
-        // 真的摘掉了旧叠加层就要通知整理层：side 的拆图副本里还留着它，签名不重算副本就不重建（Codex 在 #89 指出）
+        // Notify cleanup when an old overlay was removed: side split copies still contain it and need a new signature (Codex #89).
         const removed = clearImage(target)
         outcome.set(target, 'done')
         if (removed) options.onRendered?.([target])
       }
-      // 动图：helper 只识别了第 0 帧，浏览器在放后面的帧，框对不上——不叠
+      // Animation: OCR covers only frame 0 while the browser plays later frames; boxes would not align, so omit overlays.
       if ((ocr.result.frames ?? 1) > 1) return finishEmpty()
       const boxes = linesToBoxes(ocr.result.lines)
-      if (boxes.length === 0) return finishEmpty() // 图里没有可翻的文字
+      if (boxes.length === 0) return finishEmpty() // No translatable text in the image.
       const caption = captionOf(target.el)
       const context: TranslateContext = { ...options.context, ...(caption ? { sectionTitle: caption } : {}) }
       const res = await options.translate({
@@ -236,26 +236,26 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       })
       if (!alive()) return
       if (!res.ok) {
-        // key 失效 / 没配 key：与文字管线一样，第一次遇到就停调度，之后的图不再取、不再识别
+        // Invalid / missing key: stop on the first error, as with text; do not fetch or recognize later images.
         if (FATAL_KINDS.has(res.error.kind) && fatal === undefined) {
           fatal = `${res.error.kind}: ${res.error.message}`
           scheduler?.disconnect()
           parked.clear()
-          // 已认领但没完成的（并发中的、排队的）一并记失败，进度与 failed() 才对得上；排队的直接结清
-          for (const [other, state] of outcome) if (state === 'requested' && other !== target) fail(other, `停在配置错误：${res.error.message}`)
+          // Fail all claimed, unfinished targets (active and queued) so progress and failed() agree; settle queued targets immediately.
+          for (const [other, state] of outcome) if (state === 'requested' && other !== target) fail(other, `Stopped by configuration error: ${res.error.message}`)
           for (const entry of queue.splice(0)) entry.done()
-          fail(target, `翻译失败：${res.error.message}`)
-          // 立刻把带 fatal 的进度发出去：别等还在等 OCR 的另一个 worker（最长一个 helper 超时）结束才让 popup 知道（Codex 在 #89 指出）
+          fail(target, `Translation failed: ${res.error.message}`)
+          // Report fatal progress immediately, without waiting for another worker's OCR (up to one helper timeout; Codex #89).
           report()
           return
         }
-        return fail(target, `翻译失败：${res.error.message}`)
+        return fail(target, `Translation failed: ${res.error.message}`)
       }
       const translated = new Map(res.result.segments.map(s => [s.id, decodeText(s.text)]))
       const labels: ImageLabel[] = []
       for (const [i, box] of boxes.entries()) {
         const text = translated.get(`${target.id}#L${i}`)?.trim()
-        // 译文与原文相同（单位、变量名、引擎原样返回的）不画：白框盖住原图只会把排版好的下标变成 OCR 读歪的字
+        // Omit unchanged translations (units, variables, engine passthrough): white boxes would replace correct subscripts with OCR errors.
         if (!text || sameText(text, box.text)) continue
         labels.push({ x: box.x, y: box.y, w: box.w, h: box.h, lines: box.lines, source: box.text, text })
       }
@@ -283,7 +283,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       outcome.set(t, 'requested')
     }
     report()
-    // 进 run 级队列，worker 池按上限取（fetch → hash → base64 → OCR 一条龙，别一次全开）
+    // Enqueue for the run-wide pool, which caps the entire fetch → hash → base64 → OCR sequence.
     const settled = fresh.map(target => new Promise<void>(done => queue.push({ target, done })))
     pump()
     await Promise.all(settled)
@@ -302,7 +302,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
     }
   }
 
-  // 首屏在这里同步播种，回调会在 translate 就绪之前触发，所以 translate 得先定义
+  // Seed the first viewport synchronously; the callback runs before translate would otherwise be ready, so define it first.
   let scheduler: LazyScheduler<ImageTarget> | null = null
   scheduler = createLazyScheduler(options.targets, { ...options.preload, onEnter: entered => { void translate(entered) } })
 
@@ -319,7 +319,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       stopped = true
       scheduler?.disconnect()
       parked.clear()
-      // 排队没开始的直接结清，等它们的 translate() 才会返回
+      // Settle queued work immediately so waiting translate() calls can return.
       for (const entry of queue.splice(0)) entry.done()
     },
     failed: () => options.targets.filter(t => outcome.get(t) === 'failed'),

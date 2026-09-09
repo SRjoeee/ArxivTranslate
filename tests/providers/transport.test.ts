@@ -18,7 +18,7 @@ function mockProvider(translate: TranslationProvider['translate'], extra: Partia
   }
 }
 
-/** 链由测试直接给：不碰真的 buildChain，也就不需要真的 API key */
+/** Tests supply the chain directly, avoiding real buildChain calls and real API keys */
 const withChain = (chain: TranslationProvider[], extra: Parameters<typeof createLocalTransport>[1] = {}) =>
   createLocalTransport(DEFAULT_CONFIG, { buildChain: async () => chain, ...extra })
 
@@ -32,14 +32,14 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('createLocalTransport：翻译', () => {
-  it('成功响应形状', async () => {
+describe('createLocalTransport: translation', () => {
+  it('successful response shape', async () => {
     const t = await withChain([mockProvider(async r => ({ segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' }))])
-    // 模型名只对 openai-compat 引擎带上：换模型不该让免费引擎的缓存失效
+    // Only openai-compat includes the model name; changing models must not invalidate free-engine caches.
     expect(await t.translate({ request: req })).toEqual({ ok: true, result: { segments: [{ id: 'a', text: '译:x' }], provider: 'mock' }, cached: 0 })
   })
 
-  it('限流一次后重试成功', async () => {
+  it('retries successfully after one rate-limit response', async () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)
     let calls = 0
@@ -48,19 +48,19 @@ describe('createLocalTransport：翻译', () => {
       return { segments: r.segments, provider: 'mock' }
     })])
     const pending = t.translate({ request: req })
-    await vi.advanceTimersByTimeAsync(100) // 攒批
+    await vi.advanceTimersByTimeAsync(100) // Collect into a batch
     expect(calls).toBe(1)
-    await vi.advanceTimersByTimeAsync(6_000) // 429 的暂停窗口（基础 5s）过后重发
+    await vi.advanceTimersByTimeAsync(6_000) // Retry after the base five-second 429 pause.
     expect((await pending).ok).toBe(true)
     expect(calls).toBe(2)
   })
 
-  it('令牌桶：突发 capacity 个，之后按 rate 放行（Read Frog request-queue 的语义）', async () => {
+  it('token bucket allows an initial capacity burst, then releases requests at rate (Read Frog request-queue semantics)', async () => {
     vi.useFakeTimers()
     let inFlight = 0
     let peak = 0
     const release: (() => void)[] = []
-    // 每条单独成批（maxBatchItems 1），速率 1/s、突发 2
+    // One segment per batch, rate 1/s, burst 2
     const t = await withChain([mockProvider(async r => {
       inFlight++
       peak = Math.max(peak, inFlight)
@@ -72,7 +72,7 @@ describe('createLocalTransport：翻译', () => {
     await vi.advanceTimersByTimeAsync(100)
     expect(peak).toBe(2)
     expect(release.length).toBe(2)
-    await vi.advanceTimersByTimeAsync(1_000) // 第三个等下一个令牌
+    await vi.advanceTimersByTimeAsync(1_000) // The third request waits for the next token.
     expect(release.length).toBe(3)
     expect(peak).toBe(3)
     for (const fn of release) fn()
@@ -80,30 +80,30 @@ describe('createLocalTransport：翻译', () => {
     expect((await all).every(r => r.ok)).toBe(true)
   })
 
-  it('错误响应形状：ProviderError 带 kind，其他错误为 unknown', async () => {
+  it('error response shape: ProviderError retains kind; other errors become unknown', async () => {
     const auth = await withChain([mockProvider(async () => { throw new ProviderError('auth', 'bad key') })])
     expect(await auth.translate({ request: req })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
-    // 未知错误默认可重试：把重试关掉再看形状
+    // Unknown errors retry by default; disable retries to inspect the response shape.
     const boom = await withChain([mockProvider(async () => { throw new Error('boom') })], { queue: { maxRetries: 0 } })
     expect(await boom.translate({ request: req })).toEqual({ ok: false, error: { kind: 'unknown', message: 'boom' } })
   })
 
-  it('指名引擎的调用不走降级链：设置页「测试连接」要如实报出这个端点的错', async () => {
+  it('explicit-engine calls bypass fallback so settings connection tests report that endpoint failure accurately', async () => {
     const failing = { ...mockProvider(async () => { throw new ProviderError('auth', 'bad key') }), id: 'openai-compat' }
     const free = { ...mockProvider(async r => ({ segments: r.segments, provider: 'google-web' })), id: 'google-web' }
     const t = await withChain([failing, free])
-    // 不指名：链照常兜底，整页翻译不停死
+    // Unspecified engine: normal chain fallback keeps whole-paper translation running.
     expect(await t.translate({ request: req })).toMatchObject({ ok: true, result: { provider: 'google-web' } })
-    // 指名：直接报错，不能因为链上有免费兜底就显示成成功
+    // Explicit engine: report the error, never success merely because a free fallback exists.
     expect(await t.translate({ request: req, providerId: 'openai-compat' })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
   })
 
-  it('指名一个不在链上的引擎：如实说，不悄悄换成别的', async () => {
+  it('naming an engine absent from the chain reports it explicitly instead of silently switching', async () => {
     const t = await withChain([mockProvider(async r => ({ segments: r.segments, provider: 'mock' }))])
-    expect(await t.translate({ request: req, providerId: 'chrome-builtin' })).toEqual({ ok: false, error: { kind: 'unknown', message: '引擎 chrome-builtin 不在当前链上' } })
+    expect(await t.translate({ request: req, providerId: 'chrome-builtin' })).toEqual({ ok: false, error: { kind: 'unknown', message: 'Engine chrome-builtin is not in the current chain' } })
   })
 
-  it('cancel 撤掉在飞的请求，撤掉的条数如实返回', async () => {
+  it('cancel aborts in-flight requests and returns the actual cancelled count', async () => {
     vi.useFakeTimers()
     const t = await withChain([mockProvider(() => new Promise(() => undefined) as never)])
     const pending = t.translate({ request: req, scope: 'session-1' })
@@ -113,10 +113,10 @@ describe('createLocalTransport：翻译', () => {
   })
 })
 
-describe('createLocalTransport：状态', () => {
+describe('createLocalTransport: status', () => {
   const engine = (id: string, available: boolean): TranslationProvider => ({
     id,
-    displayName: id === 'google-web' ? 'Google 网页翻译（免费）' : id,
+    displayName: id === 'google-web' ? 'Google web translation (free)' : id,
     kind: 'mt',
     preservesMarkup: true,
     maxBatchChars: 1000,
@@ -125,7 +125,7 @@ describe('createLocalTransport：状态', () => {
     translate: async () => ({ segments: [], provider: id }),
   })
 
-  it('首选可用时不报降级，能力字段取首选引擎的', async () => {
+  it('an available preferred engine reports no fallback and supplies capability fields', async () => {
     const t = await withChain([engine('openai-compat', true), engine('google-web', true)])
     expect(await t.status()).toEqual({
       providerId: 'openai-compat',
@@ -139,19 +139,19 @@ describe('createLocalTransport：状态', () => {
     })
   })
 
-  it('首选不可用但链上有兜底时报出来：popup 据此保持「翻译」可点（Codex 在 #50 指出）', async () => {
+  it('an unavailable preferred engine with a fallback reports it so the popup keeps Translate enabled (Codex #50)', async () => {
     const t = await withChain([engine('chrome-builtin', false), engine('google-web', true)])
     const r = await t.status()
     expect(r.available).toBe(false)
-    expect(r.fallback).toEqual({ id: 'google-web', displayName: 'Google 网页翻译（免费）' })
+    expect(r.fallback).toEqual({ id: 'google-web', displayName: 'Google web translation (free)' })
   })
 
-  it('整条链都不可用时不报降级：这时按钮该是灰的', async () => {
+  it('an entirely unavailable chain reports no fallback and should disable the button', async () => {
     const t = await withChain([engine('openai-compat', false), engine('google-web', false)])
     expect((await t.status()).fallback).toBeUndefined()
   })
 
-  it('只有一个引擎时也不报降级', async () => {
+  it('a single-engine chain also reports no fallback', async () => {
     const t = await withChain([engine('openai-compat', false)])
     const r = await t.status()
     expect(r.available).toBe(false)
@@ -159,7 +159,7 @@ describe('createLocalTransport：状态', () => {
     expect(r.chain).toEqual(['openai-compat'])
   })
 
-  it('降级之后 status 报的是实际在用的引擎与原因（§8.5）', async () => {
+  it('after fallback, status reports the actual engine and reason (§8.5)', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const failing = { ...engine('openai-compat', true), translate: async () => { throw new ProviderError('auth', 'bad key') } }
     const ok = { ...engine('google-web', true), translate: async (r: TranslateRequest) => ({ segments: r.segments, provider: 'google-web' }) }
@@ -168,14 +168,14 @@ describe('createLocalTransport：状态', () => {
     expect((await t.translate({ request: req })).ok).toBe(true)
     expect((await t.status()).engine).toEqual({
       id: 'google-web',
-      displayName: 'Google 网页翻译（免费）',
+      displayName: 'Google web translation (free)',
       demoted: { displayName: 'openai-compat', kind: 'auth', message: 'bad key' },
     })
   })
 })
 
-// Dexie + fake-indexeddb 靠真计时器调度，这一组不能用 fake timers
-describe('createLocalTransport：缓存', () => {
+// Dexie and fake-indexeddb schedule with real timers; this group cannot use fake timers.
+describe('createLocalTransport: cache', () => {
   let n = 0
   const cacheOf = () => new TranslationCache({ db: createCacheDb(`axt-transport-${++n}`, { indexedDB, IDBKeyRange }) })
   const echo = (calls: string[][]) => mockProvider(async r => {
@@ -185,7 +185,7 @@ describe('createLocalTransport：缓存', () => {
   const withCache = { paper: '2410.00260', renderPath: 'markup' as const }
   const two: TranslateRequest = { segments: [{ id: 'a', text: 'x' }, { id: 'b', text: 'y' }], source: 'en', target: 'zh-CN' }
 
-  it('首次全部未命中并写缓存；第二次全部命中不调用 provider', async () => {
+  it('first call misses and caches everything; the second hits without calling the provider', async () => {
     const calls: string[][] = []
     const t = await withChain([echo(calls)], { cache: portOf(cacheOf()) })
     const first = await t.translate({ request: two, cache: withCache })
@@ -195,7 +195,7 @@ describe('createLocalTransport：缓存', () => {
     expect(calls).toEqual([['a', 'b']])
   })
 
-  it('部分命中只发未命中段落，按原顺序合并', async () => {
+  it('partial hits send only misses and merge results in original order', async () => {
     const calls: string[][] = []
     const t = await withChain([echo(calls)], { cache: portOf(cacheOf()) })
     await t.translate({ request: { ...two, segments: [{ id: 'b', text: 'y' }] }, cache: withCache })
@@ -205,7 +205,7 @@ describe('createLocalTransport：缓存', () => {
     expect(calls).toEqual([['b'], ['a', 'c']])
   })
 
-  it('不带 cache 的请求不读不写缓存（设置页的连接测试）', async () => {
+  it('requests without cache neither read nor write it, as in settings connection tests', async () => {
     const calls: string[][] = []
     const cache = cacheOf()
     const t = await withChain([echo(calls)], { cache: portOf(cache) })
@@ -216,22 +216,22 @@ describe('createLocalTransport：缓存', () => {
   })
 })
 
-describe('chainConfigChanged：什么样的配置改动才重建链', () => {
-  it('每个配置字段都被显式归类，两张表合起来正好覆盖 Config', () => {
+describe('chainConfigChanged: configuration changes that rebuild the chain', () => {
+  it('explicitly classifies every Config field, with both lists covering it exactly', () => {
     expect([...CHAIN_CONFIG_FIELDS, ...VOLATILE_CONFIG_FIELDS].sort()).toEqual(Object.keys(DEFAULT_CONFIG).sort())
   })
 
-  it('切换显示模式、样式、预加载、术语表不重建：那时页面往往正在翻，重建会清掉令牌桶与降级记录', () => {
+  it('mode, style, preload, and glossary changes preserve the chain to avoid resetting token buckets and fallback state during translation', () => {
     const base = DEFAULT_CONFIG
     expect(chainConfigChanged(base, { ...base, mode: 'side' })).toBe(false)
     expect(chainConfigChanged(base, { ...base, style: { preset: 'quote', customCss: '' } })).toBe(false)
     expect(chainConfigChanged(base, { ...base, preload: { margin: 42, threshold: 0.5 } })).toBe(false)
     expect(chainConfigChanged(base, { ...base, glossary: [{ term: 'token', translation: '词元' }] })).toBe(false)
-    // 图片翻译的模式闸（§15）只是显示闸，用户翻着页勾掉一个模式不该把队列清掉
+    // Image mode gates (§15) control display only; toggling a mode during reading must not clear queues.
     expect(chainConfigChanged(base, { ...base, image: { modes: ['side'] } })).toBe(false)
   })
 
-  it('引擎、端点、模型、key、目标语言、提示词、降级开关改了就重建', () => {
+  it('engine, endpoint, model, key, target language, prompt, and fallback changes rebuild the chain', () => {
     const base = DEFAULT_CONFIG
     const cases: Config[] = [
       { ...base, provider: 'google-web' },
@@ -247,7 +247,7 @@ describe('chainConfigChanged：什么样的配置改动才重建链', () => {
     for (const next of cases) expect([next, chainConfigChanged(base, next)]).toEqual([next, true])
   })
 
-  it('同值的新对象不算改动：storage 每次 watch 都给一份新解析结果', () => {
+  it('new objects with equal values are unchanged because each storage watch returns a fresh parsed object', () => {
     expect(chainConfigChanged(DEFAULT_CONFIG, structuredClone(DEFAULT_CONFIG))).toBe(false)
   })
 })

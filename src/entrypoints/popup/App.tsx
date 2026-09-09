@@ -12,18 +12,18 @@ import { sendMessage, sendToActiveTab, type PageStatus } from '@/shared/messages
 
 const scriptStart = performance.now()
 
-// 翻译 / 恢复 / 进度 + provider 状态 + 模式切换（§7.2）；引擎在设置页选。
+// Translate / restore / progress, provider status and mode switching (§7.2); engines are selected in settings.
 export function App() {
-  const [ping, setPing] = useState('连接后台…')
+  const [ping, setPing] = useState('Connecting to background…')
   const [provider, setProvider] = useState<ProviderStatus | null>(null)
   const [page, setPage] = useState<PageStatus | null>(null)
   const [stats, setStats] = useState<BlockStats | null>(null)
   const [note, setNote] = useState('')
   const [config, setLocalConfig] = useState<Config | null>(null)
-  /** Chrome 内置翻译的语言包状态（§8.4）：downloadable 时要在点击处理函数里 create() 才有用户手势 */
+  /** Chrome language pack status (§8.4): downloadable requires create() inside a click handler for the user gesture. */
   const [pack, setPack] = useState<'unsupported' | 'available' | 'downloadable' | 'downloading' | 'unavailable' | null>(null)
   const [packNote, setPackNote] = useState('')
-  /** 配置被回退成默认值的原因；非 null 时顶部挂一条警告 */
+  /** Configuration fallback reason; show a warning at the top when non-null. */
   const [configFallback, setConfigFallback] = useState<string | null>(null)
 
   const refresh = useCallback(() => {
@@ -32,11 +32,11 @@ export function App() {
   const loadStats = useCallback(() => {
     sendToActiveTab({ type: 'axt:stats' }).then(setStats).catch(() => setStats(null))
   }, [])
-  /** 引擎可用性。语言包下载完、设置改过之后都要重查，否则"翻译"按钮停在挂载时的旧状态 */
+  /** Recheck engine availability after downloads or setting changes so the Translate button does not retain its initial state. */
   const loadProvider = useCallback(() => {
     sendMessage({ type: 'axt:provider-status' }).then(setProvider).catch(() => setProvider(null))
   }, [])
-  /** 语言包状态（§8.4）：popup 是扩展页面，Translator 在这里同样可用，不必绕 content script */
+  /** Language pack status (§8.4): Translator is available in the popup extension page, so no content-script detour is needed. */
   const checkPack = useCallback(async (target: string) => {
     const api = (globalThis as { Translator?: { availability(o: { sourceLanguage: string; targetLanguage: string }): Promise<string> } }).Translator
     if (!api) return setPack('unsupported')
@@ -53,14 +53,14 @@ export function App() {
     const t0 = performance.now()
     sendMessage({ type: 'axt:ping' })
       .then(r => {
-        setPing(`后台已连接 v${r.version}`)
+        setPing(`Background connected v${r.version}`)
         console.debug(`[axt] ping round-trip ${Math.round(performance.now() - t0)} ms`)
       })
-      .catch(e => setPing(`后台未响应：${String(e)}`))
+      .catch(e => setPing(`Background did not respond: ${String(e)}`))
     loadProvider()
     getConfig().then(config => {
       setLocalConfig(config)
-      // 回退成默认值时用户的 key / 引擎 / 模式全部不生效，必须显式说出来
+      // Falling back to defaults disables the user's saved key, engine and mode; explain this explicitly.
       setConfigFallback(configFallbackReason())
       void checkPack(config.targetLanguage)
     }).catch(() => setLocalConfig(null))
@@ -68,8 +68,8 @@ export function App() {
     refresh()
   }, [refresh, loadStats, checkPack, loadProvider])
 
-  // 页面还在加载时 content script 尚未注入（document_idle），首问会"没有接收方"；
-  // 隔 500 ms 再问几次，别一开就判定"不是 arXiv 页面"（Codex 在 #3 指出）
+  // While a page loads, content script has not yet injected (document_idle), so the first message may have no receiver.
+  // Retry a few times at 500 ms intervals before deciding this is not an arXiv page (Codex #3).
   useEffect(() => {
     if (page !== null) return
     let attempts = 0
@@ -84,8 +84,8 @@ export function App() {
     return () => clearInterval(id)
   }, [page, refresh, loadStats])
 
-  // 翻译开着时每 500 ms 轮询进度：滚动会继续触发，没有"翻完"的终点（§10）。
-  // 降级状态记在 background，跟着一起查——实测这条消息的往返在毫秒级（RESEARCH §6.7）
+  // Poll progress every 500 ms while translation is on: scrolling keeps triggering work; there is no final completion (§10).
+  // Also fetch background fallback status; measured message round trips take milliseconds (RESEARCH §6.7).
   const on = page?.progress.state === 'on'
   useEffect(() => {
     if (!on) return
@@ -100,7 +100,7 @@ export function App() {
     setNote('')
     try {
       const r = await sendToActiveTab({ type: 'axt:translate-page' })
-      if (!r.started) setNote(r.reason ?? '无法开始')
+      if (!r.started) setNote(r.reason ?? 'Could not start')
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e))
     }
@@ -108,16 +108,16 @@ export function App() {
   }
 
   const MODES: [Mode, string, string][] = [
-    ['stack', '上下', '译文紧跟原文，任何宽度都能用'],
-    ['side', '左右', '需要较宽的窗口；窄了自动退回上下'],
-    ['only', '仅译文', '隐藏原文，参考文献仍保持双语'],
+    ['stack', 'Stacked', 'Translation follows the original; works at any width'],
+    ['side', 'Side by side', 'Needs a wide window; automatically uses stacked mode when narrow'],
+    ['only', 'Translation only', 'Hide the original; references remain bilingual'],
   ]
 
   async function chooseMode(mode: Mode) {
     setNote('')
     try {
       const r = await sendToActiveTab({ type: 'axt:set-mode', mode })
-      if (r.mode !== r.preference) setNote(`窗口偏窄，已按上下对照显示（选的是${MODES.find(([m]) => m === r.preference)?.[1] ?? r.preference}）`)
+      if (r.mode !== r.preference) setNote(`Window is narrow; using stacked mode (selected: ${MODES.find(([m]) => m === r.preference)?.[1] ?? r.preference})`)
       refresh()
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e))
@@ -128,7 +128,7 @@ export function App() {
     setNote('')
     try {
       const r = await sendToActiveTab({ type: 'axt:retry-failed' })
-      setNote(`已重新提交 ${r.retried} 块`)
+      setNote(`Resubmitted ${r.retried} blocks`)
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e))
     }
@@ -136,9 +136,9 @@ export function App() {
   }
 
   /**
-   * 提示词切换（对应 Read Frog popup 的 translate-prompt-selector）：立即落盘，下次点"翻译"生效。
-   * 只改 prompts，其余字段以**此刻存着的**为准：切换对照模式是 content script 写的配置，popup 挂载时的快照已经过期，
-   * 整个写回会把模式改回去（Codex 在 #39 指出）
+   * Prompt selection (Read Frog popup translate-prompt-selector): save immediately; takes effect the next time Translate is clicked.
+   * Change only prompts; read all other fields from current storage. Content script writes mode changes, making the popup's initial snapshot stale.
+   * Writing the whole snapshot would revert the mode (Codex #39).
    */
   async function choosePrompt(promptId: string) {
     try {
@@ -146,33 +146,33 @@ export function App() {
       const next = { ...latest, prompts: { ...latest.prompts, promptId } }
       setLocalConfig(next)
       await setConfig(next)
-      if (on) setNote('提示词已保存，恢复原文后再点"翻译"生效')
+      if (on) setNote('Prompt saved. Restore the original, then click Translate to apply it.')
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e))
     }
   }
 
   /**
-   * 下载语言包。**必须由点击直接触发**：availability 是 downloadable 时无手势 create() 抛 NotAllowedError（RESEARCH §6.1）。
-   * 首次下载期间 availability() 一直是 downloadable、monitor 也没有进度事件（实测 67 s），所以只给不确定态提示
+   * Download a language pack. **Must run directly from a click**: create() without a gesture throws NotAllowedError when downloadable (RESEARCH §6.1).
+   * During the first download, availability() remains downloadable and the monitor emits no progress (67s observed), so show an indeterminate state.
    */
   async function downloadPack() {
     if (!config) return
     const api = (globalThis as { Translator?: { create(o: { sourceLanguage: string; targetLanguage: string }): Promise<unknown> } }).Translator
     if (!api) return
     setPack('downloading')
-    setPackNote('正在下载语言包，首次约需 1 分钟…')
+    setPackNote('Downloading language pack; the first download takes about a minute…')
     try {
       await api.create({ sourceLanguage: BUILTIN_SOURCE_LANGUAGE, targetLanguage: toBcp47(config.targetLanguage) })
       await checkPack(config.targetLanguage)
-      // 重查引擎可用性：不查的话"翻译"按钮会停在下载前的状态，要关掉 popup 再开一次才可点
+      // Recheck availability so Translate becomes enabled without closing and reopening the popup.
       loadProvider()
-      // 当前页若已在翻译，它的降级链早把内置引擎永久降级了；通知它撤销，后面的块就走离线引擎
-      // 引擎链在 background（§8.0）：让它重建一条，把刚可用的内置引擎放回链上
+      // An active page may have permanently demoted the built-in engine for this session; reset it so later blocks use offline translation.
+      // The chain lives in background (§8.0): rebuild it to include the now-available built-in engine.
       const reset = await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).then(r => r.reset).catch(() => false)
-      setPackNote(reset ? '已就绪，接下来的段落会用离线引擎' : '已就绪，可以直接点"翻译"')
+      setPackNote(reset ? 'Ready; subsequent paragraphs will use the offline engine' : 'Ready; click Translate to start')
     } catch (e) {
-      setPackNote(`下载失败：${e instanceof Error ? e.message : String(e)}`)
+      setPackNote(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
       await checkPack(config.targetLanguage)
     }
   }
@@ -181,14 +181,14 @@ export function App() {
     setNote('')
     try {
       const r = await sendToActiveTab({ type: 'axt:restore-page' })
-      setNote(`已恢复原文（移除 ${r.removedNodes} 个译文节点）`)
+      setNote(`Original restored (${r.removedNodes} translation nodes removed)`)
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e))
     }
     refresh()
   }
 
-  // 首选引擎不可用但链上有兜底时照样能翻（§8.5）：不看 fallback 的话会出现「有 Google 兜底、按钮却是灰的」
+  // A fallback allows translation even if the preferred engine is unavailable (§8.5); ignoring it would disable Translate despite a working Google fallback.
   const canTranslate = !!page?.paper && (!!provider?.available || !!provider?.fallback) && !on
   const canRestore = !!page && page.progress.state !== 'idle'
 
@@ -196,38 +196,38 @@ export function App() {
     <main style={{ minWidth: 280, padding: 12, font: '13px system-ui, sans-serif' }}>
       <h1 style={{ fontSize: 14, margin: '0 0 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         arXiv HTML Translator
-        <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={() => browser.runtime.openOptionsPage()}>设置</button>
+        <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={() => browser.runtime.openOptionsPage()}>Settings</button>
       </h1>
       {configFallback && (
         <p style={{ margin: '0 0 8px', padding: '6px 8px', borderRadius: 4, background: '#fdf0f0', color: '#b00' }}>
-          配置读取失败，正在使用默认设置，你保存的 API key 与引擎选择<strong>都没有生效</strong>。
+          Could not read configuration; using defaults. Your saved API key and engine selection <strong>are not active</strong>.
           <span style={{ display: 'block', marginTop: 4, color: '#666' }}>{configFallback}</span>
         </p>
       )}
       <p style={{ margin: '0 0 4px', color: '#666' }}>{ping}</p>
       <p style={{ margin: '0 0 8px', color: '#666' }}>
         {provider === null
-          ? '引擎状态未知'
+          ? 'Engine status unknown'
           : provider.available
-            ? `引擎：${provider.providerId} · ${provider.model ?? ''}`
+            ? `Engine: ${provider.providerId} · ${provider.model ?? ''}`
             : provider.fallback
-              ? `${provider.providerId} 不可用，将使用${provider.fallback.displayName}`
+              ? `${provider.providerId} unavailable; using ${provider.fallback.displayName}`
               : provider.providerId === 'chrome-builtin'
-                ? '内置翻译的语言包还没准备好，点下面的按钮下载'
-                : '未配置 API key，请先到设置页填写'}
+                ? 'Built-in language pack is not ready; download it below'
+                : 'API key not configured; add it in Settings'}
       </p>
 
       {page === null
-        ? <p style={{ margin: 0, color: '#666' }}>当前标签页不是 arXiv HTML 页面，或扩展更新后页面尚未刷新</p>
+        ? <p style={{ margin: 0, color: '#666' }}>This tab is not an arXiv HTML page, or it needs a refresh after an extension update</p>
         : (
           <section>
             <p style={{ margin: '0 0 8px' }}>
-              <button type="button" onClick={translate} disabled={!canTranslate}>{on ? '已开启' : '翻译'}</button>
+              <button type="button" onClick={translate} disabled={!canTranslate}>{on ? 'On' : 'Translate'}</button>
               {' '}
-              <button type="button" onClick={restorePage} disabled={!canRestore}>恢复原文</button>
+              <button type="button" onClick={restorePage} disabled={!canRestore}>Restore original</button>
             </p>
             <p style={{ margin: '0 0 8px', display: 'flex', gap: 4, alignItems: 'center' }}>
-              <span style={{ color: '#666' }}>对照</span>
+              <span style={{ color: '#666' }}>View</span>
               {MODES.map(([m, label, title]) => (
                 <button
                   type="button"
@@ -243,7 +243,7 @@ export function App() {
             </p>
             {config?.provider === 'openai-compat' && (
               <p style={{ margin: '0 0 8px', display: 'flex', gap: 4, alignItems: 'center' }}>
-                <span style={{ color: '#666' }}>提示词</span>
+                <span style={{ color: '#666' }}>Prompt</span>
                 <select style={{ font: 'inherit', fontSize: 12, flex: 1 }} value={config.prompts.promptId} onChange={e => choosePrompt(e.target.value)}>
                   {Object.values(BUILT_IN_PROMPTS).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                   {config.prompts.patterns.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -252,27 +252,27 @@ export function App() {
             )}
             {provider?.engine.demoted && (
               <p style={{ margin: '0 0 8px', padding: 6, background: '#fff4e5', borderRadius: 4, fontSize: 12, lineHeight: 1.5 }}>
-                {provider.engine.demoted.displayName}不可用（{provider.engine.demoted.kind}），已降级到{provider.engine.displayName}。
-                译文质量不如 LLM；修好设置后恢复原文再翻即可切回
+                {provider.engine.demoted.displayName} unavailable ({provider.engine.demoted.kind}); switched to {provider.engine.displayName}.
+                Translation quality is lower than an LLM. Fix settings, restore the original and translate again to switch back.
               </p>
             )}
             {(pack === 'downloadable' || pack === 'downloading' || packNote) && (
               <p style={{ margin: '0 0 8px', fontSize: 12, color: '#666' }}>
                 {pack === 'downloadable' && (
-                  <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={downloadPack}>下载离线语言包</button>
+                  <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={downloadPack}>Download offline language pack</button>
                 )}
-                {pack === 'downloading' && <span>正在下载…</span>}
+                {pack === 'downloading' && <span>Downloading…</span>}
                 {packNote && <span style={{ display: 'block', marginTop: 4 }}>{packNote}</span>}
               </p>
             )}
             <ProgressLine page={page} />
-            {/* 致命错误后不给重试：那一轮的 run 已经 halted，content 侧的 translate() 会立刻返回，
-                却照旧报告失败块数，popup 于是宣称"已重新提交 N 块"——一个请求都没发（Codex 在 #36 指出）。
-                出路是上面那句提示说的：修好配置后点"翻译"，那会开一轮新的 run */}
+            {/* No retry after fatal errors: the run is halted and content-side translate() returns immediately,
+                while still reporting the failed block count, falsely claiming N blocks were resubmitted without any request (Codex #36).
+                Instead, fix configuration and click Translate as instructed above to start a new run. */}
             {(page.progress.failed > 0 || (page.images?.failed ?? 0) > 0) && page.progress.state !== 'idle' && !page.progress.fatal && !page.images?.fatal && (
               <p style={{ margin: '6px 0 0' }}>
                 <button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={retryFailed}>
-                  重试失败的 {[page.progress.failed > 0 ? `${page.progress.failed} 块` : '', (page.images?.failed ?? 0) > 0 ? `${page.images?.failed} 张图` : ''].filter(Boolean).join('、')}
+                  Retry failed {[page.progress.failed > 0 ? `${page.progress.failed} blocks` : '', (page.images?.failed ?? 0) > 0 ? `${page.images?.failed} images` : ''].filter(Boolean).join(', ')}
                 </button>
               </p>
             )}
@@ -286,18 +286,18 @@ export function App() {
 
 function ProgressLine({ page }: { page: PageStatus }) {
   const p = page.progress
-  // 看到哪翻到哪（§10）：显示"已翻 / 已进入视口（共多少）"，翻译是开着的状态，没有"翻完"
-  const counts = `已翻 ${p.done} / 已触发 ${p.requested}（共 ${p.total}）${p.failed ? `，失败 ${p.failed}` : ''}${p.cached ? `，缓存命中 ${p.cached}` : ''}`
-  const text = p.state === 'idle' ? '未翻译'
-    : p.state === 'on' ? `${counts}${p.inFlight > 0 ? ' · 翻译中…' : ' · 就绪，滚动继续翻'}`
-    : `已停止：${counts}`
+  // Translate what enters view (§10): show translated / triggered (total); translation stays on rather than reaching a final completion.
+  const counts = `Translated ${p.done} / triggered ${p.requested} (${p.total} total)${p.failed ? `, failed ${p.failed}` : ''}${p.cached ? `, cached ${p.cached}` : ''}`
+  const text = p.state === 'idle' ? 'Not translated'
+    : p.state === 'on' ? `${counts}${p.inFlight > 0 ? ' · Translating…' : ' · Ready; scroll to continue'}`
+    : `Stopped: ${counts}`
   const images = page.images
   return (
     <p style={{ margin: 0 }}>
       {text}
-      {images && images.requested > 0 && <span>｜图 {images.done}/{images.requested}{images.failed ? `，失败 ${images.failed}` : ''}</span>}
-      {images?.fatal && <span style={{ color: '#b00' }}>｜图片翻译停在 {images.fatal}。恢复原文、修好配置后再翻译</span>}
-      {p.fatal && <span style={{ color: '#b00' }}>｜{p.fatal}。修好配置后点"翻译"继续</span>}
+      {images && images.requested > 0 && <span> | Images {images.done}/{images.requested}{images.failed ? `, failed ${images.failed}` : ''}</span>}
+      {images?.fatal && <span style={{ color: '#b00' }}> | Image translation stopped: {images.fatal}. Restore the original, fix settings and translate again.</span>}
+      {p.fatal && <span style={{ color: '#b00' }}> | {p.fatal}. Fix settings and click Translate to continue.</span>}
     </p>
   )
 }
@@ -305,7 +305,7 @@ function ProgressLine({ page }: { page: PageStatus }) {
 function StatsLine({ stats }: { stats: BlockStats }) {
   return (
     <p style={{ margin: '8px 0 0', color: '#666', fontSize: 12 }}>
-      块 {stats.total}（文本 {stats.text}，表格 {stats.table}；单元格 {stats.cells}，数值格 {stats.numericCells}）
+      Blocks {stats.total} (text {stats.text}, tables {stats.table}; cells {stats.cells}, numeric cells {stats.numericCells})
     </p>
   )
 }

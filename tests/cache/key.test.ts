@@ -7,7 +7,7 @@ const base: CacheIdentity = {
 }
 
 describe('normalizeText', () => {
-  it('NFC、折叠所有空白、去首尾', () => {
+  it('normalizes NFC, collapses all whitespace, and trims', () => {
     expect(normalizeText('  a \n\t b  ')).toBe('a b')
     expect(normalizeText('é')).toBe('é')
     expect(normalizeText('a  b')).toBe('a b')
@@ -15,17 +15,17 @@ describe('normalizeText', () => {
 })
 
 describe('buildCacheKey', () => {
-  it('64 位 hex 且稳定', async () => {
+  it('returns a stable 64-digit hex value', async () => {
     const key = await buildCacheKey(base)
     expect(key).toMatch(/^[0-9a-f]{64}$/)
     expect(await buildCacheKey({ ...base })).toBe(key)
   })
 
-  it('文本归一化后相同则键相同', async () => {
+  it('equivalent normalized text produces the same key', async () => {
     expect(await buildCacheKey({ ...base, text: '  Hello   <x id="1"/>\n world ' })).toBe(await buildCacheKey(base))
   })
 
-  it('任一字段不同则键不同', async () => {
+  it('changing any field changes the key', async () => {
     const key = await buildCacheKey(base)
     const variants: Partial<CacheIdentity>[] = [
       { providerId: 'x' }, { model: 'x' }, { promptVersion: '2' }, { rulesVersion: '0.3.0' }, { target: 'ja' }, { renderPath: 'runs' }, { text: 'Hello <x id="2"/> world' },
@@ -33,26 +33,26 @@ describe('buildCacheKey', () => {
     for (const v of variants) expect(await buildCacheKey({ ...base, ...v }), JSON.stringify(v)).not.toBe(key)
   })
 
-  it('文本里的分隔符不会撞键', async () => {
+  it('delimiters in text do not cause key collisions', async () => {
     const a = await buildCacheKey({ ...base, model: 'm|x', text: 'y' })
     const b = await buildCacheKey({ ...base, model: 'm', text: 'x|y' })
     expect(a).not.toBe(b)
   })
 
-  it('提示词指纹不同则键不同：换了提示词不能命中旧译文', async () => {
+  it('different prompt fingerprints produce different keys so new prompts cannot reuse old translations', async () => {
     const a = await buildCacheKey({ ...base, promptKey: 'default' })
     const b = await buildCacheKey({ ...base, promptKey: 'custom:abc' })
     expect(a).not.toBe(b)
   })
 
-  it('上下文不同则键不同：同一段文字在另一篇论文 / 另一章里不能拿来命中（Codex 在 #28 指出）', async () => {
+  it('different context changes the key so identical text in another paper or section cannot reuse a translation (Codex #28)', async () => {
     const a = await buildCacheKey({ ...base, context: { paperTitle: 'P1', abstract: 'A' } })
     const b = await buildCacheKey({ ...base, context: { paperTitle: 'P2', abstract: 'A' } })
     expect(a).not.toBe(b)
     expect(await buildCacheKey({ ...base, context: undefined })).toBe(await buildCacheKey({ ...base, context: undefined }))
   })
 
-  it('改一条术语的译法，键就变；空表与不带术语表同键（否则加表那一刻全部缓存失效）', async () => {
+  it('changing a glossary translation changes the key; an empty glossary matches an omitted glossary without invalidating existing caches', async () => {
     const withA = await buildCacheKey({ ...base, context: { glossary: [{ term: 'weights', translation: '权重' }] } })
     const withB = await buildCacheKey({ ...base, context: { glossary: [{ term: 'weights', translation: '重量' }] } })
     expect(withA).not.toBe(withB)
@@ -60,15 +60,15 @@ describe('buildCacheKey', () => {
     expect(empty).toBe(await buildCacheKey({ ...base, context: {} }))
   })
 
-  it('上下文以原文进 SHA-256 载荷，不先压成 32 位 hash：DJB2 相撞的两个标题也不同键（Codex 给的实例）', async () => {
+  it('hashes original context with SHA-256 rather than a 32-bit hash: colliding DJB2 titles still get distinct keys (Codex example)', async () => {
     const a = await buildCacheKey({ ...base, context: { paperTitle: '19k04n01vcr73f' } })
     const b = await buildCacheKey({ ...base, context: { paperTitle: '1efm0uaep90s9' } })
     expect(a).not.toBe(b)
   })
 })
 
-describe('ocrCacheKey（DESIGN §15.2）', () => {
-  it('只随图片字节的 hash 与 helper 版本变；与译文的键空间不重叠', async () => {
+describe('ocrCacheKey (DESIGN §15.2)', () => {
+  it('depends only on the image byte hash and helper version, in a namespace separate from translations', async () => {
     const key = await ocrCacheKey('abc', '0.1.0')
     expect(key).toMatch(/^[0-9a-f]{64}$/)
     expect(await ocrCacheKey('abc', '0.1.0')).toBe(key)

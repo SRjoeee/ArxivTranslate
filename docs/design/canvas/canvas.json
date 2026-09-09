@@ -1,26 +1,26 @@
 {
   "pages": [
-    { "id": "page-1", "name": "设计稿" },
-    { "id": "page-2", "name": "方向草图（存档）" }
+    { "id": "page-1", "name": "Designs" },
+    { "id": "page-2", "name": "Direction sketches (archive)" }
   ],
   "artboards": [
-    { "file": "Main.dc.html", "title": "Popup · 六个状态", "x": 0, "y": 0, "w": 2240, "h": 520, "page": "page-1" },
-    { "file": "Engine.dc.html", "title": "设置 · 引擎", "x": 0, "y": 660, "w": 1120, "h": 720, "page": "page-1" },
-    { "file": "Reading.dc.html", "title": "设置 · 阅读", "x": 1220, "y": 660, "w": 1120, "h": 720, "page": "page-1" },
-    { "file": "Prompts.dc.html", "title": "设置 · 提示词与术语（编辑抽屉打开）", "x": 0, "y": 1520, "w": 1120, "h": 720, "page": "page-1" },
-    { "file": "InPage.dc.html", "title": "页内组件 + 阅读工具条提案", "x": 1220, "y": 1520, "w": 1120, "h": 640, "page": "page-1" },
-    { "file": "UxMap.dc.html", "title": "UX 地图（v1）", "x": 0, "y": 0, "w": 1200, "h": 780, "page": "page-2" },
-    { "file": "EditorialPopup.dc.html", "title": "方向 A · 学术编辑 — Popup", "x": 0, "y": 940, "w": 720, "h": 600, "page": "page-2" },
-    { "file": "EditorialOptions.dc.html", "title": "方向 A · 学术编辑 — 设置", "x": 820, "y": 940, "w": 1120, "h": 720, "page": "page-2" },
-    { "file": "InstrumentPopup.dc.html", "title": "方向 B · 仪表工具 — Popup", "x": 0, "y": 1820, "w": 720, "h": 600, "page": "page-2" },
-    { "file": "InstrumentOptions.dc.html", "title": "方向 B · 仪表工具 — 设置", "x": 820, "y": 1820, "w": 1120, "h": 720, "page": "page-2" },
-    { "file": "SoftPopup.dc.html", "title": "方向 C · 柔和产品 — Popup（原始草图）", "x": 0, "y": 2700, "w": 720, "h": 600, "page": "page-2" },
-    { "file": "SoftOptions.dc.html", "title": "方向 C · 柔和产品 — 设置（原始草图）", "x": 820, "y": 2700, "w": 1120, "h": 720, "page": "page-2" }
+    { "file": "Main.dc.html", "title": "Popup · Six states", "x": 0, "y": 0, "w": 2240, "h": 520, "page": "page-1" },
+    { "file": "Engine.dc.html", "title": "Settings · Engine", "x": 0, "y": 660, "w": 1120, "h": 720, "page": "page-1" },
+    { "file": "Reading.dc.html", "title": "Settings · Reading", "x": 1220, "y": 660, "w": 1120, "h": 720, "page": "page-1" },
+    { "file": "Prompts.dc.html", "title": "Settings · Prompts & terms (edit drawer open)", "x": 0, "y": 1520, "w": 1120, "h": 720, "page": "page-1" },
+    { "file": "InPage.dc.html", "title": "In-page components + reading toolbar proposal", "x": 1220, "y": 1520, "w": 1120, "h": 640, "page": "page-1" },
+    { "file": "UxMap.dc.html", "title": "UX map (v1)", "x": 0, "y": 0, "w": 1200, "h": 780, "page": "page-2" },
+    { "file": "EditorialPopup.dc.html", "title": "Direction A · Academic editorial — Popup", "x": 0, "y": 940, "w": 720, "h": 600, "page": "page-2" },
+    { "file": "EditorialOptions.dc.html", "title": "Direction A · Academic editorial — Settings", "x": 820, "y": 940, "w": 1120, "h": 720, "page": "page-2" },
+    { "file": "InstrumentPopup.dc.html", "title": "Direction B · Instrument panel — Popup", "x": 0, "y": 1820, "w": 720, "h": 600, "page": "page-2" },
+    { "file": "InstrumentOptions.dc.html", "title": "Direction B · Instrument panel — Settings", "x": 820, "y": 1820, "w": 1120, "h": 720, "page": "page-2" },
+    { "file": "SoftPopup.dc.html", "title": "Direction C · Soft product — Popup (original sketch)", "x": 0, "y": 2700, "w": 720, "h": 600, "page": "page-2" },
+    { "file": "SoftOptions.dc.html", "title": "Direction C · Soft product — Settings (original sketch)", "x": 820, "y": 2700, "w": 1120, "h": 720, "page": "page-2" }
   ],
   "annotations": [
-    { "id": "note-disclosure", "x": 2360, "y": 0, "w": 320, "page": "page-1", "text": "露出规则（该看时看到，不该看时看不到）\n\n引擎卡的状态药丸：就绪 / 翻译中 / 已降级 / 需要语言包——一处承担所有状态，没有计数。\n\n翻译开着时：引擎与语言行的箭头收起（此刻不该改）。\n\n只在发生时出现：失败行（紧挨引擎卡）、降级说明（长在引擎卡里）。\n\n非 arXiv 页：引擎卡与按钮都不出现。\n\n设置页：LLM 表单只在选 LLM 时出现；「连接」只在字段改过后出现；思考模式收进「更多选项」；自定义 CSS 只在选「自定义」时出现；「提示词与术语」在非 LLM 引擎下变灰并提示。" },
-    { "id": "note-code", "x": 2360, "y": 420, "w": 320, "page": "page-1", "text": "落地时要改的代码逻辑\n\n1. 默认引擎改为 google-web（首次打开即可用）\n2. 语言包下载：popup 引擎展开列表 + 设置页引擎卡，两处都是点击手势\n3. 「连接」= 先 setConfig 再指名当前表单的引擎测一句，测的是表单值\n4. 除 LLM 表单外所有控件即改即存，去掉全局 save\n5. 失败原因映射成人话：超时 / 额度用尽 / 译文格式不对 / key 失效\n6. 页面加载中与非 arXiv 页显示同一句话\n7. 预翻译距离与阈值改为刻度滑杆，内部映射 margin / threshold" },
-    { "id": "note-pill", "x": 2360, "y": 1520, "w": 300, "page": "page-1", "text": "阅读工具条仍是提案：翻译开着时想切模式 / 恢复，可以不再点工具栏图标。做不做由你定。" }
+    { "id": "note-disclosure", "x": 2360, "y": 0, "w": 320, "page": "page-1", "text": "Visibility rules (show information when relevant; hide it otherwise)\n\nEngine-card status pill: Ready / Translating / Fallback active / Language pack required. One place for all states, no counts.\n\nWhile translation is on: hide arrows on engine and language rows (changes are unavailable).\n\nShow only when applicable: failure row (beside engine card), fallback explanation (inside engine card).\n\nNon-arXiv page: hide engine card and buttons.\n\nSettings: show LLM form only when LLM is selected; show Connect only after fields change; put thinking mode under More options; show custom CSS only for Custom; dim Prompts & terms and show a hint for non-LLM engines." },
+    { "id": "note-code", "x": 2360, "y": 420, "w": 320, "page": "page-1", "text": "Code behavior changes required for implementation\n\n1. Default engine becomes google-web (usable on first open)\n2. Language-pack download: expanded popup engine list + settings engine card, both triggered by clicks\n3. Connect = setConfig first, then explicitly test one sentence with the engine selected in the current form; test form values\n4. Save all controls immediately except the LLM form; remove global save\n5. Map failure reasons to plain language: timeout / quota exhausted / invalid translation format / expired key\n6. Show the same sentence while loading and on non-arXiv pages\n7. Use stepped sliders for translate-ahead distance and threshold, mapped internally to margin / threshold" },
+    { "id": "note-pill", "x": 2360, "y": 1520, "w": 300, "page": "page-1", "text": "The reading toolbar remains a proposal: while translation is on, switching modes / restoring the original would no longer require clicking the toolbar icon. Whether to implement it is your decision." }
   ],
   "launch": { "view": "canvas", "page": "page-1" }
 }

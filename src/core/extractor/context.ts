@@ -1,8 +1,8 @@
-// 论文级上下文（DESIGN §8.2）：标题与摘要，页面加载时抽一次（那时 DOM 里还没有译文；翻译过再抽会把上一轮的译文也算进摘要），每批 prompt 都带上。
-// Read Frog 是多调一次 LLM 给网页生成摘要；论文自带 abstract，直接用。
+// Paper context (DESIGN §8.2): extract title and abstract once on page load, before translations exist; otherwise old translations enter the abstract. Include in every prompt batch.
+// Read Frog makes an extra LLM call to summarize a page; papers already provide an abstract.
 import { ABSTRACT, DOCUMENT_ROOT, DOCUMENT_TITLE, classify } from '@/core/rules/latexml'
 
-/** 摘要截断长度：每批都要带，太长就是白花 token */
+/** Abstract length cap: every batch includes it, so excess text wastes tokens. */
 export const ABSTRACT_MAX_CHARS = 1200
 
 export interface PaperContext {
@@ -10,14 +10,14 @@ export interface PaperContext {
   abstract?: string
 }
 
-/** LaTeXML 的 <math> 里带 <annotation> 存着 TeX 源码，textContent 会把公式读两遍；只取呈现层文字 */
+/** LaTeXML stores TeX in <annotation> inside <math>; textContent duplicates formulas. Read only presentation text. */
 const HIDDEN_MATH_META = new Set(['annotation', 'annotation-xml'])
 
 /**
- * 不该进上下文的元素：
- * - 规则里的跳过项（出版元数据、转换错误……）：2507.00150 把 .ltx_pubnotes 嵌在文档标题里，
- *   不跳过的话整段致谢会被当成标题、随每批发出并进缓存键（Codex 在 #28 指出）
- * - 我们自己注入的节点（class 以 axt- 开头，硬规则 5）：翻译过再抽，上一轮的译文会混进摘要
+ * Elements excluded from context:
+ * - Rule exclusions (publication metadata, conversion errors, etc.): 2507.00150 nests .ltx_pubnotes in its title.
+ *   Without this filter, acknowledgements enter the title, every batch, and cache keys (Codex #28).
+ * - Injected nodes (axt- classes, hard rule 5): re-extraction must not include previous translations in the abstract.
  */
 function excluded(el: Element): boolean {
   if (HIDDEN_MATH_META.has(el.localName)) return true

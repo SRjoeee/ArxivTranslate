@@ -1,16 +1,16 @@
-// 模式的自动降级（DESIGN §7.2）：side 需要足够宽的视口，窄了自动退回 stack，变宽再回来。
-// 用户手选的模式记为偏好，自动降级不覆盖偏好。
+// Automatic mode fallback (DESIGN §7.2): side needs a wide viewport; use stack when narrow and restore side when wide again.
+// Preserve the user's preferred mode; automatic fallback never overwrites it.
 import { setMode, type Mode } from './index'
 
-/** 与 arXiv 主题折叠导航栏的断点对齐；ar5iv 另有 46/52/96/109rem 断点（RESEARCH.md §3.2） */
+/** Match arXiv's navigation-collapse breakpoint; ar5iv also uses 46/52/96/109rem breakpoints (RESEARCH.md §3.2). */
 export const NARROW_QUERY = '(max-width: 1279px)'
 
 export interface ModeController {
-  /** 用户选定的模式 */
+  /** User-selected mode. */
   preference: () => Mode
-  /** 实际写在 <html> 上的模式 */
+  /** Mode actually applied to <html>. */
   effective: () => Mode
-  /** 选一个新模式；返回实际生效的那个 */
+  /** Select a new mode; return the effective mode. */
   choose: (mode: Mode) => Mode
   stop: () => void
 }
@@ -22,7 +22,7 @@ interface MediaLike {
 }
 
 export interface ModeControllerOptions {
-  /** 测试注入；默认用 window.matchMedia，环境没有时视为不窄 */
+  /** Test injection; defaults to window.matchMedia, or non-narrow if unavailable. */
   media?: MediaLike | null
   onChange?: (effective: Mode, preference: Mode) => void
 }

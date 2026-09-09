@@ -4,7 +4,7 @@ import { isInlineTitleCandidate } from '@/core/rules/latexml'
 const docOf = (body: string) => new DOMParser().parseFromString(`<!doctype html><html><body><article class="ltx_document">${body}</article></body></html>`, 'text/html')
 
 describe('isInlineTitleCandidate', () => {
-  it('节标题、摘要标题是候选；文档主标题、段落不是', () => {
+  it('section and abstract headings are candidates; document titles and paragraphs are not', () => {
     const doc = docOf(
       '<h6 class="ltx_title ltx_title_abstract" id="a">Abstract</h6>'
       + '<h2 class="ltx_title ltx_title_section" id="s">1 Introduction</h2>'

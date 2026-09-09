@@ -1,0 +1,1859 @@
+{
+  "version": 1,
+  "exceptions": [
+    {
+      "file": "docs/DESIGN.md",
+      "text": "  **Do not restrict this rule by mode; it already has no effect in side** [Measured, 2026-09-07, issue #68 / Codex #13]: side containers are `display: grid`, and headings are direct grid children; **grid items always blockify**, overriding inline-block behavior. All 69 short headings in 2609.00246 are `inline-block` in stack and share a line (“Abstract” 0–90, “摘要” 90–157). In side, **zero** remain inline-block: all become block, original 0–648 left, translation 672–1320 right, same row. Adding `html[data-axt-mode=\"stack\"]` changes no output and adds a mode check to maintain; do not add it. `modes.css` already has a dedicated side `[data-axt-inline]` translation rule clearing the 0.5em start margin, confirming intent. `e2e:layout` asserts block display, left/right placement, and equal rows.",
+      "reason": "Measured bilingual heading text preserves the recorded layout evidence.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "  **Translation-quality measurements** (google-web, the worst case among free engines): 28 of 30 were normal transliterations, even recovering Chinese characters for names (`Yuan Xia` → 袁霞, `Haipeng Cai` → 蔡海鹏, `Fumihiro Imoto` → 井本文宏; exact characters are guesses). One failure: **`Brian Street` → 布莱恩街**, treating the surname as a common noun. Roughly 3% error, visibly wrong, with the original beside it. LLMs have title/abstract context and should do better. **No prompt change**: adding a constraint to every batch for a few names is not worthwhile, and bumping `PROMPT_VERSION` invalidates all caches; revisit only with real feedback.",
+      "reason": "Recorded name transliterations and mistranslations preserve the evidence behind the author-translation decision.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "  **Translation-quality measurements** (google-web, worst-case free engine): standalone author segments are **more likely to be transliterated** than full citations. Google tends to preserve names in full citations (`W. Arendt 和 AFM ter Elst`, `Agha, G., Palmskog, K.:`), but transliterates separate segments (`史蒂文·阿兹特、齐格弗里德·拉斯托弗…`). Two specific defects: institutional authors treated as common words (`Anthropic.` → `人类学。`), and initials losing periods (`V. I.` → `VI`, `M. D.` → `MD`, resembling Roman numerals). **The LLM path does not have this problem**: the default instruction “Keep author names, journal names, conference names, dataset names, code identifiers and URLs in the original language” returns author segments unchanged.",
+      "reason": "Observed citation and institutional-author translations document quality defects.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "  Otherwise there is a **visible consequence**: the hidden label is the only translatable text in an email `.ltx_contact` (the address is protected `mailto`), so the block qualifies for translation. Its translated “电子邮件：” label is also hidden by site CSS, leaving two identical address lines (reported by the user in 2507.00150). Affiliations do not duplicate because they contain real text, but translating invisible labels wastes work; google-web also rendered `Affiliation:` as “联系：”.",
+      "reason": "Recorded translations of hidden labels explain the duplicate-address failure.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "- **Send glossary with every batch** [Decided, 2026-09-05]: configuration `glossary: { term, translation }[]` since v6; options text editor uses one entry/line, comma or tab delimiters, `#` comments. `providers/glossary.ts` parses/deduplicates (KISS `parseAITerms` shape plus tabs, comments, and line-numbered errors instead of silent dropping). **Semicolons do not separate records**: KISS splits `a, 甲; b, 乙`, but legitimate translations can contain semicolons (`kernel, 核; 统计学中称核函数`); splitting silently corrupts one valid mapping into unrelated records (Codex #52). **200 entries maximum**: every batch carries them, roughly 2–3KB / 700 tokens, comparable to an abstract. Larger glossaries need per-paragraph matching, deferred to v2. Per-entry limits: source 120 characters, translation 200; total 6000, preventing an entire pasted document being accepted as one entry. Define limits in `GLOSSARY_LIMITS`; **migrations must run `normalizeGlossary`**, as v6 had no limits and blindly copying into v7 makes `getConfig()` reject the whole configuration and revert to defaults, appearing to lose keys, engines, and prompts (Codex #52). **Automatically append `{{glossary}}` when custom prompts omit it**, like `{{input}}` / `{{targetLanguage}}`; new templates otherwise omit it and configured glossaries have no effect. This changes model input, so `PROMPT_VERSION` becomes 4 (hard rule 6). **Omit the field for empty glossaries**, rather than sending `[]`: `contextPayload` keys empty and absent identically, preserving existing cache on feature introduction while changed translations invalidate affected entries. LLM-only: free engines ignore context; `translate-service` includes context in cache keys only when `provider.promptKey` exists.",
+      "reason": "Glossary data examples demonstrate delimiter compatibility and semicolon preservation.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "- **Short headings share a line** [Decided]: for `title` units other than the document title with visible text ≤60 characters, add `data-axt-inline` to original and translation. CSS sets both to `display: inline-block` (retaining vertical heading margins) and gives the translation 0.5em start margin, producing “Abstract 摘要” on one line. Reference projects achieve this by inserting translations inside originals; our subtree invariant requires attributes + CSS. Keep the main title stacked: its `text-align: center` no longer centers it when inline.",
+      "reason": "Bilingual heading sample illustrates the intended inline layout.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "- **Translate `.ltx_tag` containing environment names** [Decided, 2026-09-05, user feedback]: LaTeXML also puts theorem, figure, table, algorithm, and appendix **names** in `.ltx_tag`. Protecting all of `Definition 1.1.` as a number leaves Chinese readers with English. Distinguish subclasses: translate `ltx_tag_theorem` / `ltx_tag_figure` / `ltx_tag_table` / `ltx_tag_float` / `ltx_tag_appendix` / `ltx_tag_part` / `ltx_tag_chapter`; keep others (equation, section, subsection, ref, item, note) void. **Classes alone are insufficient**: subfigure panels also use `.ltx_tag_figure` for pure identifiers `(a)` `(b)` `(c)` (5 of 387 named tags, Codex #53); translating them can rewrite identifiers and break panel correspondence. Add `isNamedTag`: class must be listed and, **after removing parenthesized identifier-only groups**, contain at least two consecutive letters. Keep parentheses containing non-Roman words: `(Figure 1)` must not lose its environment name (Codex #53). Counting letters alone misses multi-letter Roman panel IDs `(ii)` `(iii)`; LaTeXML uses parentheses for identifiers, not environment names (`Definition 1.2 (Hall set)` retains Definition and still translates). Evidence: all 1241 `.ltx_tag` across 12 fixtures: 246 theorem tags all resemble “Definition 1”, 43 table tags “Table 1:”, 58 of 63 figure tags “Figure 1.”, 20 appendix tags “Appendix A”, 13 float tags “Algorithm 1”; conversely, only 13 of 344 equation tags contain letters (untouchable LaTeX labels such as `(let.lin)`), all letter-bearing tags among 439 section/subsection/ref tags are Roman numerals (II, III.1), and 54 note tags are footnote markers. **Never translate Roman-numbered labels**: google-gtx tests on 2026-09-05 (Codex #53) gave `Table IV:` → `表四：`, `Table X:` → `表十：`, `Part I` → `第一部分`, while references remain protected originals, breaking correspondence. Arabic numbers (`Table 4:` → `表 4：`), letter numbering (`Appendix A` → `附录A`), and parenthesized panels (`Figure 1(a)`) retained their identifiers. Google itself treats only I / V / X / L / M as numbers, and single C / D as letters; `ROMAN_ID` follows this. For compound numbering, inspect the first part (`Table IV.1` → 表四.1; both `IV.1` / `IV-A` are Roman), case-insensitively (LaTeX `\\roman`: `Table iv:` → 表四：). `fixtures-stats.ts` must also count rule hits through `classify()`, not selectors, or allowed tags are incorrectly counted as protect/tag. Papers use consistent numbering styles, so readers will not see “表 4” and “Table IV” together. Fixture result: 368 of 387 named tags translate, 19 remain protected (5 panel labels + 13 Roman-numbered tables + `Part I`). Bump `RULES_VERSION` (cache key), now 0.6.2. Measured in 2609.04056v1: theorem-title blocks increased from 34 to 75; `Definition 1.2 (Hall set).` → `定义 1.2（大厅布置）。`",
+      "reason": "Exact translated labels and numbering failures document the protection rule and its evidence.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "- **Translate description-list terms too** [Decided, 2026-09-06, Codex #18]: LaTeXML puts the term from `\\item[Compactness]` in `.ltx_tag.ltx_tag_item`. Protected tags leave `.ltx_item` with no own text, so it **never becomes a block** and the term never translates. Add `.ltx_tag_item` to `NAMED_TAGS`, using existing content checks: of 371 across 12 fixtures, only 8 contain words (`Markov categories:`, `CD categories:`, `Compactness.`, `RQ1`–`RQ5`); the other 363 are markers such as `(1)` and `•`, still void. google-web returned `RQ1` unchanged and translated `Markov categories:` as “马尔可夫分类：”, leaving identifiers intact. The snapshot delta is exactly these 8.",
+      "reason": "Recorded description-list term translation establishes identifier preservation.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "- **Use the existing contextual pipeline, not Safari's isolated line translation**. In the user's Safari comparison of a physics diagram, “Dressed sites” became “打扮的网站”, “Even sites” “甚至网站”, “String Extension” “特林扩展名”, and a lone **B** was labeled “字母b”. That is the result of sending lines without captions/sections. Send each image's lines together in one batch with caption and section context through existing providers; skip single letters, pure numbers, and identifiers using existing §6 preservation rules.",
+      "reason": "Exact diagram mistranslations preserve the evidence for contextual image translation.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "- **Visibility**: `axt:provider-status` field `engine` carries actual engine and downgrade reason (since 2026-09-06 background owns the chain; no longer in `PageStatus`). Popup polls alongside progress and explains that free terminology is less accurate than LLMs (§8.1 “weights → 重量”) and that repairing settings then restoring/retranslating returns to the preferred engine. Also `console.warn` on downgrade for e2e and user diagnosis.",
+      "reason": "Recorded weights mistranslation explains the documented fallback-quality limitation.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "- Normalize extra spaces after full stops (“。 ” → “。”).",
+      "reason": "Exact full-stop and space sequences specify translation normalization.",
+      "count": 1
+    },
+    {
+      "file": "docs/DESIGN.md",
+      "text": "`google-web` replaces planned `google-gtx` (`translate_a/single`): on 2026-09-04, translateHtml handled 150 items in 556ms with placeholders intact; gtx supports one item (RESEARCH.md §6.6). Do not integrate gtx or Microsoft edge (auth endpoint now 404, RESEARCH.md §5). Free engines serve **large regression runs** and immediate first-viewport output; LLMs remain the final translation standard because MT can render “weights” as “重量”, lacking terminology accuracy.",
+      "reason": "Recorded mistranslation of weights documents the free-engine terminology limitation.",
+      "count": 1
+    },
+    {
+      "file": "docs/RESEARCH.md",
+      "text": "2. **Our placeholders are preserved unchanged**: `Let <x id=\"1\"/> be a <t id=\"2\">connected</t> graph` → `让<x id=\"1\"/>成为<t id=\"2\">连接</t>图表`. Void and paired placeholders and all IDs remain intact, supporting the **markup path** with `preservesMarkup: true`, without needing runs fallback. DESIGN §8's default `preservesMarkup: false` for `google-gtx` needs revision.",
+      "reason": "Recorded Chinese placeholder translation output; preserves empirical markup evidence.",
+      "count": 1
+    },
+    {
+      "file": "docs/RESEARCH.md",
+      "text": "Comparison: an LLM took 190 s for a 159-block paper; this endpoint needs approximately 1 s with batches of 150. Quality is ordinary machine translation, for example \"weights\" → \"重量\". It suits large regression runs and immediate first-screen display, not replacement of LLM-quality final translations.",
+      "reason": "Chinese translation of weights demonstrates a recorded quality issue.",
+      "count": 1
+    },
+    {
+      "file": "docs/RESEARCH.md",
+      "text": "| 17 | §8.1 `chrome-builtin` preservesMarkup: false | Tests preserved HTML tags and void / paired placeholders. Change to `true`, like gtx. Base `isAvailable()` on `availability()`; when `downloadable`, call `create()` within a user gesture (popup click) to trigger download. The first download emits no progress events, and `availability()` does not change to `downloading`, so show indeterminate UI. Normalize \"。 \" in the translation | §6 |",
+      "reason": "Exact Chinese full-stop-plus-space normalization sample in historical recommendation.",
+      "count": 1
+    },
+    {
+      "file": "docs/RESEARCH.md",
+      "text": "| Four-sentence paragraph, about 90 words | 18 ms | Translated sentence by sentence with readable quality; sentences were separated by “。 ”, adding a space after the full stop that needs normalization |",
+      "reason": "Chinese full stop followed by a space is the exact normalization case observed.",
+      "count": 1
+    },
+    {
+      "file": "docs/RESEARCH.md",
+      "text": "| One plain-text sentence | 9 ms | “当图表连接时，定理 1 的证明是微不足道的。” |",
+      "reason": "Recorded Chinese plain-text translation output; empirical evidence.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/EditorialOptions.dc.html",
+      "text": "        <div style=\"font-size: 12px; color: #7a756c; font-family: 'Newsreader', serif; font-style: italic;\">「设 G 为连通图」· 412 ms · deepseek-v4-flash</div>",
+      "reason": "Sample successful translation output in the connection-test mockup.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/EditorialOptions.dc.html",
+      "text": "      <div style=\"display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid #1c1a17; font-size: 13px; min-width: 150px; justify-content: space-between;\">中文（简体）<svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#1c1a17\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m6 9 6 6 6-6\"></path></svg></div>",
+      "reason": "Native Simplified Chinese language name in a target-language selector mockup.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/EditorialPopup.dc.html",
+      "text": "          <div style=\"font-size: 14px; font-weight: 600;\">中文（简体）</div>",
+      "reason": "Native Simplified Chinese language name in a target-language selector mockup.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/Engine.dc.html",
+      "text": "        <div style=\"display: flex; align-items: center; gap: 8px; font-size: 12px; color: #7c7c89; font-weight: 600;\"><span style=\"width: 6px; height: 6px; border-radius: 50%; background: #1f8a4c;\"></span>Connected · 412 ms · 「设 G 为连通图」</div>",
+      "reason": "Sample successful translation output in the connection-test mockup.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/Engine.dc.html",
+      "text": "      <div style=\"display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border: 1px solid #e3e3e8; border-radius: 10px; min-width: 150px; font-weight: 600;\">中文（简体）<svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#7c7c89\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m6 9 6 6 6-6\"></path></svg></div>",
+      "reason": "Native Simplified Chinese language name in a target-language selector mockup.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/InstrumentOptions.dc.html",
+      "text": "        <div style=\"display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 10px; border: 1px solid #c9cfd8; border-radius: 3px; min-width: 140px;\">中文（简体）<svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#6b7280\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m6 9 6 6 6-6\"></path></svg></div>",
+      "reason": "Native Simplified Chinese language name in a target-language selector mockup.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/InstrumentOptions.dc.html",
+      "text": "        <div style=\"font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: #6b7280; display: flex; gap: 12px;\"><span style=\"color: #1f8a4c;\">OK</span><span>412 ms</span><span>deepseek-v4-flash</span><span style=\"color: #15171b;\">「设 G 为连通图」</span></div>",
+      "reason": "Sample successful translation output in the connection-test mockup.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/InstrumentPopup.dc.html",
+      "text": "        <div style=\"display: flex; align-items: center; gap: 8px;\"><span>中文（简体）</span><svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#6b7280\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m6 9 6 6 6-6\"></path></svg></div>",
+      "reason": "Native Simplified Chinese language name in a target-language selector mockup.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/Main.dc.html",
+      "text": "          <div style=\"display: flex; flex-direction: column; gap: 1px;\"><div style=\"font-size: 11px; color: #7c7c89; font-weight: 600;\">Translate to</div><div style=\"font-weight: 600;\">中文（简体）</div></div>",
+      "reason": "Native Simplified Chinese language name in a target-language selector mockup.",
+      "count": 4
+    },
+    {
+      "file": "docs/design/canvas/Prompts.dc.html",
+      "text": "      <div style=\"padding: 12px 18px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; line-height: 1.7;\">weights, 权重<br>attention head, 注意力头<br>ablation, 消融<br><span style=\"color: #c2c2ca;\">…</span></div>",
+      "reason": "Sample user glossary mappings retain their Chinese translation values.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/Reading.dc.html",
+      "text": "        <div style=\"box-sizing: border-box; padding: 12px 10px; border-radius: 10px; border: 1px solid #ececf0; display: flex; flex-direction: column; align-items: center; gap: 8px;\"><div style=\"font-size: 13px; font-family: 'Songti SC', 'Noto Serif SC', serif; text-decoration: underline dashed rgba(30,30,36,0.4); text-decoration-thickness: 2px; text-underline-offset: 3px;\">注意力就是全部</div><div style=\"font-size: 10px; color: #7c7c89; font-weight: 600;\">Thick dashed</div></div>",
+      "reason": "Translated paper sample demonstrates reading typography and underline styles.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/Reading.dc.html",
+      "text": "        <div style=\"box-sizing: border-box; padding: 12px 10px; border-radius: 10px; border: 1px solid #ececf0; display: flex; flex-direction: column; align-items: center; gap: 8px;\"><div style=\"font-size: 13px; font-family: 'Songti SC', 'Noto Serif SC', serif; text-decoration: underline dashed rgba(30,30,36,0.4); text-underline-offset: 3px;\">注意力就是全部</div><div style=\"font-size: 10px; color: #7c7c89; font-weight: 600;\">Dashed</div></div>",
+      "reason": "Translated paper sample demonstrates reading typography and underline styles.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/Reading.dc.html",
+      "text": "        <div style=\"box-sizing: border-box; padding: 12px 10px; border-radius: 10px; border: 1px solid #ececf0; display: flex; flex-direction: column; align-items: center; gap: 8px;\"><div style=\"font-size: 13px; font-family: 'Songti SC', 'Noto Serif SC', serif; text-decoration: underline wavy rgba(30,30,36,0.4); text-decoration-thickness: 2px; text-underline-offset: 3px;\">注意力就是全部</div><div style=\"font-size: 10px; color: #7c7c89; font-weight: 600;\">Thick wavy</div></div>",
+      "reason": "Translated paper sample demonstrates reading typography and underline styles.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/Reading.dc.html",
+      "text": "        <div style=\"box-sizing: border-box; padding: 12px 10px; border-radius: 10px; border: 1px solid #ececf0; display: flex; flex-direction: column; align-items: center; gap: 8px;\"><div style=\"font-size: 13px; font-family: 'Songti SC', 'Noto Serif SC', serif; text-decoration: underline wavy rgba(30,30,36,0.4); text-underline-offset: 3px;\">注意力就是全部</div><div style=\"font-size: 10px; color: #7c7c89; font-weight: 600;\">Wavy</div></div>",
+      "reason": "Translated paper sample demonstrates reading typography and underline styles.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/Reading.dc.html",
+      "text": "        <div style=\"box-sizing: border-box; padding: 12px 10px; border-radius: 10px; border: 1px solid #ececf0; display: flex; flex-direction: column; align-items: center; gap: 8px;\"><div style=\"font-size: 13px; font-family: 'Songti SC', 'Noto Serif SC', serif; text-decoration: underline; text-decoration-color: rgba(30,30,36,0.4); text-underline-offset: 3px;\">注意力就是全部</div><div style=\"font-size: 10px; color: #7c7c89; font-weight: 600;\">Solid</div></div>",
+      "reason": "Translated paper sample demonstrates reading typography and underline styles.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/Reading.dc.html",
+      "text": "        <div style=\"box-sizing: border-box; padding: 12px 10px; border-radius: 10px; box-shadow: 0 0 0 2px #b31b1b; display: flex; flex-direction: column; align-items: center; gap: 8px;\"><div style=\"font-size: 13px; font-family: 'Songti SC', 'Noto Serif SC', serif; text-decoration: underline dotted rgba(30,30,36,0.4); text-underline-offset: 3px;\">注意力就是全部</div><div style=\"font-size: 10px; color: #7c7c89; font-weight: 600;\">Dotted</div></div>",
+      "reason": "Translated paper sample demonstrates reading typography and underline styles.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/Reading.dc.html",
+      "text": "        <div style=\"font-family: 'Songti SC', 'Noto Serif SC', serif; font-size: 13px; line-height: 1.6; text-decoration: underline dotted rgba(30,30,36,0.4); text-underline-offset: 3px;\">设 <i>G</i> 为具有 <i>n</i> 个顶点、最小度为 δ 的连通图。我们证明该界对所有 δ ≥ 2 都是紧的。</div>",
+      "reason": "Translated paper sample demonstrates reading typography and underline styles.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/SoftOptions.dc.html",
+      "text": "        <div style=\"font-size: 12px; color: #7c7c89; font-weight: 500;\"><span style=\"color: #1f8a4c; font-weight: 700;\">Success</span> · 「设 G 为连通图」· 412 ms</div>",
+      "reason": "Sample successful translation output in the connection-test mockup.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/SoftOptions.dc.html",
+      "text": "      <div style=\"display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border: 1px solid #e3e3e8; border-radius: 10px; min-width: 150px; font-weight: 600;\">中文（简体）<svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#7c7c89\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"m6 9 6 6 6-6\"></path></svg></div>",
+      "reason": "Native Simplified Chinese language name in a target-language selector mockup.",
+      "count": 1
+    },
+    {
+      "file": "docs/design/canvas/SoftPopup.dc.html",
+      "text": "        <div style=\"display: flex; flex-direction: column; gap: 1px;\"><div style=\"font-size: 11px; color: #7c7c89; font-weight: 600;\">Translate to</div><div style=\"font-weight: 600;\">中文（简体）</div></div>",
+      "reason": "Native Simplified Chinese language name in a target-language selector mockup.",
+      "count": 1
+    },
+    {
+      "file": "scripts/check-language.test.mjs",
+      "text": "const punctuation = '，'",
+      "reason": "Deliberate Han or CJK-punctuation input tests rejection of unregistered engineering text.",
+      "count": 1
+    },
+    {
+      "file": "scripts/check-language.test.mjs",
+      "text": "const sample = '中文'",
+      "reason": "Deliberate Han or CJK-punctuation input tests rejection of unregistered engineering text.",
+      "count": 1
+    },
+    {
+      "file": "src/config/languages.ts",
+      "text": "  \"cmn\": \"简体中文\",",
+      "reason": "Native Simplified Chinese language name, required for language selection.",
+      "count": 1
+    },
+    {
+      "file": "src/config/languages.ts",
+      "text": "  \"cmn-Hant\": \"繁體中文\",",
+      "reason": "Native Traditional Chinese language name, required for language selection.",
+      "count": 1
+    },
+    {
+      "file": "src/config/languages.ts",
+      "text": "  \"jpn\": \"日本語\",",
+      "reason": "Native Japanese language name, required for language selection.",
+      "count": 1
+    },
+    {
+      "file": "src/config/languages.ts",
+      "text": "  \"yue\": \"粵語\",",
+      "reason": "Native Cantonese language name, required for language selection.",
+      "count": 1
+    },
+    {
+      "file": "src/config/languages.ts",
+      "text": " * - yue and cmn both map to zh, which produces Mandarin (observed yue: \"巴士站喺邊\"; zh: \"公交车站在哪里\").",
+      "reason": "Observed Cantonese and Mandarin translation outputs explain provider language-code mapping.",
+      "count": 1
+    },
+    {
+      "file": "src/core/renderer/image.ts",
+      "text": "    else if (/[⺀-鿿가-힯豈-﫿＀-￯]/.test(ch)) width += 1",
+      "reason": "Unicode character ranges used to estimate OCR text width; changing them changes layout behavior.",
+      "count": 1
+    },
+    {
+      "file": "src/core/rules/latexml.ts",
+      "text": "  const last = text.replace(/[\\s.:：。()（）]+$/, '').trim().split(/\\s+/).pop() ?? ''",
+      "reason": "Chinese punctuation is functional trailing-punctuation syntax for protected label detection.",
+      "count": 1
+    },
+    {
+      "file": "src/core/rules/latexml.ts",
+      "text": " * | `Part I` | 第一部分 |  | `Appendix C` / `D` | 附录C / 附录D |",
+      "reason": "Recorded translation outputs explain why Roman-numbered labels must remain protected.",
+      "count": 1
+    },
+    {
+      "file": "src/core/rules/latexml.ts",
+      "text": " * | `Table IV:` | 表四： |  | `Table 4:` | 表 4： |",
+      "reason": "Recorded translation outputs explain why Roman-numbered labels must remain protected.",
+      "count": 1
+    },
+    {
+      "file": "src/core/rules/latexml.ts",
+      "text": " * | `Table X:` | 表十： |  | `Appendix A` | 附录A |",
+      "reason": "Recorded translation outputs explain why Roman-numbered labels must remain protected.",
+      "count": 1
+    },
+    {
+      "file": "src/core/rules/latexml.ts",
+      "text": "// (`Table iv:` → 表四：, `Theorem ii.3` → 定理二.3), so match case-insensitively (Codex #53).",
+      "reason": "Recorded translation outputs explain why Roman-numbered labels must remain protected.",
+      "count": 1
+    },
+    {
+      "file": "src/core/rules/latexml.ts",
+      "text": "// Measured google-gtx on 2026-09-05: `Table IV.1` → 表四.1. LaTeX \\roman emits lowercase, which is localized too",
+      "reason": "Recorded translation outputs explain why Roman-numbered labels must remain protected.",
+      "count": 1
+    },
+    {
+      "file": "src/core/rules/latexml.ts",
+      "text": "const PARENTHESIZED = /[(（][^)）]*[)）]/g",
+      "reason": "ASCII and fullwidth parenthesis delimiters are functional identifier-matching syntax.",
+      "count": 1
+    },
+    {
+      "file": "src/entrypoints/background/helper.ts",
+      "text": "  return /not found|forbidden|not registered|无法找到|找不到/i.test(reason ?? '')",
+      "reason": "Localized third-party Chrome native-host errors must still match the existing error classifier.",
+      "count": 1
+    },
+    {
+      "file": "src/entrypoints/options/App.tsx",
+      "text": "        placeholder={'weights, 权重\\nattention head, 注意力头\\n# Lines starting with # are comments'}",
+      "reason": "Chinese glossary translations demonstrate valid user data; the placeholder instructions are English.",
+      "count": 1
+    },
+    {
+      "file": "src/providers/chrome-builtin.ts",
+      "text": "  return text.replace(/([。，、；：？！）」』】])[ \\t]+/g, '$1')",
+      "reason": "Functional CJK punctuation set for translation whitespace normalization.",
+      "count": 1
+    },
+    {
+      "file": "src/providers/chrome-builtin.ts",
+      "text": " * Extra spaces after CJK punctuation: the model translates sentences separately and joins them with spaces, e.g. \"。 我们\".",
+      "reason": "Exact observed punctuation and translated text demonstrate the spacing defect.",
+      "count": 1
+    },
+    {
+      "file": "src/providers/glossary.ts",
+      "text": "const SEPARATOR = /[,，\\t]/",
+      "reason": "Fullwidth comma remains a supported glossary delimiter for existing user data.",
+      "count": 1
+    },
+    {
+      "file": "tests/cache/key.test.ts",
+      "text": "    const withA = await buildCacheKey({ ...base, context: { glossary: [{ term: 'weights', translation: '权重' }] } })",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/cache/key.test.ts",
+      "text": "    const withB = await buildCacheKey({ ...base, context: { glossary: [{ term: 'weights', translation: '重量' }] } })",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/cache/store.test.ts",
+      "text": "    await Promise.all(Array.from({ length: 6 }, (_, i) => c.set(`k${i}`, `译文${i}`, 'p')))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/cache/store.test.ts",
+      "text": "    await c.set('k', '短', 'p', 0)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/cache/store.test.ts",
+      "text": "    await c.set('k', '长很多的新译文内容', 'p', 2000)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/cache/store.test.ts",
+      "text": "    expect(await c.get('k')).toBe('译文')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/cache/store.test.ts",
+      "text": "    expect(await c.get('k', 2000)).toBe('长很多的新译文内容')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/cache/store.test.ts",
+      "text": "    expect(await c.set('k', '译文', '2410.00260')).toBe(true)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/languages.test.ts",
+      "text": "    expect(label('cmn')).toBe('Simplified Mandarin Chinese (简体中文)')",
+      "reason": "Native language spelling in an English UI label; exact expectation matches the retained native-name table.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/languages.test.ts",
+      "text": "    expect(label('jpn')).toBe('Japanese (日本語)')",
+      "reason": "Native language spelling in an English UI label; exact expectation matches the retained native-name table.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "        { term: 'bias', translation: '偏'.repeat(500) },",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "        { term: 'weights', translation: '权重' },",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "        { term: 'x'.repeat(500), translation: '整篇文档被当成一条粘了进来' },",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "      preload: { margin: 1000, threshold: 0 }, fallback: { enabled: true }, glossary: [{ term: 'weights', translation: '权重' }],",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: [...at, { term: 'a', translation: '译' }] })).rejects.toThrow()",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: [{ term: '', translation: '空' }] })).rejects.toThrow()",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: [{ term: 'x', translation: '译'.repeat(201) }] })).rejects.toThrow()",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    await expect(setConfig({ ...DEFAULT_CONFIG, glossary: [{ term: 'x'.repeat(121), translation: '译' }] })).rejects.toThrow()",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    const at = Array.from({ length: 100 }, () => ({ term: 'a'.repeat(30), translation: '译'.repeat(30) }))",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    const long = Array.from({ length: 30 }, (_, i) => ({ term: `${i}`.padEnd(120, 'x'), translation: '译'.repeat(200) }))",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    const many = Array.from({ length: 201 }, (_, i) => ({ term: `t${i}`, translation: `译${i}` }))",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    const ok = Array.from({ length: 200 }, (_, i) => ({ term: `t${i}`, translation: `译${i}` }))",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    expect(c.glossary).toEqual([{ term: 'weights', translation: '权重' }])",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 2
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    expect(normalizeGlossary([...ok, { term: 'extra', translation: '多的' }])).toHaveLength(200)",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/config/storage.test.ts",
+      "text": "    expect(normalizeGlossary([{ term: 1, translation: '译' }, null, { term: 'a', translation: '甲' }])).toEqual([{ term: 'a', translation: '甲' }])",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/core/marks.test.ts",
+      "text": "    const doc = new DOMParser().parseFromString(`<div id=\"root\"><img class=\"ltx_graphics\" src=\"a.png\" id=\"g\"><div class=\"${IMG_CLASS}\" data-axt-for=\"g\"><span>标签</span></div><p class=\"${T_CLASS}\">译</p></div>`, 'text/html')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/core/marks.test.ts",
+      "text": "    const doc = new DOMParser().parseFromString(`<div><p class=\"${T_CLASS}\">译</p><div class=\"${IMG_CLASS}\"><span>标签</span></div><p class=\"ltx_p\">原文</p></div>`, 'text/html')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/core/marks.test.ts",
+      "text": "    const doc = new DOMParser().parseFromString(`<p class=\"ltx_p\">See <img class=\"ltx_graphics\" src=\"a.png\"><span class=\"${IMG_CLASS}\"><span>静态电荷</span></span> here.</p>`, 'text/html')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/core/marks.test.ts",
+      "text": "    expect(block.text).not.toContain('静态电荷')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/e2e/local-endpoint.mjs",
+      "text": "const MARK = '〖LOCAL〗'",
+      "reason": "Exact synthetic local-provider output marker used by positive and negative routing assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/extractor/context.test.ts",
+      "text": "      <p class=\"ltx_p\" data-axt-id=\"a1\">We study graphs.</p><p class=\"ltx_p axt-t\" data-axt-for=\"a1\">我们研究图。</p></div></article>`, 'text/html')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/extractor/extract.test.ts",
+      "text": "    const blocks = extract(docOf('<li class=\"ltx_item\"><span class=\"ltx_tag\">1.</span><span class=\"axt-t axt-mirror\">mirror text</span><p class=\"ltx_p\">Inner.</p><p class=\"ltx_p axt-t\">译文</p></li>'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/image/run.test.ts",
+      "text": "        return { ok: true, result: { segments: call.request.segments.map(s => ({ id: s.id, text: '译' })), provider: 'mock' }, cached: 0 }",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/image/run.test.ts",
+      "text": "      result: { segments: call.request.segments.map(s => ({ id: s.id, text: s.text === 'Static charge' ? '静态电荷' : s.text })), provider: 'mock' },",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/image/run.test.ts",
+      "text": "      translate: async (call: { request: { segments: { id: string; text: string }[] } }) => ({ ok: true as const, result: { segments: call.request.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' }, cached: 0 }),",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 2
+    },
+    {
+      "file": "tests/image/run.test.ts",
+      "text": "      translate: async (call: { request: { segments: { id: string; text: string }[] } }) => ({ ok: true, result: { segments: call.request.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' }, cached: 0 }),",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/image/run.test.ts",
+      "text": "    expect(Array.from(overlay.children).map(s => s.textContent)).toEqual(['译:Static charge', '译:Even sites'])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/image/run.test.ts",
+      "text": "    expect(doc.querySelector(`.${IMG_CLASS} > span`)!.textContent).toBe('译:ab < cd & ef')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/image/run.test.ts",
+      "text": "    expect(spans.map(s => s.textContent)).toEqual(['静态电荷']) // \"Even sites\" is unchanged, so no label is drawn.",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/image/run.test.ts",
+      "text": "    result: { segments: call.request.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' },",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/pipeline/run.test.ts",
+      "text": "      if (seg.id === 'p2' && !corrupted) { corrupted = true; return '坏了' }",
+      "reason": "Deliberately malformed Chinese translation result omitting placeholders, used to exercise validation fallback.",
+      "count": 1
+    },
+    {
+      "file": "tests/pipeline/run.test.ts",
+      "text": "      if (seg.id === 'p2' && req.cache?.renderPath === 'markup') return '坏了'",
+      "reason": "Deliberately malformed Chinese translation result omitting placeholders, used to exercise validation fallback.",
+      "count": 1
+    },
+    {
+      "file": "tests/pipeline/session-guard.test.ts",
+      "text": "          return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' }",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/pipeline/session-guard.test.ts",
+      "text": "        translate: async r => { calls.push(r.segments.map(s => s.id)); return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' } },",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/pipeline/session-guard.test.ts",
+      "text": "      return { ok: true, result: { segments: message.request!.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' }, cached: 0 }",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/pipeline/session-guard.test.ts",
+      "text": "    const { service, calls } = await serviceWith({ getMany: async () => ['甲'], putMany: async () => undefined })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/pipeline/session-guard.test.ts",
+      "text": "    const { service, calls } = await serviceWith({ getMany: async keys => keys.map((_, i) => (i === 0 ? '甲' : null)), putMany: async () => undefined })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/clone.test.ts",
+      "text": "      + '<span class=\"axt-t\" data-axt-for=\"n1\">脚注。</span></span>',",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/clone.test.ts",
+      "text": "    const doc = docOf('<span class=\"ltx_text\" id=\"s\">外<em>内</em></span>')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/clone.test.ts",
+      "text": "    const doc = docOf('<span id=\"s\" class=\"ltx_note\" data-keep=\"1\"><a id=\"a\" href=\"/x\">链接</a></span>')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/rehydrate.test.ts",
+      "text": "    const html = htmlOf(rehydrate('<x id=\"2\"/> 先于 <x id=\"1\"/>', b, document))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/rehydrate.test.ts",
+      "text": "    expect(html).toBe('<math class=\"ltx_Math\"><mi>b</mi></math> 先于 <math class=\"ltx_Math\"><mi>a</mi></math>')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/runs.test.ts",
+      "text": "    expect(holder.textContent).toBe('译[We follow it.]')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/runs.test.ts",
+      "text": "    expect(holder.textContent).toContain('译[ now.]')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/runs.test.ts",
+      "text": "    expect(holder.textContent).toContain('译[ too.]')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/runs.test.ts",
+      "text": "    expect(holder.textContent).toContain('译[Read ]')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/runs.test.ts",
+      "text": "    expect(holder.textContent).toContain('译[See ]')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/runs.test.ts",
+      "text": "    expect(htmlOf(joinRuns(['甲 < 乙 ', ' 丙'], layout, b, document))).toBe('甲 &lt; 乙 <math class=\"ltx_Math\"><mi>x</mi></math> 丙')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/runs.test.ts",
+      "text": "  const render = (html: string, translate: (r: string) => string = r => `译[${r}]`) => {",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/serialize.test.ts",
+      "text": "    const li = el('<li class=\"ltx_item\">Lead <p class=\"ltx_p\">inner</p><p class=\"ltx_p axt-t\">译文</p><span class=\"axt-t axt-mirror\">mirror text</span></li>')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/validate.test.ts",
+      "text": "      '令 <x id=\"1\"/> 为 <t id=\"2\">粗体</t>。',",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/validate.test.ts",
+      "text": "      '令 <x id=\"1\"/> 为 <t id=\"2\">粗体</t>，见 <x id=\"3\"/>。',",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/validate.test.ts",
+      "text": "    expect(reason('<x id=\"3\"/> 之后，<t id=\"2\">粗体</t> 与 <x id=\"1\"/>')).toBe('ok')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/validate.test.ts",
+      "text": "    expect(reason('令 <x id=\"1\"/> 为 <t id=\"2\">粗体</t>。')).toBe('missing')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/validate.test.ts",
+      "text": "    expect(reason('令 <x id=\"1\"/> 为 <t id=\"2\">粗体</t>，见 <x id=\"3\"/>。')).toBe('ok')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/validate.test.ts",
+      "text": "    expect(validate('<t id=\"1\">甲 <t id=\"2\">乙</t></t>', b).ok).toBe(true)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/validate.test.ts",
+      "text": "    expect(validate('<t id=\"2\">乙</t><t id=\"1\">甲</t>', b).ok).toBe(true)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/validate.test.ts",
+      "text": "    expect(validate('一段 <x id=\"1\"/> 译文', derived)).toMatchObject({ ok: false, reason: 'unknown' })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/protector/validate.test.ts",
+      "text": "    expect(validate('一段纯译文', derived).ok).toBe(true)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/chrome-builtin.test.ts",
+      "text": "    const { api } = fakeApi({ translate: () => '第一句。 第二句。' })",
+      "reason": "Chinese punctuation and spacing normalization input/output; exact Unicode characters are essential.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/chrome-builtin.test.ts",
+      "text": "    expect(normalizeSpacing('图连通时，定理 1 显然。 证明从略。')).toBe('图连通时，定理 1 显然。证明从略。')",
+      "reason": "Chinese punctuation and spacing normalization input/output; exact Unicode characters are essential.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/chrome-builtin.test.ts",
+      "text": "    expect(normalizeSpacing('甲、 乙； 丙： 丁？ 戊！ 己')).toBe('甲、乙；丙：丁？戊！己')",
+      "reason": "Chinese punctuation and spacing normalization input/output; exact Unicode characters are essential.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/chrome-builtin.test.ts",
+      "text": "    expect(normalizeSpacing('见 <x id=\"1\"/>。 又见 <t id=\"2\">图</t>。')).toBe('见 <x id=\"1\"/>。又见 <t id=\"2\">图</t>。')",
+      "reason": "Chinese punctuation and spacing normalization input/output; exact Unicode characters are essential.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/chrome-builtin.test.ts",
+      "text": "    expect(result.segments[0]?.text).toBe('第一句。第二句。')",
+      "reason": "Chinese punctuation and spacing normalization input/output; exact Unicode characters are essential.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/fallback.test.ts",
+      "text": "const ok = (id: string): TranslateMessageResponse => ({ ok: true, result: { segments: [{ id: 's1', text: `${id} 译文` }], provider: id }, cached: 0 })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "      { line: 3, text: ', 偏置', reason: 'Source term is empty' },",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "      { term: 'bias', translation: '偏置' },",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 2
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "      { term: 'i.i.d.', translation: '独立同分布' },",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "      { term: 'logits', translation: '对数几率' },",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "      { term: 'loss', translation: '损失' },",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "      { term: 'prior', translation: '先验' },",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "      { term: 'weights', translation: '权重' },",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 3
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    const { entries } = parseGlossary('i.i.d., 独立同分布, 简称 iid')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    const { entries } = parseGlossary('weights, 重量\\nbias, 偏置\\nweights, 权重')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    const { entries, issues } = parseGlossary('# 深度学习\\nweights, 权重\\n\\n   \\n# 尾注\\n')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    const { entries, issues } = parseGlossary('kernel, 核; 统计学中称核函数')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    const { entries, issues } = parseGlossary('weights, 权重\\nbias\\n, 偏置\\nloss,   ')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    const { entries, issues } = parseGlossary('weights, 权重\\nbias，偏置\\nloss\\t损失\\nlogits, 对数几率\\nprior, 先验')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    const { issues } = parseGlossary('weights, 权重\\nbias')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    expect(entries).toEqual([{ term: 'i.i.d.', translation: '独立同分布, 简称 iid' }])",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    expect(entries).toEqual([{ term: 'kernel', translation: '核; 统计学中称核函数' }])",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    expect(entries).toEqual([{ term: 'weights', translation: '权重' }])",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 2
+    },
+    {
+      "file": "tests/providers/glossary.test.ts",
+      "text": "    expect(text).toBe('weights, 权重\\ni.i.d., 独立同分布')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/google-web.test.ts",
+      "text": "    const fetch = vi.fn(async () => okResponse(['一', '二', '三']))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/google-web.test.ts",
+      "text": "    const short = createGoogleWebProvider({ fetch: (async () => okResponse(['只有一条'])) as unknown as typeof globalThis.fetch })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/google-web.test.ts",
+      "text": "    const translated = '让 <x id=\"1\"/> 是一个 <t id=\"2\">连通的</t> 图。'",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/google-web.test.ts",
+      "text": "    expect(result.segments).toEqual([{ id: 's0', text: '一' }, { id: 's1', text: '二' }, { id: 's2', text: '三' }])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/openai-compat.test.ts",
+      "text": "    const model = modelReturning({ segments: [{ id: 's1', text: '你好 <x id=\"1\"/>' }, { id: 's2', text: '世界' }] }, o => { captured = o })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/openai-compat.test.ts",
+      "text": "    const model = modelReturning({ segments: [{ id: 's1', text: '你好 <x id=\"1\"/>' }, { id: 's2', text: '世界' }] }, options => { sent = JSON.stringify(options) })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/openai-compat.test.ts",
+      "text": "    expect(result).toEqual({ segments: [{ id: 's1', text: '你好 <x id=\"1\"/>' }, { id: 's2', text: '世界' }], provider: 'openai-compat', model: 'test/model' })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/prompt.test.ts",
+      "text": "    const withGlossary = { ...request, context: { ...request.context, glossary: [{ term: 'weights', translation: '权重' }, { term: 'bias', translation: '偏置' }] } }",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/prompt.test.ts",
+      "text": "    const withGlossary = { ...request, context: { glossary: [{ term: 'graph', translation: '图' }] } }",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/prompt.test.ts",
+      "text": "    expect(buildPrompts(withGlossary, prompts).prompt).toContain('graph -> 图')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/prompt.test.ts",
+      "text": "    expect(buildPrompts({ ...request, context: { glossary: [{ term: 'graph', translation: '图' }] } }, DEFAULT_PROMPTS_CONFIG).prompt).toContain('graph -> 图')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/prompt.test.ts",
+      "text": "    expect(formatGlossary([{ term: 'graph', translation: '图' }])).toBe('graph -> 图')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/prompt.test.ts",
+      "text": "    expect(prompt).toContain('bias -> 偏置')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/prompt.test.ts",
+      "text": "    expect(prompt).toContain('weights -> 权重')",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/request/concurrency-cap.test.ts",
+      "text": "        return attempt++ === 0 ? [] : items.map(i => `译:${i.text}`)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/request/concurrency-cap.test.ts",
+      "text": "      executeBatch: async (items, meta) => { seen.push(meta.startedAt); return items.map(i => `译:${i.text}`) },",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/request/concurrency-cap.test.ts",
+      "text": "      executeBatch: async items => { executed++; return items.map(i => `译:${i.text}`) },",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/request/concurrency-cap.test.ts",
+      "text": "      executeIndividual: async (item, meta) => { seen.push(meta.startedAt); return `译:${item.text}` },",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/request/concurrency-cap.test.ts",
+      "text": "      executeIndividual: async item => { individual++; return `译:${item.text}` },",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/request/concurrency-cap.test.ts",
+      "text": "    expect(await batch.enqueue({ text: 'A' })).toBe('译:A')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 2
+    },
+    {
+      "file": "tests/providers/request/concurrency-cap.test.ts",
+      "text": "    expect(await result).toBe('译:A')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 3
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "        return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' }",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 2
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "        segments: r.segments.map(s => ({ ...s, text: s.id === 'a' ? '译文 <x id=\"7\"/>' : `译:${s.text}` })),",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "        segments: r.segments.map(s => ({ ...s, text: s.id === 'a' ? '译文丢了占位符' : `译:${s.text}` })),",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "      getProvider: async () => provider(async r => ({ segments: r.segments.map(s => ({ ...s, text: '译' })), provider: 'mock' })),",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "      getProvider: async () => provider(async r => { calls++; return { segments: r.segments.map(s => ({ ...s, text: `译${calls}:${s.text}` })), provider: 'mock' } }),",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "      getProvider: async () => provider(async r => { calls.push(r.segments.map(s => s.id)); return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' } }),",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 2
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "      { id: 'a', text: '公式 <x id=\"1\"/> 见 <t id=\"2\">此处</t>。' },",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "      { id: 'b', text: '公式 <x id=\"1\"/>。' },",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "    const all = Promise.all([service.translate(withContext(['a'], '第一节')), service.translate(withContext(['b'], '第二节'))])",
+      "reason": "Chinese paper section-title context fixture for contextual batching boundaries.",
+      "count": 2
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "    expect(again.ok && again.result.segments[0]?.text).toBe('译2:text-a')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "    expect(res.ok && res.result.segments.map(s => s.text)).toEqual(['译文 <x id=\"7\"/>', '译:text-b'])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "    expect(second.ok && second.result.segments[2]?.text).toBe('译:text-c')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "    expect(third.ok && third.result.segments[0]?.text).toBe('译2:text-a')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "    expect(writes.flat().map(w => w.translation)).toEqual(['译:text-a', '译:text-b'])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "    expect(writes[0]!.map(w => w.translation)).toEqual(['译:text-b'])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/translate-service.test.ts",
+      "text": "    expect(writes[0]!.map(w => w.translation)).toEqual(['译:公式 <x id=\"1\"/>。'])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/transport.test.ts",
+      "text": "    const t = await withChain([mockProvider(async r => ({ segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' }))])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/transport.test.ts",
+      "text": "    expect(await t.translate({ request: req })).toEqual({ ok: true, result: { segments: [{ id: 'a', text: '译:x' }], provider: 'mock' }, cached: 0 })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/transport.test.ts",
+      "text": "    expect(chainConfigChanged(base, { ...base, glossary: [{ term: 'token', translation: '词元' }] })).toBe(false)",
+      "reason": "Chinese glossary data or serialized prompt/glossary expectation; preserves parsing, sizing, migration, and cache identity semantics.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/transport.test.ts",
+      "text": "    expect(first).toEqual({ ok: true, result: { segments: [{ id: 'a', text: '译:x' }, { id: 'b', text: '译:y' }], provider: 'mock' }, cached: 0 })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/transport.test.ts",
+      "text": "    expect(second).toEqual({ ok: true, result: { segments: [{ id: 'a', text: '译:x' }, { id: 'b', text: '译:y' }], provider: 'mock' }, cached: 2 })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/providers/transport.test.ts",
+      "text": "    return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock', model: 'm' }",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/a11y.test.ts",
+      "text": "    const doc = docOf('<div class=\"ltx_para\"><p class=\"ltx_p\" data-axt-id=\"p1\">A.</p><p class=\"ltx_p axt-t\" data-axt-for=\"p1\">甲。</p><table class=\"ltx_equation\"><tbody><tr><td>x</td></tr></tbody></table></div>')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/a11y.test.ts",
+      "text": "    const node = renderText(block!, frag(doc, '你好。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 3
+    },
+    {
+      "file": "tests/renderer/a11y.test.ts",
+      "text": "    renderText(block!, frag(doc, 'こんにちは。'))",
+      "reason": "Japanese translation output verifies accessible translation language metadata.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/anchors.test.ts",
+      "text": "    for (const b of blocks) renderText(b as TextBlock, frag(doc, '译文'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/anchors.test.ts",
+      "text": "    renderText(blocks.find(b => b.el === cap) as TextBlock, frag(doc, '图 2：一张图。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/anchors.test.ts",
+      "text": "    renderText(blocks.find(b => b.el === cap) as TextBlock, frag(doc, '图 6。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/anchors.test.ts",
+      "text": "    renderText(blocks.find(b => b.el === cap) as TextBlock, frag(doc, '图 6：各行。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/anchors.test.ts",
+      "text": "    renderText(blocks.find(b => b.el === target) as TextBlock, frag(doc, '译文。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/anchors.test.ts",
+      "text": "  renderText(block, frag(doc, '目标段落。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/authors.test.ts",
+      "text": "    const fragment = rehydrate(block.text.replace('University of Southern California', '南加州大学'), block, doc)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/authors.test.ts",
+      "text": "    const fragment = rehydrate(block.text.replace('Vinayak Arannil', '维纳亚克·阿兰尼尔'), block, doc)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/authors.test.ts",
+      "text": "    const node = renderText(first!, frag(doc, '维纳亚克·阿兰尼尔'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/authors.test.ts",
+      "text": "    expect(holder.innerHTML).toBe('<span class=\"ltx_contact_name\">Affiliation:&nbsp;</span>南加州大学 ')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/authors.test.ts",
+      "text": "    expect(holder.innerHTML).toBe('维纳亚克·阿兰尼尔<sup class=\"ltx_sup\">*</sup> ')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/authors.test.ts",
+      "text": "    for (const block of nameBlocks(doc)) renderText(block, frag(doc, `译:${block.el.textContent}`))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/failed.test.ts",
+      "text": "    renderTable(block as TableBlock, new Map([[cell, frag(doc, '甲')]]))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    const node = renderImage(target, [label('译')])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    const node = renderImage(target, [label('静态电荷', 'Static charge'), label('过程', 'Processes', { x: 0.6, y: 0.03, w: 0.26, h: 0.035 })])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    const node = renderImage(target, [label('静态电荷', 'Static charge')])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    const one = labelStyle(label('静态电荷', 'Static charge', { h: 0.05, w: 0.3, lines: 1 }))",
+      "reason": "CJK image-label width/font-size fixture; preserving character counts preserves geometry assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    const two = labelStyle(label('动态 电荷', 'Dynamical charge', { h: 0.05, w: 0.3, lines: 2 }))",
+      "reason": "CJK image-label width/font-size fixture; preserving character counts preserves geometry assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    expect(emWidth('静态')).toBeCloseTo(2)",
+      "reason": "CJK image-label width/font-size fixture; preserving character counts preserves geometry assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    expect(overlayOf(target)!.textContent).toBe('二')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    expect(spans[0]!.textContent).toBe('静态电荷')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    renderImage(target, [label('一')])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    renderImage(target, [label('二')])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/image.test.ts",
+      "text": "    renderImage(target, [label('译')])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/mirror.test.ts",
+      "text": "          <figcaption class=\"ltx_caption ${T_CLASS}\" data-axt-for=\"2\">(a) 面板</figcaption>",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/mirror.test.ts",
+      "text": "      <div class=\"ltx_para\"><p class=\"ltx_p\">x</p><p class=\"ltx_p ${T_CLASS}\" data-axt-for=\"1\">译</p></div>",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/mirror.test.ts",
+      "text": "      <div class=\"ltx_para\"><p class=\"ltx_p\">x</p><p class=\"ltx_p ${T_CLASS}\" data-axt-for=\"1\">译</p></div>`)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/mirror.test.ts",
+      "text": "      renderImage({ id: el.id, el }, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text: '静态电荷' }])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/mirror.test.ts",
+      "text": "    for (const b of blocks) renderText(b as TextBlock, frag(doc, '译文'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/mirror.test.ts",
+      "text": "    renderText(blocks[0] as TextBlock, frag(doc, '译文'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 2
+    },
+    {
+      "file": "tests/renderer/mirror.test.ts",
+      "text": "    renderText(blocks[0] as TextBlock, frag(document, '译文'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/mirror.test.ts",
+      "text": "  if (first) renderText(first, frag(doc, '译文'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/notes.test.ts",
+      "text": "    expect(box.textContent!.indexOf('English')).toBeLessThan(box.textContent!.indexOf('中文'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/notes.test.ts",
+      "text": "    expect(box.textContent).toContain('中文脚注')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/notes.test.ts",
+      "text": "    expect(copy(doc).querySelector('.axt-note-t')!.textContent).toContain('中文脚注')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/notes.test.ts",
+      "text": "    expect(copy(doc).querySelector('.axt-note-t')!.textContent).toContain('修订')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/notes.test.ts",
+      "text": "    expect(source.textContent).toContain('中文脚注')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/notes.test.ts",
+      "text": "    expect(sourceNote(doc).querySelector(`.${T_CLASS}`)!.textContent).toContain('中文脚注')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/notes.test.ts",
+      "text": "    sourceNote(doc).querySelector(`.${T_CLASS}`)!.append('（修订）')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/notes.test.ts",
+      "text": "  <p class=\"ltx_p ${T_CLASS}\" data-axt-for=\"p1\">正文<span class=\"ltx_note ltx_role_footnote\"><sup class=\"ltx_note_mark\">1</sup",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/notes.test.ts",
+      "text": "const withNote = (translated = true, zh = '中文脚注') => docOf(`",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/pair-margins.test.ts",
+      "text": "      <img src=\"a.png\"><figcaption class=\"ltx_caption ${T_CLASS}\">图 1</figcaption></figure></article>`",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/pair-margins.test.ts",
+      "text": "      ><span class=\"c ${T_CLASS}\">甲</span><span class=\"c ${T_CLASS}\">乙</span></article>`",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/pair-margins.test.ts",
+      "text": "    ><span class=\"c aff\">Univ</span><span class=\"c aff ${T_CLASS}\">大学</span",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/pair-margins.test.ts",
+      "text": "    ><span class=\"c mail\">a@b</span><span class=\"c mail ${T_CLASS}\">甲</span",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/pair-margins.test.ts",
+      "text": "    const again = docOf('<div class=\"ltx_para\"><p class=\"ltx_p\" style=\"margin-top: 8px\">A</p><p class=\"ltx_p axt-t\" data-axt-for=\"a\">译</p></div>')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/pair-margins.test.ts",
+      "text": "    const doc = docOf('<div class=\"ltx_para\"><p class=\"ltx_p\" style=\"margin-top: 8px\">A</p><p class=\"ltx_p axt-t\" data-axt-for=\"a\">译</p></div>')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/pending.test.ts",
+      "text": "    const node = renderText(p, frag(doc, '文本。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/prep.test.ts",
+      "text": "    renderImage(target, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text: '静态电荷' }])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/prep.test.ts",
+      "text": "    renderText(blocks.find(b => b.el.id === 'c1') as TextBlock, frag(doc, '图 1。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/prep.test.ts",
+      "text": "    renderText(byId('c1'), frag(doc, '图 1。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 6
+    },
+    {
+      "file": "tests/renderer/prep.test.ts",
+      "text": "    renderText(byId('c2'), frag(doc, '图 2。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 3
+    },
+    {
+      "file": "tests/renderer/prep.test.ts",
+      "text": "    renderText(byId('p1'), frag(doc, '文。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 2
+    },
+    {
+      "file": "tests/renderer/prep.test.ts",
+      "text": "    renderText(c1, frag(doc, '图 1。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/prep.test.ts",
+      "text": "    renderText(c2, frag(doc, '图 2。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "      const node = renderText(b, frag(doc, '译'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    const node = renderText(b!, frag(doc, '你好<span class=\"ltx_note\" data-axt-id=\"n1\" data-axt-state=\"pending\">x</span>'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    const node = renderText(b!, frag(doc, '注意力'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    const node = renderText(b1!, frag(doc, '你好 <em>x</em>。'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    const tags = blocks.map(b => renderText(b, frag(doc, '译')).tagName)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    expect(doc.getElementById('outer')!.textContent).toContain('致谢')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    expect(node.innerHTML).toBe('你好 <em>x</em>。')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    expect(nodes[0]?.textContent).toBe('第二版')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    expect(render('The quick brown fox.', '敏捷的棕色狐狸。').hasAttribute(IDENTITY_ATTR)).toBe(false)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    renderText(b!, frag(doc, '第一版'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    renderText(b!, frag(doc, '第二版'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/render.test.ts",
+      "text": "    renderText(innerBlock, frag(doc, '致谢'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/restore.test.ts",
+      "text": "      else renderTable(b as TableBlock, new Map([[(b as TableBlock).cells[0]!.el, frag(document, '模型')]]))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/restore.test.ts",
+      "text": "      if (b.kind === 'text') renderText(b as TextBlock, frag(document, '译'))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/restore.test.ts",
+      "text": "    renderImage({ id: 'g1', el }, [{ x: 0, y: 0, w: 0.2, h: 0.05, lines: 1, source: 'Cap', text: '说明' }])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/side-layout.test.ts",
+      "text": "      + `<figcaption class=\"ltx_caption ${T_CLASS}\" data-axt-for=\"c1\">表 1</figcaption>`",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/side-layout.test.ts",
+      "text": "      + `<p class=\"ltx_p\" data-axt-id=\"p1\">x</p><p class=\"ltx_p ${T_CLASS}\" data-axt-for=\"p1\">甲</p></div></div>`)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/side-layout.test.ts",
+      "text": "      + `<table class=\"ltx_tabular ${T_CLASS}\" data-axt-for=\"t1\"><tbody><tr><td class=\"ltx_td\">甲</td></tr></tbody></table>`",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/side-layout.test.ts",
+      "text": "      ><span class=\"ltx_p ${T_CLASS}\" data-axt-for=\"1\">脚注译文</span></span></span></span></div>`)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/side-layout.test.ts",
+      "text": "    node.textContent = '译文'",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "        <figcaption class=\"ltx_caption ${T_CLASS}\" data-axt-for=\"p1\">(a) 面板</figcaption>",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "      <figcaption class=\"ltx_caption ${T_CLASS}\" data-axt-for=\"b1\">说明</figcaption></figure>`)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "      <figcaption class=\"ltx_caption ${T_CLASS}\" data-axt-for=\"c1\">表 1</figcaption></figure>`)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "      <figcaption class=\"ltx_caption ${T_CLASS}\" data-axt-for=\"c1\">表 1：<math>x</math></figcaption></figure>`)",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "      <figcaption class=\"ltx_caption\">cap A</figcaption><figcaption class=\"ltx_caption ${T_CLASS}\" data-axt-for=\"c1\">说明 A</figcaption>",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "      <table class=\"ltx_tabular ${T_CLASS}\" data-axt-for=\"t1\"><tbody><tr><td>甲</td></tr></tbody></table>",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 2
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "      expect(clone.querySelector(`.${IMG_CLASS}`)!.textContent).toBe('静态电荷')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "    const overlayOn = (doc: Document, text = '静态电荷') => {",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "    doc.querySelector(`figure[${SPLIT_ATTR}] .ltx_caption.${T_CLASS}`)!.textContent = '图 1. 另一种译法'",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "    done.textContent = '说明 B'",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "    expect(clone.textContent).toContain('图 1. 译文')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "    expect(clone.textContent).toContain('说明 A')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "    expect(doc.querySelector(`.${SPLIT_CLASS}`)!.textContent).toContain('另一种译法')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "    expect(doc.querySelector(`.${SPLIT_CLASS}`)!.textContent).toContain('注')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "    expect(mixed.querySelector(`.${SPLIT_CLASS}`)!.textContent).toContain('说明 B')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "    t.textContent = '注'",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/split-figures.test.ts",
+      "text": "  <figcaption class=\"ltx_caption ${T_CLASS}\" data-axt-for=\"c1\">图 1. 译文</figcaption>${extra}",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table-fit.test.ts",
+      "text": "    + `<table class=\"ltx_tabular ${T_CLASS}\" data-axt-for=\"T\"><tbody><tr><td class=\"ltx_td\">甲</td></tr></tbody></table></figure>`",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table.test.ts",
+      "text": "      [t.cells[0]!.el, frag(doc, '模型')],",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table.test.ts",
+      "text": "      [t.cells[2]!.el, frag(doc, '基线')],",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table.test.ts",
+      "text": "    const node = renderTable(t, new Map([[t.cells[0]!.el, frag(doc, '模型')]]))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table.test.ts",
+      "text": "    const node = renderTable(t, new Map([[t.cells[0]!.el, outer], [t.cells[1]!.el, frag(doc, '甲')], [t.cells[2]!.el, frag(doc, '乙')]]))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table.test.ts",
+      "text": "    const outer = frag(doc, '外层<table class=\"ltx_tabular\"><tbody><tr><td class=\"ltx_td\">Alpha</td><td class=\"ltx_td\">Beta</td></tr></tbody></table>')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table.test.ts",
+      "text": "    expect(clones[0]?.querySelector(TABLE_RULES.cell)?.textContent).toBe('二')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table.test.ts",
+      "text": "    expect(tds.map(td => td.innerHTML)).toEqual(['模型', '91.2', '基线', '<math class=\"ltx_Math\"><mi>x</mi></math>'])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table.test.ts",
+      "text": "    expect(tds.map(td => td.textContent)).toEqual(['外层甲乙', '甲', '乙'])",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table.test.ts",
+      "text": "    renderTable(t, new Map([[t.cells[0]!.el, frag(doc, '一')]]))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/renderer/table.test.ts",
+      "text": "    renderTable(t, new Map([[t.cells[0]!.el, frag(doc, '二')]]))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/rules/latexml.test.ts",
+      "text": "      for (const label of ['(a)', '(ii)', '(iii)', '(iv)', '（乙）', '(A.1)']) {",
+      "reason": "Unicode rule boundary fixture: Chinese panel identifier or Chinese text must retain its classification.",
+      "count": 1
+    },
+    {
+      "file": "tests/rules/latexml.test.ts",
+      "text": "    expect(hasTranslatableText(el('<p class=\"ltx_p\">证明。</p>'))).toBe(true)",
+      "reason": "Unicode rule boundary fixture: Chinese panel identifier or Chinese text must retain its classification.",
+      "count": 1
+    },
+    {
+      "file": "tests/scheduler/title.test.ts",
+      "text": "    const t2 = translateTitle(doc2, { translate: async () => { current = false; return '另一篇' }, isCurrent: () => current })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/scheduler/title.test.ts",
+      "text": "    const title = translateTitle(doc, { translate: async text => { calls.push(text); return '一篇论文' }, isCurrent: () => true })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/scheduler/title.test.ts",
+      "text": "    const title = translateTitle(doc, { translate: async text => { calls.push(text); return `译:${text}` }, isCurrent: () => true })",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/scheduler/title.test.ts",
+      "text": "    expect(doc.title).toBe('一篇论文')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/scheduler/title.test.ts",
+      "text": "    expect(doc.title).toBe('译:A Paper')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/scheduler/title.test.ts",
+      "text": "    expect(doc.title).toBe('译:Changed by page')",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    },
+    {
+      "file": "tests/shared/digest.test.ts",
+      "text": "    const text = 'Static charge — 静态电荷'",
+      "reason": "Mixed English/Chinese UTF-8 hash vector; exact bytes are part of the test.",
+      "count": 1
+    },
+    {
+      "file": "tests/shared/transport.test.ts",
+      "text": "    const { sent, send } = recorder(() => ({ ok: true, result: { segments: [{ id: 'a', text: '甲' }], provider: 'mock' }, cached: 0 }))",
+      "reason": "Chinese translation input/output fixture; preserves source-to-translation and exact DOM/cache assertions.",
+      "count": 1
+    }
+  ]
+}

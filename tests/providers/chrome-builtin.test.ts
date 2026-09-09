@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { BUILTIN_MAX_ITEMS, createChromeBuiltinProvider, normalizeSpacing, type TranslatorApi, type TranslatorSession } from '@/providers/chrome-builtin'
 import { ProviderError, type TranslateRequest } from '@/providers/types'
 
-/** 假的 Translator 全局：happy-dom 里没有这个 API，行为照 RESEARCH §6 的实测 */
+/** Fake Translator global: happy-dom lacks this API; behavior follows measurements in RESEARCH §6 */
 function fakeApi(options: {
   availability?: string
   translate?: (input: string) => Promise<string> | string
@@ -37,40 +37,40 @@ const req = (texts: string[], signal?: AbortSignal): TranslateRequest => ({
 const named = (name: string, message = name) => Object.assign(new Error(message), { name })
 
 describe('createChromeBuiltinProvider', () => {
-  it('形状：markup 路径、内置类别、本地批次参数', () => {
+  it('declares markup support, built-in category, and local batching limits', () => {
     const { api } = fakeApi()
     const provider = createChromeBuiltinProvider('cmn', { translator: api })
     expect(provider.id).toBe('chrome-builtin')
     expect(provider.kind).toBe('builtin')
-    expect(provider.preservesMarkup).toBe(true) // RESEARCH §6.2 实测保留标签与占位符
+    expect(provider.preservesMarkup).toBe(true) // RESEARCH §6.2 verified that tags and placeholders are preserved.
     expect(provider.rateLimit).toEqual({ rate: 20, capacity: 20 })
   })
 
-  it('只有 available 才算可用：downloadable / downloading 需要用户手势，链上拿不到', async () => {
+  it('only available is usable: downloadable and downloading require a user gesture unavailable to the chain', async () => {
     for (const [availability, expected] of [['available', true], ['downloadable', false], ['downloading', false], ['unavailable', false]] as const) {
       const { api } = fakeApi({ availability })
       expect(await createChromeBuiltinProvider('cmn', { translator: api }).isAvailable()).toBe(expected)
     }
   })
 
-  it('浏览器没有这个 API 时不可用，也不会抛', async () => {
+  it('a browser without the API reports unavailable without throwing', async () => {
     const provider = createChromeBuiltinProvider('cmn', { translator: null })
     expect(await provider.isAvailable()).toBe(false)
     await expect(provider.translate(req(['x']))).rejects.toMatchObject({ kind: 'no-key' })
   })
 
-  it('availability 自己抛错时按不可用处理，不让链挂在这一步', async () => {
+  it('availability errors report unavailable without breaking chain construction', async () => {
     const api: TranslatorApi = { availability: async () => { throw new Error('boom') }, create: async () => ({ translate: async () => '' }) }
     expect(await createChromeBuiltinProvider('cmn', { translator: api }).isAvailable()).toBe(false)
   })
 
-  it('目标语言从 ISO 639-3 转成 BCP-47 交给 API', async () => {
+  it('converts target language from ISO 639-3 to BCP-47 for the API', async () => {
     const { api, state } = fakeApi()
     await createChromeBuiltinProvider('cmn-Hant', { translator: api }).translate(req(['x']))
     expect(state.lastCreate).toMatchObject({ sourceLanguage: 'en', targetLanguage: 'zh-TW' })
   })
 
-  it('一批多条逐条翻译，按 id 归位', async () => {
+  it('translates batch items individually and associates results by ID', async () => {
     const { api, state } = fakeApi()
     const result = await createChromeBuiltinProvider('cmn', { translator: api }).translate(req(['one', 'two', 'three']))
     expect(state.translated).toEqual(['one', 'two', 'three'])
@@ -78,13 +78,13 @@ describe('createChromeBuiltinProvider', () => {
     expect(result.provider).toBe('chrome-builtin')
   })
 
-  it('空请求不建会话', async () => {
+  it('empty requests create no session', async () => {
     const { api, state } = fakeApi()
     expect((await createChromeBuiltinProvider('cmn', { translator: api }).translate(req([]))).segments).toEqual([])
     expect(state.creates).toBe(0)
   })
 
-  it('会话按语言对复用：多批只 create 一次（二次 create 仍要约 8.6 s 本地加载）', async () => {
+  it('reuses sessions by language pair across batches, avoiding another roughly 8.6-second local load', async () => {
     const { api, state } = fakeApi()
     const provider = createChromeBuiltinProvider('cmn', { translator: api })
     await provider.translate(req(['a']))
@@ -93,7 +93,7 @@ describe('createChromeBuiltinProvider', () => {
     expect(state.creates).toBe(1)
   })
 
-  it('create 失败后清掉缓存，下一批重新创建', async () => {
+  it('clears the cached session after create fails so the next batch recreates it', async () => {
     let fail = true
     const state = { creates: 0 }
     const api: TranslatorApi = {
@@ -111,7 +111,7 @@ describe('createChromeBuiltinProvider', () => {
     expect(state.creates).toBe(2)
   })
 
-  it('错误分类：NotAllowedError / NotSupportedError → no-key，AbortError → aborted，其余 unknown', async () => {
+  it('classifies NotAllowedError and NotSupportedError as no-key, AbortError as aborted, and other errors as unknown', async () => {
     for (const [name, kind] of [['NotAllowedError', 'no-key'], ['NotSupportedError', 'no-key'], ['AbortError', 'aborted'], ['TypeError', 'unknown']] as const) {
       const { api } = fakeApi({ createError: named(name) })
       const error = await createChromeBuiltinProvider('cmn', { translator: api }).translate(req(['x'])).catch(e => e)
@@ -120,12 +120,12 @@ describe('createChromeBuiltinProvider', () => {
     }
   })
 
-  it('逐条翻译时抛的错同样分类', async () => {
+  it('classifies errors from individual translations the same way', async () => {
     const { api } = fakeApi({ translate: () => { throw named('AbortError') } })
     await expect(createChromeBuiltinProvider('cmn', { translator: api }).translate(req(['x']))).rejects.toMatchObject({ kind: 'aborted' })
   })
 
-  it('signal 只传给逐条翻译，不传给会话创建：一批超时不能把共用会话拒掉（Codex 在 #50 指出）', async () => {
+  it('passes the batch signal only to individual translations; one timeout must not reject the shared session creation (Codex #50)', async () => {
     const controller = new AbortController()
     const seen: [string, unknown][] = []
     const api: TranslatorApi = {
@@ -133,14 +133,14 @@ describe('createChromeBuiltinProvider', () => {
       create: async (opts) => { seen.push(['create', opts.signal]); return { translate: async (_i, o) => { seen.push(['translate', o?.signal]); return 'x' } } },
     }
     await createChromeBuiltinProvider('cmn', { translator: api }).translate(req(['a'], controller.signal))
-    // create 拿到的是 provider 自己的信号（给超时中止用），绝不是任何一批请求的信号
+    // create receives the provider-owned timeout signal, never a batch request signal.
     expect(seen[0]![0]).toBe('create')
     expect(seen[0]![1]).toBeInstanceOf(AbortSignal)
     expect(seen[0]![1]).not.toBe(controller.signal)
     expect(seen[1]).toEqual(['translate', controller.signal])
   })
 
-  it('信号量把额度直接转交给等待者：释放的瞬间新来的调用不能抢到同一个额度（Codex 在 #50 指出）', async () => {
+  it('the semaphore transfers permits directly to waiters so new calls cannot steal a released permit (Codex #50)', async () => {
     const { createSemaphore } = await import('@/providers/chrome-builtin')
     const withPermit = createSemaphore(1)
     let active = 0
@@ -148,15 +148,15 @@ describe('createChromeBuiltinProvider', () => {
     const job = (release: Promise<void>) => withPermit(async () => { active++; peak = Math.max(peak, active); await release; active-- })
     let releaseA!: () => void
     const a = job(new Promise<void>(r => { releaseA = r }))
-    const b = job(Promise.resolve()) // 排队等待
+    const b = job(Promise.resolve()) // Queued and waiting
     releaseA()
-    // A 释放的同一轮里 C 到达：先减后唤醒的实现会让 B、C 同时进入
+    // C arrives in the same turn that A releases; decrementing before waking would let both B and C enter.
     const c = job(Promise.resolve())
     await Promise.all([a, b, c])
     expect(peak).toBe(1)
   })
 
-  it('会话创建超时会真的中止底层加载，不只是拒掉包装的 Promise（Codex 在 #50 指出）', async () => {
+  it('session creation timeout aborts underlying loading rather than only rejecting the wrapper promise (Codex #50)', async () => {
     let seenSignal: AbortSignal | undefined
     const api: TranslatorApi = {
       availability: async () => 'available',
@@ -167,7 +167,7 @@ describe('createChromeBuiltinProvider', () => {
     expect(seenSignal?.aborted).toBe(true)
   })
 
-  it('按自己声明的上限分批：降级过来的大批次不能一口气压垮本地模型（Codex 在 #50 指出）', async () => {
+  it('splits requests by declared limits so large fallback batches cannot overwhelm the local model (Codex #50)', async () => {
     let peak = 0
     let running = 0
     const api: TranslatorApi = {
@@ -182,7 +182,7 @@ describe('createChromeBuiltinProvider', () => {
         },
       }),
     }
-    // 首选是 google-web 时批次可达 100 条，降级链会把同一个调用原样转过来
+    // Preferred google-web batches can contain 100 segments, and fallback forwards the same call unchanged.
     const many = Array.from({ length: 100 }, (_, i) => `s${i}`)
     const result = await createChromeBuiltinProvider('cmn', { translator: api }).translate(req(many))
     expect(result.segments).toHaveLength(100)
@@ -190,7 +190,7 @@ describe('createChromeBuiltinProvider', () => {
     expect(peak).toBeLessThanOrEqual(BUILTIN_MAX_ITEMS)
   })
 
-  it('并发闸是 provider 级的：多个批次同时进来，总在飞数仍不超过上限（Codex 在 #50 指出）', async () => {
+  it('provider-wide concurrency limits total in-flight work across simultaneous batches (Codex #50)', async () => {
     let running = 0
     let peak = 0
     const api: TranslatorApi = {
@@ -205,7 +205,7 @@ describe('createChromeBuiltinProvider', () => {
         },
       }),
     }
-    // 队列可以同时派发多个批次；在一次调用内分批只管得住那一次
+    // The queue may dispatch several batches together; per-call splitting limits only one call.
     const provider = createChromeBuiltinProvider('cmn', { translator: api })
     const calls = Array.from({ length: 5 }, (_, b) =>
       provider.translate(req(Array.from({ length: 20 }, (_, i) => `b${b}s${i}`))))
@@ -215,11 +215,11 @@ describe('createChromeBuiltinProvider', () => {
     expect(peak).toBeLessThanOrEqual(BUILTIN_MAX_ITEMS)
   })
 
-  it('会话创建挂死时按独立超时失败，并把缓存清掉让下次真的重建（Codex 在 #50 指出）', async () => {
+  it('hung session creation fails on its own timeout and clears the cache so the next call really recreates it (Codex #50)', async () => {
     let creates = 0
     const api: TranslatorApi = {
       availability: async () => 'available',
-      // 第一次永不返回，第二次正常
+      // The first call never returns; the second succeeds.
       create: async () => {
         creates++
         if (creates === 1) return new Promise<TranslatorSession>(() => undefined)
@@ -228,13 +228,13 @@ describe('createChromeBuiltinProvider', () => {
     }
     const provider = createChromeBuiltinProvider('cmn', { translator: api, createTimeoutMs: 20 })
     await expect(provider.translate(req(['x']))).rejects.toMatchObject({ kind: 'timeout' })
-    // 没清缓存的话这里会再等同一个死 Promise
+    // Without cache cleanup this would wait on the same hung promise again.
     const again = await provider.translate(req(['y']))
     expect(again.segments[0]?.text).toBe('[y]')
     expect(creates).toBe(2)
   })
 
-  it('会话创建成功后不受超时影响：定时器要清掉', async () => {
+  it('successful session creation clears its timer and cannot later time out', async () => {
     const { api, state } = fakeApi()
     const provider = createChromeBuiltinProvider('cmn', { translator: api, createTimeoutMs: 20 })
     expect((await provider.translate(req(['a']))).segments[0]?.text).toBe('[a]')
@@ -243,22 +243,22 @@ describe('createChromeBuiltinProvider', () => {
     expect(state.creates).toBe(1)
   })
 
-  it('归一化中日韩标点后的多余空格（RESEARCH §6.2 实测的「。 」）', () => {
+  it('normalizes extra spaces after CJK punctuation (RESEARCH §6.2 observed a space after a full stop)', () => {
     expect(normalizeSpacing('图连通时，定理 1 显然。 证明从略。')).toBe('图连通时，定理 1 显然。证明从略。')
     expect(normalizeSpacing('甲、 乙； 丙： 丁？ 戊！ 己')).toBe('甲、乙；丙：丁？戊！己')
-    // 英文标点后的空格不能动
+    // Preserve spaces after English punctuation.
     expect(normalizeSpacing('Let x = 1. Then y.')).toBe('Let x = 1. Then y.')
-    // 占位符原样穿过
+    // Pass placeholders through unchanged.
     expect(normalizeSpacing('见 <x id="1"/>。 又见 <t id="2">图</t>。')).toBe('见 <x id="1"/>。又见 <t id="2">图</t>。')
   })
 
-  it('译文经过归一化再返回', async () => {
+  it('returns normalized translations', async () => {
     const { api } = fakeApi({ translate: () => '第一句。 第二句。' })
     const result = await createChromeBuiltinProvider('cmn', { translator: api }).translate(req(['x']))
     expect(result.segments[0]?.text).toBe('第一句。第二句。')
   })
 
-  it('默认从全局取 Translator', async () => {
+  it('uses the global Translator by default', async () => {
     const { api } = fakeApi()
     vi.stubGlobal('Translator', api)
     try {

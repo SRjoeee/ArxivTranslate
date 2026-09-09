@@ -10,58 +10,58 @@ import { sendMessage } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
 import { PromptManager } from './PromptManager'
 
-/** 分组显示：整套照搬 KISS 的预设，加上 Read Frog 的绿与淡色底（§7.5） */
+/** Grouped presets: the full KISS set plus Read Frog green and tint (§7.5). */
 const STYLE_GROUPS: [string, [StylePreset, string][]][] = [
-  ['基础', [['none', '与原文相同'], ['muted', '淡一档'], ['green', '绿色（Read Frog 默认）']]],
-  ['下划线', [['underline', '实线'], ['dotted', '点线'], ['dashed', '虚线'], ['dashed-bold', '粗虚线'], ['wavy', '波浪线'], ['wavy-bold', '粗波浪线']]],
-  ['边框', [['quote', '左侧竖线'], ['box', '细边框'], ['box-dashed', '虚线边框']]],
-  ['底色', [['marker', '荧光笔'], ['marker-gradient', '渐变荧光笔'], ['highlight', '高亮底'], ['tint', '淡色底']]],
-  ['特效', [['gradient', '渐变文字'], ['colorful', '多彩底'], ['glow', '发光'], ['blink', '呼吸'], ['blur', '模糊（悬停清晰）']]],
-  ['自定义', [['custom', '自定义 CSS']]],
+  ['Basic', [['none', 'Match original'], ['muted', 'Muted'], ['green', 'Green (Read Frog default)']]],
+  ['Underline', [['underline', 'Solid'], ['dotted', 'Dotted'], ['dashed', 'Dashed'], ['dashed-bold', 'Bold dashed'], ['wavy', 'Wavy'], ['wavy-bold', 'Bold wavy']]],
+  ['Border', [['quote', 'Left rule'], ['box', 'Thin border'], ['box-dashed', 'Dashed border']]],
+  ['Background', [['marker', 'Marker'], ['marker-gradient', 'Gradient marker'], ['highlight', 'Highlight'], ['tint', 'Tint']]],
+  ['Effects', [['gradient', 'Gradient text'], ['colorful', 'Colorful background'], ['glow', 'Glow'], ['blink', 'Pulse'], ['blur', 'Blur (reveal on hover)']]],
+  ['Custom', [['custom', 'Custom CSS']]],
 ]
 
 const STYLE_NOTES: Partial<Record<StylePreset, string>> = {
-  none: '不加任何装饰',
-  green: 'Read Frog 译文的默认配色，对照阅读时最容易区分',
-  quote: '同行的短标题译文不加线，否则会把标题挤歪',
-  dashed: '下划线类不占空间，左右对照时不影响两栏对齐',
-  blur: '悬停才看清，适合自测与背诵',
-  gradient: '静态渐变；流动动画会持续占用 CPU，实测后去掉了',
-  custom: '只填声明，选择器由扩展补上',
+  none: 'No added decoration',
+  green: 'Read Frog’s default translation color makes bilingual text easy to distinguish',
+  quote: 'Inline short headings omit the rule to preserve alignment',
+  dashed: 'Underlines take no extra space and preserve side-by-side alignment',
+  blur: 'Reveal on hover for self-testing and memorization',
+  gradient: 'Static gradient; animation was removed after testing showed sustained CPU use',
+  custom: 'Enter declarations only; the extension adds selectors',
 }
 
 const SAMPLE = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
 
-/** 图片翻译的模式闸（§15）：与 popup 的模式按钮同一套叫法 */
-const IMAGE_MODES: [Config['mode'], string][] = [['side', '左右对照'], ['stack', '上下对照'], ['only', '仅译文']]
+/** Image translation mode gate (§15): same labels as the popup mode buttons. */
+const IMAGE_MODES: [Config['mode'], string][] = [['side', 'Side by side'], ['stack', 'Stacked'], ['only', 'Translation only']]
 
 const PROVIDERS: [Config['provider'], string, string][] = [
-  ['openai-compat', 'LLM（OpenAI 兼容端点）', '译文质量最好，需要 API key'],
-  ['google-web', 'Google 网页翻译（免费）', '不需要 key，整篇几秒翻完，术语准确度不如 LLM'],
-  ['chrome-builtin', 'Chrome 内置翻译（离线）', '不需要 key、不联网，单句十几毫秒；术语准确度不如 LLM，首次使用要在 popup 里下载语言包'],
+  ['openai-compat', 'LLM (OpenAI-compatible endpoint)', 'Best translation quality; requires an API key'],
+  ['google-web', 'Google web translation (free)', 'No key required; translates a paper in seconds, with less accurate terminology than an LLM'],
+  ['chrome-builtin', 'Chrome built-in translation (offline)', 'No key or network required; tens of milliseconds per sentence. Less accurate terminology than an LLM; download the language pack from the popup before first use'],
 ]
 
-// Phase 2：provider 配置 + 连接测试。样式预设、术语表、缓存管理在 Phase 3。
+// Phase 2: provider settings and connection testing. Styles, glossary and cache management follow in Phase 3.
 export function App() {
   const [config, setLocal] = useState<Config>(DEFAULT_CONFIG)
   const [hasStoredKey, setHasStoredKey] = useState(false)
-  // 空串表示"不改动已存的 key"；密钥只写不回显
+  // Empty means keep the stored key; keys are write-only and never displayed.
   const [keyInput, setKeyInput] = useState('')
   const [notice, setNotice] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState('')
-  // 术语表在页面里是文本，保存时才解析成结构（成批粘贴比逐行编辑快）
+  // Glossary stays as text in the form and is parsed on save (bulk pasting is faster than editing rows).
   const [glossaryText, setGlossaryText] = useState('')
   const [cache, setCache] = useState<{ entries: number; bytes: number } | null>(null)
   const [cacheError, setCacheError] = useState('')
   const [cacheNote, setCacheNote] = useState('')
-  /** 本机 OCR helper 的状态（§15.4）：没检测到就把图片翻译一节灰掉 */
+  /** Local OCR helper status (§15.4): disable the image translation section if undetected. */
   const [helper, setHelper] = useState<HelperStatus | null>(null)
 
   const loadCacheStats = useCallback(async () => {
     try {
       const res = await sendMessage({ type: 'axt:cache-stats' })
-      // 读不到就说读不到：把失败显示成「已缓存 0 条」会让用户以为缓存是空的（Codex 在 #52 指出）
+      // Report read failures: showing zero cached entries would falsely imply an empty cache (Codex #52).
       if (res.ok) { setCache({ entries: res.entries, bytes: res.bytes }); setCacheError('') }
       else { setCache(null); setCacheError(res.message) }
     } catch (e) {
@@ -71,7 +71,7 @@ export function App() {
   }, [])
 
   useEffect(() => {
-    sendMessage({ type: 'axt:helper-status' }).then(setHelper).catch(() => setHelper({ available: false, reason: '扩展后台未响应' }))
+    sendMessage({ type: 'axt:helper-status' }).then(setHelper).catch(() => setHelper({ available: false, reason: 'Extension background did not respond' }))
   }, [])
 
   useEffect(() => {
@@ -81,7 +81,7 @@ export function App() {
       setGlossaryText(formatGlossaryText(c.glossary))
     })
     void loadCacheStats()
-    // 翻译发生在别的标签页：切回设置页时重新读一次，否则显示的永远是打开那一刻的数字
+    // Translation happens in other tabs: refresh when settings regains focus so counts do not remain at their initial values.
     const onVisible = () => { if (!document.hidden) void loadCacheStats() }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
@@ -97,22 +97,22 @@ export function App() {
   async function save() {
     setNotice('')
     try {
-      // 自定义 CSS 只接受声明块：写了花括号会把整篇论文的排版改掉，而且很难看出原因
+      // Custom CSS accepts declarations only: braces can alter the whole paper layout in ways that are hard to diagnose.
       if (config.style.preset === 'custom') {
         const css = sanitizeCustomCss(config.style.customCss)
-        if (!css.ok) throw new Error(`自定义样式：${css.reason}`)
+        if (!css.ok) throw new Error(`Custom style: ${css.reason}`)
       }
-      // 写错的术语行要报行号，不能静默丢掉——用户会以为术语已经生效
+      // Report malformed glossary lines by number; silently dropping them would imply the terms were applied.
       const glossary = parseGlossary(glossaryText)
       if (glossary.issues.length > 0) {
-        throw new Error(`术语表：${glossary.issues.map(i => `第 ${i.line} 行${i.reason}`).join('；')}`)
+        throw new Error(`Glossary: ${glossary.issues.map(i => `line ${i.line}: ${i.reason}`).join('; ')}`)
       }
-      // 先校验再申请权限：字段有错时不该先把 host 权限拿到手（Codex 在 #6 指出）
+      // Validate before requesting permissions; invalid fields should not grant host access (Codex #6).
       const parsed = configSchema.safeParse({ ...config, glossary: glossary.entries, openaiCompat: { ...config.openaiCompat, apiKey: keyInput || config.openaiCompat.apiKey } })
-      if (!parsed.success) throw new Error(parsed.error.issues.map(i => `${i.path.join('.')}：${i.message}`).join('；'))
+      if (!parsed.success) throw new Error(parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; '))
       const next = parsed.data
       const previous = await getConfig()
-      // 免费端点自带 CORS，不需要 host 权限；只有走 LLM 时才申请
+      // Free endpoints supply CORS headers and need no host permission; request it only for LLMs.
       if (next.provider === 'openai-compat') await ensureHostPermission(next.openaiCompat.baseURL)
       await setConfig(next)
       await releaseHostPermission(previous.openaiCompat.baseURL, next.openaiCompat.baseURL)
@@ -120,15 +120,15 @@ export function App() {
       setHasStoredKey(next.openaiCompat.apiKey.length > 0)
       setKeyInput('')
       setGlossaryText(formatGlossaryText(next.glossary))
-      setNotice('已保存')
+      setNotice('Saved')
     } catch (e) {
-      setNotice(`保存失败：${e instanceof Error ? e.message : String(e)}`)
+      setNotice(`Save failed: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
   /**
-   * 留空只表示"不改"，删除要有显式动作（Codex 在 #6 指出）。
-   * 只动已存的那份：表单里未保存的改动（比如换了 Base URL）不能借这个动作绕过校验与权限申请（Codex 在 #30 指出）
+   * Empty means keep; deletion requires an explicit action (Codex #6).
+   * Modify stored config only: unsaved form changes (e.g. Base URL) must not bypass validation or permission requests through this action (Codex #30).
    */
   async function clearKey() {
     setNotice('')
@@ -138,9 +138,9 @@ export function App() {
       setLocal(c => ({ ...c, openaiCompat: { ...c.openaiCompat, apiKey: '' } }))
       setHasStoredKey(false)
       setKeyInput('')
-      setNotice('已清除 API key')
+      setNotice('API key cleared')
     } catch (e) {
-      setNotice(`清除失败：${e instanceof Error ? e.message : String(e)}`)
+      setNotice(`Could not clear API key: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -151,35 +151,35 @@ export function App() {
     try {
       const res = await sendMessage({
         type: 'axt:translate',
-        // 指名引擎：测试连接问的是「这个端点通不通」，走降级链的话端点坏了也会显示成功。
-        // 用**已保存的**那个而不是表单里的——按钮上写着「用已保存的配置」，而 background 也是从
-        // storage 读配置建链；拿未保存的下拉值去指名，轻则测错引擎，重则报「不在当前链上」（Codex 在 #59 指出）
+        // Name the engine explicitly: connection testing asks whether this endpoint works; fallback could falsely report success.
+        // Use the saved engine, not the form value: the button promises saved settings, and background builds its chain from storage.
+        // An unsaved selection could test the wrong engine or report that it is absent from the chain (Codex #59).
         providerId: (await getConfig()).provider,
-        request: { segments: [{ id: 'sample', text: SAMPLE }], source: 'en', target: config.targetLanguage, context: { sectionTitle: '连接测试' } },
+        request: { segments: [{ id: 'sample', text: SAMPLE }], source: 'en', target: config.targetLanguage, context: { sectionTitle: 'Connection test' } },
       })
       const ms = Math.round(performance.now() - t0)
       setTestResult(res.ok
-        ? `${res.result.segments[0]?.text ?? ''}（${ms} ms，${res.result.model ?? ''}）`
-        : `失败：${res.error.kind} — ${res.error.message}`)
+        ? `${res.result.segments[0]?.text ?? ''} (${ms} ms, ${res.result.model ?? ''})`
+        : `Failed: ${res.error.kind} — ${res.error.message}`)
     } catch (e) {
-      setTestResult(`失败：${e instanceof Error ? e.message : String(e)}`)
+      setTestResult(`Failed: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setTesting(false)
     }
   }
 
 
-  /** 清空整库。设置页拿不到当前论文 id，所以只做全局清空（§9） */
+  /** Clear the entire cache: settings has no current paper id, so only global clearing is available (§9). */
   async function clearCache() {
-    if (!window.confirm('清空全部译文缓存？之后重新翻译会重新请求引擎。')) return
+    if (!window.confirm('Clear all cached translations? Translating again will send new requests to the engine.')) return
     setCacheNote('')
     try {
       const result = await sendMessage({ type: 'axt:cache-clear', paper: undefined })
       if (!result.ok) throw new Error(result.message)
-      setCacheNote(`已删除 ${result.removed} 条`)
+      setCacheNote(`Deleted ${result.removed} entries`)
       await loadCacheStats()
     } catch (e) {
-      setCacheNote(`清空失败：${e instanceof Error ? e.message : String(e)}`)
+      setCacheNote(`Could not clear cache: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
 
@@ -188,76 +188,76 @@ export function App() {
 
   return (
     <main style={{ maxWidth: 640, margin: '40px auto', font: '14px system-ui, sans-serif', lineHeight: 1.5 }}>
-      <h1 style={{ fontSize: 18 }}>arXiv HTML Translator · 设置</h1>
+      <h1 style={{ fontSize: 18 }}>arXiv HTML Translator · Settings</h1>
 
-      <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译引擎</h2>
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>Translation engine</h2>
       <label style={label}>
-        引擎
+        Engine
         <select style={field} value={config.provider} onChange={e => setLocal(c => ({ ...c, provider: e.target.value as Config['provider'] }))}>
           {PROVIDERS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
         <small style={{ color: '#666' }}>{PROVIDERS.find(([id]) => id === config.provider)?.[2]}</small>
       </label>
 
-      <h2 style={{ fontSize: 15, marginTop: 24, opacity: config.provider === 'openai-compat' ? 1 : 0.5 }}>OpenAI 兼容端点</h2>
+      <h2 style={{ fontSize: 15, marginTop: 24, opacity: config.provider === 'openai-compat' ? 1 : 0.5 }}>OpenAI-compatible endpoint</h2>
       <label style={label}>
         Base URL
         <input style={field} value={config.openaiCompat.baseURL} onChange={e => patchOpenAI({ baseURL: e.target.value })} placeholder="https://openrouter.ai/api/v1" disabled={config.provider !== 'openai-compat'} />
-        <small style={{ color: '#666' }}>OpenRouter、DeepSeek、Ollama 等；非 openrouter.ai 的域名保存时会申请访问权限</small>
+        <small style={{ color: '#666' }}>OpenRouter, DeepSeek, Ollama, etc. Saving a domain other than openrouter.ai requests access permission.</small>
       </label>
       <label style={label}>
-        API key{hasStoredKey ? '（已配置，留空则不改）' : ''}
+        API key{hasStoredKey ? ' (configured; leave blank to keep)' : ''}
         <input style={field} type="password" value={keyInput} onChange={e => setKeyInput(e.target.value)} autoComplete="off" placeholder={hasStoredKey ? '••••••••' : 'sk-…'} disabled={config.provider !== 'openai-compat'} />
-        {hasStoredKey && <button type="button" style={{ marginTop: 4, font: 'inherit', fontSize: 12 }} onClick={clearKey}>清除已存的 key</button>}
-        <small style={{ display: 'block', color: '#666' }}>本机端点（localhost / 127.0.0.1）可以不填</small>
+        {hasStoredKey && <button type="button" style={{ marginTop: 4, font: 'inherit', fontSize: 12 }} onClick={clearKey}>Clear stored key</button>}
+        <small style={{ display: 'block', color: '#666' }}>Optional for local endpoints (localhost / 127.0.0.1)</small>
       </label>
       <label style={label}>
-        模型
+        Model
         <input style={field} value={config.openaiCompat.model} onChange={e => patchOpenAI({ model: e.target.value })} placeholder="deepseek/deepseek-v4-flash" disabled={config.provider !== 'openai-compat'} />
       </label>
       <label style={label}>
-        思考模式
+        Thinking mode
         <select style={field} value={config.openaiCompat.thinking} onChange={e => patchOpenAI({ thinking: e.target.value as Config['openaiCompat']['thinking'] })} disabled={config.provider !== 'openai-compat'}>
-          <option value="disabled">关闭（默认，翻译不需要推理，开着每批慢一个数量级）</option>
-          <option value="enabled">开启</option>
+          <option value="disabled">Off (default)</option>
+          <option value="enabled">On</option>
         </select>
-        <small style={{ color: '#666' }}>{thinkingHint(config.openaiCompat.baseURL)}</small>
+        <small style={{ color: '#666' }}>Reasoning is unnecessary and can slow batches by 10×. {thinkingHint(config.openaiCompat.baseURL)}</small>
       </label>
       <label style={label}>
-        目标语言
+        Target language
         <select style={field} value={config.targetLanguage} onChange={e => setLocal(c => ({ ...c, targetLanguage: e.target.value as LangCode }))}>
           {LANG_CODES.map(code => <option key={code} value={code}>{languageLabel(code)}</option>)}
         </select>
       </label>
 
-      <h2 style={{ fontSize: 15, marginTop: 24, opacity: config.provider === 'openai-compat' ? 1 : 0.5 }}>提示词（LLM 引擎）</h2>
-      <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>决定"怎么翻"；收发协议（JSON 段落与占位符规则）由扩展自动追加，任何提示词都改不掉。换提示词后旧译文不再命中缓存</small>
+      <h2 style={{ fontSize: 15, marginTop: 24, opacity: config.provider === 'openai-compat' ? 1 : 0.5 }}>Prompts (LLM engines)</h2>
+      <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>Controls translation style. The extension always appends the mandatory JSON segment and placeholder protocol. Changing prompts invalidates cached translations.</small>
       <PromptManager value={config.prompts} onChange={prompts => setLocal(c => ({ ...c, prompts }))} />
 
       <label style={{ ...label, marginTop: 20 }}>
         <input type="checkbox" checked={config.fallback.enabled} onChange={e => setLocal(c => ({ ...c, fallback: { enabled: e.target.checked } }))} />
-        {' '}引擎失败时自动降级
+        {' '}Automatically fall back when an engine fails
         <small style={{ display: 'block', color: '#666' }}>
-          key 失效、额度用尽或网络异常时自动切到免费引擎，整页翻译不会停死；免费引擎的术语准确度不如 LLM（会把 weights 译成"重量"），popup 会提示当前用的是哪个引擎。关掉则失败时停下并报错
+          Switch to a free engine if the key expires, quota runs out or the network fails, keeping translation running. Free engines can misread technical terms (such as treating model weights as physical weight); the popup shows the active engine. When disabled, failures stop translation and display an error.
         </small>
       </label>
 
-      <h2 style={{ fontSize: 15, marginTop: 24, opacity: config.provider === 'openai-compat' ? 1 : 0.5 }}>术语表</h2>
+      <h2 style={{ fontSize: 15, marginTop: 24, opacity: config.provider === 'openai-compat' ? 1 : 0.5 }}>Glossary</h2>
       <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>
-        每行一条「原文, 译文」，逗号或制表符分隔，<code>#</code> 开头是注释。随每批一起发给模型，让同一篇里的术语译法统一。
-        只对 LLM 引擎有效，免费引擎不看术语表；改动会让已缓存的译文失效。当前 {parseGlossary(glossaryText).entries.length} 条（上限 200）
+        One entry per line: “source, translation”, separated by a comma or tab. Lines starting with <code>#</code> are comments. Each batch includes the glossary for consistent terminology.
+        LLM engines only; free engines ignore it. Changes invalidate cached translations. Current entries: {parseGlossary(glossaryText).entries.length} (maximum 200).
       </small>
       <textarea
         style={{ ...field, minHeight: 120, fontFamily: 'ui-monospace, monospace', fontSize: 12, marginTop: 0 }}
         value={glossaryText}
         onChange={e => setGlossaryText(e.target.value)}
-        placeholder={'weights, 权重\nattention head, 注意力头\n# 以 # 开头的行是注释'}
+        placeholder={'weights, 权重\nattention head, 注意力头\n# Lines starting with # are comments'}
         disabled={config.provider !== 'openai-compat'}
       />
 
-      <h2 style={{ fontSize: 15, marginTop: 24 }}>译文样式</h2>
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>Translation style</h2>
       <label style={label}>
-        外观
+        Appearance
         <select style={field} value={config.style.preset} onChange={e => setLocal(c => ({ ...c, style: { ...c.style, preset: e.target.value as StylePreset } }))}>
           {STYLE_GROUPS.map(([group, items]) => (
             <optgroup key={group} label={group}>
@@ -265,11 +265,11 @@ export function App() {
             </optgroup>
           ))}
         </select>
-        <small style={{ color: '#666' }}>{STYLE_NOTES[config.style.preset] ?? '译文只加装饰，字体与字号仍随论文原样'}</small>
+        <small style={{ color: '#666' }}>{STYLE_NOTES[config.style.preset] ?? 'Decoration only; translations keep the paper’s font and size'}</small>
       </label>
       {config.style.preset === 'custom' && (
         <label style={label}>
-          自定义声明
+          Custom declarations
           <textarea
             style={{ ...field, minHeight: 70, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}
             value={config.style.customCss}
@@ -277,22 +277,22 @@ export function App() {
             placeholder="color: #1565c0; opacity: 0.95;"
           />
           <small style={{ display: 'block', color: '#666' }}>
-            只填花括号里的声明，扩展会补上选择器。不要写花括号、<code>@</code> 规则或标签。
-            译文继承原文的字体与字号，写 <code>font-size</code> 这类属性会破坏站点排版
+            Enter only the declarations inside braces; the extension adds selectors. Do not include braces, <code>@</code> rules or tags.
+            Translations inherit the original font and size; properties such as <code>font-size</code> can disrupt the paper’s layout.
           </small>
         </label>
       )}
 
-      <h2 style={{ fontSize: 15, marginTop: 24, opacity: helper?.available ? 1 : 0.5 }}>图片翻译（Mac）</h2>
+      <h2 style={{ fontSize: 15, marginTop: 24, opacity: helper?.available ? 1 : 0.5 }}>Image translation (Mac)</h2>
       <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>
-        {helper === null ? '正在检测本机 OCR helper…'
-          : helper.available ? `已检测到 helper ${helper.version ?? ''}。位图里的文字由本机 Vision 识别，译文叠在图上；SVG 不翻`
-          : `未检测到 helper${helper.reason ? `（${helper.reason}）` : ''}。安装方法见仓库 helper/README.md；没装时整页翻译照常，只是不翻图`}
+        {helper === null ? 'Detecting local OCR helper…'
+          : helper.available ? `Helper ${helper.version ?? ''} detected. Local Vision OCR reads bitmap text; translations appear over the image. SVGs are not translated.`
+          : `Helper not detected${helper.reason ? ` (${helper.reason})` : ''}. See helper/README.md in the repository for installation. Page text translation still works without it.`}
       </small>
       <fieldset style={{ border: 0, padding: 0, margin: '0 0 14px' }} disabled={!helper?.available}>
-        <legend style={{ padding: 0 }}>在哪些模式下翻译图片</legend>
+        <legend style={{ padding: 0 }}>Translate images in these modes</legend>
         {IMAGE_MODES.map(([mode, name]) => (
-          <label key={mode} style={{ marginRight: 16 }}>
+          <label key={mode} style={{ display: 'inline-block', marginRight: 16 }}>
             <input
               type="checkbox"
               checked={config.image.modes.includes(mode)}
@@ -301,41 +301,41 @@ export function App() {
             {' '}{name}
           </label>
         ))}
-        <small style={{ display: 'block', color: '#666', marginTop: 4 }}>只影响显示：切到没勾的模式时叠加层隐藏，切回来再显示，不重新识别</small>
+        <small style={{ display: 'block', color: '#666', marginTop: 4 }}>Display only: overlays hide in unchecked modes and reappear when you switch back, without repeating OCR.</small>
       </fieldset>
 
-      <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译范围</h2>
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>Translation range</h2>
       <label style={label}>
-        预翻译距离（像素）
+        Preload distance (pixels)
         <input style={field} type="number" min={0} max={10000} step={100} value={config.preload.margin} onChange={e => setLocal(c => ({ ...c, preload: { ...c.preload, margin: Number(e.target.value) } }))} />
-        <small style={{ color: '#666' }}>屏幕下方多远的段落提前翻译。越小越省 API 费用；改动在下次开始翻译时生效</small>
+        <small style={{ color: '#666' }}>How far below the screen to translate ahead. Smaller values reduce API costs. Changes apply when translation next starts.</small>
       </label>
       <label style={label}>
-        可见阈值（0 到 1）
+        Visibility threshold (0 to 1)
         <input style={field} type="number" min={0} max={1} step={0.1} value={config.preload.threshold} onChange={e => setLocal(c => ({ ...c, preload: { ...c.preload, threshold: Number(e.target.value) } }))} />
-        <small style={{ color: '#666' }}>段落露出多少比例才翻译；0 表示碰到边缘就翻</small>
+        <small style={{ color: '#666' }}>Visible fraction of a paragraph required to trigger translation; 0 triggers at the viewport edge.</small>
       </label>
 
       <p>
-        <button type="button" onClick={save}>保存</button>
+        <button type="button" onClick={save}>Save</button>
         {' '}
-        <button type="button" onClick={testConnection} disabled={testing}>{testing ? '测试中…' : '测试连接（用已保存的配置）'}</button>
+        <button type="button" onClick={testConnection} disabled={testing}>{testing ? 'Testing…' : 'Test connection (saved settings)'}</button>
         {' '}
         <span>{notice}</span>
       </p>
       {testResult && <p style={{ padding: 8, background: '#f4f4f4', borderRadius: 4 }}>{testResult}</p>}
 
-      <h2 style={{ fontSize: 15, marginTop: 24 }}>译文缓存</h2>
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>Translation cache</h2>
       <p style={{ margin: '0 0 4px', fontSize: 13 }}>
         {cache !== null
-          ? `已缓存 ${cache.entries} 条 · ${(cache.bytes / 1024 / 1024).toFixed(2)} MB`
-          : cacheError === '' ? '读取中…' : `读取缓存失败：${cacheError}`}
+          ? `${cache.entries} cached entries · ${(cache.bytes / 1024 / 1024).toFixed(2)} MB`
+          : cacheError === '' ? 'Loading…' : `Could not read cache: ${cacheError}`}
       </p>
       <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>
-        缓存按引擎、模型、提示词、术语表分开存；换了其中任何一样都不会命中旧译文，通常不需要手动清
+        Cache entries are separated by engine, model, prompt and glossary. Changing any of these prevents old translation hits, so manual clearing is usually unnecessary.
       </small>
       <p>
-        <button type="button" onClick={clearCache}>清空全部缓存</button>
+        <button type="button" onClick={clearCache}>Clear all cache</button>
         {' '}
         <span style={{ color: '#666', fontSize: 12 }}>{cacheNote}</span>
       </p>
@@ -343,7 +343,7 @@ export function App() {
   )
 }
 
-/** 只有登记过的端点会带思考字段（thinking.ts），其他端点开关无效，提前说清 */
+/** Only registered endpoints receive thinking fields (thinking.ts); explain that other endpoints ignore this setting. */
 function thinkingHint(baseURL: string): string {
   let host = ''
   try {
@@ -352,8 +352,8 @@ function thinkingHint(baseURL: string): string {
     return ''
   }
   return THINKING_HOSTS.includes(host)
-    ? `会按 ${host} 的字段格式发送开关`
-    : `${host} 未登记（支持：${THINKING_HOSTS.join('、')}），不发送思考字段，按端点默认行为`
+    ? `Sends the thinking setting in the format required by ${host}`
+    : `${host} is not registered (supported: ${THINKING_HOSTS.join(', ')}). No thinking field is sent; endpoint defaults apply.`
 }
 
 function originPattern(url: string): string | null {
@@ -364,16 +364,16 @@ function originPattern(url: string): string | null {
   }
 }
 
-/** 自定义端点需要该 origin 的 host 权限；保存按钮就是用户手势 */
+/** Custom endpoints require host permission for their origin; Save supplies the user gesture. */
 async function ensureHostPermission(baseURL: string) {
   const origin = originPattern(baseURL)
-  if (!origin) throw new Error('Base URL 不合法')
+  if (!origin) throw new Error('Invalid Base URL')
   if (await browser.permissions.contains({ origins: [origin] })) return
   const granted = await browser.permissions.request({ origins: [origin] })
-  if (!granted) throw new Error(`未授予对 ${origin} 的访问权限`)
+  if (!granted) throw new Error(`Access permission not granted for ${origin}`)
 }
 
-/** 换了端点就收回旧 origin 的权限，免得越换越多；manifest 里固定申请的不收（Codex 在 #6 指出） */
+/** Revoke the previous origin when changing endpoints to avoid accumulating permissions; keep manifest-declared permissions (Codex #6). */
 async function releaseHostPermission(previousURL: string, currentURL: string) {
   const previous = originPattern(previousURL)
   if (!previous || previous === originPattern(currentURL)) return

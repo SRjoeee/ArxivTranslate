@@ -1,16 +1,16 @@
-// 标签页标题翻译（DESIGN §10）：Read Frog page-translation.ts 里 document.title 那一段的改写。
-// 开始时翻一次 document.title；<head> 上的观察器盯着标题被页面改成"既非原文也非我们写的值"时重翻；
-// 停止时恢复原文（§7.1：恢复后逐节点相等，<title> 的文本也要回去）。
-// arXiv 页面是静态的，观察器几乎不会触发，但它没有负担，照搬（CLAUDE.md 的搬运判定）。
+// Tab title translation (DESIGN §10): adapted from Read Frog's document.title handling in page-translation.ts.
+// Translate document.title once at startup. Observe <head> and retranslate if the page sets a value different from both the original and our translation.
+// Restore the original on stop (§7.1: node-for-node restoration includes <title> text).
+// arXiv pages are static, so this rarely fires, but has no meaningful overhead; retain it per CLAUDE.md's porting rule.
 
 export interface TitleTranslator {
   stop(): void
 }
 
 export interface TitleOptions {
-  /** 翻一段纯文本；拿不到译文返回 null（保持原标题） */
+  /** Translate plain text; return null if unavailable to retain the original title. */
   translate: (text: string) => Promise<string | null>
-  /** 会话还在不在：结果回来时会话已结束就丢掉 */
+  /** Whether the session is still current; discard results arriving after it ends. */
   isCurrent: () => boolean
 }
 
@@ -30,8 +30,8 @@ export function translateTitle(doc: Document, options: TitleOptions): TitleTrans
       applied = next
       if (doc.title !== next) doc.title = next
     } catch (error) {
-      // 会话取消后的拒绝是预期的，不算噪音
-      if (request === version && options.isCurrent()) console.warn('[axt] 标题翻译失败', error)
+      // Rejection after session cancellation is expected, not log noise.
+      if (request === version && options.isCurrent()) console.warn('[axt] Title translation failed', error)
     }
   }
 
@@ -51,7 +51,7 @@ export function translateTitle(doc: Document, options: TitleOptions): TitleTrans
 
   return {
     stop() {
-      // 页面自己改过标题（不是我们写的）：以它为准恢复
+      // The page changed its own title; restore that value rather than ours.
       const current = doc.title || ''
       if (current !== applied) source = current
       observer?.disconnect()

@@ -1,5 +1,5 @@
-// 移植自 reference/read-frog/src/utils/request/retry-policy.ts@9b44f82（GPL-3.0），2026-09-03 移植、有修改：仅调整以通过本项目的严格类型检查。
-// 请求错误分类、Retry-After 解析与限流退避策略；由本目录的 request-queue 驱动（2026-09-05 起，此前是 src/providers/retry.ts 的 withRetry）。
+// Ported from reference/read-frog/src/utils/request/retry-policy.ts@9b44f82 (GPL-3.0), 2026-09-03; modified only for this project's strict type checks.
+// Request error classification, Retry-After parsing and rate-limit backoff; driven by request-queue since 2026-09-05 (previously providers/retry.ts withRetry).
 
 export type RequestErrorKind =
   | "rate-limit"

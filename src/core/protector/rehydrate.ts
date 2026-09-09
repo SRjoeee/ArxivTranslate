@@ -1,4 +1,4 @@
-// 回填（DESIGN §6.4）：译文 → DocumentFragment。占位符换成原节点的克隆，按译文顺序放置；原节点不动。
+// Rehydration (DESIGN §6.4): translation → DocumentFragment. Replace placeholders with clones in translated order; leave originals untouched.
 import { cloneWithoutIds } from './clone'
 import type { ProtectedBlock } from './serialize'
 import { decodeText } from './text'

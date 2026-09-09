@@ -23,7 +23,8 @@
     "helper:build": "swift build -c release --package-path helper",
     "helper:smoke": "node scripts/helper-smoke.mjs",
     "lint": "biome lint .",
-    "lint:fix": "biome lint --write ."
+    "lint:fix": "biome lint --write .",
+    "check:language": "node --test scripts/check-language.test.mjs && node scripts/check-language.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

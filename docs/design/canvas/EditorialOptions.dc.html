@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <script src="./support.js"></script>
@@ -17,57 +17,57 @@
   <div style="width: 220px; box-sizing: border-box; padding: 32px 24px; border-right: 1px solid #ded9cf; display: flex; flex-direction: column; gap: 28px;">
     <div style="display: flex; flex-direction: column; gap: 2px;">
       <div style="font-family: 'Newsreader', Georgia, serif; font-size: 22px; font-weight: 600; letter-spacing: -0.01em;">arXiv <span style="color: #b31b1b;">Translate</span></div>
-      <div style="font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: #7a756c;">设置 · v0.9</div>
+      <div style="font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: #7a756c;">Settings · v0.9</div>
     </div>
     <div style="display: flex; flex-direction: column; gap: 4px; font-size: 14px;">
-      <div style="padding: 6px 0; font-weight: 600; border-left: 2px solid #b31b1b; padding-left: 10px; margin-left: -12px;">引擎</div>
-      <div style="padding: 6px 0; color: #7a756c;">阅读</div>
-      <div style="padding: 6px 0; color: #7a756c;">提示词与术语</div>
-      <div style="padding: 6px 0; color: #7a756c;">数据</div>
+      <div style="padding: 6px 0; font-weight: 600; border-left: 2px solid #b31b1b; padding-left: 10px; margin-left: -12px;">Engine</div>
+      <div style="padding: 6px 0; color: #7a756c;">Reading</div>
+      <div style="padding: 6px 0; color: #7a756c;">Prompts & terms</div>
+      <div style="padding: 6px 0; color: #7a756c;">Data</div>
     </div>
   </div>
 
   <div style="flex: 1; box-sizing: border-box; padding: 32px 48px; display: flex; flex-direction: column; gap: 24px; overflow: hidden;">
     <div style="display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; border-bottom: 3px double #1c1a17;">
-      <div style="font-family: 'Newsreader', Georgia, serif; font-size: 28px; font-weight: 600; letter-spacing: -0.01em;">引擎</div>
-      <div style="font-size: 13px; color: #7a756c;">选一个翻译引擎；改动即时生效，只有端点表单需要「应用」</div>
+      <div style="font-family: 'Newsreader', Georgia, serif; font-size: 28px; font-weight: 600; letter-spacing: -0.01em;">Engine</div>
+      <div style="font-size: 13px; color: #7a756c;">Choose a translation engine; changes apply immediately, except the endpoint form requires “Apply”</div>
     </div>
 
     <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 14px; border-bottom: 1px solid #ded9cf;">
-      <div style="display: flex; flex-direction: column; gap: 2px;"><div style="font-size: 14px; font-weight: 600;">目标语言</div><div style="font-size: 12px; color: #7a756c;">三个引擎共用；源语言固定为英文</div></div>
+      <div style="display: flex; flex-direction: column; gap: 2px;"><div style="font-size: 14px; font-weight: 600;">Target language</div><div style="font-size: 12px; color: #7a756c;">Shared by three engines; source language is fixed to English</div></div>
       <div style="display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid #1c1a17; font-size: 13px; min-width: 150px; justify-content: space-between;">中文（简体）<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#1c1a17" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg></div>
     </div>
 
     <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;">
       <div style="box-sizing: border-box; padding: 14px 16px; border: 1.5px solid #b31b1b; background: #ffffff; display: flex; flex-direction: column; gap: 6px;">
         <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-family: 'Newsreader', serif; font-size: 17px; font-weight: 600;">LLM</div><span style="width: 8px; height: 8px; border-radius: 50%; background: #b31b1b;"></span></div>
-        <div style="font-size: 12px; color: #7a756c; line-height: 1.5;">译文质量最好，需要 API key。OpenRouter、DeepSeek、Ollama 皆可</div>
+        <div style="font-size: 12px; color: #7a756c; line-height: 1.5;">Best translation quality; requires an API key. Works with OpenRouter, DeepSeek, and Ollama</div>
       </div>
       <div style="box-sizing: border-box; padding: 14px 16px; border: 1px solid #ded9cf; display: flex; flex-direction: column; gap: 6px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-family: 'Newsreader', serif; font-size: 17px; font-weight: 500;">Google 网页翻译</div><span style="width: 8px; height: 8px; border-radius: 50%; border: 1px solid #7a756c;"></span></div>
-        <div style="font-size: 12px; color: #7a756c; line-height: 1.5;">免费、几秒翻完一篇；术语准确度不如 LLM</div>
+        <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-family: 'Newsreader', serif; font-size: 17px; font-weight: 500;">Google web translation</div><span style="width: 8px; height: 8px; border-radius: 50%; border: 1px solid #7a756c;"></span></div>
+        <div style="font-size: 12px; color: #7a756c; line-height: 1.5;">Free, translates a paper in seconds; terminology is less accurate than an LLM</div>
       </div>
       <div style="box-sizing: border-box; padding: 14px 16px; border: 1px solid #ded9cf; display: flex; flex-direction: column; gap: 6px;">
-        <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-family: 'Newsreader', serif; font-size: 17px; font-weight: 500;">Chrome 离线翻译</div><span style="width: 8px; height: 8px; border-radius: 50%; border: 1px solid #7a756c;"></span></div>
-        <div style="font-size: 12px; color: #7a756c; line-height: 1.5;">不联网、单句十几毫秒；需先下载语言包</div>
-        <div style="font-size: 12px; text-decoration: underline; text-underline-offset: 3px;">下载中文语言包（约 1 分钟）</div>
+        <div style="display: flex; justify-content: space-between; align-items: center;"><div style="font-family: 'Newsreader', serif; font-size: 17px; font-weight: 500;">Chrome offline translation</div><span style="width: 8px; height: 8px; border-radius: 50%; border: 1px solid #7a756c;"></span></div>
+        <div style="font-size: 12px; color: #7a756c; line-height: 1.5;">Offline, about 10–20 ms per sentence; download a language pack first</div>
+        <div style="font-size: 12px; text-decoration: underline; text-underline-offset: 3px;">Download Chinese language pack (about 1 minute)</div>
       </div>
     </div>
 
     <div style="display: flex; flex-direction: column; gap: 0; border-top: 1px solid #ded9cf;">
-      <div style="display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid #ded9cf;"><div style="font-size: 13px; font-weight: 600;">端点</div><div style="padding: 7px 10px; border: 1px solid #ded9cf; background: #ffffff; font-size: 13px;">https://openrouter.ai/api/v1</div></div>
-      <div style="display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid #ded9cf;"><div style="font-size: 13px; font-weight: 600;">API key</div><div style="display: flex; gap: 10px; align-items: center;"><div style="flex: 1; padding: 7px 10px; border: 1px solid #ded9cf; background: #ffffff; font-size: 13px; color: #7a756c;">•••••••••••••••• 已保存</div><div style="font-size: 12px; text-decoration: underline; text-underline-offset: 3px;">清除</div></div></div>
-      <div style="display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid #ded9cf;"><div style="font-size: 13px; font-weight: 600;">模型</div><div style="padding: 7px 10px; border: 1px solid #ded9cf; background: #ffffff; font-size: 13px;">deepseek/deepseek-v4-flash</div></div>
-      <div style="display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid #ded9cf;"><div style="font-size: 13px; font-weight: 600;">思考模式</div><div style="display: flex; align-items: center; gap: 10px; font-size: 13px;"><span style="width: 30px; height: 16px; border: 1px solid #1c1a17; position: relative; display: inline-block;"><span style="position: absolute; left: 1px; top: 1px; width: 12px; height: 12px; background: #1c1a17;"></span></span><span style="color: #7a756c;">关闭 · 翻译不需要推理，开着每批慢一个数量级</span></div></div>
+      <div style="display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid #ded9cf;"><div style="font-size: 13px; font-weight: 600;">Endpoint</div><div style="padding: 7px 10px; border: 1px solid #ded9cf; background: #ffffff; font-size: 13px;">https://openrouter.ai/api/v1</div></div>
+      <div style="display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid #ded9cf;"><div style="font-size: 13px; font-weight: 600;">API key</div><div style="display: flex; gap: 10px; align-items: center;"><div style="flex: 1; padding: 7px 10px; border: 1px solid #ded9cf; background: #ffffff; font-size: 13px; color: #7a756c;">•••••••••••••••• Saved</div><div style="font-size: 12px; text-decoration: underline; text-underline-offset: 3px;">Clear</div></div></div>
+      <div style="display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid #ded9cf;"><div style="font-size: 13px; font-weight: 600;">Model</div><div style="padding: 7px 10px; border: 1px solid #ded9cf; background: #ffffff; font-size: 13px;">deepseek/deepseek-v4-flash</div></div>
+      <div style="display: grid; grid-template-columns: 160px 1fr; gap: 16px; align-items: center; padding: 12px 0; border-bottom: 1px solid #ded9cf;"><div style="font-size: 13px; font-weight: 600;">Thinking mode</div><div style="display: flex; align-items: center; gap: 10px; font-size: 13px;"><span style="width: 30px; height: 16px; border: 1px solid #1c1a17; position: relative; display: inline-block;"><span style="position: absolute; left: 1px; top: 1px; width: 12px; height: 12px; background: #1c1a17;"></span></span><span style="color: #7a756c;">Off · Translation needs no reasoning; enabling it makes each batch an order of magnitude slower</span></div></div>
       <div style="display: flex; gap: 12px; align-items: center; padding: 14px 0;">
-        <div style="padding: 8px 18px; background: #1c1a17; color: #faf8f4; font-size: 13px; font-weight: 600;">应用</div>
-        <div style="padding: 8px 18px; border: 1px solid #1c1a17; font-size: 13px;">测试连接</div>
+        <div style="padding: 8px 18px; background: #1c1a17; color: #faf8f4; font-size: 13px; font-weight: 600;">Apply</div>
+        <div style="padding: 8px 18px; border: 1px solid #1c1a17; font-size: 13px;">Test connection</div>
         <div style="font-size: 12px; color: #7a756c; font-family: 'Newsreader', serif; font-style: italic;">「设 G 为连通图」· 412 ms · deepseek-v4-flash</div>
       </div>
     </div>
 
     <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 14px; border-top: 1px solid #ded9cf;">
-      <div style="display: flex; flex-direction: column; gap: 2px;"><div style="font-size: 14px; font-weight: 600;">失败时自动降级到免费引擎</div><div style="font-size: 12px; color: #7a756c;">key 失效、额度用尽或断网时整页不停；popup 会提示当前用的是哪个引擎</div></div>
+      <div style="display: flex; flex-direction: column; gap: 2px;"><div style="font-size: 14px; font-weight: 600;">Automatically fall back to a free engine on failure</div><div style="font-size: 12px; color: #7a756c;">Page translation continues if a key expires, quota runs out, or the network disconnects; the popup shows the active engine</div></div>
       <span style="width: 30px; height: 16px; background: #b31b1b; position: relative; display: inline-block;"><span style="position: absolute; right: 1px; top: 1px; width: 12px; height: 12px; background: #faf8f4;"></span></span>
     </div>
   </div>

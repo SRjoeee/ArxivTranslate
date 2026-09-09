@@ -1,4 +1,4 @@
-// Vitest 全局准备：Dexie 需要 IndexedDB，缓存键需要 Web Crypto
+// Global Vitest setup: Dexie needs IndexedDB and cache keys need Web Crypto.
 import 'fake-indexeddb/auto'
 import { webcrypto } from 'node:crypto'
 

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FIT_ATTR, FIT_SCROLL, T_CLASS, fitTables, resetFitCache, watchFontLoads } from '@/core/renderer'
 import { docOf } from './helpers'
 
-/** 一对表格：原表 + 译文克隆（renderTable 的结果形状） */
+/** Table pair: original and translated clone, matching renderTable output */
 const pairDoc = (count = 1) => {
   const one = '<figure class="ltx_table"><table class="ltx_tabular"><tbody><tr><td class="ltx_td">a</td></tr></tbody></table>'
     + `<table class="ltx_tabular ${T_CLASS}" data-axt-for="T"><tbody><tr><td class="ltx_td">甲</td></tr></tbody></table></figure>`
@@ -11,36 +11,36 @@ const pairDoc = (count = 1) => {
 const originals = (doc: Document) => Array.from(doc.querySelectorAll(`.ltx_tabular:not(.${T_CLASS})`))
 const fitOf = (el: Element) => el.getAttribute(FIT_ATTR)
 
-/** 一对行间公式：原式 + 镜像（createMirrors 的结果形状） */
+/** Display-equation pair: original and mirror, matching createMirrors output */
 const eqnDoc = () => docOf('<div class="ltx_para"><table class="ltx_equation ltx_eqn_table"><tbody><tr class="ltx_equation ltx_eqn_row"><td class="ltx_eqn_cell">x</td><td class="ltx_eqn_cell ltx_eqn_eqno">(1)</td></tr></tbody></table>'
   + `<table class="ltx_equation ltx_eqn_table ${T_CLASS} axt-mirror" data-axt-for="mirror:0"><tbody><tr class="ltx_equation ltx_eqn_row"><td class="ltx_eqn_cell">x</td><td class="ltx_eqn_cell ltx_eqn_eqno">(1)</td></tr></tbody></table></div>`)
 
 describe('fitTables', () => {
   beforeEach(() => resetFitCache())
-  it('行间公式与镜像同表格一样按栏缩放：只标最外层的 table.ltx_eqn_table，组里的 tr.ltx_equation 不单独算', () => {
+  it('fits display equations and mirrors like tables, marking only outer table.ltx_eqn_table rather than each grouped equation row', () => {
     const doc = eqnDoc()
     const r = fitTables(doc, { naturalWidth: () => 800, columnWidth: () => 436 })
-    expect(r).toEqual({ fitted: 0, scrolled: 1 }) // 436/800 = 0.545 < 0.7 → 滚动
+    expect(r).toEqual({ fitted: 0, scrolled: 1 }) // 436/800 = 0.545 < 0.7 → scrolling
     const [original, mirror] = Array.from(doc.querySelectorAll('table'))
     expect(fitOf(original!)).toBe(FIT_SCROLL)
     expect(fitOf(mirror!)).toBe(FIT_SCROLL)
     expect(doc.querySelector(`tr[${FIT_ATTR}]`)).toBeNull()
-    // 窗口变宽：栏宽变了才重量（同栏宽、同译文节点会命中缓存，见下面那组）
+    // Widening remeasures only after column width changes; unchanged width and translation nodes hit the cache below.
     const again = fitTables(doc, { naturalWidth: () => 500, columnWidth: () => 425 })
     expect(again).toEqual({ fitted: 1, scrolled: 0 })
     expect(fitOf(original!)).toBe('85') // 425/500 = 0.85
   })
 
-  it('装得下就不标比例', () => {
+  it('tables that fit receive no scale marker', () => {
     const doc = pairDoc()
     const r = fitTables(doc, { naturalWidth: () => 400, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 0, scrolled: 0 })
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
 
-  it('装不下就落到能装下的那一档，原表与译文同标', () => {
+  it('oversized tables use the fitting scale step on both original and translation', () => {
     const doc = pairDoc()
-    // 需要 484/551 = 0.878 → 85 档
+    // Required 484/551 = 0.878 → 85 step
     const r = fitTables(doc, { naturalWidth: () => 551, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 1, scrolled: 0 })
     const original = originals(doc)[0]!
@@ -48,33 +48,33 @@ describe('fitTables', () => {
     expect(fitOf(original.nextElementSibling!)).toBe('85')
   })
 
-  it('档位向下取：刚好等于某档时用该档', () => {
+  it('rounds scale steps downward and keeps exact matches', () => {
     const doc = pairDoc()
     fitTables(doc, { naturalWidth: () => 1000, columnWidth: () => 950 })
     expect(fitOf(originals(doc)[0]!)).toBe('95')
   })
 
-  it('缩到 0.7 还装不下就退化为栏内滚动', () => {
+  it('falls back to in-column scrolling when scale 0.7 still cannot fit', () => {
     const doc = pairDoc()
     const r = fitTables(doc, { naturalWidth: () => 1200, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 0, scrolled: 1 })
     expect(fitOf(originals(doc)[0]!)).toBe(FIT_SCROLL)
   })
 
-  it('没有译文的表格不处理', () => {
+  it('ignores tables without translations', () => {
     const doc = docOf('<figure class="ltx_table"><table class="ltx_tabular"><tbody><tr><td class="ltx_td">a</td></tr></tbody></table></figure>')
     const r = fitTables(doc, { naturalWidth: () => 900, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 0, scrolled: 0 })
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
 
-  it('拿不到布局信息时什么都不做（happy-dom、display:none）', () => {
+  it('does nothing without layout information, as in happy-dom or display:none', () => {
     const doc = pairDoc()
     expect(fitTables(doc, { naturalWidth: () => 0, columnWidth: () => 0 })).toEqual({ fitted: 0, scrolled: 0 })
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
 
-  it('重复调用按新宽度重算，窗口变宽后标记被清掉', () => {
+  it('recomputes for new widths and clears markers when the viewport widens', () => {
     const doc = pairDoc()
     fitTables(doc, { naturalWidth: () => 551, columnWidth: () => 484 })
     expect(fitOf(originals(doc)[0]!)).toBe('85')
@@ -82,28 +82,28 @@ describe('fitTables', () => {
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
 
-  it('多张表各自算各自的', () => {
+  it('computes each table independently', () => {
     const doc = pairDoc(2)
-    // 每对的两张都会被量（按更宽的定档），所以按元素给宽度而不是按调用次序
+    // Both tables in each pair are measured and the wider one determines scale, so assign widths by element, not call order.
     const widths = new Map(Array.from(doc.querySelectorAll('.ltx_tabular')).map((el, i) => [el, i < 2 ? 551 : 1200]))
     const r = fitTables(doc, { naturalWidth: el => widths.get(el) ?? 0, columnWidth: () => 484 })
     expect(r).toEqual({ fitted: 1, scrolled: 1 })
     expect(originals(doc).map(fitOf)).toEqual(['85', FIT_SCROLL])
   })
 
-  it('译表比原表宽时按译表定档，两张同一档（实测 2606.07636v2 的 Table 4：原表装得下、译表溢出 179px）', () => {
+  it('when the translated table is wider, both use its scale (2606.07636v2 Table 4: original fit, translation overflowed 179px)', () => {
     const doc = pairDoc()
     const [orig, clone] = Array.from(doc.querySelectorAll('.ltx_tabular'))
     const widths = new Map([[orig!, 600], [clone!, 800]])
     const r = fitTables(doc, { naturalWidth: el => widths.get(el) ?? 0, columnWidth: () => 648 })
-    // 只看原表的话 600 ≤ 648 不用缩；按译表 648/800 = 0.81 → 80 档
+    // The original alone needs no scaling at 600 ≤ 648; the translation requires 648/800 = 0.81 → 80 step.
     expect(r).toEqual({ fitted: 1, scrolled: 0 })
     expect(fitOf(orig!)).toBe('80')
     expect(fitOf(clone!)).toBe('80')
   })
 })
 
-describe('只读量法的松紧规则', () => {
+describe('tightening and relaxing with read-only measurements', () => {
   beforeEach(() => resetFitCache())
   const column = 468
   const marked = (fit: string | null) => {
@@ -113,34 +113,34 @@ describe('只读量法的松紧规则', () => {
   }
   const original = (doc: Document) => doc.querySelector('table')!
 
-  it('精确值（溢出时的盒宽）可以收紧', () => {
+  it('exact overflowing box widths may tighten scale', () => {
     const doc = marked('90')
     fitTables(doc, { naturalWidth: () => 560, columnWidth: () => column }) // 468/560 = 0.836 → 80
     expect(fitOf(original(doc))).toBe('80')
   })
 
-  it('估算值永远不用来收紧：它量的是"装得下"的状态', () => {
+  it('estimated widths never tighten because they measure an already-fitting state', () => {
     const doc = marked('90')
     fitTables(doc, { naturalWidth: () => ({ width: 560, exact: false }), columnWidth: () => column })
     expect(fitOf(original(doc))).toBe('90')
   })
 
-  it('估算值放松要留 5% 余量，否则会在两档之间来回跳', () => {
-    // 460 × 1.05 = 483 > 468：不能去掉标记
+  it('relaxing estimated scale requires 5% headroom to avoid oscillating between steps', () => {
+    // 460 × 1.05 = 483 > 468: keep the marker.
     const stay = marked('95')
     fitTables(stay, { naturalWidth: () => ({ width: 460, exact: false }), columnWidth: () => column })
     expect(fitOf(original(stay))).toBe('95')
-    // 440 × 1.05 = 462 ≤ 468：可以去掉
+    // 440 × 1.05 = 462 ≤ 468: remove the marker.
     const loosen = marked('95')
     fitTables(loosen, { naturalWidth: () => ({ width: 440, exact: false }), columnWidth: () => column })
     expect(fitOf(original(loosen))).toBeNull()
-    // 从 80 放松：加余量后 500 × 1.05 = 525 → 468/525 = 0.891 → 85，而不是不加余量的 90
+    // Relax from 80 with headroom: 500 × 1.05 = 525, then 468/525 = 0.891 → 85 instead of 90 without headroom.
     const step = marked('80')
     fitTables(step, { naturalWidth: () => ({ width: 500, exact: false }), columnWidth: () => column })
     expect(fitOf(original(step))).toBe('85')
   })
 
-  it('不再克隆去量：模块里没有探针，量宽度不往文档里插节点', async () => {
+  it('measures without clones or probes and inserts no measurement nodes into the document', async () => {
     const mod = await import('@/core/renderer/table-fit')
     expect('createFitProbe' in mod).toBe(false)
     const doc = eqnDoc()
@@ -150,32 +150,32 @@ describe('只读量法的松紧规则', () => {
   })
 })
 
-describe('读写分批与缓存（issue #46）', () => {
+describe('batched reads and writes with caching (issue #46)', () => {
   beforeEach(() => resetFitCache())
 
-  it('同栏宽、同译文节点：第二趟不再量，直接用上次的档', () => {
+  it('same column width and translation node reuse the prior scale without another measurement', () => {
     const doc = pairDoc()
     const natural = vi.fn(() => 551)
-    // 一对表量两次（原表 + 译表，按更宽的定档）
+    // Measure twice per table pair, taking the wider original or translation.
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
     expect(natural).toHaveBeenCalledTimes(2)
     const r = fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
     expect(natural).toHaveBeenCalledTimes(2)
-    // 结果与计数照旧
+    // Results and counts remain unchanged.
     expect(r).toEqual({ fitted: 1, scrolled: 0 })
     expect(fitOf(originals(doc)[0]!)).toBe('85')
   })
 
-  it('栏宽变了就重量', () => {
+  it('changed column width triggers remeasurement', () => {
     const doc = pairDoc()
     const natural = vi.fn(() => 551)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 700 })
-    expect(natural).toHaveBeenCalledTimes(4) // 两趟 × 每趟两张
+    expect(natural).toHaveBeenCalledTimes(4) // Two passes × two tables
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
 
-  it('译文节点换了（重新渲染 / 重试）就重量：节点身份就是内容版本', () => {
+  it('replacing the translation node after rendering or retry triggers remeasurement because node identity represents content version', () => {
     const doc = pairDoc()
     const natural = vi.fn(() => 551)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
@@ -183,22 +183,22 @@ describe('读写分批与缓存（issue #46）', () => {
     const fresh = original.nextElementSibling!.cloneNode(true) as Element
     original.nextElementSibling!.replaceWith(fresh)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(4) // 两趟 × 每趟两张
+    expect(natural).toHaveBeenCalledTimes(4) // Two passes × two tables
     expect(fitOf(fresh)).toBe('85')
   })
 
-  it('量到 0（还没布局）的不进缓存，下一趟照样量', () => {
+  it('zero widths before layout are not cached and are measured again next pass', () => {
     const doc = pairDoc()
     const widths = [0, 0, 551, 551]
     const natural = vi.fn(() => widths.shift()!)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
     expect(fitOf(originals(doc)[0]!)).toBeNull()
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(4) // 两趟 × 每趟两张
+    expect(natural).toHaveBeenCalledTimes(4) // Two passes × two tables
     expect(fitOf(originals(doc)[0]!)).toBe('85')
   })
 
-  it('值没变就不写属性：第二趟一次 setAttribute 都不发生', () => {
+  it('unchanged values cause no attribute writes on the second pass', () => {
     const doc = pairDoc()
     fitTables(doc, { naturalWidth: () => 551, columnWidth: () => 484 })
     const original = originals(doc)[0]!
@@ -209,15 +209,15 @@ describe('读写分批与缓存（issue #46）', () => {
     expect(setT).not.toHaveBeenCalled()
   })
 
-  it('没配对的表：标记本来就没有时不做无谓的 removeAttribute', () => {
+  it('unpaired tables without markers avoid unnecessary removeAttribute calls', () => {
     const doc = docOf('<figure class="ltx_table"><table class="ltx_tabular"><tbody><tr><td class="ltx_td">a</td></tr></tbody></table></figure>')
     const remove = vi.spyOn(originals(doc)[0]!, 'removeAttribute')
     fitTables(doc, { naturalWidth: () => 900, columnWidth: () => 484 })
     expect(remove).not.toHaveBeenCalled()
   })
 
-  it('读写分批：量第二张表时，第一张的标记还没写下去', () => {
-    // 交错写法里第一张写完 zoom、第二张紧接着读几何，每张都是一次强制同步布局
+  it('batches reads before writes: the first table is still unmarked while measuring the second', () => {
+    // Interleaving zoom writes with geometry reads would force a synchronous layout for every table.
     const doc = pairDoc(2)
     const [t1] = originals(doc)
     const seen: Array<string | null> = []
@@ -226,43 +226,43 @@ describe('读写分批与缓存（issue #46）', () => {
       return 551
     })
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    // 两张都该落到 85 档——但量到第一张以外的任何一张时，第一张都还是干净的（一对量两张，两对共三次）
+    // Both pairs need scale 85, but the first remains clean during all three subsequent measurements across the two pairs.
     expect(originals(doc).map(fitOf)).toEqual(['85', '85'])
     expect(seen).toEqual([null, null, null])
   })
 })
 
-describe('字体加载完成要让缓存失效（Codex 在 #84 指出）', () => {
+describe('font loading invalidates the cache (Codex #84)', () => {
   beforeEach(() => resetFitCache())
 
-  /** happy-dom 没有 FontFaceSet：造一个只有事件的 */
+  /** happy-dom has no FontFaceSet; provide an event-only test double */
   const withFonts = (doc: Document) => {
     const fonts = new EventTarget()
     Object.defineProperty(doc, 'fonts', { value: fonts, configurable: true })
     return fonts
   }
 
-  it('loadingdone 之后再整理会重量，档位随新的自然宽度走', () => {
+  it('preparation after loadingdone remeasures and selects scale from the new natural width', () => {
     const doc = pairDoc()
     const fonts = withFonts(doc)
     const scheduled = vi.fn()
     const off = watchFontLoads(doc, scheduled)
-    // 一趟量两张（原表 + 译表）：字体到达前后各给一个宽度
+    // Each pass measures original and translation; provide one width before and another after font loading.
     let width = 551
     const natural = vi.fn(() => width)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
     expect(fitOf(originals(doc)[0]!)).toBe('85')
-    // 字体到了：自然宽度变成 700，但译文节点、栏宽都没变——不清缓存就永远停在 85
+    // The font changes natural width to 700 without changing node identity or column width; stale cache would stay at 85 forever.
     fonts.dispatchEvent(new Event('loadingdone'))
     expect(scheduled).toHaveBeenCalledTimes(1)
     width = 700
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(4) // 两趟 × 每趟两张
+    expect(natural).toHaveBeenCalledTimes(4) // Two passes × two tables
     expect(fitOf(originals(doc)[0]!)).toBe(FIT_SCROLL) // 484/700 = 0.69 < 0.7
     off()
   })
 
-  it('卸载后不再响应', () => {
+  it('uninstall stops responding', () => {
     const doc = pairDoc()
     const fonts = withFonts(doc)
     const scheduled = vi.fn()
@@ -271,7 +271,7 @@ describe('字体加载完成要让缓存失效（Codex 在 #84 指出）', () =>
     expect(scheduled).not.toHaveBeenCalled()
   })
 
-  it('没有 FontFaceSet 的环境什么都不做', () => {
+  it('does nothing without FontFaceSet', () => {
     const doc = pairDoc()
     expect(() => watchFontLoads(doc, () => {})()).not.toThrow()
   })

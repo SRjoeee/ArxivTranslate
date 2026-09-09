@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <script src="./support.js"></script>
@@ -15,62 +15,62 @@
 </helmet>
 <div style="width: 1200px; min-height: 780px; box-sizing: border-box; background: #ffffff; padding: 36px 40px; display: flex; flex-direction: column; gap: 24px;">
   <div style="display: flex; align-items: baseline; gap: 16px;">
-    <div style="font-size: 22px; font-weight: 700; letter-spacing: -0.01em;">用户体验地图（v1 草图期）</div>
-    <div style="font-size: 13px; color: #6b6b6b;">三个方向共用这一套信息架构；草图只比气质与密度</div>
+    <div style="font-size: 22px; font-weight: 700; letter-spacing: -0.01em;">User experience map (v1 sketch stage)</div>
+    <div style="font-size: 13px; color: #6b6b6b;">All three directions share this information architecture; sketches compare only character and density</div>
   </div>
 
   <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px;">
     <div style="display: flex; flex-direction: column; gap: 10px; border: 1px solid #e6e3dd; padding: 16px 18px;">
-      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #b31b1b;">旅程 1 · 首次使用</div>
-      <div style="font-size: 13px; line-height: 1.5;">打开 arXiv HTML 页 → 点图标</div>
-      <div style="font-size: 13px; line-height: 1.5;">popup 默认引擎 <b>Google 网页翻译</b>（免费，零配置）→ 直接可点「翻译本页」</div>
-      <div style="font-size: 13px; line-height: 1.5;">想要更好译文 → 引擎行显示「LLM · 未配置」→ 一键去设置页的引擎卡</div>
-      <div style="font-size: 12px; color: #6b6b6b; line-height: 1.5;">改动：默认引擎从 LLM 改为免费引擎，首次点开就能用；目前默认 LLM 且没 key，第一眼是灰按钮</div>
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #b31b1b;">Journey 1 · First use</div>
+      <div style="font-size: 13px; line-height: 1.5;">Open an arXiv HTML page → click the icon</div>
+      <div style="font-size: 13px; line-height: 1.5;">Default popup engine <b>Google web translation</b>(free, no setup) → “Translate page” is immediately available</div>
+      <div style="font-size: 13px; line-height: 1.5;">Want better translations → engine row shows “LLM · Not configured” → one click opens the engine card in settings</div>
+      <div style="font-size: 12px; color: #6b6b6b; line-height: 1.5;">Change: default to the free engine instead of LLM for immediate first-use access; currently LLM is the default without a key, so users first see a disabled button</div>
     </div>
     <div style="display: flex; flex-direction: column; gap: 10px; border: 1px solid #e6e3dd; padding: 16px 18px;">
-      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #b31b1b;">旅程 2 · 日常阅读</div>
-      <div style="font-size: 13px; line-height: 1.5;">点图标 → 「翻译本页」（或快捷键）→ 看到哪翻到哪</div>
-      <div style="font-size: 13px; line-height: 1.5;">读着切模式：上下 / 左右 / 仅译文，随时切</div>
-      <div style="font-size: 13px; line-height: 1.5;">读完或想对照原文 → 「恢复原文」</div>
-      <div style="font-size: 12px; color: #6b6b6b; line-height: 1.5;">popup 里只有这几件事；提示词、样式、术语全在设置页</div>
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #b31b1b;">Journey 2 · Everyday reading</div>
+      <div style="font-size: 13px; line-height: 1.5;">Click icon → “Translate page” (or shortcut) → translate as you read</div>
+      <div style="font-size: 13px; line-height: 1.5;">Switch modes at any time while reading: stacked / side by side / translation only</div>
+      <div style="font-size: 13px; line-height: 1.5;">Finished reading or want the source → “Restore original”</div>
+      <div style="font-size: 12px; color: #6b6b6b; line-height: 1.5;">Only these actions belong in the popup; prompts, styles, and terminology live in settings</div>
     </div>
     <div style="display: flex; flex-direction: column; gap: 10px; border: 1px solid #e6e3dd; padding: 16px 18px;">
-      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #b31b1b;">旅程 3 · 出问题时</div>
-      <div style="font-size: 13px; line-height: 1.5;">几块失败 → 页内失败块旁「重试」；popup 进度行给「重试 N 块」</div>
-      <div style="font-size: 13px; line-height: 1.5;">key 失效 → 自动降级到免费引擎，popup 状态槽一条提示 + 「去修」</div>
-      <div style="font-size: 13px; line-height: 1.5;">配置读不出 → 状态槽红条，说清「key 与引擎没生效」</div>
-      <div style="font-size: 12px; color: #6b6b6b; line-height: 1.5;">所有提示走同一个「状态槽」，一次只显示最要紧的一条</div>
+      <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #b31b1b;">Journey 3 · When something goes wrong</div>
+      <div style="font-size: 13px; line-height: 1.5;">Some blocks fail → “Retry” beside each failed block; popup progress row offers “Retry N blocks”</div>
+      <div style="font-size: 13px; line-height: 1.5;">Key expires → automatically fall back to a free engine; one popup status notice + “Fix”</div>
+      <div style="font-size: 13px; line-height: 1.5;">Config cannot be read → red status notice explaining that key and engine settings did not take effect</div>
+      <div style="font-size: 12px; color: #6b6b6b; line-height: 1.5;">All notices share one status area, showing only the most important one at a time</div>
     </div>
   </div>
 
   <div style="display: grid; grid-template-columns: 1.1fr 1fr 0.9fr; gap: 20px;">
     <div style="display: flex; flex-direction: column; gap: 8px; border: 1px solid #e6e3dd; padding: 16px 18px;">
-      <div style="font-size: 12px; font-weight: 700;">Popup（320 宽）— 自上而下</div>
-      <div style="font-size: 13px; line-height: 1.6;">1. 品牌 + 设置入口</div>
-      <div style="font-size: 13px; line-height: 1.6;">2. <b>引擎行</b>：名称 · 状态点（就绪 / 缺 key / 已降级）· 点开切引擎</div>
-      <div style="font-size: 13px; line-height: 1.6;">3. 目标语言（源固定英文，不显示）</div>
-      <div style="font-size: 13px; line-height: 1.6;">4. <b>主按钮</b>：翻译本页 ⇄ 恢复原文</div>
-      <div style="font-size: 13px; line-height: 1.6;">5. 模式分段：上下 / 左右 / 仅译文</div>
-      <div style="font-size: 13px; line-height: 1.6;">6. 进度：已翻 / 已触发 · 失败 N → 重试</div>
-      <div style="font-size: 13px; line-height: 1.6;">7. 状态槽（一次一条）</div>
-      <div style="font-size: 12px; color: #6b6b6b; line-height: 1.5; margin-top: 4px;">拿掉：后台连通行、块统计行、popup 里的提示词下拉</div>
+      <div style="font-size: 12px; font-weight: 700;">Popup (320 wide) — top to bottom</div>
+      <div style="font-size: 13px; line-height: 1.6;">1. Brand + settings entry</div>
+      <div style="font-size: 13px; line-height: 1.6;">2. <b>Engine row</b>: name · status dot (ready / missing key / fallback active) · click to switch engines</div>
+      <div style="font-size: 13px; line-height: 1.6;">3. Target language (source fixed to English, hidden)</div>
+      <div style="font-size: 13px; line-height: 1.6;">4. <b>Primary button</b>: Translate page ⇄ Restore original</div>
+      <div style="font-size: 13px; line-height: 1.6;">5. Mode segments: stacked / side by side / translation only</div>
+      <div style="font-size: 13px; line-height: 1.6;">6. Progress: translated / triggered · N failed → retry</div>
+      <div style="font-size: 13px; line-height: 1.6;">7. Status area (one notice at a time)</div>
+      <div style="font-size: 12px; color: #6b6b6b; line-height: 1.5; margin-top: 4px;">Remove: background-connectivity row, block-statistics row, popup prompt dropdown</div>
     </div>
     <div style="display: flex; flex-direction: column; gap: 8px; border: 1px solid #e6e3dd; padding: 16px 18px;">
-      <div style="font-size: 12px; font-weight: 700;">设置页 — 四个一级页，零深层</div>
-      <div style="font-size: 13px; line-height: 1.6;"><b>引擎</b>：目标语言 · 三张引擎卡（选中的展开表单）· 测试连接 · 失败自动降级</div>
-      <div style="font-size: 13px; line-height: 1.6;"><b>阅读</b>：默认模式 · 译文样式画廊（即选即预览）· 预翻译距离（滑杆）</div>
-      <div style="font-size: 13px; line-height: 1.6;"><b>提示词与术语</b>：提示词列表 + 侧栏编辑器 · 术语表（仅 LLM 时出现在导航）</div>
-      <div style="font-size: 13px; line-height: 1.6;"><b>数据</b>：缓存条数 / 体积 · 清空</div>
-      <div style="font-size: 12px; color: #6b6b6b; line-height: 1.5; margin-top: 4px;">即改即存；只有 LLM 端点表单要「应用」（申请 host 权限需要点击手势），测试连接测的是表单里的值</div>
+      <div style="font-size: 12px; font-weight: 700;">Settings — four top-level pages, no nested pages</div>
+      <div style="font-size: 13px; line-height: 1.6;"><b>Engine</b>: target language · three engine cards (selected card expands its form) · test connection · automatic fallback</div>
+      <div style="font-size: 13px; line-height: 1.6;"><b>Reading</b>: default mode · translation-style gallery (preview on selection) · translate-ahead distance (slider)</div>
+      <div style="font-size: 13px; line-height: 1.6;"><b>Prompts & terms</b>: prompt list + side editor · glossary (navigation entry appears only for LLM)</div>
+      <div style="font-size: 13px; line-height: 1.6;"><b>Data</b>: cache entries / size · clear</div>
+      <div style="font-size: 12px; color: #6b6b6b; line-height: 1.5; margin-top: 4px;">Save on change; only the LLM endpoint form needs “Apply” (host permission requests require a click gesture); connection tests use form values</div>
     </div>
     <div style="display: flex; flex-direction: column; gap: 8px; border: 1px solid #e6e3dd; padding: 16px 18px;">
-      <div style="font-size: 12px; font-weight: 700;">依赖 → 露出规则</div>
-      <div style="font-size: 13px; line-height: 1.6;">非 arXiv 页 → popup 只剩一句话 + 设置入口</div>
-      <div style="font-size: 13px; line-height: 1.6;">引擎 ≠ LLM → 提示词 / 术语 / 思考 / 降级开关不出现</div>
-      <div style="font-size: 13px; line-height: 1.6;">离线引擎未下语言包 → 引擎卡内就有「下载」按钮（不再只在 popup）</div>
-      <div style="font-size: 13px; line-height: 1.6;">未翻译 → 不显示进度 / 恢复 / 重试</div>
-      <div style="font-size: 13px; line-height: 1.6;">样式 ≠ 自定义 → 不显示 CSS 框</div>
-      <div style="font-size: 13px; line-height: 1.6;">窗口偏窄 → 左右选项加「将按上下显示」角标而非事后提示</div>
+      <div style="font-size: 12px; font-weight: 700;">Dependencies → visibility rules</div>
+      <div style="font-size: 13px; line-height: 1.6;">Non-arXiv page → popup shows only one sentence + settings entry</div>
+      <div style="font-size: 13px; line-height: 1.6;">Engine ≠ LLM → hide prompts / glossary / thinking / fallback toggle</div>
+      <div style="font-size: 13px; line-height: 1.6;">Offline engine without language pack → “Download” appears inside the engine card (not only in the popup)</div>
+      <div style="font-size: 13px; line-height: 1.6;">Not translated → hide progress / restore / retry</div>
+      <div style="font-size: 13px; line-height: 1.6;">Style ≠ custom → hide CSS field</div>
+      <div style="font-size: 13px; line-height: 1.6;">Narrow window → badge the side-by-side option “Will use stacked layout” instead of explaining afterward</div>
     </div>
   </div>
 </div>

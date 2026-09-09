@@ -1,10 +1,10 @@
-// 移植自 @read-frog/definitions@0.4.4（reference/read-frog 的依赖包，GPL-3.0）的语言表，2026-09-05 移植、有修改：
-// 只搬 LANG_CODE_ISO6393_OPTIONS 与四张名称 / 映射表，其余（SRS、电子书 schema）不搬；辅助函数是本项目的。
-// 语言码用 ISO 639-3（与 Read Frog 一致），配置 v4 起 targetLanguage 存这个码；
-// LLM prompt 里填英文名，Google 网页翻译按 BCP-47 收，各自经这里的函数转换。
+// Language tables ported from @read-frog/definitions@0.4.4 (reference/read-frog dependency, GPL-3.0), 2026-09-05; modified:
+// Only LANG_CODE_ISO6393_OPTIONS and four name/mapping tables were ported; SRS and ebook schemas were omitted. Helpers are project-owned.
+// ISO 639-3 codes match Read Frog; targetLanguage stores these codes since config v4.
+// Helpers convert them to English names for LLM prompts and BCP-47 for Google web translation.
 import { z } from 'zod'
 
-/** 179 个 ISO 639-3 码，顺序照 Read Frog（常用语言在前） */
+/** 179 ISO 639-3 codes in Read Frog order (common languages first). */
 export const LANG_CODES = [
   "eng",
   "cmn",
@@ -191,7 +191,7 @@ export type LangCode = (typeof LANG_CODES)[number]
 
 export const langCodeSchema = z.enum(LANG_CODES)
 
-/** 英文语言名：填进 LLM prompt 的 {{targetLanguage}}（Read Frog translate-text.ts 的做法） */
+/** English language names for LLM prompt {{targetLanguage}} (as in Read Frog translate-text.ts). */
 export const LANG_CODE_TO_EN_NAME = {
   "eng": "English",
   "cmn": "Simplified Mandarin Chinese",
@@ -374,190 +374,190 @@ export const LANG_CODE_TO_EN_NAME = {
   "hif": "Fiji Hindi",
 } as const satisfies Record<LangCode, string>
 
-/** 中文语言名：设置页显示用 */
+/** English UI display names; the legacy export name is retained for compatibility. */
 export const LANG_CODE_TO_ZH_NAME = {
-  "eng": "英语",
-  "cmn": "简体中文",
-  "cmn-Hant": "繁体中文",
-  "yue": "粤语",
-  "spa": "西班牙语",
-  "rus": "俄语",
-  "arb": "阿拉伯语",
-  "ben": "孟加拉语",
-  "hin": "印地语",
-  "por": "葡萄牙语",
-  "ind": "印尼语",
-  "jpn": "日语",
-  "fra": "法语",
-  "deu": "德语",
-  "jav": "爪哇语",
-  "kor": "韩语",
-  "tel": "泰卢固语",
-  "vie": "越南语",
-  "mar": "马拉地语",
-  "ita": "意大利语",
-  "tam": "泰米尔语",
-  "tur": "土耳其语",
-  "urd": "乌尔都语",
-  "guj": "古吉拉特语",
-  "pol": "波兰语",
-  "ukr": "乌克兰语",
-  "kan": "坎纳达语",
-  "mai": "迈蒂利语",
-  "mal": "马拉雅拉姆语",
-  "pes": "波斯语",
-  "mya": "缅甸语",
-  "swh": "斯瓦希里语",
-  "sun": "巽他语",
-  "ron": "罗马尼亚语",
-  "pan": "旁遮普语",
-  "bho": "博杰普尔语",
-  "amh": "阿姆哈拉语",
-  "hau": "豪萨语",
-  "fuv": "富拉语",
-  "bos": "波斯尼亚语",
-  "hrv": "克罗地亚语",
-  "nld": "荷兰语",
-  "srp": "塞尔维亚语",
-  "tha": "泰语",
-  "ckb": "库尔德语",
-  "yor": "约鲁巴语",
-  "uzn": "乌兹别克语",
-  "zlm": "马来语",
-  "ibo": "伊博语",
-  "npi": "尼泊尔语",
-  "ceb": "宿务语",
-  "skr": "旁遮普语",
-  "tgl": "塔加路语",
-  "hun": "匈牙利语",
-  "azj": "北阿塞拜疆语",
-  "sin": "僧伽罗语",
-  "koi": "科米-彼尔姆语",
-  "ell": "现代希腊语",
-  "ces": "捷克语",
-  "mag": "马加哈语",
-  "run": "鲁恩达语",
-  "bel": "白俄罗斯语",
-  "plt": "高原马达加斯加语",
-  "qug": "奇布查语",
-  "mad": "马都拉语",
-  "nya": "尼扬加语",
-  "zyb": "壮语",
-  "pbu": "北部普什图语",
-  "kin": "基尼亚卢旺达语",
-  "zul": "祖鲁语",
-  "bul": "保加利亚语",
-  "swe": "瑞典语",
-  "lin": "林加拉语",
-  "som": "索马里语",
-  "hms": "南部乾东苗语",
-  "hnj": "苗族北部语",
-  "ilo": "伊洛卡诺语",
-  "kaz": "哈萨克语",
-  "heb": "希伯来语",
-  "nob": "书面挪威语",
-  "nno": "新挪威语",
-  "afr": "南非荷兰语",
-  "sqi": "阿尔巴尼亚语",
-  "asm": "阿萨姆语",
-  "eus": "巴斯克语",
-  "bre": "布列塔尼语",
-  "cat": "加泰罗尼亚语",
-  "cos": "科西嘉语",
-  "cym": "威尔士语",
-  "dan": "丹麦语",
-  "div": "迪维希语",
-  "epo": "世界语",
-  "ekk": "爱沙尼亚语",
-  "fao": "法罗语",
-  "fij": "斐济语",
-  "fin": "芬兰语",
-  "fry": "西弗里西亚语",
-  "gla": "苏格兰盖尔语",
-  "gle": "爱尔兰语",
-  "glg": "加利西亚语",
-  "grn": "瓜拉尼语",
-  "hat": "海地克里奥尔语",
-  "haw": "夏威夷语",
-  "hye": "亚美尼亚语",
-  "ido": "伊多语",
-  "ina": "国际辅助语",
-  "isl": "冰岛语",
-  "kat": "格鲁吉亚语",
-  "khm": "高棉语",
-  "kir": "吉尔吉斯语",
-  "lao": "老挝语",
-  "lat": "拉丁语",
-  "lvs": "拉脱维亚语",
-  "lit": "立陶宛语",
-  "ltz": "卢森堡语",
-  "mkd": "马其顿语",
-  "mlt": "马耳他语",
-  "mon": "蒙古语",
-  "mri": "毛利语",
-  "nso": "北索托语",
-  "oci": "奥克语",
-  "ori": "奥里亚语",
-  "orm": "奥罗莫语",
-  "prs": "达里语",
-  "san": "梵语",
-  "slk": "斯洛伐克语",
-  "slv": "斯洛文尼亚语",
-  "smo": "萨摩亚语",
-  "sna": "绍纳语",
-  "snd": "信德语",
-  "sot": "南索托语",
-  "tah": "塔希提语",
-  "tat": "鞑靼语",
-  "tgk": "塔吉克语",
-  "tir": "提格雷尼亚语",
-  "ton": "汤加语",
-  "tsn": "茨瓦纳语",
-  "tuk": "土库曼语",
-  "uig": "维吾尔语",
-  "vol": "沃拉普克语",
-  "wol": "沃洛夫语",
-  "xho": "科萨语",
-  "ydd": "东意第绪语",
-  "aka": "阿坎语",
-  "bam": "班巴拉语",
-  "bis": "比斯拉马语",
-  "bod": "藏语",
-  "che": "车臣语",
-  "chv": "楚瓦什语",
-  "dzo": "宗喀语",
-  "ewe": "埃维语",
-  "kab": "卡拜尔语",
-  "lug": "卢干达语",
-  "oss": "奥塞梯语",
-  "ssw": "斯瓦蒂语",
-  "ven": "文达语",
-  "war": "瓦瑞语",
-  "nde": "北恩德贝勒语",
-  "nbl": "南恩德贝勒语",
-  "pam": "邦板牙语",
-  "hil": "希利盖农语",
-  "bcl": "中比科尔语",
-  "min": "米南佳保语",
-  "ace": "亚齐语",
-  "bug": "布吉语",
-  "ban": "巴厘语",
-  "bjn": "班贾尔语",
-  "mak": "望加锡语",
-  "sas": "萨萨克语",
-  "tet": "德顿语",
-  "cha": "查莫罗语",
-  "niu": "纽埃语",
-  "tvl": "图瓦卢语",
-  "gil": "吉尔伯特语",
-  "mah": "马绍尔语",
-  "pau": "帕劳语",
-  "wls": "瓦利斯语",
-  "rar": "拉罗汤加语",
-  "hif": "斐济印地语",
+  "eng": "English",
+  "cmn": "Simplified Mandarin Chinese",
+  "cmn-Hant": "Traditional Mandarin Chinese",
+  "yue": "Cantonese",
+  "spa": "Spanish",
+  "rus": "Russian",
+  "arb": "Standard Arabic",
+  "ben": "Bengali",
+  "hin": "Hindi",
+  "por": "Portuguese",
+  "ind": "Indonesian",
+  "jpn": "Japanese",
+  "fra": "French",
+  "deu": "German",
+  "jav": "Javanese (Javanese)",
+  "kor": "Korean",
+  "tel": "Telugu",
+  "vie": "Vietnamese",
+  "mar": "Marathi",
+  "ita": "Italian",
+  "tam": "Tamil",
+  "tur": "Turkish",
+  "urd": "Urdu",
+  "guj": "Gujarati",
+  "pol": "Polish",
+  "ukr": "Ukrainian",
+  "kan": "Kannada",
+  "mai": "Maithili",
+  "mal": "Malayalam",
+  "pes": "Iranian Persian",
+  "mya": "Burmese",
+  "swh": "Swahili (individual language)",
+  "sun": "Sundanese",
+  "ron": "Romanian",
+  "pan": "Panjabi",
+  "bho": "Bhojpuri",
+  "amh": "Amharic",
+  "hau": "Hausa",
+  "fuv": "Nigerian Fulfulde",
+  "bos": "Bosnian (Cyrillic)",
+  "hrv": "Croatian",
+  "nld": "Dutch",
+  "srp": "Serbian (Cyrillic)",
+  "tha": "Thai",
+  "ckb": "Central Kurdish",
+  "yor": "Yoruba",
+  "uzn": "Northern Uzbek (Cyrillic)",
+  "zlm": "Malay (individual language) (Arabic)",
+  "ibo": "Igbo",
+  "npi": "Nepali (individual language)",
+  "ceb": "Cebuano",
+  "skr": "Saraiki",
+  "tgl": "Tagalog",
+  "hun": "Hungarian",
+  "azj": "North Azerbaijani (Cyrillic)",
+  "sin": "Sinhala",
+  "koi": "Komi-Permyak",
+  "ell": "Modern Greek (1453-)",
+  "ces": "Czech",
+  "mag": "Magahi",
+  "run": "Rundi",
+  "bel": "Belarusian",
+  "plt": "Plateau Malagasy",
+  "qug": "Chimborazo Highland Quichua",
+  "mad": "Madurese",
+  "nya": "Nyanja",
+  "zyb": "Yongbei Zhuang",
+  "pbu": "Northern Pashto",
+  "kin": "Kinyarwanda",
+  "zul": "Zulu",
+  "bul": "Bulgarian",
+  "swe": "Swedish",
+  "lin": "Lingala",
+  "som": "Somali",
+  "hms": "Southern Qiandong Miao",
+  "hnj": "Hmong Njua",
+  "ilo": "Iloko",
+  "kaz": "Kazakh",
+  "heb": "Hebrew",
+  "nob": "Norwegian Bokmål",
+  "nno": "Norwegian Nynorsk",
+  "afr": "Afrikaans",
+  "sqi": "Albanian",
+  "asm": "Assamese",
+  "eus": "Basque",
+  "bre": "Breton",
+  "cat": "Catalan",
+  "cos": "Corsican",
+  "cym": "Welsh",
+  "dan": "Danish",
+  "div": "Divehi",
+  "epo": "Esperanto",
+  "ekk": "Estonian",
+  "fao": "Faroese",
+  "fij": "Fijian",
+  "fin": "Finnish",
+  "fry": "Western Frisian",
+  "gla": "Scottish Gaelic",
+  "gle": "Irish",
+  "glg": "Galician",
+  "grn": "Guarani",
+  "hat": "Haitian Creole",
+  "haw": "Hawaiian",
+  "hye": "Armenian",
+  "ido": "Ido",
+  "ina": "Interlingua",
+  "isl": "Icelandic",
+  "kat": "Georgian",
+  "khm": "Khmer",
+  "kir": "Kyrgyz",
+  "lao": "Lao",
+  "lat": "Latin",
+  "lvs": "Latvian",
+  "lit": "Lithuanian",
+  "ltz": "Luxembourgish",
+  "mkd": "Macedonian",
+  "mlt": "Maltese",
+  "mon": "Mongolian",
+  "mri": "Maori",
+  "nso": "Northern Sotho",
+  "oci": "Occitan",
+  "ori": "Odia",
+  "orm": "Oromo",
+  "prs": "Dari",
+  "san": "Sanskrit",
+  "slk": "Slovak",
+  "slv": "Slovenian",
+  "smo": "Samoan",
+  "sna": "Shona",
+  "snd": "Sindhi",
+  "sot": "Southern Sotho",
+  "tah": "Tahitian",
+  "tat": "Tatar",
+  "tgk": "Tajik",
+  "tir": "Tigrinya",
+  "ton": "Tongan",
+  "tsn": "Tswana",
+  "tuk": "Turkmen",
+  "uig": "Uyghur",
+  "vol": "Volapük",
+  "wol": "Wolof",
+  "xho": "Xhosa",
+  "ydd": "Eastern Yiddish",
+  "aka": "Akan",
+  "bam": "Bambara",
+  "bis": "Bislama",
+  "bod": "Tibetan",
+  "che": "Chechen",
+  "chv": "Chuvash",
+  "dzo": "Dzongkha",
+  "ewe": "Ewe",
+  "kab": "Kabyle",
+  "lug": "Ganda",
+  "oss": "Ossetian",
+  "ssw": "Swati",
+  "ven": "Venda",
+  "war": "Waray",
+  "nde": "North Ndebele",
+  "nbl": "South Ndebele",
+  "pam": "Pampanga",
+  "hil": "Hiligaynon",
+  "bcl": "Central Bikol",
+  "min": "Minangkabau",
+  "ace": "Acehnese",
+  "bug": "Buginese",
+  "ban": "Balinese",
+  "bjn": "Banjar",
+  "mak": "Makasar",
+  "sas": "Sasak",
+  "tet": "Tetum",
+  "cha": "Chamorro",
+  "niu": "Niuean",
+  "tvl": "Tuvaluan",
+  "gil": "Gilbertese",
+  "mah": "Marshallese",
+  "pau": "Palauan",
+  "wls": "Wallisian",
+  "rar": "Rarotongan",
+  "hif": "Fiji Hindi",
 } as const satisfies Record<LangCode, string>
 
-/** 该语言自己的写法 */
+/** Native language names, displayed in their own languages. */
 export const LANG_CODE_TO_LOCALE_NAME = {
   "eng": "English",
   "cmn": "简体中文",
@@ -740,7 +740,7 @@ export const LANG_CODE_TO_LOCALE_NAME = {
   "hif": "फ़िजी हिंदी",
 } as const satisfies Record<LangCode, string>
 
-/** ISO 639-3 → BCP-47（Google 等按 BCP-47 收目标语言）；38 个码没有对应的两字母码 */
+/** ISO 639-3 → BCP-47 (used by Google and others); 38 codes have no two-letter equivalent. */
 export const ISO6393_TO_6391 = {
   "eng": "en",
   "cmn": "zh",
@@ -891,30 +891,30 @@ export function isLangCode(value: string): value is LangCode {
   return (LANG_CODES as readonly string[]).includes(value)
 }
 
-/** 填进 prompt 的语言名；不认识的码原样返回（自定义或旧配置） */
+/** Language name for prompts; pass through unknown codes from custom or older configs. */
 export function englishName(code: string): string {
   return isLangCode(code) ? LANG_CODE_TO_EN_NAME[code] : code
 }
 
-/** 设置页显示：中文名（本地写法），对应 Read Frog language-labels.ts 的 getLanguageLabel */
+/** Settings label: English name (native name), corresponding to Read Frog language-labels.ts getLanguageLabel. */
 export function label(code: LangCode): string {
   const zh = LANG_CODE_TO_ZH_NAME[code]
   const local = LANG_CODE_TO_LOCALE_NAME[code]
-  return zh === local ? zh : `${zh}（${local}）`
+  return zh === local ? zh : `${zh} (${local})`
 }
 
-/** 给按 BCP-47 收目标语言的引擎（google-web）；没有两字母码的语言原样传 ISO 639-3 码 */
+/** For engines accepting BCP-47 targets (google-web); pass through ISO 639-3 when no two-letter code exists. */
 const BCP47: Partial<Record<LangCode, string>> = ISO6393_TO_6391
 
 /**
- * 两字母码丢掉了语言身份或文字，而端点其实分得清的，改发别的标签（Codex 在 #39 三轮指出，逐条实测）：
- * - yue 与 cmn 都是 zh，发 zh 就成了普通话（实测 yue 返回"巴士站喺邊"，zh 返回"公交车站在哪里"）
- * - ckb（索拉尼）与 kmr（库尔曼吉）都是 ku，发 ku 就成了库尔曼吉（实测 ckb 返回阿拉伯字母 "وێستگەی پاس"，ku 返回拉丁字母 "Rawestgeha"）
- * - zlm 在表里就叫 "Malay (individual language) (Arabic)"，发 ms 得到拉丁字母的马来语（实测 ms-Arab 返回爪夷文 "دمان ڤرهنتين بس؟"）
+ * Override two-letter codes that lose language or script distinctions supported by the endpoint (three rounds of Codex #39; each verified):
+ * - yue and cmn both map to zh, which produces Mandarin (observed yue: "巴士站喺邊"; zh: "公交车站在哪里").
+ * - ckb (Sorani) and kmr (Kurmanji) both map to ku, which produces Kurmanji (ckb: Arabic-script "وێستگەی پاس"; ku: Latin-script "Rawestgeha").
+ * - zlm is "Malay (individual language) (Arabic)"; ms produces Latin-script Malay (ms-Arab returned Jawi "دمان ڤرهنتين بس؟").
  *
- * 表里另外三个带文字标注的条目**端点做不到**，只能维持现状（实测 bs / bs-Cyrl、uz / uz-Cyrl、az / az-Cyrl 返回完全相同的拉丁字母结果）：
- * bos "Bosnian (Cyrillic)"、uzn "Northern Uzbek (Cyrillic)"、azj "North Azerbaijani (Cyrillic)"。
- * srp "Serbian (Cyrillic)" 本来就对（sr 一律返回西里尔字母）。LLM 路径不受影响：它拿的是英文名，文字标注在名字里
+ * Three other script distinctions are **unsupported by the endpoint** and remain unchanged (bs / bs-Cyrl, uz / uz-Cyrl, az / az-Cyrl returned identical Latin text):
+ * bos "Bosnian (Cyrillic)", uzn "Northern Uzbek (Cyrillic)", azj "North Azerbaijani (Cyrillic)".
+ * srp "Serbian (Cyrillic)" already works (sr always returns Cyrillic). LLMs are unaffected: the English names include the script.
  */
 const BCP47_OVERRIDES: Partial<Record<LangCode, string>> = { yue: 'yue', ckb: 'ckb', zlm: 'ms-Arab' }
 
@@ -924,11 +924,11 @@ export function toBcp47(code: string): string {
 }
 
 /**
- * BCP-47 → ISO 639-3，配置 v3→v4 迁移用。BCP-47 不分大小写（Codex 在 #39 指出）。
- * 依次：精确反查（zh-TW → cmn-Hant）；子标签相交——表里同主语言的条目中，取地区 / 文字子标签有交集的
- * （zh-Hant-TW ∩ zh-TW → cmn-Hant）；中文的繁体文字标签或港澳台地区（zh-Hant、zh-HK、zh-MO）表里没有对应条目，
- * 归 cmn-Hant（Codex 在 #39 第二轮指出：只按主语言回退会把繁体悄悄换成简体）；再按主语言回退
- * （zh-CN → zh → cmn，表里 cmn 排在 yue 前面）；都没有回退简体中文
+ * BCP-47 → ISO 639-3 for config v3→v4 migration. BCP-47 is case-insensitive (Codex #39).
+ * Try exact reverse lookup (zh-TW → cmn-Hant), then matching region/script subtags within the same primary language
+ * (zh-Hant-TW ∩ zh-TW → cmn-Hant). Traditional Chinese script or Hong Kong/Macau/Taiwan tags (zh-Hant, zh-HK, zh-MO) without a table entry
+ * map to cmn-Hant (Codex #39, round 2: primary-language fallback alone silently changes Traditional to Simplified). Then fall back by primary language
+ * (zh-CN → zh → cmn; cmn precedes yue in the table), or finally to Simplified Chinese.
  */
 export function fromBcp47(tag: string): LangCode {
   if (isLangCode(tag)) return tag
@@ -944,5 +944,5 @@ export function fromBcp47(tag: string): LangCode {
   return sameLanguage[0]?.[0] ?? DEFAULT_LANG_CODE
 }
 
-/** 繁体中文的文字 / 地区子标签（小写） */
+/** Traditional Chinese script/region subtags, in lowercase. */
 const TRADITIONAL_CHINESE_SUBTAGS = new Set(['hant', 'tw', 'hk', 'mo'])

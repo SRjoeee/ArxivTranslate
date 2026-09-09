@@ -10,7 +10,7 @@ const page =
   + '<table class="ltx_tabular" id="T"><tbody><tr><td class="ltx_td">Model</td><td class="ltx_td">1</td></tr></tbody></table></article>'
 
 describe('enable / setMode', () => {
-  it('在 <html> 上写状态，样式只注入一份，幂等', () => {
+  it('writes state on html and injects one stylesheet idempotently', () => {
     document.body.innerHTML = page
     enable(document, 'stack')
     enable(document, 'stack')
@@ -24,7 +24,7 @@ describe('enable / setMode', () => {
 })
 
 describe('restore', () => {
-  it('翻译 + 调试描边后恢复，DOM 与最初逐字相等', () => {
+  it('restoring after translation and debug outlines recovers the exact initial DOM', () => {
     document.head.innerHTML = ''
     document.body.innerHTML = page
     const before = document.documentElement.outerHTML
@@ -41,11 +41,11 @@ describe('restore', () => {
     const result = restore(document)
     expect(document.documentElement.outerHTML).toBe(before)
     expect(result.removedNodes).toBe(4)
-    // data-axt-id ×4 + data-axt-state ×4 + 原标题的 data-axt-inline + data-axt-on + data-axt-mode + data-axt-debug
+    // data-axt-id ×4 + data-axt-state ×4 + original-title data-axt-inline + data-axt-on + data-axt-mode + data-axt-debug
     expect(result.strippedAttrs).toBe(12)
   })
 
-  it('图片叠加层与模式闸一起恢复（§7.1 第 4 条、§15.2）', () => {
+  it('restores image overlays and mode gates together (§7.1 rule 4, §15.2)', () => {
     document.head.innerHTML = ''
     document.body.innerHTML = '<article class="ltx_document"><figure class="ltx_figure"><img class="ltx_graphics" src="a.png" id="g1"><figcaption class="ltx_caption" id="c">Cap</figcaption></figure></article>'
     const before = document.documentElement.outerHTML

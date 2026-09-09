@@ -1,48 +1,48 @@
-// 会话与链的绑定（DESIGN §8.0，Codex 在 #59 指出的两条）。
+// Bind sessions to chains (DESIGN §8.0; two issues raised in Codex #59).
 //
-// 请求搬回 background 之后多出两个暴露面，都因为 scope 不再和「它从哪来、绑哪条链」关联：
+// Moving requests into background exposed two problems when scopes lost their association with source tabs and chains:
 //
-// 1. 配置中途变更会换掉正在进行的那一轮用的链。popup 的提示词下拉写完就落盘，界面上明说
-//    「恢复原文后再点翻译生效」；`chrome-builtin` 更是在构造时就把语言对固定下来，中途改目标语言
-//    会让同一轮里先后出现两种语言。所以**一次会话认准它开始时的那条链**，重建只影响之后的会话。
-// 2. 标签页关掉时队列还在 worker 里活着。搬迁前请求跑在 content 里，关页面连带就没了；现在不撤的话
-//    关掉的标签页还会继续发付费请求，直到批次耗尽预算（单批最长 180 秒）。
+// 1. Mid-session config changes replaced the active chain. Popup prompt selection saves immediately but explicitly promises
+//    to apply only after restore/restart. chrome-builtin fixes the language pair at construction, so changing targets mid-run could mix languages.
+//    Therefore each session keeps its starting chain; rebuilding only affects later sessions.
+// 2. Closing a tab leaves worker queues alive. Previously content-owned requests died with the page; without explicit cancellation,
+//    closed tabs would keep sending paid requests until their batch budgets expire (up to 180s).
 import type { TranslationTransport } from '@/providers/transport'
 
 export interface SessionRouter {
-  /** 取这次调用该用的链：带 scope 的绑定到它开始时的那条，不带的（设置页连接测试）用当前那条 */
+  /** Select a chain: scoped calls bind to their starting chain; unscoped calls (settings tests) use the current chain. */
   forCall(scope: string | undefined, tabId: number | undefined): Promise<TranslationTransport>
   /**
-   * 只记下 scope 属于哪个标签页，不建链、不等待：图片 OCR 的第一条请求要绑 tab 才撤得到，
-   * 但不能让它等翻译链构造（Codex 在 #87 指出）。同一标签页的旧 scope 顺手撤掉
+   * Record scope ownership by tab without building or awaiting a chain. The first image OCR request needs this binding for cancellation,
+   * but must not wait for translation-chain construction (Codex #87). Also cancel old scopes for the same tab.
    */
   bind(scope: string, tabId: number | undefined): void
-  /** 撤掉这些 scope 并解绑，返回撤掉的条数 */
+  /** Cancel/unbind scopes and return the number of cancelled requests. */
   drop(scopes: readonly string[]): Promise<number>
-  /** 标签页关闭 / 导航：撤掉挂在它上面的会话 */
+  /** Tab close/navigation: cancel its bound sessions. */
   dropTab(tabId: number): Promise<number>
   /**
-   * 把所有进行中的会话迁到新链上。**只给用户的显式动作用**（下载完语言包后的 `axt:engine-ready`）：
-   * 被动的配置变更故意不迁，见本文件开头
+   * Move all active sessions to the new chain. Only for explicit user actions (axt:engine-ready after language pack download).
+   * Passive config changes intentionally leave sessions in place; see the file header.
    */
   rebindAll(transport: TranslationTransport): void
-  /** 当前还绑着的 scope，按绑定顺序 */
+  /** Currently bound scopes, in binding order. */
   bound(): string[]
 }
 
 /**
- * @param current 取「此刻的」链；配置变更后它返回新的一条，已绑定的会话不受影响
- * @param options.onDrop 每撤掉一个 scope 调一次：翻译队列之外还有别的按 scope 排队的东西（图片 OCR，§15.2），
- *   撤会话时一起撤；返回它撤掉的条数
+ * @param current Current chain; config changes produce a new one without affecting already-bound sessions.
+ * @param options.onDrop Called for each cancelled scope to cancel other scoped work such as image OCR (§15.2),
+ *   returning the number of cancelled requests.
  */
 export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string) => number } = {}): SessionRouter {
-  /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
+  /** transport is assigned at the first forCall; bind alone records only tabId. */
   const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number }>()
   /**
-   * 撤过的 scope。会话 id 不会重复，撤过的不该再活过来：bind 之后 forCall 正在 `await current()` 时
-   * 标签页关掉了——drop 看到的是"没 transport"就跳过了撤翻译，forCall 回来又把它 set 回去、请求照发
-   *（Codex 在 #87 指出）。forCall 回来发现自己被撤过：不重新绑定，把 scope 在这条链上撤掉再交出去，
-   * 之后带这个 scope 的请求在 translate-service 里直接 aborted
+   * Cancelled scopes must not revive; session ids are unique. A tab can close after bind while forCall awaits current(),
+   * so drop sees no transport and skips translation cancellation, then forCall would restore the binding and send requests.
+   * If forCall resumes after cancellation, do not rebind; cancel the scope on that chain before returning it
+   * so translate-service immediately aborts subsequent scoped requests (Codex #87).
    */
   const dropped = new Set<string>()
 
@@ -52,10 +52,10 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
       const bound = sessions.get(scope)
       sessions.delete(scope)
       dropped.add(scope)
-      // 别的按 scope 排队的东西（图片 OCR）先撤，不等建链：建链可能挂在 Translator.availability() 上（Codex 在 #87 指出）
+      // Cancel other scoped work (image OCR) without awaiting a chain that may hang on Translator.availability() (Codex #87).
       cancelled += options.onDrop?.(scope) ?? 0
-      // 只经 bind 绑过、从没翻过字的会话（bound 有值、没 transport）：这个 worker 里没有它的翻译请求，不用为撤它建一条链。
-      // 完全没绑过的也要撤：worker 中途重启过，绑定丢了但队列里可能还有这个 scope 的任务
+      // A scope bound without transport has never translated text in this worker; do not build a chain solely to cancel it.
+      // Cancel unbound scopes too: a worker restart can lose bindings while queued work for the scope may remain.
       if (bound && !bound.transport) continue
       const transport = bound?.transport ?? await current()
       cancelled += await transport.cancel(scope)
@@ -72,19 +72,19 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
       const bound = sessions.get(scope)
       if (bound?.transport) return bound.transport
       if (!bound && dropped.has(scope)) {
-        // 撤过的会话又来请求（worker 里的旧 content 还在发）：给它当前链但先撤掉，请求会直接 aborted
+        // An old content script may keep requesting with a cancelled scope; return the current chain after cancelling that scope on it.
         const transport = await current()
         await transport.cancel(scope)
         return transport
       }
-      // 一个标签页同时只有一个会话：出现新 scope 说明上一轮没走 endRun（导航、刷新），把它撤掉。
-      // bind 过的（bound 有值、没 transport）已经在 bind 里撤过了
+      // One session per tab: a new scope means the old run missed endRun (navigation/reload), so cancel it.
+      // Scopes already bound without transport were handled by bind.
       if (!bound && tabId !== undefined) {
         const stale = scopesOfTab(tabId)
         if (stale.length > 0) await drop(stale)
       }
       const transport = await current()
-      // 建链期间被撤（关标签页 / 恢复原文）：不复活，补撤这条链上的它
+      // Cancelled during chain construction (tab close/restore): do not revive; also cancel on this chain.
       if (dropped.has(scope)) {
         await transport.cancel(scope)
         return transport

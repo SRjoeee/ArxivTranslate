@@ -1,9 +1,9 @@
-// 引擎降级链（DESIGN §8.5）。一层薄编排，不动队列：
-// createTranslateService 已经是"一个 provider 一套队列 + 缓存 + 批处理"的闭包，缓存键里带
-// providerId | model | promptKey，不同引擎的译文天然分开存，所以链包在外面而不是塞进服务里。
+// Engine fallback chain (DESIGN §8.5): thin orchestration around existing queues.
+// createTranslateService already closes over one provider, queues, cache and batching; cache keys include
+// providerId | model | promptKey, naturally separating translations. Wrap the service instead of embedding the chain inside it.
 //
-// 解决的问题：key 过期、额度用尽、网络抖动时 run.ts 会把整页翻译停死（no-key / auth 触发
-// scheduler.disconnect()），读者对着半篇译文干等。硬规则 4：失败必须可恢复并触发 fallback 链。
+// Expired keys, exhausted quotas and network failures previously stopped all page translation in run.ts (no-key/auth call
+// scheduler.disconnect()), leaving readers waiting on a half-translated paper. Hard rule 4 requires recoverable failure through fallback.
 import type { TranslateCall, TranslateMessageResponse, TranslateService } from './translate-service'
 import type { ProviderErrorKind, TranslationProvider } from './types'
 
@@ -20,43 +20,43 @@ export interface DemotedInfo {
 }
 
 export interface FallbackStatus {
-  /** 配置里选的引擎 */
+  /** Configured engine. */
   configuredId: string
-  /** 此刻实际在用的引擎；与 configuredId 不同就说明降级了 */
+  /** Currently active engine; a different id from configuredId indicates fallback. */
   activeId: string
-  /** 最近一次降级的原因，popup 用来解释为什么译文换了引擎 */
+  /** Latest fallback reason, shown in the popup to explain engine changes. */
   demoted?: DemotedInfo
 }
 
 /**
- * 没有 `reset()`：「用户把配置修好之后链要回到首选」（Codex 在 #50 指出）不由这一层负责。
- * 链常驻 background，语言包下载完时 popup 发 `axt:engine-ready`，background **重建整条链**——
- * 那比撤销降级记录更彻底：建链时 `isAvailable()` 为假、根本没进链的引擎，撤记录是救不回来的（DESIGN §8.5）
+ * No reset(): returning to the preferred engine after configuration is fixed (Codex #50) belongs above this layer.
+ * The chain lives in background. After a language pack download, popup sends axt:engine-ready and background **rebuilds the entire chain**.
+ * Clearing demotion records cannot restore an engine excluded during construction because isAvailable() was false (DESIGN §8.5).
  */
 export interface FallbackService extends TranslateService {
   status(): FallbackStatus
 }
 
 /**
- * 会触发降级的错误类型。`aborted` 不在其中——会话取消不是引擎的错，换个引擎重来只会再被取消一次。
- * 队列自己的重试（retry-policy）跑完才会走到这里，所以链上不再叠加重试。
+ * Errors that trigger fallback. aborted is excluded: session cancellation is not an engine failure, and another engine would just be cancelled again.
+ * The queue's retry-policy has already exhausted retries before reaching this layer; do not add another retry layer.
  */
 export const FALLBACK_KINDS: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>([
   'no-key', 'auth', 'network', 'timeout', 'rate-limit', 'bad-request', 'invalid-response', 'unknown',
 ])
 
-/** 配置问题不会自己好：本会话内永久降级，不再浪费一次请求去试 */
+/** Configuration errors cannot self-recover: demote for the session rather than waste another request. */
 const PERMANENT_KINDS: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>(['no-key', 'auth'])
 
 /**
- * 瞬时故障的冷却时长。持续故障时不设冷却的话，每次调用都要把该引擎的重试与超时（最长 120s）白等一遍；
- * 设太长又会在短暂抖动后长时间用着更差的引擎。60s 是折中，可注入以便测试
+ * Transient failure cooldown. Without it, persistent faults repeat the engine's full retries/timeouts (up to 120s) on every call.
+ * Too long a cooldown leaves a weaker engine active after a brief fault. 60s is a compromise, injectable for tests.
  */
 export const DEFAULT_COOLDOWN_MS = 60_000
 
 interface Demotion {
   info: DemotedInfo
-  /** undefined = 永久（本会话） */
+  /** undefined = permanent for this session. */
   until?: number
 }
 
@@ -64,7 +64,7 @@ export function createFallbackService(
   steps: readonly FallbackStep[],
   opts: { cooldownMs?: number; now?: () => number } = {},
 ): FallbackService {
-  if (steps.length === 0) throw new Error('降级链至少要有一个引擎')
+  if (steps.length === 0) throw new Error('Fallback chain requires at least one engine')
   const cooldownMs = opts.cooldownMs ?? DEFAULT_COOLDOWN_MS
   const now = opts.now ?? Date.now
   const demotions = new Map<string, Demotion>()
@@ -75,14 +75,14 @@ export function createFallbackService(
     if (!demotion) return false
     if (demotion.until === undefined) return true
     if (now() < demotion.until) return true
-    // 冷却到期：恢复候选资格，成功与否由下一次调用说了算
+    // Cooldown expired: make the engine eligible; the next call determines whether it succeeds.
     demotions.delete(id)
     return false
   }
 
   const available = (): FallbackStep[] => {
     const alive = steps.filter(step => !isDemoted(step.provider.id))
-    // 全都降级了就退回最后一步：宁可再失败一次并把错误如实报上去，也不能无引擎可用
+    // If all engines are demoted, use the last step: report its real failure rather than have no engine to call.
     return alive.length > 0 ? alive : [steps[steps.length - 1]!]
   }
 
@@ -93,7 +93,7 @@ export function createFallbackService(
       ...(PERMANENT_KINDS.has(error.kind) ? {} : { until: now() + cooldownMs }),
     })
     lastDemoted = info
-    console.warn(`[axt] ${step.provider.displayName} 降级（${error.kind}）：${error.message}`)
+    console.warn(`[axt] ${step.provider.displayName} demoted (${error.kind}): ${error.message}`)
   }
 
   const translate = async (call: TranslateCall): Promise<TranslateMessageResponse> => {
@@ -102,7 +102,7 @@ export function createFallbackService(
     for (const [index, step] of chain.entries()) {
       const response = await step.service.translate(call)
       if (response.ok) {
-        // 一次成功就撤销该引擎的降级记录：瞬时故障不该拖着它一直待在冷却里
+        // One success clears this engine's demotion; a transient fault should not keep it cooling down afterward.
         demotions.delete(step.provider.id)
         return response
       }
@@ -111,11 +111,11 @@ export function createFallbackService(
       if (isLast || !FALLBACK_KINDS.has(response.error.kind)) return response
       demote(step, response.error)
     }
-    // chain 非空，循环至少执行一次
+    // The chain is nonempty, so the loop runs at least once.
     return last!
   }
 
-  /** 恢复原文要撤掉每套队列：漏一个就有在飞请求回来往 DOM 写 */
+  /** Restore must cancel every queue; missing one permits an in-flight result to write to the DOM. */
   const cancel = (scope: string): number => steps.reduce((n, step) => n + step.service.cancel(scope), 0)
 
   const status = (): FallbackStatus => ({

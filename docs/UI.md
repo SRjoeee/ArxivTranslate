@@ -1,295 +1,295 @@
-# UI 契约 — 文案、状态与令牌
+# UI contract — copy, states, and tokens
 
-界面实现的唯一依据。设计画布（`docs/design/canvas/`）只作参照；两者冲突以本文为准，要改先改这里。
-编号规则：`P` popup 状态、`O` 设置页、`I` 页内组件；文案编号 `S-<面>-<序号>`。反馈时直接引用编号。
+The sole authority for UI implementation. The design canvas (`docs/design/canvas/`) is reference material; this document takes precedence in a conflict. Update it before changing the implementation.
+Numbering: `P` for popup states, `O` for options, `I` for in-page components; copy IDs use `S-<surface>-<number>`. Cite IDs directly in feedback.
 
-状态：**草稿，逐节讨论中**。已定的节标 [定]，未定的标 [议]。
+Status: **Draft, under discussion section by section**. Settled sections are marked [Agreed], unresolved sections [Discussion].
 
 ---
 
-## 1. 语气规则 [议]
+## 1. Voice rules [Discussion]
 
-1. **对用户说话，不说系统内部。** 不出现 provider、引擎链、降级、块、会话、fallback、background、fixture 等词；内部概念一律换成 §2 的用户词。
-2. **按钮是动词短语，3–5 字。** 翻译本页、显示原文、重试、连接、下载、清空。不用「确定」「OK」这种不说明后果的词。
-3. **状态是名词或形容词，2–4 字。** 就绪、翻译中、已暂停、需要设置。
-4. **出错只说三件事：发生了什么、影响是什么、你能做什么。** 不写错误码、不猜原因、不道歉。错误码与原始信息放在悬停 `title` 里供排查。
-5. **数字只在用户能据此行动时出现。** 「2 段没翻出来 · 重试」可以；「已翻 24 / 已触发 31（共 120）」不行。
-6. **一句话说完，≤ 30 字。** 说不完的拆成设置页里的说明文字，popup 里不解释原理。
-7. **不用客套与语气词**：请、哦、一下、吧、啦。不用感叹号。单句不加句末句号；两句以上才用句号。
-8. **同一概念全站只用一个词**，见 §2。
-9. **中英混排留一个空格**；产品名、模型名、API Key 保留原文大小写。
-10. **全角标点**，省略号用单字「…」，间隔用「·」。
+1. **Speak to users, not about internals.** Avoid provider, engine chain, degradation, block, session, fallback, background, fixture, and similar terms. Replace internal concepts with the user-facing terms in §2.
+2. **Buttons use verb phrases, 3–5 Chinese characters in the original copy specification.** Translate page, Show original, Retry, Connect, Download, Clear. Avoid “Confirm” or “OK”, which do not explain the outcome.
+3. **States use nouns or adjectives, 2–4 Chinese characters in the original specification.** Ready, Translating, Paused, Setup required.
+4. **Errors say only three things: what happened, its effect, and what the user can do.** No error codes, guessed causes, or apologies. Put error codes and raw messages in hover `title` text for troubleshooting.
+5. **Show numbers only when users can act on them.** “2 paragraphs could not be translated · Retry” is useful; “Translated 24 / Triggered 31 (120 total)” is not.
+6. **Use one sentence, ≤ 30 Chinese characters in the original specification.** Move longer explanations to options-page help text; do not explain mechanisms in the popup.
+7. **No pleasantries or conversational filler**, such as “please” or softening particles. No exclamation marks. Omit a final period for a single sentence; use periods only for two or more sentences.
+8. **Use one term for each concept throughout the product**, as specified in §2.
+9. **Separate mixed Chinese and English text with one space**; preserve capitalization of product names, model names, and API Key.
+10. **The original Chinese copy uses full-width punctuation**; use the single-character ellipsis “…” and separator “·”.
 
-## 2. 术语对照 [议]
+## 2. Terminology [Discussion]
 
-| 内部词（代码 / DESIGN.md） | 用户看到的词 | 备注 |
+| Internal term (code / DESIGN.md) | User-facing term | Notes |
 |---|---|---|
-| provider / engine | **翻译服务**（上下文清楚时简称「服务」） | 三家参考产品都用「翻译服务」 |
-| `openai-compat` | **AI 模型** | 用户认的是「AI」，不是「LLM」「OpenAI 兼容」 |
-| `google-web` | **Google 翻译** | |
-| `chrome-builtin` | **Chrome 离线翻译** | |
-| fallback / demoted | **已改用 ×××** | 用动作描述，不造名词 |
-| block / segment | **段落** | 表格、公式块对用户也是「段落」 |
-| translate page | **翻译本页** | |
-| restore | **显示原文** | 与「翻译本页」成对；「恢复」暗示出了错 |
-| mode: stack / side / only | **上下对照 / 左右对照 / 仅译文**（分段控件里简作 上下 / 左右 / 仅译文） | |
-| targetLanguage | **翻译为** | 「译成」偏书面 |
-| language pack | **离线语言包** | |
-| prompt | **提示词** | AI 用户的通用词 |
-| glossary | **术语表** | |
-| cache | **已缓存的译文** | 不单说「缓存」 |
-| preload margin | **提前翻译的范围** | 刻度：半屏 / 一屏 / 两屏 / 三屏 |
-| preload threshold | **开始翻译的时机** | 刻度：刚露出 / 露出一半 / 完全露出 |
-| thinking | **深度思考** | 国内 AI 产品的通用叫法 |
-| baseURL | **接口地址** | |
-| apiKey | **API Key** | 保留英文，用户在服务商那边看到的就是这个 |
-| model | **模型** | |
-| test connection | **连接** | = 保存 + 验证一句 |
-| retry failed | **重试** | |
-| fatal / stopped | **已暂停** | 页面上还留着部分译文，所以是「暂停」不是「失败」 |
-| image translation / overlay | **图片翻译**；叠加层不命名 | §15 |
-| OCR helper | **识别助手** | 用户不需要知道 Native Messaging、Vision、helper |
-| `image.modes` | **在这些模式下显示图片译文** | 只影响显示，不重识别 |
-| reading typography（#47） | **排版** | 与「译文样式」（装饰）分开：排版管字号、行高、宽度、间距 |
-| split view（#83） | **分栏** | 实验功能 |
-| hosted free LLM（#97） | **免费 AI 翻译** | 候选；与「AI 模型」（自带 Key）并列 |
-| Edge translatetext（#98） | **Microsoft 翻译** | 候选 |
+| provider / engine | **Translation service** (shorten to “service” when context is clear) | All three reference products use this term |
+| `openai-compat` | **AI model** | Users recognize “AI”, rather than “LLM” or “OpenAI-compatible” |
+| `google-web` | **Google Translate** | |
+| `chrome-builtin` | **Chrome offline translation** | |
+| fallback / demoted | **Switched to ×××** | Describe an action; do not invent a noun |
+| block / segment | **Paragraph** | Tables and equation blocks are also “paragraphs” to users |
+| translate page | **Translate page** | |
+| restore | **Show original** | Pairs with “Translate page”; “Restore” suggests something went wrong |
+| mode: stack / side / only | **Stacked / Side by side / Translation only** (short forms in segmented controls: Stacked / Side by side / Translation only) | |
+| targetLanguage | **Translate to** | The original alternative phrasing was more literary |
+| language pack | **Offline language pack** | |
+| prompt | **Prompt** | Familiar to AI users |
+| glossary | **Glossary** | |
+| cache | **Cached translations** | Do not say just “cache” |
+| preload margin | **Translate ahead** | Steps: half a screen / one screen / two screens / three screens |
+| preload threshold | **When to start translating** | Steps: first visible / half visible / fully visible |
+| thinking | **Deep thinking** | Common terminology in Chinese AI products |
+| baseURL | **API endpoint** | |
+| apiKey | **API Key** | Keep the English term users see at their service provider |
+| model | **Model** | |
+| test connection | **Connect** | = save + verify with one sentence |
+| retry failed | **Retry** | |
+| fatal / stopped | **Paused** | Some translations remain on the page, so use “paused” rather than “failed” |
+| image translation / overlay | **Image translation**; do not name the overlay | §15 |
+| OCR helper | **Recognition assistant** | Users do not need to know about Native Messaging, Vision, or the helper |
+| `image.modes` | **Show image translations in these modes** | Affects display only; does not rerun recognition |
+| reading typography (#47) | **Typography** | Separate from decorative “translation styles”: typography controls font size, line height, width, and spacing |
+| split view (#83) | **Split view** | Experimental |
+| hosted free LLM (#97) | **Free AI translation** | Candidate; alongside “AI model” (bring your own Key) |
+| Edge translatetext (#98) | **Microsoft Translator** | Candidate |
 
-## 3. 文案表 [议]
+## 3. Copy table [Discussion]
 
 ### 3.1 Popup
 
-| 编号 | 位置 / 何时 | 文案 | 备注 |
+| ID | Location / condition | Copy | Notes |
 |---|---|---|---|
-| S-P-01 | 品牌行 | arXiv Translate | 产品名占位，待定 |
-| S-P-02 | 品牌行齿轮 `aria-label` | 设置 | |
-| S-P-03 | 非 arXiv 页 / 页面加载中（P0） | 打开一篇 arXiv 论文的 HTML 版本，就可以翻译 | 两种情况同一句，不说「后台未响应」 |
-| S-P-10 | 服务行标签 | 翻译服务 | |
-| S-P-11 | 服务行值 | {模型名 / 服务名} | AI 模型显示模型名（`deepseek-v4-flash`），其他显示服务名 |
-| S-P-12 | 状态药丸 · 可用 | 就绪 | 绿 |
-| S-P-13 | 状态药丸 · 翻译进行中 | 翻译中 | 红 + 转环 |
-| S-P-14 | 状态药丸 · 已改用其他服务 | 已改用 | 红；卡内附 S-P-30 |
-| S-P-15 | 状态药丸 · 首选不可用但有兜底 | 将改用 | 琥珀；卡内附 S-P-31 |
-| S-P-16 | 状态药丸 · 不可用且无兜底 | 需要设置 | 灰；卡内附 S-P-32 |
-| S-P-17 | 状态药丸 · 致命错误后 | 已暂停 | 灰；卡内附 S-P-33 |
-| S-P-18 | 状态药丸 · 离线语言包下载中 | 下载中 | 灰 + 转环 |
-| S-P-20 | 语言行标签 | 翻译为 | |
-| S-P-21 | 语言行值 | {语言名} | `languages.ts` 的 label |
-| S-P-30 | 卡内说明 · 已改用 | {服务名} 的 API Key 已失效，后面的段落改用 Google 翻译，专业术语可能不准 | 「去修」→ 设置 · 翻译服务；原因按 S-E 表替换 |
-| S-P-31 | 卡内说明 · 将改用 | 还没有填写 API Key，这次会用 Google 翻译 | 「去填」→ 设置 |
-| S-P-32 | 卡内说明 · 需要设置 | 还没有填写 API Key，填好就能翻译 | 「去填」→ 设置；离线包场景换成 S-P-40 |
-| S-P-33 | 卡内说明 · 已暂停 | {原因}。改好设置后点「重新翻译」 | 原因按 S-E 表 |
-| S-P-34 | 卡内说明 · 设置读取失败 | 设置没能读取，正在用默认设置 | 红；「去查看」→ 设置。最高优先级，压过其他说明 |
-| S-P-35 | 卡内说明 · 图片翻译已暂停 | 图片翻译已暂停：{原因}。显示原文、改好设置后再翻译 | `images.fatal`；文字翻译未暂停时也显示 |
-| S-P-40 | 服务列表 · 离线翻译行动作 | 下载 | 可下载时；点击即开始（必须是点击手势） |
-| S-P-41 | 服务列表 · 离线翻译行副标题 · 下载中 | 下载中，约需 1 分钟 | 没有进度事件，只能给估时 |
-| S-P-42 | 服务列表 · 离线翻译行副标题 · 不支持 | 这个语言暂不支持离线翻译 | `unavailable` |
-| S-P-43 | 服务列表 · 离线翻译行副标题 · Chrome 不支持 | 此版本 Chrome 没有离线翻译 | `unsupported`，整行禁用 |
-| S-P-44 | 服务列表 · AI 模型副标题 | 译文最准确 | |
-| S-P-45 | 服务列表 · Google 翻译副标题 | 免费，几秒翻完 | |
-| S-P-46 | 服务列表 · 离线翻译副标题 | 不联网，速度最快 | |
-| S-P-47 | 服务列表 · AI 模型子行 | 提示词 · {名称} | 只在选中 AI 模型时出现，点开是提示词列表；覆盖现有 popup 的提示词下拉 |
-| S-P-48 | 服务列表 · 免费 AI 翻译（候选 #97） | 免费 AI 翻译 / 不用配置，直接用 | 接入前隐藏 |
-| S-P-49 | 服务列表 · Microsoft 翻译（候选 #98） | Microsoft 翻译 / 免费 | 接入前隐藏 |
-| S-P-50 | 主按钮 · 未翻译 | 翻译本页 | 附快捷键角标 |
-| S-P-51 | 主按钮 · 翻译中 | 显示原文 | |
-| S-P-52 | 主按钮 · 已暂停 | 重新翻译 | 次按钮 S-P-53 同时出现 |
-| S-P-53 | 次按钮 · 已暂停 | 显示原文 | 文字按钮 |
-| S-P-60 | 失败行 | {n} 段没翻出来 / {m} 张图没翻出来 / {n} 段、{m} 张图没翻出来 | 只在 `progress.failed + images.failed > 0` 且两者都非致命时出现；三种写法按有无取用 |
-| S-P-61 | 失败行动作 | 重试 | |
-| S-P-70 | 模式分段 | 上下 · 左右 · 仅译文 | `title` 分别为 S-P-71/72/73 |
-| S-P-71 | 模式 `title` · 上下 | 译文紧跟在原文下方 | |
-| S-P-72 | 模式 `title` · 左右 | 原文与译文并排；窗口较窄时按上下显示 | |
-| S-P-73 | 模式 `title` · 仅译文 | 隐藏原文，参考文献仍保留双语 | |
-| S-P-74 | 模式条下备注 · 窄窗口 | 窗口较窄，暂按上下显示 | 只在选了左右且实际为上下时出现 |
+| S-P-01 | Brand row | arXiv Translate | Placeholder product name, undecided |
+| S-P-02 | Brand-row gear `aria-label` | Settings | |
+| S-P-03 | Non-arXiv page / page loading (P0) | Open the HTML version of an arXiv paper to translate it | Same sentence for both cases; do not say “background unresponsive” |
+| S-P-10 | Service-row label | Translation service | |
+| S-P-11 | Service-row value | {model name / service name} | AI models show the model name (`deepseek-v4-flash`); others show the service name |
+| S-P-12 | Status pill · available | Ready | Green |
+| S-P-13 | Status pill · translation active | Translating | Red + spinner |
+| S-P-14 | Status pill · switched service | Switched | Red; include S-P-30 inside the card |
+| S-P-15 | Status pill · preferred service unavailable, fallback available | Will switch | Amber; include S-P-31 inside the card |
+| S-P-16 | Status pill · unavailable, no fallback | Setup required | Gray; include S-P-32 inside the card |
+| S-P-17 | Status pill · after fatal error | Paused | Gray; include S-P-33 inside the card |
+| S-P-18 | Status pill · offline language pack downloading | Downloading | Gray + spinner |
+| S-P-20 | Language-row label | Translate to | |
+| S-P-21 | Language-row value | {language name} | Label from `languages.ts` |
+| S-P-30 | Card note · switched | The API Key for {service name} is no longer valid. Remaining paragraphs will use Google Translate; technical terms may be inaccurate | “Fix” → Settings · Translation service; replace the reason using the S-E table |
+| S-P-31 | Card note · will switch | No API Key has been entered; Google Translate will be used this time | “Add key” → Settings |
+| S-P-32 | Card note · setup required | Enter an API Key to start translating | “Add key” → Settings; use S-P-40 for the offline-pack case |
+| S-P-33 | Card note · paused | {reason}. Update settings, then select “Translate again” | Reason from the S-E table |
+| S-P-34 | Card note · settings read failed | Settings could not be loaded; using defaults | Red; “View” → Settings. Highest priority, overriding other notes |
+| S-P-35 | Card note · image translation paused | Image translation paused: {reason}. Show the original, update settings, then translate again | `images.fatal`; shown even if text translation is not paused |
+| S-P-40 | Service list · offline-translation row action | Download | When downloadable; clicking starts immediately (requires a click gesture) |
+| S-P-41 | Service list · offline row subtitle · downloading | Downloading, about 1 minute | No progress events; only an estimate is possible |
+| S-P-42 | Service list · offline row subtitle · unsupported language | Offline translation is not yet available for this language | `unavailable` |
+| S-P-43 | Service list · offline row subtitle · unsupported Chrome | This Chrome version has no offline translation | `unsupported`; disable the entire row |
+| S-P-44 | Service list · AI model subtitle | Most accurate translations | |
+| S-P-45 | Service list · Google Translate subtitle | Free, translates in seconds | |
+| S-P-46 | Service list · offline subtitle | No internet needed, fastest | |
+| S-P-47 | Service list · AI model subrow | Prompt · {name} | Appears only when AI model is selected; opens the prompt list and replaces the existing popup prompt dropdown |
+| S-P-48 | Service list · free AI translation (candidate #97) | Free AI translation / Ready to use, no setup | Hidden until integrated |
+| S-P-49 | Service list · Microsoft Translator (candidate #98) | Microsoft Translator / Free | Hidden until integrated |
+| S-P-50 | Primary button · not translated | Translate page | With shortcut badge |
+| S-P-51 | Primary button · translating | Show original | |
+| S-P-52 | Primary button · paused | Translate again | Show secondary button S-P-53 alongside it |
+| S-P-53 | Secondary button · paused | Show original | Text button |
+| S-P-60 | Failure row | {n} paragraphs could not be translated / {m} images could not be translated / {n} paragraphs and {m} images could not be translated | Only when `progress.failed + images.failed > 0` and neither is fatal; choose the applicable form |
+| S-P-61 | Failure-row action | Retry | |
+| S-P-70 | Mode segments | Stacked · Side by side · Translation only | `title` values S-P-71/72/73 respectively |
+| S-P-71 | Mode `title` · stacked | Translation follows directly below the original | |
+| S-P-72 | Mode `title` · side by side | Original and translation appear side by side; narrow windows use stacked layout | |
+| S-P-73 | Mode `title` · translation only | Hide the original; references remain bilingual | |
+| S-P-74 | Note below modes · narrow window | Window is narrow; using stacked layout for now | Only when side by side is selected but the effective layout is stacked |
 
-### 3.2 设置页
+### 3.2 Options page
 
-| 编号 | 位置 | 文案 | 备注 |
+| ID | Location | Copy | Notes |
 |---|---|---|---|
-| S-O-01 | 导航 | 翻译服务 · 阅读 · 提示词与术语 · 数据 | |
-| S-O-02 | 导航 · 提示词与术语在非 AI 模型时的 `title` | 只对 AI 模型生效 | 项变灰仍可点 |
-| S-O-10 | 翻译服务页标题 / 副标题 | 翻译服务 / 选一个，改动即时生效 | |
-| S-O-11 | 翻译为 行 | 翻译为 | 三个服务共用 |
-| S-O-12 | 卡 · AI 模型 | AI 模型 / 译文最准确，术语跟着论文走；需要 API Key | |
-| S-O-13 | 卡 · Google 翻译 | Google 翻译 / 免费，几秒翻完一篇；专业术语可能不准 | 角标「免费」 |
-| S-O-14 | 卡 · Chrome 离线翻译 | Chrome 离线翻译 / 不联网，速度最快；先下载一次语言包 | 角标「离线」；卡内动作同 S-P-40…43 |
-| S-O-15 | 卡 · 免费 AI 翻译（候选 #97） | 免费 AI 翻译 / 不用配置，由 arXiv Translate 提供；有每日额度 | 接入前隐藏 |
-| S-O-16 | 卡 · Microsoft 翻译（候选 #98） | Microsoft 翻译 / 免费；不保留链接与公式位置 | 接入前隐藏；runs 路径 |
-| S-O-20 | AI 模型表单 | 接口地址 · API Key · 模型 | |
-| S-O-21 | 接口地址占位 | https://openrouter.ai/api/v1 | |
-| S-O-22 | 接口地址说明 | OpenRouter、DeepSeek、Ollama 都可以 | 权限申请那句不预告，浏览器弹出时用户自然看到 |
-| S-O-23 | API Key · 已保存 | •••••••• 已保存 | 右侧「清除」 |
-| S-O-24 | API Key 说明 | 本机地址可以不填 | 只在接口地址是 localhost / 127.0.0.1 时出现 |
-| S-O-25 | 模型占位 | deepseek/deepseek-v4-flash | |
-| S-O-26 | 连接按钮 | 连接 | 只在字段改过后出现；点击 = 保存 + 验证 |
-| S-O-27 | 连接结果 · 成功 | 已连接 · {ms} ms | 悬停显示试译句 |
-| S-O-28 | 连接结果 · 失败 | {S-E 原因} | 红 |
-| S-O-29 | 更多选项（折叠行） | 更多选项 | 内含 S-O-30 |
-| S-O-30 | 深度思考 | 深度思考 / 翻译不需要推理，开着会慢很多；只对 OpenRouter、DeepSeek 生效 | 默认关 |
-| S-O-31 | 自动改用免费服务 | 出问题时自动改用免费服务 / API Key 失效、额度用尽或断网时，翻译不会停下 | 默认开 |
-| S-O-40 | 阅读页标题 / 副标题 | 阅读 / 译文长什么样、什么时候开始翻 | |
-| S-O-41 | 译文样式 | 译文样式 | 分组：基础 · 下划线 · 边框 · 底色 · 特效 · 自定义 |
-| S-O-42 | 样式格子名 | 与原文相同 · 淡一档 · 绿色 · 实线 · 点线 · 虚线 · 粗虚线 · 波浪线 · 粗波浪线 · 左侧竖线 · 细边框 · 虚线边框 · 荧光笔 · 渐变荧光笔 · 高亮底 · 淡色底 · 渐变文字 · 多彩底 · 发光 · 呼吸 · 模糊 | 沿用现有 |
-| S-O-43 | 样式说明（预览下方，仅个别样式有） | 模糊：悬停才看清，适合自测 / 左侧竖线：同行的短标题不加线 | 其余不写 |
-| S-O-44 | 自定义 CSS 说明 | 只写声明，不写选择器和花括号；字体、字号会跟随论文，别改 | 只在选「自定义」时出现 |
-| S-O-47 | 排版（#47） | 排版 / 原文和译文一起变，公式和代码不受影响 | 卡内：字号 · 行高 · 页面宽度 · 栏间距 · 段间距 · 文字颜色；顶部预设「默认 · 舒适 · 紧凑」；右上「恢复默认」；与译文样式共用同一段预览 |
-| S-O-48 | 分栏（#83，实验） | 左右对照的分栏位置 / 在页面上拖中缝调整，双击恢复居中 | 只有一个「恢复居中」按钮；实验期只在开发构建出现 |
-| S-O-45 | 提前翻译的范围 | 提前翻译的范围 / 屏幕下方多远的段落先翻；越近越省费用 | 刻度：半屏 · 一屏 · 两屏 · 三屏 |
-| S-O-46 | 开始翻译的时机 | 开始翻译的时机 / 段落露出多少才开始翻 | 刻度：刚露出 · 露出一半 · 完全露出 |
-| S-O-50 | 提示词页标题 / 副标题 | 提示词与术语 / 只对 AI 模型生效，决定「怎么翻」 | |
-| S-O-51 | 提示词列表 · 内置 | Default / 直译，保留段落结构 · Precision rewrite / 先译后润，读起来像中文论文 | 行尾「查看」 |
-| S-O-52 | 提示词列表 · 自定义 | {名称} / 自定义 | 行尾「编辑」 |
-| S-O-53 | 新建 | 新建提示词… | |
-| S-O-54 | 导入 / 导出 | 导入 · 导出 | 导出只在有自定义时出现 |
-| S-O-55 | 编辑抽屉 | 编辑提示词 / 名称 · System prompt · 用户提示词 / 完成 · 取消 · 删除 | 内置提示词的抽屉标题「查看提示词」，底部只有「复制一份来改」 |
-| S-O-56 | 抽屉说明 | 收发格式由扩展自动补在后面，改不掉 | System prompt 标签右侧 |
-| S-O-57 | 变量块 `title` | 目标语言 · 待翻译的段落（必须有）· 论文标题 · 摘要 · 当前章节 · 术语表 | |
-| S-O-58 | 删除确认 | 删除「{名称}」？ / 删除 · 取消 | `<dialog>` |
-| S-O-60 | 术语表 | 术语表 / 每行「原文, 译文」，让同一篇里的译法一致 | 右上「{n} 条」 |
-| S-O-61 | 术语表错误 | 第 {n} 行{原因} | 行内红字，不弹窗 |
-| S-O-80 | 图片翻译 节 | 图片翻译 / 图里的文字识别后，译文叠在原位；只翻位图，不翻 SVG | 在「翻译服务」页，服务卡之下 |
-| S-O-81 | 识别助手 · 检测中 | 正在检测识别助手… | 灰 + 转环 |
-| S-O-82 | 识别助手 · 就绪 | 识别助手已就绪 | 绿点；版本号放 `title` |
-| S-O-83 | 识别助手 · 未安装 | 需要安装识别助手（仅 Mac） | 「安装方法」→ helper/README；下方多选禁用 |
-| S-O-84 | 识别助手 · 需重装 | 识别助手版本不匹配，请重新安装 | 握手无版本 / 协议不符 |
-| S-O-85 | 识别助手 · 非 Mac | 图片翻译目前只支持 Mac | 整节折叠成一行 |
-| S-O-86 | 识别助手 · 未授权（分发后） | 允许与识别助手通信 | 按钮；`permissions.request` 需点击手势 |
-| S-O-87 | 图片翻译模式 | 在这些模式下显示图片译文 / 只影响显示，不会重新识别 | 多选：上下 · 左右 · 仅译文，默认全选 |
-| S-O-70 | 数据页标题 | 数据 | |
-| S-O-71 | 已缓存的译文 | 已缓存的译文 / {n} 条 · {size} MB · 换了服务、模型或提示词会自动分开存，通常不用清 | 右侧「清空」 |
-| S-O-72 | 读取失败 | 没能读取缓存 | 不显示成「0 条」 |
-| S-O-73 | 清空确认 | 清空所有已缓存的译文？之后再翻译会重新请求翻译服务 / 清空 · 取消 | |
-| S-O-74 | 清空结果 | 已清空 | 2 秒后消失 |
+| S-O-01 | Navigation | Translation service · Reading · Prompts & terms · Data | |
+| S-O-02 | Navigation · Prompts & terms `title` for non-AI service | Applies only to AI models | Dimmed but still clickable |
+| S-O-10 | Translation-service title / subtitle | Translation service / Choose one; changes take effect immediately | |
+| S-O-11 | Translate-to row | Translate to | Shared by all three services |
+| S-O-12 | Card · AI model | AI model / Most accurate translations, with paper-aware terminology; requires an API Key | |
+| S-O-13 | Card · Google Translate | Google Translate / Free, translates a paper in seconds; technical terms may be inaccurate | “Free” badge |
+| S-O-14 | Card · Chrome offline translation | Chrome offline translation / No internet needed, fastest; download a language pack once | “Offline” badge; card actions match S-P-40…43 |
+| S-O-15 | Card · free AI translation (candidate #97) | Free AI translation / No setup, provided by arXiv Translate; daily limits apply | Hidden until integrated |
+| S-O-16 | Card · Microsoft Translator (candidate #98) | Microsoft Translator / Free; does not preserve link and equation positions | Hidden until integrated; runs path |
+| S-O-20 | AI model form | API endpoint · API Key · Model | |
+| S-O-21 | API endpoint placeholder | https://openrouter.ai/api/v1 | |
+| S-O-22 | API endpoint help | Works with OpenRouter, DeepSeek, and Ollama | Do not announce the permission request; users see the browser prompt when it appears |
+| S-O-23 | API Key · saved | •••••••• Saved | “Clear” on the right |
+| S-O-24 | API Key help | Optional for local endpoints | Only when the API endpoint is localhost / 127.0.0.1 |
+| S-O-25 | Model placeholder | deepseek/deepseek-v4-flash | |
+| S-O-26 | Connect button | Connect | Appears only after fields change; click = save + verify |
+| S-O-27 | Connection result · success | Connected · {ms} ms | Hover shows the test translation |
+| S-O-28 | Connection result · failure | {S-E reason} | Red |
+| S-O-29 | More options (collapsible row) | More options | Contains S-O-30 |
+| S-O-30 | Deep thinking | Deep thinking / Translation does not need reasoning; enabling it is much slower. Applies only to OpenRouter and DeepSeek | Off by default |
+| S-O-31 | Automatic free-service switch | Automatically switch to a free service if something goes wrong / Translation continues if an API Key expires, quota runs out, or the network disconnects | On by default |
+| S-O-40 | Reading title / subtitle | Reading / How translations look and when they start | |
+| S-O-41 | Translation style | Translation style | Groups: Basic · Underline · Border · Background · Effects · Custom |
+| S-O-42 | Style tile names | Match original · Muted · Green · Solid · Dotted · Dashed · Thick dashed · Wavy · Thick wavy · Left rule · Thin border · Dashed border · Highlighter · Gradient highlighter · Highlight background · Tinted background · Gradient text · Multicolor background · Glow · Pulse · Blur | Retain existing names |
+| S-O-43 | Style help (below preview, selected styles only) | Blur: hover to reveal, useful for self-testing / Left rule: no rule on short inline headings | No help for the others |
+| S-O-44 | Custom CSS help | Declarations only; no selectors or braces. Font family and size follow the paper; do not change them | Only when “Custom” is selected |
+| S-O-47 | Typography (#47) | Typography / Original and translation change together; equations and code are unaffected | Card: font size · line height · page width · column gap · paragraph spacing · text color; top presets “Default · Comfortable · Compact”; “Reset to defaults” at upper right; shares the same paragraph preview with translation styles |
+| S-O-48 | Split view (#83, experimental) | Side-by-side column divider / Drag the center divider on the page; double-click to recenter | Only a “Recenter” button; development builds only during the experiment |
+| S-O-45 | Translate-ahead range | Translate ahead / How far below the screen to translate in advance; a shorter range costs less | Steps: half a screen · one screen · two screens · three screens |
+| S-O-46 | Translation trigger | When to start translating / How much of a paragraph must be visible before translation starts | Steps: first visible · half visible · fully visible |
+| S-O-50 | Prompts title / subtitle | Prompts & terms / AI models only; controls how they translate | |
+| S-O-51 | Prompt list · built-in | Default / Literal translation, preserving paragraph structure · Precision rewrite / Translate, then polish to read like a Chinese academic paper | “View” at row end |
+| S-O-52 | Prompt list · custom | {name} / Custom | “Edit” at row end |
+| S-O-53 | Create | New prompt… | |
+| S-O-54 | Import / export | Import · Export | Export appears only when custom prompts exist |
+| S-O-55 | Edit drawer | Edit prompt / Name · System prompt · User prompt / Done · Cancel · Delete | Built-in drawer title: “View prompt”; its only footer action is “Duplicate to edit” |
+| S-O-56 | Drawer help | The extension appends the input/output format automatically; it cannot be changed | To the right of the System prompt label |
+| S-O-57 | Variable-chip `title` | Target language · Paragraphs to translate (required) · Paper title · Abstract · Current section · Glossary | |
+| S-O-58 | Delete confirmation | Delete “{name}”? / Delete · Cancel | `<dialog>` |
+| S-O-60 | Glossary | Glossary / One “source, translation” pair per line for consistent terminology within a paper | “{n} entries” at upper right |
+| S-O-61 | Glossary error | Line {n}: {reason} | Inline red text, no dialog |
+| S-O-80 | Image-translation section | Image translation / Recognize text in images and overlay translations in place; raster images only, not SVG | On the Translation service page below service cards |
+| S-O-81 | Recognition assistant · checking | Checking recognition assistant… | Gray + spinner |
+| S-O-82 | Recognition assistant · ready | Recognition assistant ready | Green dot; version in `title` |
+| S-O-83 | Recognition assistant · missing | Install the recognition assistant (Mac only) | “Installation instructions” → helper/README; disable mode checkboxes below |
+| S-O-84 | Recognition assistant · reinstall required | Recognition assistant version mismatch; reinstall it | Handshake lacks version / protocol mismatch |
+| S-O-85 | Recognition assistant · non-Mac | Image translation currently supports Mac only | Collapse the section to one line |
+| S-O-86 | Recognition assistant · permission missing (after distribution) | Allow communication with the recognition assistant | Button; `permissions.request` requires a click gesture |
+| S-O-87 | Image-translation modes | Show image translations in these modes / Affects display only; does not rerun recognition | Checkboxes: Stacked · Side by side · Translation only, all checked by default |
+| S-O-70 | Data-page title | Data | |
+| S-O-71 | Cached translations | Cached translations / {n} entries · {size} MB · Different services, models, and prompts are stored separately; clearing is usually unnecessary | “Clear” on the right |
+| S-O-72 | Read failure | Could not read cached translations | Do not show “0 entries” |
+| S-O-73 | Clear confirmation | Clear all cached translations? Future translations will request the service again / Clear · Cancel | |
+| S-O-74 | Clear result | Cleared | Disappears after 2 seconds |
 
-### 3.3 页内组件
+### 3.3 In-page components
 
-| 编号 | 位置 | 文案 | 备注 |
+| ID | Location | Copy | Notes |
 |---|---|---|---|
-| S-I-01 | 加载中 | （无文字） | 转环 + 骨架线 |
-| S-I-02 | 失败块 | {S-E 原因} · 重试 | 原始信息在 `title` |
-| S-I-03 | 已改用提示（视口右下角） | 已改用 Google 翻译 · 去查看 | 出现一次，可关闭，8 秒后淡出；「去查看」→ 设置 · 翻译服务 |
-| S-I-04 | 图片叠加层 | （译文本身） | 白色半透明圆角框盖在原文字上，悬停显示原文；等待 / 失败不建节点（§15） |
-| S-I-05 | 分栏手柄（#83，实验） | （无文字） | 中缝悬停出现，拖动改列宽，双击复位 |
+| S-I-01 | Loading | (No text) | Spinner + skeleton lines |
+| S-I-02 | Failed block | {S-E reason} · Retry | Raw message in `title` |
+| S-I-03 | Service-switch notice (bottom-right of viewport) | Switched to Google Translate · View | Appears once, dismissible, fades after 8 seconds; “View” → Settings · Translation service |
+| S-I-04 | Image overlay | (The translation itself) | Translucent white rounded box over original text; hover shows the original; no nodes while pending / failed (§15) |
+| S-I-05 | Split-view handle (#83, experimental) | (No text) | Appears on hover over the center gap; drag to resize columns, double-click to reset |
 
-### 3.4 错误原因（S-E）
+### 3.4 Error reasons (S-E)
 
-`ProviderErrorKind` → 用户句。用于 S-P-30/33、S-O-28、S-I-02。
+`ProviderErrorKind` → user-facing sentence. Used by S-P-30/33, S-O-28, S-I-02.
 
-| kind | 用户句 | 用户能做什么 |
+| kind | User-facing sentence | User action |
 |---|---|---|
-| `no-key` | 还没有填写 API Key | 去设置 |
-| `auth` | API Key 无效或已过期 | 去设置 |
-| `rate-limit` | 请求太频繁，稍后自动重试 | 不用做什么 |
-| `timeout` | 翻译超时 | 重试 |
-| `network` | 网络不通 | 重试 |
-| `bad-request` | 翻译服务拒绝了这个请求 | 悬停看原始信息 |
-| `invalid-response` | 返回的译文格式不对 | 重试 |
-| `unknown` | 翻译失败 | 重试 |
-| `aborted` | （不显示） | 用户自己取消的 |
+| `no-key` | No API Key has been entered | Open settings |
+| `auth` | API Key is invalid or expired | Open settings |
+| `rate-limit` | Too many requests; retrying shortly | None needed |
+| `timeout` | Translation timed out | Retry |
+| `network` | Network unavailable | Retry |
+| `bad-request` | The translation service rejected this request | Hover to see the raw message |
+| `invalid-response` | The returned translation has an invalid format | Retry |
+| `unknown` | Translation failed | Retry |
+| `aborted` | (Not shown) | Canceled by the user |
 
 ---
 
-## 4. Popup 状态表 [议]
+## 4. Popup state table [Discussion]
 
-列 = 元素；格 = 该状态下的呈现，「—」= 不出现。判定条件用代码里的字段写。
+Columns represent elements; cells show their presentation in each state. “—” means absent. Conditions use code field names.
 
-| 编号 | 状态 | 判定 | 服务行 | 药丸 | 语言行 | 卡内说明 | 失败行 | 主按钮 | 次按钮 | 模式条 |
+| ID | State | Condition | Service row | Pill | Language row | Card note | Failure row | Primary button | Secondary button | Mode bar |
 |---|---|---|---|---|---|---|---|---|---|---|
-| P0 | 非 arXiv / 加载中 | `page === null` | — | — | — | S-P-03（独立卡） | — | — | — | — |
-| P1 | 就绪 | idle ∧ available ∧ !fallback | 值 + 箭头 | 就绪 | 值 + 箭头 | — | — | 翻译本页 | — | 可选 |
-| P2 | 服务列表展开 | P1/P5-/P6 下点服务行 | 列表（3 行 + 语言行） | — | 并入列表 | — | — | 翻译本页 | — | 可选（被推到下方） |
-| P3 | 翻译中 | on ∧ failed = 0 ∧ !demoted | 值，**无箭头** | 翻译中 | 值，**无箭头** | — | — | 显示原文 | — | 可选 |
-| P4 | 翻译中，有失败 | on ∧ failed > 0 ∧ !fatal | 同 P3 | 翻译中 | 同 P3 | — | S-P-60 + 重试 | 显示原文 | — | 可选 |
-| P5 | 已改用其他服务 | `engine.demoted` | 新服务名，旧名划线 | 已改用 | — | S-P-30 + 去修 | 按 failed | 按 on | — | 可选 |
-| P6 | 将改用（首选不可用有兜底） | idle ∧ !available ∧ fallback | 首选名 | 将改用 | 值 + 箭头 | S-P-31 + 去填 | — | 翻译本页 | — | 可选 |
-| P7 | 需要设置（不可用无兜底） | !available ∧ !fallback | 首选名 | 需要设置 | 值 + 箭头 | S-P-32 / S-P-40 | — | 翻译本页 **禁用** | — | 可选 |
-| P8 | 已暂停 | stopped ∧ fatal | 值 | 已暂停 | 值 | S-P-33 | — | 重新翻译 | 显示原文 | 可选 |
-| P9 | 已停止（用户显示了原文） | stopped ∧ !fatal | 值 + 箭头 | 就绪 | 值 + 箭头 | — | — | 翻译本页 | — | 可选 |
-| P10 | 设置读取失败 | `configFallbackReason()` | 默认值 | 需要设置 | 默认值 | S-P-34 + 去查看 | — | 按 available | — | 可选 |
-| P11 | 离线语言包下载中 | pack = downloading | 值 | 下载中 | 值 | — | — | 翻译本页 禁用 | — | 可选 |
-| P12 | 图片翻译已暂停 | `images.fatal` | 按文字态 | 按文字态 | 按文字态 | S-P-35 | 只算文字 | 按文字态 | — | 可选 |
-| P13 | 图片翻译进行中 | `images.requested > 0` | 无变化 | 无变化 | — | — | 按 failed | 按 on | — | 可选 |
+| P0 | Non-arXiv / loading | `page === null` | — | — | — | S-P-03 (separate card) | — | — | — | — |
+| P1 | Ready | idle ∧ available ∧ !fallback | Value + arrow | Ready | Value + arrow | — | — | Translate page | — | Selectable |
+| P2 | Service list expanded | Click service row in P1/P5-/P6 | List (3 rows + language row) | — | Merged into list | — | — | Translate page | — | Selectable (pushed down) |
+| P3 | Translating | on ∧ failed = 0 ∧ !demoted | Value, **no arrow** | Translating | Value, **no arrow** | — | — | Show original | — | Selectable |
+| P4 | Translating, with failures | on ∧ failed > 0 ∧ !fatal | Same as P3 | Translating | Same as P3 | — | S-P-60 + Retry | Show original | — | Selectable |
+| P5 | Switched to another service | `engine.demoted` | New service name, old name struck through | Switched | — | S-P-30 + Fix | Based on failed | Based on on | — | Selectable |
+| P6 | Will switch (preferred unavailable, fallback available) | idle ∧ !available ∧ fallback | Preferred name | Will switch | Value + arrow | S-P-31 + Add key | — | Translate page | — | Selectable |
+| P7 | Setup required (unavailable, no fallback) | !available ∧ !fallback | Preferred name | Setup required | Value + arrow | S-P-32 / S-P-40 | — | Translate page **disabled** | — | Selectable |
+| P8 | Paused | stopped ∧ fatal | Value | Paused | Value | S-P-33 | — | Translate again | Show original | Selectable |
+| P9 | Stopped (user showed original) | stopped ∧ !fatal | Value + arrow | Ready | Value + arrow | — | — | Translate page | — | Selectable |
+| P10 | Settings read failed | `configFallbackReason()` | Default value | Setup required | Default value | S-P-34 + View | — | Based on available | — | Selectable |
+| P11 | Offline language pack downloading | pack = downloading | Value | Downloading | Value | — | — | Translate page disabled | — | Selectable |
+| P12 | Image translation paused | `images.fatal` | Follows text state | Follows text state | Follows text state | S-P-35 | Text only | Follows text state | — | Selectable |
+| P13 | Image translation active | `images.requested > 0` | Unchanged | Unchanged | — | — | Based on failed | Based on on | — | Selectable |
 
-叠加规则：
-- 卡内说明一次只显示一条，优先级 S-P-34 > S-P-33 > S-P-30 > S-P-31 / S-P-32。
-- P5 与 P4 可叠加：失败行照常出现在卡下方。
-- 翻译进行中（P3–P5）服务行与语言行不可点，箭头收起；要换服务先「显示原文」。
-- 窄窗口备注 S-P-74 独立于状态，只看 `mode !== preference`。
-- 主按钮禁用时不解释原因——原因已在卡内说明里。
-- 图片翻译在 popup 里**没有独立的进行中指示**（P13）：叠加层出现在页面上就是反馈；只有失败（S-P-60）和暂停（S-P-35）才露面。识别助手不可用时 popup 完全不提，只在设置页说。
-- 开发态信息（后台版本、块统计、`fatal` 原始文本）只在开发构建的样例页显示，正式 popup 不出现。
+Composition rules:
+- Show only one card note at a time: S-P-34 > S-P-33 > S-P-30 > S-P-31 / S-P-32.
+- P5 and P4 can coexist: the failure row still appears below the card.
+- During translation (P3–P5), service and language rows are not clickable and arrows disappear; select “Show original” before changing services.
+- Narrow-window note S-P-74 is independent of state and depends only on `mode !== preference`.
+- Do not repeat why the primary button is disabled; the card note already explains it.
+- Image translation has **no separate in-progress indicator** in the popup (P13): overlays appearing on the page provide feedback. Only failures (S-P-60) and pauses (S-P-35) appear. The popup says nothing when the recognition assistant is unavailable; only options explains that.
+- Development information (background version, block statistics, raw `fatal` text) appears only in the development-build gallery, never in the production popup.
 
-## 5. 令牌 [议]
+## 5. Tokens [Discussion]
 
-先定名与两套值，Tailwind v4 `@theme` 与页内 Shadow DOM 共用同一份 CSS 变量；前缀 `--axt-`。
+Define names and two value sets first. Tailwind v4 `@theme` and in-page Shadow DOM share the same CSS variables, prefixed `--axt-`.
 
-| 令牌 | 浅色 | 深色 | 用途 |
+| Token | Light | Dark | Use |
 |---|---|---|---|
-| `--axt-bg` | #f5f5f7 | #1c1c1e | 页面底 |
-| `--axt-card` | #ffffff | #2c2c2e | 卡片 |
-| `--axt-fg` | #1e1e24 | #f2f2f7 | 正文 |
-| `--axt-fg-2` | #7c7c89 | #8e8e93 | 次要文字、标签 |
-| `--axt-line` | #ececf0 | #3a3a3c | 分隔线 |
-| `--axt-control` | #e9e9ee | #3a3a3c | 分段控件底 |
-| `--axt-accent` | #b31b1b | #d63c3c | arXiv 红，主按钮、选中态 |
-| `--axt-accent-soft` | #fbecec | #3b1f1f | 红色药丸底、失败行底 |
-| `--axt-ok` | #1f8a4c | #30d158 | 就绪 |
-| `--axt-ok-soft` | #e8f5ec | #1f3a29 | 就绪药丸底 |
-| `--axt-warn` | #b8860b | #ffd60a | 将改用 |
+| `--axt-bg` | #f5f5f7 | #1c1c1e | Page background |
+| `--axt-card` | #ffffff | #2c2c2e | Cards |
+| `--axt-fg` | #1e1e24 | #f2f2f7 | Body text |
+| `--axt-fg-2` | #7c7c89 | #8e8e93 | Secondary text, labels |
+| `--axt-line` | #ececf0 | #3a3a3c | Dividers |
+| `--axt-control` | #e9e9ee | #3a3a3c | Segmented-control background |
+| `--axt-accent` | #b31b1b | #d63c3c | arXiv red, primary buttons, selected states |
+| `--axt-accent-soft` | #fbecec | #3b1f1f | Red pill and failure-row backgrounds |
+| `--axt-ok` | #1f8a4c | #30d158 | Ready |
+| `--axt-ok-soft` | #e8f5ec | #1f3a29 | Ready-pill background |
+| `--axt-warn` | #b8860b | #ffd60a | Will switch |
 | `--axt-radius-card` | 14px | | |
-| `--axt-radius-control` | 10px | | 分段、输入框 |
+| `--axt-radius-control` | 10px | | Segments, inputs |
 | `--axt-radius-pill` | 999px | | |
-| `--axt-font` | Manrope, PingFang SC, Noto Sans SC, system-ui | | 页内组件不用，跟随论文 |
+| `--axt-font` | Manrope, PingFang SC, Noto Sans SC, system-ui | | In-page components inherit the paper font instead |
 
-深色值是从苹果系统灰起的初稿，实装时对着真 popup 调。页内组件的深色是否跟随 arXiv 页面自身的深色样式：[待验证]。
+Dark values are a first draft based on Apple system grays; tune them against the real popup during implementation. Whether in-page components follow arXiv’s own dark styles: [To verify].
 
-## 6. 需要改 DESIGN.md 的条目
+## 6. Required DESIGN.md changes
 
-- §8.1 默认 provider 改为 `google-web`（首次打开即可用）
-- §8.4 语言包下载入口：popup 服务列表 + 设置页服务卡，两处都是点击手势
-- §9 「测试连接」并入「连接」：先 `setConfig` 再指名当前 provider 试译一句；测的是表单值
-- §9 配置写入：除 AI 模型表单外所有控件即改即存，去掉全局保存
-- §10 预翻译参数在 UI 上以刻度呈现，内部映射 margin / threshold
-- §7.6 新增页内「已改用」提示（单实例、Shadow DOM）
-- 错误原因映射表（§3.4）放进 `providers/types.ts` 旁
-- §15.4 `nativeMessaging` 改可选权限时，设置页加 S-O-86 授权按钮（已决定，分发时做）
-- #47 排版设置进入 config schema（新字段，升版本），与 §7.5 译文样式分开存
+- §8.1 Change the default provider to `google-web` (usable on first open)
+- §8.4 Language-pack downloads: popup service list + options service card, both triggered by click gestures
+- §9 Merge “Test connection” into “Connect”: `setConfig` first, then explicitly ask the current provider to translate one sentence; test the form values
+- §9 Configuration writes: every control except the AI model form saves immediately; remove global Save
+- §10 Show pretranslation parameters as stepped UI controls, mapped internally to margin / threshold
+- §7.6 Add an in-page “Switched” notice (single instance, Shadow DOM)
+- Place the error-reason mapping (§3.4) next to `providers/types.ts`
+- §15.4 When `nativeMessaging` becomes optional, add options authorization button S-O-86 (decided; implement for distribution)
+- #47 Add typography settings to the config schema (new fields, bump version), stored separately from §7.5 translation styles
 
-## 7. 功能覆盖清单
+## 7. Feature coverage checklist
 
-主线每加一个功能先在这里登记一行；没有落点的功能不算设计完成。
+Register each new mainline feature here first; a feature with no UI location is not fully designed.
 
-| 功能 | 来源 | 状态 | 落点 | 编号 |
+| Feature | Source | Status | Location | IDs |
 |---|---|---|---|---|
-| 整页翻译 / 显示原文 | §10 | 已实现 | popup 主按钮 | S-P-50…53，P1–P9 |
-| 三种对照模式 | §7 | 已实现 | popup 模式条；页内无控件 | S-P-70…74 |
-| 三个翻译服务 + 降级链 | §8 | 已实现 | popup 服务卡 / 设置 · 翻译服务 | S-P-10…46，S-O-10…31 |
-| 离线语言包下载 | §8.4 | 已实现 | popup 服务列表 + 设置服务卡 | S-P-40…43 |
-| 提示词库（内置 / 自定义 / 导入导出） | §8.2 | 已实现 | 设置 · 提示词与术语；popup 子行 | S-O-50…58，S-P-47 |
-| 术语表 | §8.2 | 已实现 | 设置 · 提示词与术语 | S-O-60…61 |
-| 译文样式预设 + 自定义 CSS | §7.5 | 已实现 | 设置 · 阅读 | S-O-41…44 |
-| 预翻译范围 / 时机 | §10 | 已实现 | 设置 · 阅读 | S-O-45…46 |
-| 缓存统计 / 清空 | §9 | 已实现 | 设置 · 数据 | S-O-71…74 |
-| 配置读取失败提示 | §9 | 已实现 | popup 卡内说明 | S-P-34，P10 |
-| 深度思考开关 | §8.2 | 已实现 | 设置 · 更多选项 | S-O-30 |
-| 加载环 / 失败块重试 | §7.6 | 已实现 | 页内 | S-I-01…02 |
-| **图片翻译**：识别助手检测、模式多选、进度、暂停、重试 | §15，PR #87–89 | 已实现 | 设置 · 翻译服务下方一节；popup 失败行与卡内说明；页内叠加层 | S-O-80…87，S-P-35 / 60，S-I-04，P12–P13 |
-| 识别助手授权按钮 | §15.4 | 已定，分发时 | 设置 · 图片翻译 | S-O-86 |
-| **阅读排版**（字号 / 行高 / 宽度 / 间距 / 颜色 / 预设 / 恢复默认） | #47 | 已定未做 | 设置 · 阅读 · 排版卡 | S-O-47 |
-| 分栏拖动 | #83 | 实验 | 页内手柄；设置里一个「恢复居中」 | S-I-05，S-O-48 |
-| 免费 AI 翻译（托管） | #97 | 候选 | 服务列表第四项 | S-P-48，S-O-15 |
-| Microsoft 翻译 | #98 | 候选 | 服务列表第五项 | S-P-49，S-O-16 |
-| 页内「已改用」提示 | 本文提案 | 待定 | 页内 | S-I-03 |
-| 阅读工具条 | 画布提案 | 待定 | 页内 | — |
-| 后台连通 / 块统计 | 现有 popup | 开发态 | 只在开发构建样例页 | — |
+| Translate page / Show original | §10 | Implemented | Popup primary button | S-P-50…53, P1–P9 |
+| Three comparison modes | §7 | Implemented | Popup mode bar; no in-page control | S-P-70…74 |
+| Three translation services + fallback chain | §8 | Implemented | Popup service card / Settings · Translation service | S-P-10…46, S-O-10…31 |
+| Offline language-pack download | §8.4 | Implemented | Popup service list + options service card | S-P-40…43 |
+| Prompt library (built-in / custom / import-export) | §8.2 | Implemented | Settings · Prompts & terms; popup subrow | S-O-50…58, S-P-47 |
+| Glossary | §8.2 | Implemented | Settings · Prompts & terms | S-O-60…61 |
+| Translation style presets + custom CSS | §7.5 | Implemented | Settings · Reading | S-O-41…44 |
+| Translate-ahead range / timing | §10 | Implemented | Settings · Reading | S-O-45…46 |
+| Cache statistics / clearing | §9 | Implemented | Settings · Data | S-O-71…74 |
+| Settings-read failure notice | §9 | Implemented | Popup card note | S-P-34, P10 |
+| Deep-thinking toggle | §8.2 | Implemented | Settings · More options | S-O-30 |
+| Loading spinner / failed-block retry | §7.6 | Implemented | In-page | S-I-01…02 |
+| **Image translation**: recognition-assistant detection, mode checkboxes, progress, pause, retry | §15, PR #87–89 | Implemented | Section below Settings · Translation service; popup failure row and card note; in-page overlays | S-O-80…87, S-P-35 / 60, S-I-04, P12–P13 |
+| Recognition-assistant authorization button | §15.4 | Decided, for distribution | Settings · Image translation | S-O-86 |
+| **Reading typography** (font size / line height / width / spacing / color / presets / reset to defaults) | #47 | Decided, not implemented | Settings · Reading · Typography card | S-O-47 |
+| Draggable column divider | #83 | Experimental | In-page handle; one “Recenter” action in settings | S-I-05, S-O-48 |
+| Free AI translation (hosted) | #97 | Candidate | Fourth service-list item | S-P-48, S-O-15 |
+| Microsoft Translator | #98 | Candidate | Fifth service-list item | S-P-49, S-O-16 |
+| In-page “Switched” notice | This proposal | Undecided | In-page | S-I-03 |
+| Reading toolbar | Canvas proposal | Undecided | In-page | — |
+| Background connectivity / block statistics | Existing popup | Development only | Development-build gallery only | — |
 
-## 8. 待讨论
+## 8. Open questions
 
-1. 产品名。`arXiv Translate` 只是占位。
-2. 「AI 模型」这个叫法 vs 「AI 翻译」。
-3. P8 已暂停：主按钮「重新翻译」+ 次按钮「显示原文」，还是只留一个？
-4. 语言行点开是原生 `<select>`（首字母跳转）还是带搜索的列表——先实测原生在 popup 里的表现。
-5. 页内「已改用」提示要不要做；不做的话用户只有打开 popup 才知道译文质量变了。
-6. 「识别助手」这个叫法。
-7. 排版卡（#47）的字段范围和预设名，实现前要按 issue 的验收项再核一遍。
+1. Product name. `arXiv Translate` is only a placeholder.
+2. “AI model” versus “AI translation”.
+3. P8 paused: primary “Translate again” + secondary “Show original”, or a single button?
+4. Does the language row open a native `<select>` (type-to-jump) or a searchable list? Test native behavior in the popup first.
+5. Whether to add the in-page “Switched” notice; without it, users learn that translation quality changed only by opening the popup.
+6. The term “Recognition assistant”.
+7. Recheck the typography card’s (#47) field scope and preset names against the issue’s acceptance criteria before implementation.

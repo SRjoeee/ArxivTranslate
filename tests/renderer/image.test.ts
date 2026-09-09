@@ -5,7 +5,7 @@ import {
 } from '@/core/renderer'
 import { docOf } from './helpers'
 
-// 图片叠加层（DESIGN §15.2）：<img> 的下一个兄弟、不带 axt-t、<img> 一个属性都不加、恢复原文整层删掉
+// Image overlays (DESIGN §15.2): next sibling of img, no axt-t, no added img attributes, and fully removed on restore.
 
 const FIGURE = '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1" width="476" height="357"><figcaption class="ltx_caption">Figure 1.</figcaption></figure>'
 const label = (text: string, source = text, extra: Partial<ImageLabel> = {}): ImageLabel => ({ x: 0.1, y: 0.2, w: 0.3, h: 0.05, lines: 1, source, text, ...extra })
@@ -17,7 +17,7 @@ function setup(html = FIGURE) {
 }
 
 describe('renderImage', () => {
-  it('叠加层是 <img> 的下一个兄弟，带 data-axt-for，不带 axt-t；<img> 本身一个属性都不多', () => {
+  it('overlays immediately follow img with data-axt-for and no axt-t, leaving img attributes unchanged', () => {
     const { doc, target } = setup()
     const before = target.el.outerHTML
     const node = renderImage(target, [label('静态电荷', 'Static charge')])
@@ -29,7 +29,7 @@ describe('renderImage', () => {
     expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(1)
   })
 
-  it('标签：译文做内容、原文做 title、lang 取 <html data-axt-lang>；内联样式只用百分比与容器单位', () => {
+  it('labels use translated content, original title, html data-axt-lang, and only percentage or container-unit inline styles', () => {
     const { doc, target } = setup()
     doc.documentElement.setAttribute(LANG_ATTR, 'zh-CN')
     const node = renderImage(target, [label('静态电荷', 'Static charge'), label('过程', 'Processes', { x: 0.6, y: 0.03, w: 0.26, h: 0.035 })])
@@ -45,7 +45,7 @@ describe('renderImage', () => {
     }
   })
 
-  it('紧跟在图后面的镜像先删掉：叠加层必须是图的下一个兄弟（锚点定位靠这个结构）', () => {
+  it('removes an adjacent mirror first because anchor positioning requires the overlay to immediately follow the image', () => {
     const { doc, target } = setup()
     const mirror = doc.createElement('img')
     mirror.className = `ltx_graphics ${T_CLASS} ${MIRROR_CLASS}`
@@ -55,7 +55,7 @@ describe('renderImage', () => {
     expect(doc.querySelector(`.${MIRROR_CLASS}`)).toBeNull()
   })
 
-  it('重复渲染替换不叠加；clearImage 删掉它', () => {
+  it('repeated rendering replaces rather than duplicates; clearImage removes the overlay', () => {
     const { doc, target } = setup()
     renderImage(target, [label('一')])
     renderImage(target, [label('二')])
@@ -66,7 +66,7 @@ describe('renderImage', () => {
     expect(clearImage(target)).toBe(false)
   })
 
-  it('恢复原文：叠加层与 <html> 上的模式闸一起清掉，DOM 逐字相等（§7.1）', () => {
+  it('restore removes overlays and html mode gates, recovering the exact DOM (§7.1)', () => {
     const { doc, target } = setup()
     const before = doc.documentElement.outerHTML
     enable(doc, 'stack')
@@ -78,7 +78,7 @@ describe('renderImage', () => {
     expect(result.removedNodes).toBe(1)
   })
 
-  it('setImageModes 空集合就摘掉属性', () => {
+  it('setImageModes removes the attribute for an empty set', () => {
     const { doc } = setup()
     setImageModes(doc, ['only'])
     setImageModes(doc, [])
@@ -87,16 +87,16 @@ describe('renderImage', () => {
 })
 
 describe('labelStyle', () => {
-  it('字号按框高：一行占框高的 72%，两行各占一半；宽度上限按字数均摊', () => {
+  it('font size follows box height: one line uses 72%, two lines split it, and character count limits width', () => {
     const one = labelStyle(label('静态电荷', 'Static charge', { h: 0.05, w: 0.3, lines: 1 }))
     const two = labelStyle(label('动态 电荷', 'Dynamical charge', { h: 0.05, w: 0.3, lines: 2 }))
     expect(one).toContain('font-size:min(3.60cqh,')
     expect(two).toContain('font-size:min(1.80cqh,')
-    // 4 个 CJK 字 = 4 em：宽度上限 92 × 0.3 / 4 = 6.9cqw
+    // Four CJK characters = 4 em: width cap 92 × 0.3 / 4 = 6.9cqw.
     expect(one).toContain('6.90cqw)')
   })
 
-  it('emWidth：CJK 一字一 em，拉丁 0.55，空格 0.3', () => {
+  it('emWidth assigns 1 em per CJK character, 0.55 per Latin character, and 0.3 per space', () => {
     expect(emWidth('静态')).toBeCloseTo(2)
     expect(emWidth('ab')).toBeCloseTo(1.1)
     expect(emWidth('a b')).toBeCloseTo(1.4)

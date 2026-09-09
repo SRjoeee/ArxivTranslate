@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <script src="./support.js"></script>
@@ -16,48 +16,48 @@
 </helmet>
 <div style="width: 1120px; height: 640px; box-sizing: border-box; background: #ffffff; padding: 32px 40px; display: flex; flex-direction: column; gap: 22px;">
   <div style="display: flex; align-items: baseline; gap: 14px;">
-    <div style="font-size: 18px; font-weight: 700; font-family: 'Manrope', system-ui, sans-serif;">页内组件</div>
-    <div style="font-size: 12px; color: #86868b;">长在论文正文里，字体跟随论文；只用红色 1/4 弧与药丸形状作识别</div>
+    <div style="font-size: 18px; font-weight: 700; font-family: 'Manrope', system-ui, sans-serif;">In-page components</div>
+    <div style="font-size: 12px; color: #86868b;">Embedded in the paper and inheriting its font; identified only by a red quarter arc and pill shapes</div>
   </div>
 
   <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px;">
     <div style="display: flex; flex-direction: column; gap: 10px;">
-      <div style="font-size: 11px; color: #86868b; font-weight: 600; letter-spacing: 0.04em; font-family: 'Manrope', system-ui, sans-serif;">加载中</div>
+      <div style="font-size: 11px; color: #86868b; font-weight: 600; letter-spacing: 0.04em; font-family: 'Manrope', system-ui, sans-serif;">Loading</div>
       <div style="padding: 16px 18px; border: 1px solid #f0f0f2; border-radius: 12px; font-family: Georgia, 'Times New Roman', serif; font-size: 13px; line-height: 1.6; display: flex; flex-direction: column; gap: 8px;">
         <div>Let <i>G</i> be a connected graph with <i>n</i> vertices and minimum degree δ.</div>
         <div style="display: flex; align-items: center; gap: 8px;"><span style="width: 13px; height: 13px; border-radius: 50%; border: 2px solid #e5e5ea; border-top-color: #b31b1b; display: inline-block; animation: axt-spin 0.9s linear infinite;"></span><span style="width: 140px; height: 7px; border-radius: 4px; background: #f0f0f2;"></span><span style="width: 70px; height: 7px; border-radius: 4px; background: #f0f0f2;"></span></div>
       </div>
-      <div style="font-size: 11px; color: #86868b; line-height: 1.5;">环 + 两条骨架线占位，高度接近一行译文，翻完不跳版。</div>
+      <div style="font-size: 11px; color: #86868b; line-height: 1.5;">Ring + two skeleton lines, about one translation line tall, to prevent layout shifts after translation.</div>
     </div>
     <div style="display: flex; flex-direction: column; gap: 10px;">
-      <div style="font-size: 11px; color: #86868b; font-weight: 600; letter-spacing: 0.04em; font-family: 'Manrope', system-ui, sans-serif;">失败块</div>
+      <div style="font-size: 11px; color: #86868b; font-weight: 600; letter-spacing: 0.04em; font-family: 'Manrope', system-ui, sans-serif;">Failed block</div>
       <div style="padding: 16px 18px; border: 1px solid #f0f0f2; border-radius: 12px; font-family: Georgia, 'Times New Roman', serif; font-size: 13px; line-height: 1.6; display: flex; flex-direction: column; gap: 8px;">
         <div style="text-decoration: underline dotted #b31b1b; text-underline-offset: 3px;">We prove the bound is tight for all δ ≥ 2.</div>
-        <div style="display: inline-flex; align-self: flex-start; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; background: #fbecec; border-radius: 999px; font-family: 'Manrope', 'PingFang SC', system-ui, sans-serif; font-size: 11px; font-weight: 600; color: #7a1414;">请求超时<span style="padding: 2px 9px; border-radius: 999px; background: #b31b1b; color: #ffffff;">重试</span></div>
+        <div style="display: inline-flex; align-self: flex-start; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; background: #fbecec; border-radius: 999px; font-family: 'Manrope', 'PingFang SC', system-ui, sans-serif; font-size: 11px; font-weight: 600; color: #7a1414;">Request timed out<span style="padding: 2px 9px; border-radius: 999px; background: #b31b1b; color: #ffffff;">Retry</span></div>
       </div>
-      <div style="font-size: 11px; color: #86868b; line-height: 1.5;">原因用人话（超时 / 额度用尽 / 译文格式不对），不显示错误码；点重试变回加载环。</div>
+      <div style="font-size: 11px; color: #86868b; line-height: 1.5;">Use plain reasons (timeout / quota exhausted / invalid translation format), no error codes; Retry returns to the loading ring.</div>
     </div>
     <div style="display: flex; flex-direction: column; gap: 10px;">
-      <div style="font-size: 11px; color: #86868b; font-weight: 600; letter-spacing: 0.04em; font-family: 'Manrope', system-ui, sans-serif;">降级提示 · 视口右下角</div>
+      <div style="font-size: 11px; color: #86868b; font-weight: 600; letter-spacing: 0.04em; font-family: 'Manrope', system-ui, sans-serif;">Fallback notice · bottom-right of viewport</div>
       <div style="padding: 16px 18px; border: 1px solid #f0f0f2; border-radius: 12px; height: 78px; box-sizing: border-box; display: flex; align-items: flex-end; justify-content: flex-end; background: #fafafa;">
-        <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: #ffffff; border-radius: 999px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); font-family: 'Manrope', 'PingFang SC', system-ui, sans-serif; font-size: 12px; font-weight: 600;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #b31b1b;"></span>已改用 Google 翻译<span style="color: #b31b1b;">去修</span><span style="color: #c7c7cc; margin-left: 2px;">✕</span></div>
+        <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; background: #ffffff; border-radius: 999px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); font-family: 'Manrope', 'PingFang SC', system-ui, sans-serif; font-size: 12px; font-weight: 600;"><span style="width: 7px; height: 7px; border-radius: 50%; background: #b31b1b;"></span>Switched to Google Translate<span style="color: #b31b1b;">Fix</span><span style="color: #c7c7cc; margin-left: 2px;">✕</span></div>
       </div>
-      <div style="font-size: 11px; color: #86868b; line-height: 1.5;">新增：不打开 popup 也知道译文质量变了。出现一次、可关、8 秒后自动淡出。</div>
+      <div style="font-size: 11px; color: #86868b; line-height: 1.5;">New: users can see a quality change without opening the popup. Appears once, dismissible, automatically fades after 8 seconds.</div>
     </div>
   </div>
 
   <div style="display: flex; flex-direction: column; gap: 10px; padding-top: 8px; border-top: 1px solid #f0f0f2;">
-    <div style="display: flex; align-items: baseline; gap: 12px;"><div style="font-size: 11px; color: #86868b; font-weight: 600; letter-spacing: 0.04em; font-family: 'Manrope', system-ui, sans-serif;">提案 · 阅读工具条</div><div style="font-size: 11px; color: #86868b;">只在翻译开着时出现在视口右下角；把 popup 的三层压成一颗药丸，读到一半切模式不用再点工具栏图标</div></div>
+    <div style="display: flex; align-items: baseline; gap: 12px;"><div style="font-size: 11px; color: #86868b; font-weight: 600; letter-spacing: 0.04em; font-family: 'Manrope', system-ui, sans-serif;">Proposal · Reading toolbar</div><div style="font-size: 11px; color: #86868b;">Appears at the viewport’s bottom-right only while translation is on; combines the popup’s three layers into one pill so readers can switch modes without clicking the toolbar icon</div></div>
     <div style="padding: 18px; border: 1px solid #f0f0f2; border-radius: 12px; background: #fafafa; height: 120px; box-sizing: border-box; display: flex; align-items: flex-end; justify-content: flex-end; gap: 28px;">
       <div style="display: inline-flex; align-items: center; gap: 4px; padding: 5px 6px 5px 10px; background: #ffffff; border-radius: 999px; box-shadow: 0 4px 16px rgba(0,0,0,0.12); font-family: 'Manrope', 'PingFang SC', system-ui, sans-serif; font-size: 12px; font-weight: 600;">
         <svg width="16" height="16" viewBox="0 0 20 20" style="margin-right: 4px;"><circle cx="10" cy="10" r="7" fill="none" stroke="#e5e5ea" stroke-width="2.5"></circle><circle cx="10" cy="10" r="7" fill="none" stroke="#b31b1b" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="44" stroke-dashoffset="17" transform="rotate(-90 10 10)"></circle></svg>
-        <span style="padding: 4px 10px; border-radius: 999px; background: #1d1d1f; color: #ffffff;">上下</span><span style="padding: 4px 10px; color: #86868b;">左右</span><span style="padding: 4px 10px; color: #86868b;">仅译文</span>
+        <span style="padding: 4px 10px; border-radius: 999px; background: #1d1d1f; color: #ffffff;">Stacked</span><span style="padding: 4px 10px; color: #86868b;">Side by side</span><span style="padding: 4px 10px; color: #86868b;">Translation only</span>
         <span style="width: 1px; height: 16px; background: #e5e5ea; margin: 0 4px;"></span>
-        <span style="padding: 4px 10px; color: #86868b;">恢复</span>
+        <span style="padding: 4px 10px; color: #86868b;">Restore</span>
       </div>
       <div style="display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; background: #ffffff; border-radius: 50%; box-shadow: 0 4px 16px rgba(0,0,0,0.12);"><svg width="16" height="16" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="#e5e5ea" stroke-width="2.5"></circle><circle cx="10" cy="10" r="7" fill="none" stroke="#b31b1b" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="44" stroke-dashoffset="17" transform="rotate(-90 10 10)"></circle></svg></div>
     </div>
-    <div style="font-size: 11px; color: #86868b; line-height: 1.5;">左：展开态；右：闲置 3 秒后收成一颗进度环，悬停再展开。代价是要新增一个 Shadow DOM 浮层与 DESIGN.md §7 的对应条目——是否做由你定。</div>
+    <div style="font-size: 11px; color: #86868b; line-height: 1.5;">Left: expanded; right: collapses to a progress ring after 3 seconds idle, expands on hover. Requires a new Shadow DOM overlay and matching DESIGN.md §7 entry; implementation is your decision.</div>
   </div>
 </div>
 </x-dc>

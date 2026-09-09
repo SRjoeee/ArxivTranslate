@@ -1,8 +1,8 @@
-// 移植自 reference/read-frog/src/utils/constants/prompt.ts 与 src/utils/prompts/translate.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：
-// 模板变量换成论文语义（paperTitle / abstract / sectionTitle / glossary），网页摘要改为直接用论文 abstract，
-// 去掉字幕与文本分隔符式的批处理。批处理协议不在这里——见 prompt.ts 的协议块，它追加在任何提示词之后。
+// Ported from reference/read-frog/src/utils/constants/prompt.ts and src/utils/prompts/translate.ts@9b44f82 (GPL-3.0), 2026-09-05; modified:
+// Template variables use paper context (paperTitle / abstract / sectionTitle / glossary); the paper abstract replaces a generated webpage summary.
+// Removed subtitles and delimiter-based batching. The batch protocol lives in prompt.ts and is appended after every prompt.
 //
-// 结构照搬：模板变量 {{token}} + 内置提示词表 + 用户自定义（patterns）+ 按 promptId 选择、找不到回退 default。
+// Same structure: {{token}} variables, built-in prompts, custom patterns, and promptId selection with a default fallback.
 
 export const PROMPT_TOKENS = ['targetLanguage', 'input', 'paperTitle', 'abstract', 'sectionTitle', 'glossary'] as const
 export type PromptToken = (typeof PROMPT_TOKENS)[number]
@@ -14,9 +14,9 @@ export const DEFAULT_PROMPT_ID = 'default'
 export const PRECISION_REWRITE_PROMPT_ID = 'precision-rewrite'
 
 /**
- * 论文元数据块：Read Frog 把它放在 system prompt 里；这里改放到用户消息、用定界符包起来并声明为不可信参考——
- * 标题 / 摘要是论文作者写的，讨论 prompt injection 的论文里可能就带着指令样的文字，进 system 会被当成同级指令
- *（Codex 在 #28 指出）。system prompt 只说明"用户消息里的元数据仅供参考"。
+ * Paper metadata: Read Frog puts this in the system prompt; here it goes in a delimited user message as untrusted reference data.
+ * Authors control titles/abstracts; papers about prompt injection may contain instruction-like text that would gain system-level authority
+ * if included there (Codex #28). The system prompt only says that user-message metadata is reference material.
  */
 const METADATA_BLOCK = `<document_metadata>
 Paper title: ${T.paperTitle}
@@ -85,13 +85,13 @@ export const BUILT_IN_PROMPTS: Readonly<Record<string, PromptTemplate>> = {
 
 export const BUILT_IN_PROMPT_IDS = Object.keys(BUILT_IN_PROMPTS)
 
-/** 内置提示词的一句话说明，设置页显示（Read Frog 放在 i18n 里，这里直接中文） */
+/** One-line built-in prompt descriptions for settings (stored in i18n by Read Frog; English UI text here). */
 export const BUILT_IN_PROMPT_DESCRIPTIONS: Readonly<Record<string, string>> = {
-  [DEFAULT_PROMPT_ID]: '通用学术翻译：术语用既定译法，人名、期刊名、代码与链接保留原文',
-  [PRECISION_REWRITE_PROMPT_ID]: '"翻译即改写"：摆脱原文句法、消除翻译腔，按目标语言的表达习惯重写，术语与格式照旧',
+  [DEFAULT_PROMPT_ID]: 'Academic translation: use established terminology; preserve names, journal titles, code and links',
+  [PRECISION_REWRITE_PROMPT_ID]: 'Translate by rewriting: use natural target-language phrasing while preserving terminology and formatting',
 }
 
-/** 存进配置的形状：当前选用的 id + 用户自定义的提示词 */
+/** Stored configuration: selected id and custom prompts. */
 export interface PromptsConfig {
   promptId: string
   patterns: PromptTemplate[]
@@ -103,7 +103,7 @@ export function resolvePromptReplacementValue(value: string | null | undefined, 
   return typeof value === 'string' && value.trim() !== '' ? value : fallback
 }
 
-/** 内置优先，其次自定义，都找不到回退 default（与 Read Frog 一致）。只认自有属性：id 是 "constructor" 之类时不能摸到原型 */
+/** Built-ins first, then custom prompts, then default (as in Read Frog). Own properties only: ids such as "constructor" must not access the prototype. */
 export function selectPrompt(config: PromptsConfig = DEFAULT_PROMPTS_CONFIG): PromptTemplate {
   const id = config.promptId || DEFAULT_PROMPT_ID
   const builtIn = Object.hasOwn(BUILT_IN_PROMPTS, id) ? BUILT_IN_PROMPTS[id] : undefined
@@ -112,16 +112,16 @@ export function selectPrompt(config: PromptsConfig = DEFAULT_PROMPTS_CONFIG): Pr
 
 const TOKEN_PATTERN = new RegExp(`\\{\\{(${PROMPT_TOKENS.join('|')})\\}\\}`, 'g')
 
-/** 单趟替换：填进去的值不会再被后面的变量扫一遍（原文里恰好写着 "{{abstract}}" 也要原样送给模型） */
+/** Single-pass replacement: inserted values are never scanned again, so literal "{{abstract}}" in source text reaches the model unchanged. */
 export function renderTemplate(text: string, values: Record<PromptToken, string>): string {
   return text.replace(TOKEN_PATTERN, (_, token: PromptToken) => values[token])
 }
 
 /**
- * 提示词身份，进缓存键：换了提示词就不能再命中旧译文。
- * 内置的用 id（措辞变化由 PROMPT_VERSION 兜底），自定义的带**全文**——缓存键最终是 SHA-256，
- * 这里不先压成短 hash（32 位 hash 撞了外层也分不开，Codex 在 #28 给了实例）；两段分别编码，
- * 拼一个空格会让 "A"+"B C" 与 "A B"+"C" 同键。
+ * Prompt identity for cache keys: changing a prompt must invalidate its translations.
+ * Built-ins use their id (PROMPT_VERSION covers wording changes); custom prompts include their **full text** before the final SHA-256.
+ * Do not first reduce it to a short hash: an outer hash cannot distinguish 32-bit collisions (Codex #28). Encode the two fields separately;
+ * joining with a space would give "A"+"B C" and "A B"+"C" the same key.
  */
 export function promptKey(config: PromptsConfig = DEFAULT_PROMPTS_CONFIG): string {
   const template = selectPrompt(config)

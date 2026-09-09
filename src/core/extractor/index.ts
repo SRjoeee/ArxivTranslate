@@ -1,11 +1,11 @@
-// 块提取（DESIGN.md §4.1）。extract() 只读 DOM；markBlocks() 才写 data-axt-id。
-// 遍历策略与分类解耦：分类来自 rules/latexml 的 classify()，这里只决定"是否产出"与"是否下钻"。
+// Block extraction (DESIGN.md §4.1). extract() only reads the DOM; markBlocks() writes data-axt-id.
+// Traversal and classification are separate: rules/latexml classify() classifies; this module decides whether to emit and descend.
 import { isInjected } from '@/core/marks'
 import { classify, documentRoot, isNumericCell, tableCells } from '@/core/rules/latexml'
 
 export interface Cell {
   el: Element
-  /** §5.3 数值格：原样复制，不翻译 */
+  /** Numeric cells (§5.3): copy unchanged without translation. */
   numeric: boolean
 }
 
@@ -13,7 +13,7 @@ export interface TextBlock {
   id: string
   kind: 'text'
   el: Element
-  /** 命中的规则 id */
+  /** Matched rule ID. */
   unit: string
 }
 
@@ -22,13 +22,13 @@ export interface TableBlock {
   kind: 'table'
   el: Element
   unit: 'table'
-  /** 最外层 .ltx_tabular 的直接单元格；嵌套 tabular 整体属于外层某个单元格 */
+  /** Direct cells of the outermost .ltx_tabular; nested tables belong to an outer cell. */
   cells: Cell[]
 }
 
 export type Block = TextBlock | TableBlock
 
-/** §7.1 允许在原节点追加的属性 */
+/** Attributes allowed on original nodes (§7.1). */
 export const ID_ATTR = 'data-axt-id'
 
 const ELEMENT_NODE = 1
@@ -36,9 +36,9 @@ const TEXT_NODE = 3
 const LETTER = /\p{L}/u
 
 /**
- * 自有文本：只收集分类为 null 的子树里的文本节点。skip / protect 是不可翻译内容，
- * unit / table 是嵌套单元（各自成块，不算外层的）——比规则模块的 visibleText 多剪后两类。
- * 我们自己插进去的译文 / 镜像也不算（再次提取时它们已经在原块内部）。
+ * Own text: collect text only from subtrees classified as null. skip / protect are not translatable;
+ * unit / table are nested units with their own blocks, so prune these too, unlike the rules module's visibleText.
+ * Exclude injected translations and mirrors, which may already be inside original blocks on re-extraction.
  */
 function ownText(el: Element): string {
   const parts: string[] = []
@@ -53,8 +53,8 @@ function ownText(el: Element): string {
 }
 
 /**
- * 单元格的文本：排除 skip / protect 与嵌套表（嵌套表的格各自是格）；格内的 .ltx_p 等单元计入——
- * 它们不另成块，由 protector 序列化时走进去（§5.3）。
+ * Cell text excludes skip / protect and nested tables (whose cells are handled separately). Include units such as .ltx_p:
+ * they are not separate blocks within cells; the protector descends into them during serialization (§5.3).
  */
 function cellText(el: Element): string {
   const parts: string[] = []
@@ -75,24 +75,24 @@ function cellText(el: Element): string {
   return parts.join('')
 }
 
-/** 任意深度的格都算：嵌套 tabular 的格是外层块的格，只装着嵌套表的外层格没有自有文本、按数值格原样复制 */
+/** Include cells at any depth. Nested cells belong to the outer block; an outer cell containing only a nested table has no own text and is copied as numeric. */
 function cellsOf(table: Element): Cell[] {
   return tableCells(table).map(el => ({ el, numeric: isNumericCell(cellText(el)) }))
 }
 
-/** 至少一个单元格既非数值格又含字母，这张表才有翻译的必要；空排版表、纯公式表不成块 */
+/** A table needs at least one nonnumeric cell containing letters; empty layout tables and formula-only tables do not become blocks. */
 function hasTranslatableCell(cells: Cell[]): boolean {
   return cells.some(c => !c.numeric && LETTER.test(cellText(c.el)))
 }
 
-/** 从翻译根开始按文档序提取块；找不到翻译根返回空数组。不修改 DOM */
+/** Extract blocks in document order from the translation root; return [] if absent. Does not modify the DOM. */
 export function extract(root: Document | Element): Block[] {
   const start = documentRoot(root)
   if (!start) return []
 
   const blocks: Block[] = []
   const used = new Set<string>()
-  // 元素自带 id（LaTeXML 的 S3.p1.1 等）优先，否则按块序编号；重复加后缀
+  // Prefer existing IDs (e.g. LaTeXML S3.p1.1); otherwise number by block order. Suffix duplicates.
   const assignId = (el: Element): string => {
     const base = el.id || `axt-b${blocks.length + 1}`
     let id = base
@@ -104,7 +104,7 @@ export function extract(root: Document | Element): Block[] {
   const stack: Element[] = [start]
   while (stack.length) {
     const el = stack.pop()!
-    // 我们自己插的译文 / 镜像带着原块的 class，会被规则认成块；再次提取时它们已经在页面里（Codex 在 #8 指出）
+    // Injected translations and mirrors retain original classes and would be classified as blocks on re-extraction (Codex #8).
     if (el !== start && isInjected(el)) continue
     const c = el === start ? null : classify(el)
     let descend = true
@@ -135,7 +135,7 @@ export function extract(root: Document | Element): Block[] {
   return blocks
 }
 
-/** 写入 data-axt-id。幂等；这是 §7.1 允许在原节点追加的两个属性之一 */
+/** Write data-axt-id idempotently; one of the two attributes §7.1 permits on original nodes. */
 export function markBlocks(blocks: Block[]): void {
   for (const b of blocks) b.el.setAttribute(ID_ATTR, b.id)
 }

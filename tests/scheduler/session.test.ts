@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { beginSession, endSession, getSessionId } from '@/core/scheduler/session'
 
 describe('session', () => {
-  it('开始一个会话得到新 id，当前 id 随之变化；结束返回它并清空', () => {
+  it('starting a session creates and selects a new ID; ending returns it and clears current', () => {
     const a = beginSession()
     expect(getSessionId()).toBe(a)
     const b = beginSession()
@@ -13,7 +13,7 @@ describe('session', () => {
     expect(endSession()).toBeNull()
   })
 
-  it('id 带计数，同一毫秒内也不重复', () => {
+  it('IDs include a counter and remain unique within the same millisecond', () => {
     const ids = new Set(Array.from({ length: 50 }, () => beginSession()))
     expect(ids.size).toBe(50)
     endSession()

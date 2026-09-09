@@ -1,6 +1,6 @@
-// helper 的冒烟测试（DESIGN §15）：按 Chrome Native Messaging 的帧格式（4 字节本机字节序长度 + JSON）
-// 与二进制对话——ping 取版本，再把参考图送去 OCR，检查识别出的行、置信度与归一化坐标。
-// 只在 Mac 上有意义；CI 没有 helper，不进 pnpm test。
+// Helper smoke test (DESIGN §15): communicate with the binary using Chrome Native Messaging frames (4-byte native-endian length + JSON).
+// Ping for version, then OCR the reference image and check recognized lines, confidence and normalized coordinates.
+// Mac-only; excluded from pnpm test because CI has no helper.
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -8,11 +8,11 @@ import { join } from 'node:path'
 const ROOT = join(import.meta.dirname, '..')
 const BIN = process.env.AXT_HELPER ?? ['release', 'debug'].map(c => join(ROOT, 'helper/.build', c, 'axt-helper')).find(existsSync)
 const FIXTURE = join(ROOT, 'helper/Tests/Fixtures/qed3d-string-breaking.png')
-// 参考图里确定存在的词；Vision 按行返回，图里换行的标签（"Dynamical / charge"）是两行，合并是扩展侧的事，这里只按词查
+// Known words in the reference image. Vision returns lines, so "Dynamical / charge" spans two; merging belongs to the extension. Check words only here.
 const EXPECTED = ['Dynamical', 'charge', 'Static', 'Electric', 'membrane', 'Plaquette', 'deformation', 'Processes', 'Production', 'networks']
 
 if (!BIN) {
-  console.error('没有找到 helper 二进制，先跑 pnpm helper:build')
+  console.error('Helper binary not found; run pnpm helper:build first')
   process.exit(2)
 }
 
@@ -35,7 +35,7 @@ function send(message, { split = false } = {}) {
   const header = Buffer.alloc(4)
   header.writeUInt32LE(json.length, 0)
   if (split) {
-    // 模拟管道的短读：长度前缀分两次写、中间隔一拍（Codex 在 #87 指出的情况）
+    // Simulate a short pipe read: split the length prefix across two writes separated by a brief delay (Codex #87).
     child.stdin.write(header.subarray(0, 1))
     setTimeout(() => { child.stdin.write(header.subarray(1)); child.stdin.write(json) }, 30)
   } else child.stdin.write(Buffer.concat([header, json]))
@@ -50,70 +50,70 @@ const check = (name, ok, detail = '') => {
 
 const t0 = performance.now()
 const ping = await send({ v: 1, cmd: 'ping', id: 'p1' })
-check('ping 回版本，带 Vision revision', ping.ok === true && /^\d+\.\d+\.\d+\+vision\d+$/.test(ping.version ?? '') && ping.id === 'p1', JSON.stringify(ping))
+check('ping returns version including Vision revision', ping.ok === true && /^\d+\.\d+\.\d+\+vision\d+$/.test(ping.version ?? '') && ping.id === 'p1', JSON.stringify(ping))
 
 const image = readFileSync(FIXTURE).toString('base64')
 const t1 = performance.now()
 const res = await send({ v: 1, cmd: 'ocr', id: 'o1', image })
 const ms = Math.round(performance.now() - t1)
-check('ocr 回图的尺寸', res.width === 579 && res.height === 699 && res.id === 'o1', `${res.width}×${res.height}，${ms} ms`)
+check('ocr returns image dimensions', res.width === 579 && res.height === 699 && res.id === 'o1', `${res.width}×${res.height}, ${ms} ms`)
 const lines = res.lines ?? []
-check('识别出至少 12 行', lines.length >= 12, `${lines.length} 行`)
+check('recognizes at least 12 lines', lines.length >= 12, `${lines.length} lines`)
 const texts = lines.map(l => l.text)
 const missing = EXPECTED.filter(e => !texts.some(t => t.includes(e)))
-check('关键标签都在', missing.length === 0, missing.length ? `缺 ${missing.join(' / ')}` : texts.slice(0, 8).join(' | '))
-// 全部行倒出来（文字、置信度、左上与右下），给扩展侧设计合并规则用
+check('all key labels present', missing.length === 0, missing.length ? `missing ${missing.join(' / ')}` : texts.slice(0, 8).join(' | '))
+// Dump all text/confidence/top-left/bottom-right values to support extension-side merge-rule design.
 for (const l of lines) console.log(`  ${l.conf.toFixed(2)}  (${l.quad[0][0].toFixed(3)}, ${l.quad[0][1].toFixed(3)})–(${l.quad[2][0].toFixed(3)}, ${l.quad[2][1].toFixed(3)})  ${JSON.stringify(l.text)}`)
 const inRange = lines.every(l => l.quad.length === 4 && l.quad.every(([x, y]) => x >= 0 && x <= 1 && y >= 0 && y <= 1) && l.conf >= 0 && l.conf <= 1)
-check('四角坐标与置信度都在 [0, 1]', inRange)
-// 左上原点：标题 "Processes" 在图的上部，quad 的 y 应该小
+check('corner coordinates and confidence are within [0, 1]', inRange)
+// Top-left origin: "Processes" is near the top, so its quad y should be small.
 const processes = lines.find(l => l.text.includes('Processes'))
-check('y 轴已翻成左上原点', !!processes && processes.quad[0][1] < 0.15, processes ? `Processes 的左上 y = ${processes.quad[0][1].toFixed(3)}` : '')
+check('y axis uses top-left origin', !!processes && processes.quad[0][1] < 0.15, processes ? `Processes top-left y = ${processes.quad[0][1].toFixed(3)}` : '')
 
-// AXT_SMOKE_DUMP=<path>：把原始结果存成 JSON（tests/fixtures/ocr/ 里的 fixture 就是这么来的，给合并 / 过滤规则的单测用真数据）
+// AXT_SMOKE_DUMP=<path>: save raw JSON (the source of tests/fixtures/ocr/ data for merge/filter unit tests).
 if (process.env.AXT_SMOKE_DUMP) {
   const { writeFileSync, mkdirSync } = await import('node:fs')
   const { dirname } = await import('node:path')
   mkdirSync(dirname(process.env.AXT_SMOKE_DUMP), { recursive: true })
   writeFileSync(process.env.AXT_SMOKE_DUMP, `${JSON.stringify({ width: res.width, height: res.height, lines }, null, 1)}\n`)
-  console.log(`已存 ${process.env.AXT_SMOKE_DUMP}`)
+  console.log(`Saved ${process.env.AXT_SMOKE_DUMP}`)
 }
 
-// 同一进程第二次识别：首次要加载 Vision 的模型，之后才是稳态耗时
+// Repeat OCR in the same process: first use loads the Vision model; later calls measure steady-state time.
 const t2 = performance.now()
 const again = await send({ v: 1, cmd: 'ocr', id: 'o1b', image })
 const ms2 = Math.round(performance.now() - t2)
-check('第二次识别结果一致', (again.lines ?? []).length === lines.length, `${ms2} ms（首次 ${ms} ms）`)
+check('second recognition has the same result count', (again.lines ?? []).length === lines.length, `${ms2} ms (first ${ms} ms)`)
 
-// EXIF 方向（Codex 在 #87 指出）：同一张图存成像素转了 90°、方向位为 6 的 JPEG，浏览器显示与 PNG 相同，
-// helper 报的尺寸与坐标也必须与 PNG 那次一致（Vision 按转正后的图归一化）
+// EXIF orientation (Codex #87): a JPEG with pixels rotated 90° and orientation 6 displays like the PNG in browsers.
+// Helper dimensions/coordinates must match the PNG too, since Vision normalizes against the upright image.
 const jpeg = readFileSync(join(ROOT, 'helper/Tests/Fixtures/qed3d-string-breaking-exif6.jpg')).toString('base64')
 const exif = await send({ v: 1, cmd: 'ocr', id: 'o3', image: jpeg })
-check('EXIF 方向 6 的 JPEG：尺寸按显示方向报', exif.width === 579 && exif.height === 699, `${exif.width}×${exif.height}`)
+check('EXIF orientation 6 JPEG reports display dimensions', exif.width === 579 && exif.height === 699, `${exif.width}×${exif.height}`)
 const near = (a, b) => Math.abs(a - b) < 0.02
 const pairs = ['Processes', 'Static charge', 'Odd sites'].map(word => [lines.find(l => l.text.includes(word)), (exif.lines ?? []).find(l => l.text.includes(word))])
 const aligned = pairs.every(([a, b]) => a && b && near(a.quad[0][0], b.quad[0][0]) && near(a.quad[0][1], b.quad[0][1]) && near(a.quad[2][0], b.quad[2][0]) && near(a.quad[2][1], b.quad[2][1]))
-check('EXIF 方向 6 的 JPEG：坐标与 PNG 一致（±0.02）', aligned, pairs.map(([a, b]) => `${a?.text}: png (${a?.quad[0].map(v => v.toFixed(3))}) jpg (${b?.quad[0].map(v => v.toFixed(3)) ?? '缺'})`).join('; '))
+check('EXIF orientation 6 JPEG coordinates match PNG (±0.02)', aligned, pairs.map(([a, b]) => `${a?.text}: png (${a?.quad[0].map(v => v.toFixed(3))}) jpg (${b?.quad[0].map(v => v.toFixed(3)) ?? 'missing'})`).join('; '))
 
 const shortRead = await send({ v: 1, cmd: 'ping', id: 'p2' }, { split: true })
-check('长度前缀分两次到达（短读）也能读满', shortRead.ok === true && shortRead.id === 'p2')
+check('reads the full length prefix across short reads', shortRead.ok === true && shortRead.id === 'p2')
 
-// 动图：helper 只识别第 0 帧，得把帧数报出来让扩展跳过（Codex 在 #89 指出）
+// Animated images: helper recognizes frame 0 only and must report frame count so the extension can skip overlays (Codex #89).
 const gif = readFileSync(join(ROOT, 'helper/Tests/Fixtures/two-frames.gif')).toString('base64')
 const animated = await send({ v: 1, cmd: 'ocr', id: 'g1', image: gif })
-check('两帧的 GIF 报 frames: 2', animated.frames === 2 && animated.id === 'g1', `frames=${animated.frames}`)
-check('静态 PNG 报 frames: 1', res.frames === 1)
+check('two-frame GIF reports frames: 2', animated.frames === 2 && animated.id === 'g1', `frames=${animated.frames}`)
+check('static PNG reports frames: 1', res.frames === 1)
 
 const bad = await send({ v: 1, cmd: 'ocr', id: 'o2', image: '!!!' })
-check('坏 base64 回错误信封而不是崩', bad.error?.code === 'bad-base64' && bad.id === 'o2', JSON.stringify(bad.error))
+check('invalid base64 returns an error envelope without crashing', bad.error?.code === 'bad-base64' && bad.id === 'o2', JSON.stringify(bad.error))
 const unknown = await send({ v: 1, cmd: 'nope', id: 'u1' })
-check('未知命令回 bad-request', unknown.error?.code === 'bad-request')
+check('unknown command returns bad-request', unknown.error?.code === 'bad-request')
 const wrongV = await send({ v: 2, cmd: 'ping', id: 'v2' })
-check('协议版本对不上回 unsupported-protocol', wrongV.error?.code === 'unsupported-protocol' && wrongV.id === 'v2', JSON.stringify(wrongV.error))
+check('protocol mismatch returns unsupported-protocol', wrongV.error?.code === 'unsupported-protocol' && wrongV.id === 'v2', JSON.stringify(wrongV.error))
 const noV = await send({ cmd: 'ping', id: 'v0' })
-check('缺协议版本也拒', noV.error?.code === 'unsupported-protocol')
+check('missing protocol version is rejected', noV.error?.code === 'unsupported-protocol')
 
 child.stdin.end()
 await new Promise(resolve => child.on('close', resolve))
-console.log(`${failed === 0 ? '全部通过' : `${failed} 项失败`}；总耗时 ${Math.round(performance.now() - t0)} ms`)
+console.log(`${failed === 0 ? 'All passed' : `${failed} checks failed`}; total ${Math.round(performance.now() - t0)} ms`)
 process.exit(failed === 0 ? 0 : 1)

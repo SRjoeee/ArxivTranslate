@@ -1,36 +1,36 @@
-# axt-helper：图片翻译的本机 OCR 助手
+# axt-helper: local OCR for image translation
 
-扩展在 Mac 上翻译位图里的文字时（DESIGN §15），OCR 由这个 Swift 小程序用 Apple Vision 完成；
-翻译与叠加层都在扩展里。它通过 Chrome 的 Native Messaging 与扩展通信（stdio、长度前缀 JSON），
-协议见 `docs/DESIGN.md` §15.3。核心移植自 [bytefer/macos-vision-ocr](https://github.com/bytefer/macos-vision-ocr)（MIT）。
+When the extension translates bitmap text on Mac (DESIGN §15), this Swift helper performs OCR with Apple Vision.
+Translation and overlays stay in the extension. Communication uses Chrome Native Messaging (stdio with length-prefixed JSON);
+see `docs/DESIGN.md` §15.3. Core code is ported from [bytefer/macos-vision-ocr](https://github.com/bytefer/macos-vision-ocr) (MIT).
 
-## 要求
+## Requirements
 
-- macOS 13+，Xcode Command Line Tools（`swift build` 能跑即可，不需要 Xcode）
-- Chrome / Chromium 里已加载本扩展（未打包也行）
+- macOS 13+ and Xcode Command Line Tools (`swift build` must work; full Xcode is not required)
+- The extension loaded in Chrome / Chromium (unpacked is supported)
 
-## 安装（开发者方式）
+## Developer installation
 
 ```sh
 helper/install.sh <extension-id>
 ```
 
-扩展 id 在 `chrome://extensions` 打开开发者模式后，扩展卡片上的「ID」。脚本会：
+Find the extension ID on its card in `chrome://extensions` with developer mode enabled. The script:
 
-1. `swift build -c release`，二进制在 `helper/.build/release/axt-helper`
-2. 把 host manifest 写进 Chrome 与 Chromium 默认用户数据目录下的 `NativeMessagingHosts/io.github.srjoeee.arxivtranslate.json`
-   （`~/Library/Application Support/Google/Chrome/…` 与 `…/Chromium/…`）。Chrome 找的是 **`<用户数据目录>/NativeMessagingHosts/`**，
-   所以用 `--user-data-dir` 起的浏览器（Playwright 的 e2e）要把 manifest 复制进它自己的 profile 目录；e2e 脚本会自己做
+1. Runs `swift build -c release`, producing `helper/.build/release/axt-helper`.
+2. Writes the host manifest to `NativeMessagingHosts/io.github.srjoeee.arxivtranslate.json` under the default Chrome and Chromium user-data directories
+      (`~/Library/Application Support/Google/Chrome/…` and `…/Chromium/…`). Chrome looks in **`<user-data-dir>/NativeMessagingHosts/`**,
+      so browsers launched with `--user-data-dir` (Playwright e2e) need the manifest copied into their own profile. The e2e scripts do this automatically.
 
-装完重载扩展；设置页「图片翻译」一节会显示 helper 版本。签名、公证与 pkg 分发暂不做（§15.4）。
+Reload the extension after installation. The Image translation section in Settings should show the helper version. Signing, notarization and pkg distribution are deferred (§15.4).
 
-## 冒烟测试
+## Smoke test
 
 ```sh
 pnpm helper:build    # swift build -c release
-pnpm helper:smoke    # 按原生协议喂一张参考图，检查识别行与坐标
+pnpm helper:smoke    # Send a reference image through the native protocol; check recognized lines and coordinates.
 ```
 
-## 卸载
+## Uninstall
 
-删掉上面两个 manifest 文件即可；二进制在仓库目录里，随 `git clean` 或 `rm -rf helper/.build` 走。
+Delete the two manifest files above. The binary stays in the repository and can be removed with `git clean` or `rm -rf helper/.build`.

@@ -10,14 +10,14 @@ import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { handlePing } from '@/shared/ping'
 
-// background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
-// 异步响应必须用 sendResponse + return true。
+// Background: message routing, engine chain, queues and cache (DESIGN §8.0). WXT ≥0.20 has no polyfill;
+// asynchronous responses require sendResponse + return true.
 export default defineBackground(() => {
   const cache = cachePortOf(translationCache)
 
   /**
-   * 全浏览器共用一条链、一套队列（§8.2 的跨标签页额度策略）。懒建：worker 每次被唤醒都要重建，
-   * 只是为了清个缓存就先探一遍引擎可用性不值得
+   * One browser-wide chain and queue set (§8.2 cross-tab quota policy). Build lazily because each worker wakeup needs rebuilding;
+   * checking engine availability just to clear cache would be unnecessary.
    */
   let active: Promise<{ config: Config; transport: TranslationTransport }> | null = null
   const load = async (config?: Config) => {
@@ -31,8 +31,8 @@ export default defineBackground(() => {
   const transportOf = () => (active ?? activate()).then(a => a.transport)
 
   /**
-   * 只有会换掉引擎链的配置字段才重建。content 每切一次显示模式就写一次配置，而那时页面往往正在翻——
-   * 无差别重建会把令牌桶与降级记录一起清掉（chainConfigChanged 的注释里有归类表）
+   * Rebuild only for config fields that change the engine chain. Content writes config on mode switches, often during translation;
+   * indiscriminate rebuilding would reset token buckets and fallback history (see chainConfigChanged's classification).
    */
   watchConfig(next => {
     if (!active) return
@@ -43,13 +43,13 @@ export default defineBackground(() => {
   })
 
   /**
-   * 会话与链的绑定（见 ./sessions.ts）：一次会话认准它开始时的那条链，标签页关掉就撤掉它的请求。
-   * 代价是配置恰好在翻译中途变更时新旧两条链短暂并存、跨标签页的并发预算翻倍，直到旧会话结束；
-   * 这是有意的取舍——宁可短暂多一套队列，也不能让一轮译文中途换引擎或换语言（Codex 在 #59 指出）
+   * Session-chain binding (./sessions.ts): a session keeps its starting chain; closing the tab cancels its requests.
+   * A config change during translation can briefly leave old/new chains coexisting, doubling cross-tab concurrency until old sessions end.
+   * Deliberate tradeoff: temporary duplicate queues are preferable to switching engines or languages mid-run (Codex #59).
    */
   /**
-   * 图片翻译的本机 OCR helper（DESIGN §15）：懒连接，有请求在飞时定时调一个无害 API 保活——
-   * 端口开着不能阻止 worker 被回收。撤会话时排队的识别一起撤（router 的 onDrop）
+   * Local image OCR helper (DESIGN §15): connect lazily and periodically call a harmless API while requests are in flight.
+   * An open port alone does not keep the worker alive. Session drops also cancel queued OCR through router onDrop.
    */
   const helper = createHelperClient({
     connect: () => browser.runtime.connectNative(HELPER_HOST),
@@ -59,20 +59,20 @@ export default defineBackground(() => {
   const ocr = createOcrService({ helper, cache })
   const router = createSessionRouter(transportOf, { onDrop: scope => ocr.cancel(scope) })
 
-  // 两个生命周期钩子都只给 tabId / status，不需要 "tabs" 权限
+  // Both lifecycle hooks supply tabId/status without requiring the tabs permission.
   const dropTab = (tabId: number, why: string) => {
     void router.dropTab(tabId).then(n => {
-      if (n > 0) console.debug(`[axt] 标签页 ${tabId} ${why}，撤掉 ${n} 个排队 / 在飞的请求`)
+      if (n > 0) console.debug(`[axt] Tab ${tabId} ${why}; cancelled ${n} queued / in-flight requests`)
     })
   }
-  browser.tabs.onRemoved.addListener(tabId => dropTab(tabId, '关闭'))
+  browser.tabs.onRemoved.addListener(tabId => dropTab(tabId, 'closed'))
   /**
-   * 导航离开也要撤（Codex 在 #59 指出）：`onRemoved` 只管关闭，标签页跳到别的网址时不触发。
-   * 而「同一标签页出现新 scope 就撤掉旧的」那条只在**新页面也是 arXiv 论文**时才会发生——
-   * 跳到任何别的站点，旧队列就一直跑到批次耗尽预算为止
+   * Cancel on navigation too (Codex #59): onRemoved only handles closing, not navigation to another URL.
+   * Replacing an old scope with a new one only occurs if the new page is also an arXiv paper;
+   * navigation elsewhere would leave the old queue running until its batch budgets expire.
    */
   browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === 'loading') dropTab(tabId, '导航离开')
+    if (changeInfo.status === 'loading') dropTab(tabId, 'navigated away')
   })
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -82,7 +82,7 @@ export default defineBackground(() => {
         sendResponse(handlePing(browser.runtime.getManifest().version))
         return true
       case 'axt:translate':
-        // 建链失败（provider 构造抛错）也要如实回话：不回的话调用方等到的是"message channel closed"
+        // Report chain-construction errors too; otherwise the caller only sees "message channel closed".
         router.forCall(message.scope, sender.tab?.id)
           .then(t => t.translate(message))
           .catch((e: unknown) => ({ ok: false as const, error: toErrorInfo(e) }))
@@ -97,14 +97,14 @@ export default defineBackground(() => {
         transportOf()
           .then(t => t.status())
           .then(sendResponse)
-          .catch((e: unknown) => console.error('[axt] provider-status 失败', e))
+          .catch((e: unknown) => console.error('[axt] provider-status failed', e))
         return true
       case 'axt:engine-ready':
-        // 语言包下载完之前建的链里没有这个引擎（buildChain 会把 isAvailable 为假的剔掉），
-        // 或者它已被永久降级。重建一条新链，让它重新参与（§8.5，Codex 在 #50 指出）。
-        // **进行中的会话也要迁过去**（Codex 在 #59 指出）：popup 明说「接下来的段落会用离线引擎」，
-        // 不迁的话那一页会一直用着旧的兜底链，承诺落空。这是用户显式动作，与被动的配置变更不同——
-        // 后者故意不迁（见 sessions.ts）
+        // A chain built before language-pack download excludes that engine via isAvailable(), or has permanently demoted it.
+        // Rebuild so it can participate again (§8.5, Codex #50).
+        // Move active sessions too (Codex #59): popup promises that subsequent paragraphs will use the offline engine.
+        // Without migration the page retains its old fallback chain. This explicit user action differs from passive config changes,
+        // which intentionally do not migrate sessions (sessions.ts).
         activate()
           .then(async a => {
             router.rebindAll(a.transport)
@@ -113,9 +113,9 @@ export default defineBackground(() => {
           .then(status => sendResponse({ reset: status.chain.includes(message.id) }))
           .catch(() => sendResponse({ reset: false }))
         return true
-      // IndexedDB 不可用时也要回话，否则调用方等到的是"message channel closed"（Codex 在 #7 指出）
+      // Reply even when IndexedDB is unavailable; otherwise the caller gets "message channel closed" (Codex #7).
       case 'axt:cache-clear':
-        // 失败要如实回报：吞掉异常回 { removed: 0 } 的话，IndexedDB 用不了时用户会以为已经清干净（Codex 在 #52 指出）
+        // Report failures honestly: returning removed: 0 on error would imply unavailable IndexedDB had been cleared (Codex #52).
         translationCache.clear(message.paper)
           .then(removed => sendResponse({ ok: true, removed }))
           .catch((e: unknown) => sendResponse({ ok: false, message: e instanceof Error ? e.message : String(e) }))
@@ -124,17 +124,17 @@ export default defineBackground(() => {
         ocr.status().then(sendResponse)
         return true
       case 'axt:ocr':
-        // 先把 scope 绑到 sender 的标签页：它可能是这个标签页第一条带 scope 的消息，不绑的话关标签页时 dropTab 撤不到
-        // 排队的识别。只记关联、不建链：OCR 不能等翻译链构造（Codex 在 #87 两轮指出）
+        // Bind scope to the sender tab first: this may be its first scoped message, and dropTab otherwise cannot cancel queued OCR.
+        // Record the association only; OCR must not await translation-chain construction (two rounds of Codex #87).
         if (message.scope) router.bind(message.scope, sender.tab?.id)
         ocr.ocr(message)
           .catch((e: unknown) => ({ ok: false as const, error: { kind: 'unknown' as const, message: e instanceof Error ? e.message : String(e) } }))
           .then(sendResponse)
         return true
       case 'axt:cache-stats':
-        // 与 cache-clear 同一套协议：失败要如实回报，不能把「IndexedDB 用不了」显示成「缓存是空的」。
-        // 统计前先清过期条目——`get()` 只是把它们当未命中，从不删除，不清的话页面上会一直显示
-        // 一堆已经用不了的条数与体积；这也是 cleanup() 在运行时唯一的调用点（Codex 在 #52 指出）
+        // Same protocol as cache-clear: report failures rather than describe unavailable IndexedDB as an empty cache.
+        // Clean expired entries before counting; otherwise unusable entries and their size would remain visible.
+        // This is cleanup()'s only runtime caller (Codex #52).
         translationCache.cleanup()
           .then(() => translationCache.stats())
           .then(stats => sendResponse({ ok: true, ...stats }))

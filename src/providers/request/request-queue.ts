@@ -1,7 +1,7 @@
-// 移植自 reference/read-frog/src/utils/request/request-queue.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：
-// deepmerge-ts 换成对象展开（QueueOptions 是平的）、配置 schema 换成本目录 config.ts、UUID 换成 src/shared/uuid.ts、
-// 计时器类型改 ReturnType<typeof setTimeout>（@types/node 只是传递依赖）、超时错误加 name 便于服务层归到 timeout。
-// 令牌桶限速 + 超时竞速 + 重试 / 429 暂停与暂停后单探针 / 401 排空整队 / 按 scope 取消；由 translate-service 组装（DESIGN §8.2、§10）。
+// Ported from reference/read-frog/src/utils/request/request-queue.ts@9b44f82 (GPL-3.0), 2026-09-05; modified:
+// Replaced deepmerge-ts with object spread (QueueOptions is flat), schema with local config.ts, and UUID with src/shared/uuid.ts.
+// Timer types use ReturnType<typeof setTimeout> (@types/node is transitive); timeout errors have a name for service-layer classification.
+// Token bucket, timeout races, retries, 429 pauses/single recovery probe, 401 queue drain and scope cancellation; wired by translate-service (DESIGN §8.2, §10).
 import type { RequestRetryPolicy } from "./retry-policy"
 import { getRandomUUID } from "@/shared/uuid"
 import { requestQueueConfigSchema } from "./config"
@@ -9,23 +9,23 @@ import { TranslationCancelledError } from "./cancellation"
 import { BinaryHeapPQ } from "./priority-queue"
 import { defaultRequestRetryPolicy } from "./retry-policy"
 
-/** 超时错误按 name 识别（与 cancellation.ts 同一模式），服务层据此归到 timeout */
+/** Timeout errors are identified by name (as in cancellation.ts), allowing service-layer timeout classification. */
 export const REQUEST_TIMEOUT_ERROR_NAME = "RequestTimeoutError"
 
 /**
- * 本项目新增（issue #43）：并发满载时 `nextDispatchEtaMs()` 报的等待时长。
- * 槽位什么时候空出来取决于在飞请求何时返回，没有下界可算；这里报一个「不是现在、稍后再问」的值，
- * 让攒批门闸继续攒而不是按 batchDelay 冲小批。具体数值只影响门闸的重问节奏（它自己有上限）
+ * Project addition (issue #43): wait reported by nextDispatchEtaMs() when concurrency is full.
+ * Slot availability depends on in-flight completion, so no lower bound is known. Report "not now; ask later"
+ * so the batch gate keeps accumulating instead of flushing small batches at batchDelay. This value only affects bounded recheck cadence.
  */
 export const SATURATED_DISPATCH_ETA_MS = 1000
 
 /**
- * 本项目新增（issue #43）：超时 / 取消之后，还愿意为一个尚未结束的 thunk 保留并发额度多久。
- * 我们自己的 provider 都认 signal，abort 后毫秒级就结束；这道宽限只防「实现不认 signal」把队列锁死
+ * Project addition (issue #43): how long to retain a concurrency slot for an unfinished thunk after timeout/cancellation.
+ * Our providers honor signals and finish within milliseconds of abort; this grace period prevents non-cooperative implementations from deadlocking the queue.
  */
 export const ABORT_GRACE_MS = 5_000
 
-/** 对象展开代替 deepmerge：显式传 undefined 的字段不能把已有值冲掉 */
+/** Object spread replacing deepmerge: explicit undefined fields must not overwrite existing values. */
 function withoutUndefined<T extends object>(value: T): Partial<T> {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>
 }
@@ -49,11 +49,11 @@ export interface RequestTask {
 }
 
 type QueuedRequestTask = RequestTask & {
-  /** 本项目新增：入队时刻，用于 maxTotalMs 的总时限判断（issue #43） */
+  /** Project addition: enqueue time for the maxTotalMs deadline (issue #43). */
   enqueuedAt: number
   /**
-   * 本项目新增（issue #43）：调用方给定的绝对截止时刻，优先于 `enqueuedAt + maxTotalMs`。
-   * 批级重试会为同一批文本反复入队，用它把整批的期限带过去，重试才不会各拿一份完整预算
+   * Project addition (issue #43): caller-supplied absolute deadline, overriding enqueuedAt + maxTotalMs.
+   * Batch retries re-enqueue the same texts; carry their shared deadline so each attempt cannot claim a full new budget.
    */
   deadlineAt?: number
   hash: string
@@ -73,16 +73,16 @@ export interface QueueOptions {
   baseRetryDelayMs: number
   retryPolicy?: RequestRetryPolicy
   /**
-   * 本项目新增（issue #43）：同时在飞的上限。令牌桶只管**速率**，不管并发——
-   * 响应一慢，令牌照常按 rate 补充并派发，在飞数只受排队任务数限制（实测 rate=1/capacity=1 时
-   * 三个不完成的任务全部同时在飞）。一篇论文几十个批次同时打向同一个端点会招致 429、
-   * 撞浏览器的连接上限。默认 Infinity（不改移植原行为），由调用方显式设定
+   * Project addition (issue #43): concurrency cap. Token buckets limit rate, not concurrent execution.
+   * Slow responses still replenish tokens and dispatch work, so in-flight count is limited only by queued task count (three never-finishing tasks
+   * ran concurrently with rate=1/capacity=1). Dozens of batches from one paper can invite 429s and exhaust browser connections.
+   * Defaults to Infinity, preserving upstream behavior; callers set an explicit limit.
    */
   maxConcurrent?: number
   /**
-   * 本项目新增（issue #43）：单个任务从入队到最终失败的总时限，跨所有重试与限流暂停。
-   * `timeoutMs` 只管单次尝试；持续 429 时暂停窗口会把总时长拖到分钟级（实测 60 秒还没结束），
-   * 而调用方需要的是「多久之后我可以认为这批翻不出来了」。默认 Infinity（不改移植原行为）
+   * Project addition (issue #43): total time from enqueue to final failure, across retries and rate-limit pauses.
+   * timeoutMs limits only one attempt; persistent 429 pauses can extend total time into minutes (observed unfinished after 60s).
+   * Callers need a bound on when to consider the batch failed. Defaults to Infinity, preserving upstream behavior.
    */
   maxTotalMs?: number
 }
@@ -92,9 +92,9 @@ export class RequestQueue {
   private waitingTasks = new Map<string, QueuedRequestTask>()
   private executingTasks = new Map<string, QueuedRequestTask>()
   /**
-   * 本项目新增（issue #43）：真正在跑的 thunk 数。不能直接数 executingTasks——`cancelWhere` 取消时
-   * 立刻把任务摘出去，而 abort 是协作式的，thunk 可能还在占着连接；照 map 的大小放行会让并发超上限
-   * （Codex 在 #56 指出）
+   * Project addition (issue #43): actual running thunk count. executingTasks is insufficient because cancelWhere
+   * removes tasks immediately, while cooperative abort may leave the thunk holding a connection. Counting the map would exceed concurrency
+   * (Codex #56).
    */
   private activeExecutions = 0
   private nextScheduleTimer: ReturnType<typeof setTimeout> | null = null
@@ -113,7 +113,7 @@ export class RequestQueue {
   private consecutiveRateLimits = 0
 
   constructor(private options: QueueOptions) {
-    // 构造时也校验：setQueueOptions 走的是同一张 schema，两条入口不能只守一边
+    // Validate construction too: setQueueOptions uses the same schema; both entry points need protection.
     const { retryPolicy: _policy, ...validated } = options
     const parsed = requestQueueConfigSchema.safeParse(validated)
     if (parsed.error) {
@@ -189,8 +189,8 @@ export class RequestQueue {
     if (retryPolicy) {
       this.retryPolicy = retryPolicy
     }
-    // 本项目新增（issue #43）：maxConcurrent / maxTotalMs 只约束**此后**的派发与判定；
-    // 在飞的尝试按当时的预算跑完。缩短预算时立刻重排一次，排队中已过期的马上回收（Codex 在 #56 指出）
+    // Project addition (issue #43): maxConcurrent/maxTotalMs changes affect future dispatch and checks only.
+    // In-flight attempts keep their original budgets. Reschedule immediately after shorter limits to reject expired queued tasks (Codex #56).
     this.schedule()
     // Clamp, never refill-to-full: a capacity edit must not grant a free
     // burst, and repeated identical calls (config sync) must be no-ops.
@@ -264,20 +264,20 @@ export class RequestQueue {
       this.bucketTokens >= tokensNeeded
         ? 0
         : Math.ceil(((tokensNeeded - this.bucketTokens) / this.options.rate) * 1000)
-    // 并发满载也是「现在起不了新请求」的一种，漏掉它门闸会以为槽位就绪、按 batchDelay 冲小批
-    // （本项目新增，issue #43）
+    // Full concurrency also means no request can start now; omitting this makes the batch gate flush small batches at batchDelay.
+    // Project addition (issue #43).
     const concurrencyDelayMs = this.isSaturated() ? SATURATED_DISPATCH_ETA_MS : 0
     return Math.max(pauseDelayMs, tokenDelayMs, concurrencyDelayMs)
   }
 
-  /** 在飞数已达 maxConcurrent：此刻不能再起新请求，且没有可算的等待时长（本项目新增，issue #43） */
+  /** Concurrency is at maxConcurrent: no request can start now, with no computable wait (project addition, issue #43). */
   private isSaturated(): boolean {
     return this.activeExecutions >= (this.options.maxConcurrent ?? Number.POSITIVE_INFINITY)
   }
 
   /**
-   * 距任务总时限还剩多少毫秒；没设 maxTotalMs 就是 Infinity（本项目新增，issue #43）。
-   * 派发前、单次尝试的超时、安排重试三处都用它，总时长才真的被兜住
+   * Remaining total task budget in milliseconds; Infinity if maxTotalMs is unset (project addition, issue #43).
+   * Used before dispatch, for attempt timeout and when scheduling retries to bound the actual total time.
    */
   private remainingBudgetMs(task: QueuedRequestTask, now: number): number {
     const budget = this.options.maxTotalMs
@@ -286,7 +286,7 @@ export class RequestQueue {
     return task.enqueuedAt + budget - now
   }
 
-  /** 排队中已经超出总预算的任务：现在拒掉，不让它在限流暂停里继续挂着（本项目新增，issue #43） */
+  /** Reject expired queued tasks now rather than leaving them pending during a rate-limit pause (project addition, issue #43). */
   private reapExpired(now: number) {
     let reaped = false
     for (const [hash, task] of [...this.waitingTasks]) {
@@ -298,7 +298,7 @@ export class RequestQueue {
     if (reaped) this.waitingQueue.removeWhere(task => task.drained)
   }
 
-  /** 排队任务里最早的期限还有多久到；没有期限就是 Infinity（本项目新增，issue #43） */
+  /** Time until the earliest queued deadline; Infinity if none (project addition, issue #43). */
   private nextDeadlineDelayMs(now: number): number {
     let earliest = Number.POSITIVE_INFINITY
     for (const task of this.waitingTasks.values()) {
@@ -309,7 +309,7 @@ export class RequestQueue {
 
   private budgetExceededError(task: QueuedRequestTask): Error {
     const error = new Error(`Task ${task.id} exceeded its ${this.options.maxTotalMs}ms total budget`)
-    // 归到 timeout：调用方要的答案是「这批翻不出来了」，与单次超时同一类
+    // Classify as timeout: callers need to know the batch cannot complete, just as for an attempt timeout.
     error.name = REQUEST_TIMEOUT_ERROR_NAME
     return error
   }
@@ -319,14 +319,14 @@ export class RequestQueue {
     this.clearScheduleTimer()
 
     const startedAt = Date.now()
-    // 先回收已经过期的排队任务：限流暂停可能长达 5 分钟，而它们的预算只有 180 秒，
-    // 不回收就会在暂停里一直挂着，远超对调用方承诺的时限（本项目新增，issue #43；Codex 在 #56 指出）
+    // Reject expired queued tasks first: rate-limit pauses can last five minutes while their budget is only 180s.
+    // Leaving them pending would violate the caller's deadline (project addition, issue #43; Codex #56).
     this.reapExpired(startedAt)
 
     const pauseRemainingMs = this.pausedUntil - startedAt
     if (pauseRemainingMs > 0) {
       if (this.waitingQueue.size() > 0) {
-        // 暂停结束与最早的期限，哪个先到就先醒
+        // Wake for whichever comes first: pause end or the earliest deadline.
         this.armScheduleTimer(Math.min(pauseRemainingMs, this.nextDeadlineDelayMs(startedAt)))
       }
       return
@@ -346,8 +346,8 @@ export class RequestQueue {
       if (task && task.scheduleAt <= now) {
         this.waitingQueue.pop()
         this.waitingTasks.delete(task.hash)
-        // 排在并发上限后面等太久的任务，起跑前就已经超了总时限：不要白发一次请求
-        // （本项目新增，issue #43）
+        // Tasks waiting behind the concurrency cap may expire before starting; do not send a wasted request.
+        // Project addition (issue #43).
         if (this.remainingBudgetMs(task, now) <= 0) {
           task.reject(this.budgetExceededError(task))
           continue
@@ -361,9 +361,9 @@ export class RequestQueue {
       }
     }
 
-    // 并发满载时不按「可以发了」武装定时器：槽位是被在飞请求占着的，算出来的 delay 是 0，
-    // 会一直以 0 毫秒空转直到有请求返回；执行结束时会再调一次 schedule()。
-    // 但**期限是时间事件**，满载时也要按最早的期限醒来把过期的回收掉（本项目新增，issue #43）
+    // Do not schedule an immediate dispatch timer at full concurrency: occupied slots yield delay 0,
+    // causing a busy loop until a request completes; completion will call schedule() again.
+    // Deadlines are time events, however: wake at the earliest even when full to reject expired tasks (project addition, issue #43).
     if (this.waitingQueue.size() > 0 && this.isSaturated()) {
       const deadlineDelayMs = this.nextDeadlineDelayMs(Date.now())
       if (Number.isFinite(deadlineDelayMs)) this.armScheduleTimer(deadlineDelayMs)
@@ -390,8 +390,8 @@ export class RequestQueue {
   }
 
   /**
-   * 一个限流暂停窗口的记账：暂停到点、连续窗口计数、恢复后的单探针。
-   * 抽出来是因为超预算的任务也要记（本项目新增，issue #43）
+   * Account for a rate-limit pause window: its end, consecutive-window count and single recovery probe.
+   * Extracted because tasks that exceed their budget must record the pause too (project addition, issue #43).
    */
   private applyRateLimitPause(pauseMs: number, now: number) {
     // Count one pause per pause WINDOW, not per failing sibling — with
@@ -427,13 +427,13 @@ export class RequestQueue {
     // console.info(`🏃 Starting execution of task ${task.id} (attempt ${task.retryCount + 1}) at ${Date.now()}`)
 
     let timeoutId: ReturnType<typeof setTimeout> | null = null
-    // 拿住 thunk 自己的 Promise：超时是竞速赢来的，thunk 那边可能还在跑，
-    // 并发额度要等它真的结束再还（本项目新增，issue #43；Codex 在 #56 指出）
+    // Retain the thunk's own Promise: a timeout may win the race while the thunk is still running.
+    // Return its concurrency slot only after it actually finishes (project addition, issue #43; Codex #56).
     let thunkPromise: Promise<unknown> | null = null
     const abortController = new AbortController()
     task.abortController = abortController
-    // 单次尝试也不许超出剩余总预算：否则 120 秒的一次尝试可以在 180 秒预算只剩 1 秒时开跑
-    // （本项目新增，issue #43）
+    // An attempt must fit the remaining total budget; a 120s attempt cannot start with 1s left out of 180s.
+    // Project addition (issue #43).
     const timeoutMs = Math.min(
       task.timeoutMs ?? this.options.timeoutMs,
       Math.max(1, this.remainingBudgetMs(task, Date.now())),
@@ -457,7 +457,7 @@ export class RequestQueue {
       // Race between the actual task and timeout; the signal cancels the
       // in-flight attempt on timeout so a retry never runs concurrently with it
       thunkPromise = task.thunk(abortController.signal)
-      // 超时先赢的话没人再监听 thunk 的拒绝，挂个空 catch 免得算作未处理拒绝
+      // If timeout wins, nobody else observes thunk rejection; attach an empty catch to prevent an unhandled rejection.
       thunkPromise.catch(() => undefined)
       const result = await Promise.race([thunkPromise, timeoutPromise])
 
@@ -496,9 +496,9 @@ export class RequestQueue {
         consecutiveRateLimits: this.consecutiveRateLimits,
       })
 
-      // 总时限管的是「多久之后可以认为这批翻不出来」，所以判的是**下一次尝试能否在预算内跑完**，
-      // 而不是「此刻是否已经超了」——300 秒的 Retry-After 在预算只剩几毫秒时照样会被排进去，
-      // 等它醒来早已超时几分钟（本项目新增，issue #43；Codex 在 #56 指出）
+      // The deadline bounds when callers can consider a batch failed, so check whether the next attempt fits the budget,
+      // not just whether time has already expired. A 300s Retry-After accepted with milliseconds left
+      // would wake minutes past the deadline (project addition, issue #43; Codex #56).
       const remainingMs = this.remainingBudgetMs(task, now)
       const nextDelayMs = decision.action === "retry"
         ? decision.delayMs
@@ -506,10 +506,10 @@ export class RequestQueue {
           ? Math.max(decision.pauseMs, this.pausedUntil - now)
           : 0
       if (decision.action !== "fail" && remainingMs - nextDelayMs <= 0) {
-        // 这一条到点了，但队列层面的限流冷却照记：否则 finally 里的 schedule() 会立刻把余下的
-        // 积压全推向一个刚刚喊过 429 的端点（Codex 在 #56 指出）
+        // This task expired, but still record queue-wide rate-limit cooldown; otherwise finally's schedule()
+        // would immediately flood the endpoint that just returned 429 with the remaining backlog (Codex #56).
         if (decision.action === "pause-and-retry") this.applyRateLimitPause(decision.pauseMs, now)
-        // 上报最后一次的真实错误（限流 / 网络）而不是「超预算」：降级链据此判断要不要换引擎
+        // Report the last actual rate-limit/network error instead of budget expiry so fallback can decide whether to switch engines.
         task.reject(error)
       } else if (decision.action === "retry") {
         task.retryCount++
@@ -562,13 +562,13 @@ export class RequestQueue {
   }
 
   /**
-   * 还回一个并发额度。等 thunk 自己结束再还——超时与取消都是 abort，而 abort 是协作式的，
-   * 立刻还额度会让替补请求与还在跑的那个叠在一起。宽限期兜底：真有不认 signal 的实现时，
-   * 宁可短暂超一点上限，也不能让队列被几个挂死的请求锁死（本项目新增，issue #43）
+   * Return one concurrency slot after the thunk finishes. Timeout/cancellation only abort cooperatively;
+   * immediate release would overlap the replacement with the still-running request. Grace-period fallback permits a brief overrun
+   * for implementations that ignore signals rather than let a few hung requests deadlock the queue (project addition, issue #43).
    */
   private releaseWhenSettled(thunk: Promise<unknown> | null) {
-    // thunk 同步抛出时没有 Promise 可等，立刻还额度。定时器要先声明：
-    // 在 const 初始化之前调用 release() 会撞暂时性死区，额度就永远还不回来（Codex 在 #56 指出）
+    // A synchronous thunk throw leaves no Promise to await; release immediately. Declare the timer first:
+    // calling release() before const initialization hits the temporal dead zone and leaks the slot forever (Codex #56).
     let graceTimer: ReturnType<typeof setTimeout> | undefined
     let released = false
     const release = () => {

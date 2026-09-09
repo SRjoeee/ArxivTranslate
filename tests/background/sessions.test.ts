@@ -1,9 +1,9 @@
-// 会话与链的绑定（Codex 在 #59 指出的两条 P1）
+// Session-to-chain binding (the two P1 findings in Codex #59)
 import { describe, expect, it } from 'vitest'
 import { createSessionRouter } from '@/entrypoints/background/sessions'
 import type { TranslationTransport } from '@/providers/transport'
 
-/** 只记帐的假 transport：认得出是哪一条，并记下被撤过哪些 scope */
+/** Bookkeeping-only fake transport: identifies the chain and records cancelled scopes */
 function fakeTransport(name: string, cancelled: string[] = []): TranslationTransport & { name: string; cancelled: string[] } {
   return {
     name,
@@ -17,92 +17,92 @@ function fakeTransport(name: string, cancelled: string[] = []): TranslationTrans
 const nameOf = (t: TranslationTransport) => (t as unknown as { name: string }).name
 
 describe('createSessionRouter', () => {
-  it('一次会话认准开始时的那条链：配置中途变更不换引擎，之后开始的会话才用新链', async () => {
-    const first = fakeTransport('旧链')
-    const second = fakeTransport('新链')
+  it('a session keeps its initial chain through configuration changes; only later sessions use the new chain', async () => {
+    const first = fakeTransport('old-chain')
+    const second = fakeTransport('new-chain')
     let current = first
     const router = createSessionRouter(async () => current)
 
-    expect(nameOf(await router.forCall('session-1', 1))).toBe('旧链')
-    // 用户在 popup 里换了提示词 / 目标语言，background 重建了链
+    expect(nameOf(await router.forCall('session-1', 1))).toBe('old-chain')
+    // The user changes the prompt or target language in the popup; background rebuilds the chain.
     current = second
-    // 进行中的会话继续走旧链——否则同一轮译文会中途换提示词或换语言
-    expect(nameOf(await router.forCall('session-1', 1))).toBe('旧链')
-    // 另一个标签页新开的会话拿到新链
-    expect(nameOf(await router.forCall('session-2', 2))).toBe('新链')
+    // Active sessions keep the old chain so their prompt or language cannot change midway.
+    expect(nameOf(await router.forCall('session-1', 1))).toBe('old-chain')
+    // A new session in another tab gets the new chain.
+    expect(nameOf(await router.forCall('session-2', 2))).toBe('new-chain')
   })
 
-  it('不带 scope 的调用（设置页连接测试）永远用当前那条链，也不记账', async () => {
-    const first = fakeTransport('旧链')
-    const second = fakeTransport('新链')
+  it('unscoped calls (settings connection tests) always use the current chain without bookkeeping', async () => {
+    const first = fakeTransport('old-chain')
+    const second = fakeTransport('new-chain')
     let current = first
     const router = createSessionRouter(async () => current)
-    expect(nameOf(await router.forCall(undefined, undefined))).toBe('旧链')
+    expect(nameOf(await router.forCall(undefined, undefined))).toBe('old-chain')
     current = second
-    expect(nameOf(await router.forCall(undefined, undefined))).toBe('新链')
+    expect(nameOf(await router.forCall(undefined, undefined))).toBe('new-chain')
     expect(router.bound()).toEqual([])
   })
 
-  it('撤掉 scope 时用它绑定的那条链，不是当前那条：否则撤的是新队列，旧队列继续发请求', async () => {
-    const first = fakeTransport('旧链')
-    const second = fakeTransport('新链')
+  it('cancels a scope on its bound chain, not the current one, so the old queue cannot keep sending requests', async () => {
+    const first = fakeTransport('old-chain')
+    const second = fakeTransport('new-chain')
     let current = first
     const router = createSessionRouter(async () => current)
     await router.forCall('session-1', 1)
     current = second
     expect(await router.drop(['session-1'])).toBe(1)
-    expect(first.cancelled).toEqual(['旧链:session-1'])
+    expect(first.cancelled).toEqual(['old-chain:session-1'])
     expect(second.cancelled).toEqual([])
     expect(router.bound()).toEqual([])
   })
 
-  it('没绑过的 scope 也照撤：worker 中途重启过，绑定丢了但队列里可能还有它的任务', async () => {
-    const only = fakeTransport('链')
+  it('also cancels unbound scopes: a worker restart may lose bindings while queued tasks remain', async () => {
+    const only = fakeTransport('chain')
     const router = createSessionRouter(async () => only)
-    expect(await router.drop(['幽灵会话'])).toBe(1)
-    expect(only.cancelled).toEqual(['链:幽灵会话'])
+    expect(await router.drop(['orphan-session'])).toBe(1)
+    expect(only.cancelled).toEqual(['chain:orphan-session'])
   })
 
-  it('标签页关闭：撤掉挂在它上面的会话，别的标签页不受影响', async () => {
-    const t = fakeTransport('链')
+  it('closing a tab cancels its sessions without affecting other tabs', async () => {
+    const t = fakeTransport('chain')
     const router = createSessionRouter(async () => t)
     await router.forCall('session-1', 1)
     await router.forCall('session-2', 2)
     expect(await router.dropTab(1)).toBe(1)
-    expect(t.cancelled).toEqual(['链:session-1'])
+    expect(t.cancelled).toEqual(['chain:session-1'])
     expect(router.bound()).toEqual(['session-2'])
-    // 没有会话的标签页关掉是无操作
+    // Closing a tab with no session is a no-op.
     expect(await router.dropTab(99)).toBe(0)
   })
 
-  it('同一标签页出现新 scope：上一轮没走 endRun（导航 / 刷新），把它撤掉', async () => {
-    const t = fakeTransport('链')
+  it('a new scope in the same tab cancels the previous session when navigation or reload bypassed endRun', async () => {
+    const t = fakeTransport('chain')
     const router = createSessionRouter(async () => t)
     await router.forCall('session-1', 1)
     await router.forCall('session-2', 1)
-    expect(t.cancelled).toEqual(['链:session-1'])
+    expect(t.cancelled).toEqual(['chain:session-1'])
     expect(router.bound()).toEqual(['session-2'])
   })
 
-  it('rebindAll 把进行中的会话迁到新链：只给用户显式动作用（下载完语言包）', async () => {
-    const first = fakeTransport('旧链')
-    const second = fakeTransport('新链')
+  it('rebindAll migrates active sessions to the new chain only for explicit user actions such as completing a language download', async () => {
+    const first = fakeTransport('old-chain')
+    const second = fakeTransport('new-chain')
     let current = first
     const router = createSessionRouter(async () => current)
     await router.forCall('session-1', 1)
     await router.forCall('session-2', 2)
     current = second
-    // 不迁的话，popup 承诺的「接下来的段落会用离线引擎」落空
+    // Without migration, the popup promise to use the offline engine for subsequent paragraphs would be false.
     router.rebindAll(second)
-    expect(nameOf(await router.forCall('session-1', 1))).toBe('新链')
-    expect(nameOf(await router.forCall('session-2', 2))).toBe('新链')
-    // 绑定关系（含 tabId）保留：迁完之后关标签页照样撤得掉
+    expect(nameOf(await router.forCall('session-1', 1))).toBe('new-chain')
+    expect(nameOf(await router.forCall('session-2', 2))).toBe('new-chain')
+    // Bindings, including tabId, survive migration so closing the tab still cancels its session.
     expect(await router.dropTab(1)).toBe(1)
-    expect(second.cancelled).toEqual(['新链:session-1'])
+    expect(second.cancelled).toEqual(['new-chain:session-1'])
   })
 
-  it('不同标签页的同名 scope 互不影响（会话 id 本来就唯一，这条是护栏）', async () => {
-    const t = fakeTransport('链')
+  it('identically named scopes in different tabs are independent (a safeguard despite unique session IDs)', async () => {
+    const t = fakeTransport('chain')
     const router = createSessionRouter(async () => t)
     await router.forCall('s', 1)
     await router.forCall('s', 1)
@@ -110,70 +110,70 @@ describe('createSessionRouter', () => {
     expect(t.cancelled).toEqual([])
   })
 
-  it('onDrop：撤 scope 时连带撤掉别的按 scope 排队的东西（图片 OCR，§15.2），条数计入返回值', async () => {
-    const transport = fakeTransport('链')
+  it('onDrop also cancels other scope-bound queues such as image OCR (§15.2), including their counts in the result', async () => {
+    const transport = fakeTransport('chain')
     const dropped: string[] = []
     const router = createSessionRouter(async () => transport, { onDrop: scope => { dropped.push(scope); return 2 } })
     await router.forCall('s1', 1)
     await router.forCall('s2', 2)
-    expect(await router.drop(['s1'])).toBe(3) // transport 撤 1 + onDrop 撤 2
+    expect(await router.drop(['s1'])).toBe(3) // Transport cancels 1; onDrop cancels 2.
     expect(await router.dropTab(2)).toBe(3)
     expect(dropped).toEqual(['s1', 's2'])
   })
 
-  it('bind：只记 tab 关联、同步返回、不建链；之后 dropTab 撤得到，forCall 再填链并保留 tab', async () => {
-    const transport = fakeTransport('链')
+  it('bind records the tab synchronously without building a chain; dropTab can cancel it, and forCall later fills the chain while retaining the tab', async () => {
+    const transport = fakeTransport('chain')
     let built = 0
     const dropped: string[] = []
     const router = createSessionRouter(async () => { built++; return transport }, { onDrop: scope => { dropped.push(scope); return 1 } })
     router.bind('s1', 7)
     expect(built).toBe(0)
     expect(router.bound()).toEqual(['s1'])
-    expect(nameOf(await router.forCall('s1', 7))).toBe('链')
+    expect(nameOf(await router.forCall('s1', 7))).toBe('chain')
     expect(built).toBe(1)
-    expect(await router.dropTab(7)).toBe(2) // transport 撤 1 + onDrop 撤 1
+    expect(await router.dropTab(7)).toBe(2) // Transport cancels 1; onDrop cancels 1.
     expect(dropped).toEqual(['s1'])
     expect(router.bound()).toEqual([])
-    // 同一标签页出现新 scope：bind 也撤旧的
+    // bind also cancels the old scope when the same tab starts a new one
     router.bind('s2', 8)
     router.bind('s3', 8)
     await Promise.resolve()
     expect(router.bound()).toEqual(['s3'])
   })
 
-  it('drop：onDrop 先于建链；只经 bind 绑过的会话不为撤它建链（建链可能挂在引擎探测上，Codex 在 #87 指出）', async () => {
-    const transport = fakeTransport('链')
+  it('drop calls onDrop before building a chain; a bind-only session needs no chain to cancel, since engine detection may stall (Codex #87)', async () => {
+    const transport = fakeTransport('chain')
     const order: string[] = []
     const router = createSessionRouter(async () => { order.push('current'); return transport }, { onDrop: scope => { order.push(`onDrop:${scope}`); return 1 } })
     router.bind('ocr-only', 3)
     expect(await router.dropTab(3)).toBe(1)
-    expect(order).toEqual(['onDrop:ocr-only']) // 没有 current
-    // 翻过字的会话：onDrop 仍在前，transport.cancel 在后
+    expect(order).toEqual(['onDrop:ocr-only']) // No current call
+    // For sessions that translated text, onDrop still precedes transport.cancel.
     await router.forCall('s1', 4)
     order.length = 0
     await router.dropTab(4)
     expect(order[0]).toBe('onDrop:s1')
-    expect(transport.cancelled).toContain('链:s1')
+    expect(transport.cancelled).toContain('chain:s1')
   })
 
-  it('bind → forCall 建链期间被撤：forCall 回来不复活会话，补撤这条链上的 scope；撤过的 scope 再 bind / forCall 都当已撤（Codex 在 #87 指出）', async () => {
-    const transport = fakeTransport('链')
+  it('cancelling while bind → forCall builds a chain cannot resurrect the session; cancel the returned chain too and keep later bind/forCall calls cancelled (Codex #87)', async () => {
+    const transport = fakeTransport('chain')
     let release: () => void = () => {}
     const held = new Promise<void>(resolve => { release = resolve })
     const router = createSessionRouter(async () => { await held; return transport }, { onDrop: () => 1 })
     router.bind('s1', 5)
-    const pending = router.forCall('s1', 5) // 正在 await current()
+    const pending = router.forCall('s1', 5) // Awaiting current()
     await Promise.resolve()
-    expect(await router.dropTab(5)).toBe(1) // 只有 onDrop：这时没链可撤
+    expect(await router.dropTab(5)).toBe(1) // Only onDrop: no chain exists to cancel yet.
     release()
     await pending
-    expect(router.bound()).toEqual([]) // 没复活
-    expect(transport.cancelled).toEqual(['链:s1']) // forCall 回来补撤
-    // 之后再来：bind 无效、forCall 给链但先撤
+    expect(router.bound()).toEqual([]) // Not resurrected
+    expect(transport.cancelled).toEqual(['chain:s1']) // forCall cancels the returned chain.
+    // Later bind is ignored; forCall returns the chain only after cancelling.
     router.bind('s1', 5)
     expect(router.bound()).toEqual([])
     await router.forCall('s1', 5)
     expect(router.bound()).toEqual([])
-    expect(transport.cancelled).toEqual(['链:s1', '链:s1'])
+    expect(transport.cancelled).toEqual(['chain:s1', 'chain:s1'])
   })
 })

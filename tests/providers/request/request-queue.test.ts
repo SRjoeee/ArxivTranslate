@@ -1,4 +1,4 @@
-// 移植自 reference/read-frog/src/utils/request/__tests__/request-queue.test.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：仅改 import 路径。
+// Ported from reference/read-frog/src/utils/request/__tests__/request-queue.test.ts@9b44f82 (GPL-3.0), 2026-09-05, modified import paths only.
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { RequestQueue } from "@/providers/request/request-queue"
 
@@ -66,7 +66,7 @@ describe("requestQueue – happy path", () => {
     await expect(promise).resolves.toBe("test")
   })
 
-  // 调试测试：检查带延迟的任务
+  // Debug test: inspect delayed tasks.
   it("works with delayed thunks", async () => {
     vi.useFakeTimers()
 
@@ -140,7 +140,7 @@ describe("requestQueue – token bucket", () => {
     void q.enqueue(trackingThunk(1), Date.now(), "1")
     void q.enqueue(trackingThunk(2), Date.now(), "2")
 
-    // t=1000ms: 第一个任务应该完成
+    // t=1000ms: the first task should complete.
     vi.advanceTimersByTime(1_000)
 
     expect(completed).toEqual([0])

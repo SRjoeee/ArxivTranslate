@@ -1,5 +1,5 @@
-// 移植自 reference/read-frog/src/utils/request/cancellation.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：仅加文件头。
-// 取消错误按 name 识别（跨消息边界原型链会丢）；CancelledScopeRegistry 记住已取消的 scope，堵住"请求暂时不在任何可取消结构里"的窗口。
+// Ported from reference/read-frog/src/utils/request/cancellation.ts@9b44f82 (GPL-3.0), 2026-09-05; modified only to add this header.
+// Identify cancellation errors by name (prototypes are lost across messages). CancelledScopeRegistry closes gaps where requests are temporarily outside cancellable structures.
 export const TRANSLATION_CANCELLED_ERROR_NAME = "TranslationCancelledError"
 
 /**

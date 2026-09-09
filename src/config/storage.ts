@@ -1,4 +1,4 @@
-// 配置存储：WXT 自带的带版本迁移的存储项 + 读写时 zod 校验（做法借鉴 Read Frog config/storage.ts）。
+// Configuration storage: WXT versioned storage with migrations and zod validation on reads/writes (based on Read Frog config/storage.ts).
 import { storage } from 'wxt/utils/storage'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
@@ -9,61 +9,61 @@ export const configItem = storage.defineItem<Config>('local:config', {
   fallback: DEFAULT_CONFIG,
   version: CONFIG_VERSION,
   migrations: {
-    // v1 -> v2：加提示词库；已存的 API key 与其他字段原样保留
+    // v1 -> v2: add the prompt library; preserve stored API keys and all other fields.
     2: (v1: Omit<Config, 'version' | 'prompts' | 'preload'>) => ({ ...v1, version: 2 as const, prompts: DEFAULT_PROMPTS_CONFIG }),
-    // v2 -> v3：加按视口翻译的范围（§10）
+    // v2 -> v3: add the viewport translation range (§10).
     3: (v2: Omit<Config, 'version' | 'preload' | 'targetLanguage'> & { version: 2; targetLanguage: string }) => ({ ...v2, version: 3 as const, preload: { ...DEFAULT_PRELOAD } }),
-    // v3 -> v4：目标语言从 BCP-47 换成 ISO 639-3（zh-CN → cmn、zh-TW → cmn-Hant、ja → jpn）
+    // v3 -> v4: change target language from BCP-47 to ISO 639-3 (zh-CN → cmn, zh-TW → cmn-Hant, ja → jpn).
     4: (v3: Omit<Config, 'version' | 'targetLanguage' | 'fallback'> & { version: 3; targetLanguage: string }) => ({ ...v3, version: 4 as const, targetLanguage: fromBcp47(v3.targetLanguage) }),
-    // v4 -> v5：加引擎降级链，默认开启（硬规则 4：失败必须可恢复，不能让扩展整体挂掉）
+    // v4 -> v5: add the engine fallback chain, enabled by default (hard rule 4: failures must be recoverable without disabling the extension).
     5: (v4: Omit<Config, 'version' | 'fallback' | 'glossary'> & { version: 4 }) => ({ ...v4, version: 5 as const, fallback: { enabled: true } }),
-    // v5 -> v6：加术语表，默认空表（空表不进 prompt 也不进缓存键，行为与之前一致）
+    // v5 -> v6: add an empty glossary by default (omitted from prompts and cache keys, preserving previous behavior).
     6: (v5: Omit<Config, 'version' | 'glossary' | 'style'> & { version: 5 }) => ({ ...v5, version: 6 as const, glossary: [] }),
-    // v6 -> v7：加译文样式（默认 none，与实现之前的外观一致），并把旧术语表规整到 v7 新加的限额内——
-    // 不规整的话一条超长术语就会让整份配置校验失败、回退默认值（Codex 在 #52 指出）
+    // v6 -> v7: add translation styles (default none, preserving the previous appearance) and normalize old glossaries to the new v7 limits.
+    // Without normalization, a single long term invalidates the entire config and triggers defaults (Codex #52).
     7: (v6: Omit<Config, 'version' | 'style' | 'image'> & { version: 6 }) => ({
       ...v6,
       version: 7 as const,
       glossary: normalizeGlossary(v6.glossary),
       style: { preset: 'none' as const, customCss: '' },
     }),
-    // v7 -> v8：加图片翻译的模式闸（§15），默认三种模式都开——helper 没装时它不起作用，装了就直接可用
+    // v7 -> v8: add the image translation mode gate (§15), enabled in all modes by default; inactive without the helper, ready to use when installed.
     8: (v7: Omit<Config, 'version' | 'image'> & { version: 7 }) => ({ ...v7, version: 8 as const, image: { modes: [...MODE_VALUES] } }),
   },
 })
 
 /**
- * 最近一次 `getConfig()` 的回退原因，`null` 表示配置正常。
- * 每个执行上下文（popup / content / background）各存一份自己那次调用的结果——它们互不共享内存，
- * 而 popup 本来就自己调 `getConfig()`，读这个变量拿到的正是它自己那次的结论
+ * Reason for the latest `getConfig()` fallback; `null` means the config is valid.
+ * Each execution context (popup / content / background) stores its own result because they do not share memory.
+ * The popup already calls `getConfig()` itself, so this variable holds the result of its own read.
  */
 let fallbackReason: string | null = null
 
-/** 供 UI 查询：配置是不是被回退成默认值了。回退时用户的 API key、引擎、模式全部不生效，必须让他看见 */
+/** Let the UI check whether defaults were used. A fallback disables the saved API key, engine and mode; the user must see this. */
 export function configFallbackReason(): string | null {
   return fallbackReason
 }
 
 /**
- * 说清楚为什么回退。两种已知成因：
- * (1) 存储里的版本比当前扩展新——装了更旧的构建，WXT 拒绝降级迁移（实测：v7 配置 + v6 扩展）；
- * (2) 结构不合 schema——手工改坏，或某个字段超出限额
+ * Explain why defaults were used. Two known causes:
+ * (1) Stored version is newer than the extension: WXT refuses downgrade migrations (observed with v7 config + v6 extension).
+ * (2) Data fails schema validation: manual corruption or a field exceeding its limit.
  */
 function describeFallback(stored: unknown, issues: readonly { path: PropertyKey[]; message: string }[]): string {
   const version = (stored as { version?: unknown } | null)?.version
   if (typeof version === 'number' && version > CONFIG_VERSION) {
-    return `存储里的配置是 v${version}，当前扩展只支持到 v${CONFIG_VERSION}（可能装了更旧的版本）`
+    return `Stored configuration is v${version}, but this extension supports up to v${CONFIG_VERSION} (an older version may be installed)`
   }
   const issue = issues[0]
-  if (!issue) return '未知原因'
+  if (!issue) return 'Unknown reason'
   const where = issue.path.map(String).join('.')
-  return where ? `${where}：${issue.message}` : issue.message
+  return where ? `${where}: ${issue.message}` : issue.message
 }
 
 /**
- * 读到的值不合 schema（升级失败、手工改坏）时回退默认，不让扩展挂掉。
- * **回退不能是静默的**：用户的 key 明明存着却不生效、翻译悄悄降级到免费引擎，
- * 界面上没有任何线索时谁也发现不了（2026-09-06 实测撞到：v7 配置 + v6 构建）
+ * Fall back to defaults if stored data fails validation (failed upgrade or manual corruption), keeping the extension usable.
+ * **Never fall back silently**: the saved key stops working and translation silently switches to a free engine.
+ * Without a visible clue, users cannot diagnose it (observed 2026-09-06 with v7 config + v6 build).
  */
 export async function getConfig(): Promise<Config> {
   const stored = await configItem.getValue()
@@ -73,7 +73,7 @@ export async function getConfig(): Promise<Config> {
     return parsed.data
   }
   fallbackReason = describeFallback(stored, parsed.error.issues)
-  console.warn(`[axt] 配置不合法，已回退默认值：${fallbackReason}`)
+  console.warn(`[axt] Invalid configuration; using defaults: ${fallbackReason}`)
   return DEFAULT_CONFIG
 }
 

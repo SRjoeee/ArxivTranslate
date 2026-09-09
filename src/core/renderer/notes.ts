@@ -1,36 +1,36 @@
-// 脚注在 side 模式下的两栏归位（DESIGN §7.2）。
+// Align footnotes across side-mode columns (DESIGN §7.2).
 //
-// 段落译文由占位符协议回填，脚注是受保护节点，所以**译文段落里会重建一份原文脚注**：
-// 同一条脚注在页面上出现两次，一次跟着原文、一次跟着译文。
+// Rehydration reconstructs protected footnotes inside translated paragraphs as source-language clones.
+// Each footnote therefore appears twice: beside the source and beside its translation.
 //
-// 这里把脚注的译文**复制**进那份副本，副本因此是"原文 + 译文"上下排；
-// 原件那份标上 data-axt-note，由样式隐藏（原件里的译文随整个边注框一起藏起来）。
-// 结果是页面右缘只挂一份边注，英文在上、中文在下
-// （实测 2312.17141：文档 522→2026，边注 2042→2522，side 与 stack 都只剩一份）。
+// Copy the footnote translation into the reconstructed clone, stacking source above translation.
+// Mark the original with data-axt-note so CSS hides it, including its nested translation.
+// This leaves one margin note at the right edge, with English above Chinese
+// (2312.17141: document 522→2026, margin note 2042→2522; one note in both side and stack).
 //
-// 是复制不是移动：renderText 二次翻译时靠"原块的兄弟"找旧译文来替换，译文被搬走后
-// 它找不到、旧副本又会随段落译文一起被删，脚注译文就丢了（Codex 在 #26 指出）。
-// 副本按内容比对，译文变了（换目标语言重翻）就换新的。
+// Copy, do not move: renderText finds previous translations by original-block siblings on retranslation.
+// Moving would prevent replacement; deleting the paragraph translation then deletes the only footnote copy (Codex #26).
+// Compare content and replace the copy when translations change, e.g. a new target language.
 //
-// 边注的位置沿用 arXiv 自己的（float + 负边距挂到文章外），不要改：试过把它收进本栏，
-// 正文被挤、列表项还被盖住（ar5iv 给列表项里的脚注写死了 height: 0），用户反馈"影响阅读"。
+// Retain arXiv positioning (float and negative margin outside the article). Moving notes inside the column
+// squeezed body text and covered list items (ar5iv fixes their footnotes at height: 0); users reported impaired reading.
 //
-// 隐藏只认 data-axt-note 标记、且标记只在复制成功时才打：第一版用一条无条件的 CSS 藏原件译文，
-// JS 没跑到中文就凭空消失。现在没跑到时只是退回"原件里原文 + 译文并排"的旧样子，不丢内容。
+// Hide only by data-axt-note, set after a successful copy. Unconditional CSS in the first version hid translations before JS ran.
+// Now unprocessed notes retain the old source / translation layout in the original, losing no content.
 import { ID_ATTR } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
 import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
 
-/** 原件上的标记：译文已复制进副本，这份边注由样式隐藏 */
+/** Original marker: translation copied into the clone; hide this margin note with CSS. */
 const LOCALIZED_ATTR = 'data-axt-note'
-/** 复制进副本的译文换上的 class：脱掉 ar5iv 的脚注框外壳（见下） */
+/** Class for the copied translation, removing ar5iv's footnote-box shell (below). */
 export const NOTE_T_CLASS = 'axt-note-t'
 
-/** 副本里放进去的那份译文：脱掉脚注框外壳、去掉自带标号（副本外层已经有一个） */
+/** Translation placed in the clone: remove box shell and own number, already supplied by the outer clone. */
 function localizedCopy(translated: Element): Element {
   const clone = translated.cloneNode(true) as Element
-  // 译文节点自己也是 .ltx_note_content，套进副本就成了"框里套框"——多一条 double 顶边线、
-  // 多 9.6px 缩进，它自带的标号又是绝对定位的，会飞到正文里（实测，用户反馈"位置是乱的"）
+  // The translation is also .ltx_note_content. Nesting it creates a box inside a box, adding a double top border,
+  // 9.6 px indent, and an absolutely positioned number drifting into body text (observed; user reported misplaced notes).
   clone.classList.remove(NOTE.contentClass)
   clone.classList.add(NOTE_T_CLASS)
   for (const name of clone.getAttributeNames()) if (name.startsWith('data-axt-')) clone.removeAttribute(name)
@@ -39,8 +39,8 @@ function localizedCopy(translated: Element): Element {
 }
 
 /**
- * 把脚注的译文复制进译文块里重建出来的副本，并标记原件。
- * 幂等：副本里已有同样内容就不动；内容变了就换。返回本轮改动的数量。
+ * Copy footnote translations into clones reconstructed in translated blocks, then mark originals.
+ * Idempotent: leave identical content alone; replace changed content. Return the count changed this pass.
  */
 export function localizeNotes(root: Document | Element): number {
   const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))
@@ -52,17 +52,17 @@ export function localizeNotes(root: Document | Element): number {
     const copies = Array.from(translation.querySelectorAll(`${NOTE.content}:not(.${T_CLASS})`))
     if (copies.length === 0) continue
     const sources = Array.from(original.querySelectorAll(`${NOTE.content}:not(.${T_CLASS})`))
-    // 数量对不上就不动：宁可右栏留着原文，也不要张冠李戴
+    // Leave mismatched counts alone: source text in the right column is better than the wrong footnote.
     if (sources.length !== copies.length) continue
     copies.forEach((copy, i) => {
       const source = sources[i]
       const translated = source?.nextElementSibling
-      if (!translated?.classList.contains(T_CLASS)) return // 这条脚注还没翻到，下一轮再说
+      if (!translated?.classList.contains(T_CLASS)) return // Not translated yet; try next pass.
       const fresh = localizedCopy(translated)
       const existing = copy.querySelector(`:scope > .${NOTE_T_CLASS}`)
-      if (existing?.textContent === fresh.textContent) return // 已归位且内容没变
+      if (existing?.textContent === fresh.textContent) return // Already aligned, with unchanged content.
       existing?.remove()
-      // 副本保留自己的原文，译文接在后面：一份边注里英文在上、中文在下
+      // Retain the clone's source text and append its translation, English above Chinese in one margin note.
       copy.append(fresh)
       source?.closest(NOTE.root)?.setAttribute(LOCALIZED_ATTR, '')
       localized += 1
@@ -72,10 +72,10 @@ export function localizeNotes(root: Document | Element): number {
 }
 
 /**
- * 撤销与某块相关的脚注归位，在删掉它的译文之前调用（Codex 在 #30 指出）：
- * 块里的脚注——副本随这块的译文一起没了，原件不能再藏着；
- * 块本身是脚注正文——它的译文副本在外层段落的译文里，删掉副本、原件露出来。
- * 否则再翻失败时原件边注仍被样式隐藏、副本却已删除，脚注在所有模式下都消失。返回撤销的条数
+ * Undo footnote alignment for a block before removing its translation (Codex #30).
+ * Footnotes within a block: the clone disappears with that block's translation, so reveal the original.
+ * A block that is itself footnote content: remove its translation copy in the outer paragraph and reveal the original.
+ * Otherwise failed retranslation would hide the original after deleting its copy, losing the note in every mode. Return the count undone.
  */
 export function delocalizeNotes(block: Element): number {
   let undone = 0

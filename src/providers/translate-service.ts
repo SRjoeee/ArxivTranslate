@@ -1,10 +1,10 @@
-// 翻译服务：查缓存 → 只把未命中的段落交给 provider → 回写缓存。
-// 请求层是移植的 Read Frog utils/request（DESIGN §8.2、§10）：RequestQueue 管速率（令牌桶）、超时、重试、
-// 429 暂停与暂停后的单探针、401 / no-key 排空整队、按 scope 取消；BatchQueue 把同一批次键的段落攒成一批，
-// 派发闸让它在限流期间多攒少发。组装方式照 Read Frog 的 background/translation-queues.ts，只是跑在 content 侧（§8.0）。
-// 与运行上下文无关：缓存通过 CachePort 注入，background 用本地 Dexie，content 用消息代理。
+// Translation service: read cache → send only misses to the provider → write results to cache.
+// Request layer ported from Read Frog utils/request (DESIGN §8.2, §10): RequestQueue controls token-bucket rate, timeouts, retries,
+// 429 pauses with a single recovery probe, full queue draining on 401/no-key, and scope cancellation. BatchQueue groups segments by batch key;
+// its dispatch gate accumulates larger batches during rate limits. Wiring follows Read Frog background/translation-queues.ts (§8.0).
+// Runtime-independent: CachePort is injected; background uses local Dexie and content uses a message proxy.
 import { cacheKeyFor, type RenderPath } from '@/cache/key'
-// 深引 validate 而不是 protector 的桶：serialize / rehydrate 要碰 DOM，那两个不该进 background 的包
+// Import validate directly, not the protector barrel: serialize/rehydrate touch the DOM and do not belong in the background bundle.
 import { expectationsFromText, validate } from '@/core/protector/validate'
 import { getRandomUUID } from '@/shared/uuid'
 import { BatchCountMismatchError, BatchQueue, type BatchOptions } from './request/batch-queue'
@@ -19,7 +19,7 @@ export interface CacheEntry {
   paper: string
 }
 
-/** 缓存的最小接口；批量读写，避免每段一次往返 */
+/** Minimal cache interface, with bulk reads/writes to avoid one round trip per segment. */
 export interface CachePort {
   getMany(keys: string[]): Promise<(string | null)[]>
   putMany(entries: CacheEntry[]): Promise<void>
@@ -28,16 +28,16 @@ export interface CachePort {
 export type TranslateMessageRequest = {
   request: Omit<TranslateRequest, 'signal'>
   providerId?: string
-  /** 不带即不缓存（如设置页的连接测试） */
+  /** Omit to disable caching, e.g. for settings connection tests. */
   cache?: {
     paper: string
     renderPath: RenderPath
-    /** 只写不读：占位符校验失败后的重发，不能再拿回那份坏译文（§6.3） */
+    /** Write-only retry after placeholder validation failure; do not read the same invalid translation again (§6.3). */
     bypass?: boolean
   }
 }
 
-/** 取消范围：一次运行一个 id，恢复原文时整体撤掉。可以过消息边界，所以两条路径上都有 */
+/** Cancellation scope: one id per run, cancelled on restore. Serializable across messages, so present in both transport paths. */
 export type TranslateCall = TranslateMessageRequest & {
   scope?: string
 }
@@ -50,36 +50,36 @@ export interface TranslateServiceDeps {
   getProvider: (providerId?: string) => Promise<TranslationProvider>
   getModel?: () => Promise<string | undefined>
   cache?: CachePort
-  /** 队列参数覆盖（测试用）：timeoutMs 是批次超时公式的基数；rate / capacity 以 provider.rateLimit 优先，其次这里，最后 8 / 20 */
+  /** Test queue overrides: timeoutMs is the batch timeout base; rate/capacity precedence is provider.rateLimit, these values, then 8/20. */
   queue?: Partial<QueueOptions>
-  /** 读缓存的等待上限（测试用）；默认 CACHE_READ_BUDGET_MS */
+  /** Cache read timeout for tests; defaults to CACHE_READ_BUDGET_MS. */
   cacheReadBudgetMs?: number
-  /** 攒批参数覆盖（测试用） */
+  /** Batch parameter overrides for tests. */
   batch?: Partial<Pick<BatchOptions<QueueItem, string>, 'batchDelay' | 'maxRetries' | 'enableFallbackToIndividual'>>
 }
 
 export interface TranslateService {
   translate(call: TranslateCall): Promise<TranslateMessageResponse>
-  /** 撤掉该 scope 排队与在飞的请求；返回撤掉的条数。之后带同一 scope 的调用直接返回 aborted */
+  /** Cancel queued/in-flight requests for this scope; return the count. Subsequent calls with the same scope return aborted. */
   cancel(scope: string): number
 }
 
-/** Read Frog 的默认队列参数（DEFAULT_CONFIG.pageTranslation.requestQueueConfig 与 translation-queues.ts 里的常量） */
+/** Read Frog queue defaults (DEFAULT_CONFIG.pageTranslation.requestQueueConfig and translation-queues.ts constants). */
 export const DEFAULT_RATE_LIMIT = { rate: 8, capacity: 20 } as const
 
 /**
- * 读缓存的等待上限。缓存是优化不是依赖：服务是**先等缓存再发请求**的，读一旦挂住整页翻译就停在那里
- *（issue #45 的实验 2）。content 侧的消息端口自己也有 1.5s 预算，这里是最后一道闸——
- * 换任何 CachePort 实现（background 直连 Dexie、测试替身）都保证翻译不会被缓存拖死
+ * Cache read deadline. Cache is an optimization, not a dependency: the service waits for it before requesting translation,
+ * so a hung read would stall the whole page (issue #45, experiment 2). The content message port also has a 1.5s budget; this final gate
+ * guarantees any CachePort implementation (background Dexie or test double) cannot stall translation indefinitely.
  */
 export const CACHE_READ_BUDGET_MS = 2_000
 
 /**
- * 同时在飞的上限与单批总时限（issue #43）。令牌桶只管速率，响应一慢在飞数就没有上限——
- * 一篇 220 块的论文能攒出 50 多个批次，全部同时打向一个端点会招致 429、撞浏览器连接上限。
- * 取 8 与 rate 相同：响应快于 1 秒时这道闸根本不触发，慢响应下才封顶。
- * 总时限 180 秒：单次尝试最长 120 秒（20s + 15ms/字），持续 429 时暂停窗口会把总时长拖到分钟级
- *（实测 60 秒还没结束），到点就让这批失败、由用户重试，好过无限期悬着
+ * Concurrency limit and total batch deadline (issue #43). Token buckets limit rate, not in-flight count when responses are slow.
+ * A 220-block paper can create over 50 batches; sending all at once invites 429s and browser connection-limit exhaustion.
+ * Use 8, matching rate: this gate does not engage for subsecond responses, only caps slow requests.
+ * Total deadline: 180s. One attempt can take 120s (20s + 15ms/character), and persistent 429 pauses can extend total latency into minutes
+ * (observed unfinished at 60s). Fail the batch at the deadline for user retry rather than leave it pending indefinitely.
  */
 export const DEFAULT_MAX_CONCURRENT = 8
 export const DEFAULT_MAX_TOTAL_MS = 180_000
@@ -93,11 +93,11 @@ const DEFAULT_QUEUE_OPTIONS = {
 } as const
 const BATCH_DELAY_MS = 100
 const BATCH_MAX_RETRIES = 3
-/** 批次超时随字数放大：基数 + 每字 15ms，上限 120s（Read Frog utils/constants/translate.ts）。1000 字的批 35s */
+/** Batch timeout: base + 15ms/character, capped at 120s (Read Frog utils/constants/translate.ts). A 1000-character batch gets 35s. */
 const BATCH_TIMEOUT_PER_CHAR_MS = 15
 const MAX_BATCH_TIMEOUT_MS = 120_000
 
-/** 进队列的一段：BatchQueue 按 batchKey 攒批、按 dedupKey 去重、按 scope 取消；结果只是译文字符串（去重会把同一结果交给两个条目） */
+/** Queued segment: BatchQueue groups by batchKey, deduplicates by dedupKey and cancels by scope; the result is just translated text, shared by duplicates. */
 interface QueueItem {
   uid: string
   id: string
@@ -113,15 +113,15 @@ interface QueueItem {
 interface ProviderQueues {
   requestQueue: RequestQueue
   /**
-   * 每个 provider 都攒批。Read Frog 的 `shouldUseBatchQueue` 只给 LLM 攒，因为它的免费引擎是**单条接口**；
-   * 我们的不是——`translateHtml` 一次能带 150 条（RESEARCH §6.6），内置引擎声明 20 条。照抄那条判断
-   * 等于把免费引擎最大的优势扔掉：实测 216 块发了 61 个请求、中位每个只装 2 条（上限 100 条 / 8000 字，§8.3）。
-   * `maxItemsPerBatch` 为 1 的 provider 由 BatchQueue 自然退化成一条一个请求，不需要另一条路径
+   * Batch every provider. Read Frog shouldUseBatchQueue only batches LLMs because its free endpoints accept single items.
+   * Ours accept multiple: translateHtml supports 150 (RESEARCH §6.6), and the built-in provider declares 20. Copying that condition
+   * discards their advantage: 216 blocks produced 61 requests with a median of 2 items (limit 100 items / 8000 characters, §8.3).
+   * BatchQueue naturally handles maxItemsPerBatch = 1 as single-item requests; no separate path is needed.
    */
   batchQueue: BatchQueue<QueueItem, string>
 }
 
-/** provider 看到的 id 必须唯一：不同调用的段可能同 id（同一段落重发、连接测试连发三次）混进一批 */
+/** Provider-facing ids must be unique: different calls can reuse ids (paragraph retries or three successive connection tests) within one batch. */
 function uniqueIds(items: QueueItem[]): string[] {
   const seen = new Set<string>()
   return items.map((item, i) => {
@@ -132,22 +132,22 @@ function uniqueIds(items: QueueItem[]): string[] {
 }
 
 /**
- * 只有占位符校验通过的译文才写缓存：坏译文入了库，之后每次都要先读到它、再花一次请求重来
- *（Codex 在 #30 指出）。期望从**请求文本**反推——`serialize` 转义过原文里字面的 `<` `>`，
- * 请求文本里的标签必然是占位符，所以不需要把校验回调传过消息边界（issue #42）
+ * Cache only translations that pass placeholder validation; otherwise every subsequent hit needs another request to repair it
+ * (Codex #30). Infer expectations from request text: serialize escapes literal source < and >,
+ * so request tags must be placeholders. No validation callback needs to cross the message boundary (issue #42).
  */
 const admits = (source: string, translated: string): boolean => validate(translated, expectationsFromText(source)).ok
 
-/** 超预算就当全部未命中：多花一次请求，好过整页停在这里。OCR 服务读缓存也用它（Codex 在 #87 指出） */
+/** Treat an expired budget as all misses: extra requests are better than stalling the page. Also used for OCR cache reads (Codex #87). */
 export async function readWithBudget(store: CachePort, keys: string[], budgetMs: number): Promise<(string | null)[]> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const hits = await Promise.race([
     store.getMany(keys),
     new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), budgetMs) }),
   ]).finally(() => clearTimeout(timer))
-  // 条数对不上说明这份响应与请求不配对，按索引取会张冠李戴：整批当未命中
+  // A count mismatch means the response does not correspond to the request; indexed lookup would misassign entries. Treat all as misses.
   if (hits !== null && hits.length === keys.length) return hits
-  console.warn(`[axt] 读缓存${hits === null ? `超过 ${budgetMs} ms 未返回` : '返回条数与请求不符'}，按未命中继续翻译`)
+  console.warn(`[axt] Cache read ${hits === null ? `did not return within ${budgetMs} ms` : 'returned a different item count'}; continuing with cache misses`)
   return keys.map(() => null)
 }
 
@@ -158,12 +158,12 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
   const timeoutFor = (chars: number) => Math.min(baseTimeoutMs + chars * BATCH_TIMEOUT_PER_CHAR_MS, MAX_BATCH_TIMEOUT_MS)
 
   /**
-   * 把 provider 报的"id 对不上 / 结构坏了"换成 BatchQueue 认的批次错误，并标成不可重试。
-   * **声明 `isolatable: false` 的不转**（Codex 在 #61 指出）：BatchQueue 只对 `BatchCountMismatchError`
-   * 重试与逐条兜底，转过去就等于给系统性失败叠上 3 次批级重试 + 每段一次请求——
-   * 100 段的一批白打 104 次。免费引擎返回的不是 JSON 就属于这种，拆多小都一样。
-   * RequestQueue 不再按未知错误重试，BatchQueue 重试 3 次后逐条兜底。不标的话逐条兜底前要先打 3 × 4 = 12 次；
-   * 标了 kind 也免得消息里带的模型原始输出被 "429" / "timeout" 的正则误判
+   * Convert provider id/shape errors into BatchQueue errors, marked non-retryable for RequestQueue.
+   * **Do not convert isolatable: false** (Codex #61): BatchQueue retries and falls back per item only for BatchCountMismatchError.
+   * Conversion would add three batch retries plus one request per segment to a systemic failure,
+   * wasting 104 requests for 100 segments. A free engine's non-JSON response remains invalid at any batch size.
+   * RequestQueue must not retry these as unknown errors; BatchQueue handles three retries then individual fallback. Otherwise 3 × 4 = 12 calls occur first.
+   * Setting kind also prevents raw model output containing "429" or "timeout" from fooling message-based classification.
    */
   const asBatchError = (e: unknown, expected: number): unknown =>
     e instanceof ProviderError && e.kind === 'invalid-response' && e.isolatable
@@ -186,13 +186,13 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     if (existing) return existing
     const rate = provider.rateLimit?.rate ?? deps.queue?.rate ?? DEFAULT_RATE_LIMIT.rate
     const capacity = provider.rateLimit?.capacity ?? deps.queue?.capacity ?? DEFAULT_RATE_LIMIT.capacity
-    // 并发上限与令牌桶是两种闸（§8.3）：响应快的端点靠并发就够，用速率限反而让快响应白等令牌
+    // Concurrency and rate are separate gates (§8.3); fast endpoints need concurrency control, while rate limits may waste time waiting for tokens.
     const maxConcurrent = provider.maxConcurrent ?? deps.queue?.maxConcurrent ?? DEFAULT_QUEUE_OPTIONS.maxConcurrent
     const queueOptions = { ...DEFAULT_QUEUE_OPTIONS, ...deps.queue, rate, capacity, maxConcurrent }
     const maxTotalMs = queueOptions.maxTotalMs
     /**
-     * 期限按**整批**算，不按每次入队算：批级重试与逐条兜底都带着同一个 meta 再来，
-     * 各自重算就等于 4 次重试 4 份预算（Codex 在 #56 指出）
+     * The deadline covers the **entire batch**, not each enqueue: batch retries and individual fallback reuse the same meta.
+     * Recomputing it would grant four full budgets for four attempts (Codex #56).
      */
     const deadlineOf = (meta: { startedAt: number }) => maxTotalMs === undefined ? undefined : meta.startedAt + maxTotalMs
     const requestQueue = new RequestQueue(queueOptions)
@@ -203,7 +203,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       maxRetries: deps.batch?.maxRetries ?? BATCH_MAX_RETRIES,
       maxTotalMs,
       enableFallbackToIndividual: deps.batch?.enableFallbackToIndividual ?? true,
-      // 派发闸：限流期间没有空位时批次继续攒到上限，而不是每 100ms 刷出一小批排在队里冻着
+      // Dispatch gate: when rate-limited with no free slot, keep accumulating to the cap instead of queueing a tiny frozen batch every 100ms.
       dispatchGate: { nextDispatchEtaMs: () => requestQueue.nextDispatchEtaMs() },
       getBatchKey: item => item.batchKey,
       getCharacters: item => item.text.length,
@@ -222,11 +222,11 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         item.scheduleAt,
         item.dedupKey ?? item.uid,
         item.scope ? [item.scope] : undefined,
-        // 逐条兜底是同一批文本的最后一程，不能再拿一份完整预算（Codex 在 #56 指出）
+        // Individual fallback is the final stage for the same texts; it must not receive another full budget (Codex #56).
         { timeoutMs: timeoutFor(item.text.length), deadlineAt: deadlineOf(meta) },
       ),
       onError: (error, context) => {
-        console.warn(`[axt] 批次失败（${context.isFallback ? '逐条兜底' : `第 ${context.retryCount} 次重试前`}）：${error.message}`)
+        console.warn(`[axt] Batch failed (${context.isFallback ? 'individual fallback' : `before retry ${context.retryCount}`}): ${error.message}`)
       },
     })
     const pair = { requestQueue, batchQueue }
@@ -240,7 +240,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       const model = (await deps.getModel?.()) ?? ''
       const store = cache && deps.cache ? deps.cache : null
 
-      // 1. 查缓存：一次算完所有键，一次批量读
+      // 1. Cache lookup: compute all keys, then read in bulk.
       const keys = new Map<string, string>()
       const translated = new Map<string, string>()
       if (store && cache) {
@@ -250,7 +250,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         request.segments.forEach((segment, i) => {
           keys.set(segment.id, computed[i]!)
         })
-        // 重发只写不读：坏译文已经在库里，读回来只会再坏一次
+        // Retry writes only: rereading an already cached invalid result would repeat the failure.
         if (!cache.bypass) {
           const hits = await readWithBudget(store, computed, deps.cacheReadBudgetMs ?? CACHE_READ_BUDGET_MS)
           request.segments.forEach((segment, i) => {
@@ -259,18 +259,18 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           })
         }
       }
-      // 读缓存时让出过主线程，这期间 scope 可能已被撤销（Read Frog translation-queues.ts 也在 await 之后查一次）
-      if (scope && cancelledScopes.has(scope)) return { ok: false, error: { kind: 'aborted', message: `已取消（scope: ${scope}）` } }
+      // Cache reads yielded; the scope may have been cancelled meanwhile (Read Frog translation-queues.ts also checks after await).
+      if (scope && cancelledScopes.has(scope)) return { ok: false, error: { kind: 'aborted', message: `Cancelled (scope: ${scope})` } }
       const cached = translated.size
 
-      // 2. 未命中的逐段入队；同一次调用的段落批次键相同，会攒在一起
+      // 2. Queue misses individually; segments from one call share a batch key and accumulate together.
       const misses = request.segments.filter(s => !translated.has(s.id))
       if (misses.length > 0) {
         const pair = queuesFor(provider)
         const now = Date.now()
-        // 上下文只对有提示词的引擎有意义，和缓存键同一条判断（见上面的 cacheKeyFor）。
-        // 不加这道判断的话，run.ts 往 context 里塞的 sectionTitle 每换一节就变一次键，
-        // 免费引擎的批次永远跨不了章节——攒批等于没开（§8.3）
+        // Context matters only for engines with prompts, matching cacheKeyFor above.
+        // Without this check, sectionTitle supplied by run.ts changes the key at every section boundary,
+        // preventing free-engine batches from spanning sections and defeating accumulation (§8.3).
         const batchContext = provider.promptKey ? request.context : undefined
         const batchKey = JSON.stringify([provider.id, model, provider.promptKey ?? '', request.target, cache?.renderPath ?? '', batchContext ?? null])
         const items: QueueItem[] = misses.map(segment => ({
@@ -286,8 +286,8 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         }))
         const settled = await Promise.allSettled(items.map(item => pair.batchQueue.enqueue(item)))
 
-        // 3. 先把成功且放行的写缓存：一次调用的段可能横跨两批，一批失败另一批的成果不能丢，
-        //    否则 run.ts 对半拆分重发是白花钱
+        // 3. Cache successful, accepted results first: one call may span two batches; one failure must not discard the other's success,
+        //    or run.ts splitting and retrying would waste paid requests.
         const writes: CacheEntry[] = []
         const failures: unknown[] = []
         settled.forEach((outcome, i) => {
@@ -300,14 +300,14 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           const key = keys.get(item.id)
           if (store && cache && key && admits(item.text, outcome.value)) writes.push({ key, translation: outcome.value, paper: cache.paper })
         })
-        // 写之前再查一次取消（Codex 在 #33 指出）：一次调用会被拆到多个批次，先完成的那些
-        // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，
-        // 与「恢复原文之后不再写缓存」的承诺不符
+        // Recheck cancellation before writing (Codex #33): a call may span multiple batches, and early results
+        // can fulfill before cancel(scope) removes the rest. Promise.allSettled would otherwise write those results afterward,
+        // violating the promise of no cache writes after restoring the original.
         if (store && writes.length > 0 && !(scope && cancelledScopes.has(scope))) await store.putMany(writes)
         if (failures.length > 0) return { ok: false, error: toErrorInfo(pickError(failures)) }
       }
 
-      // 4. 按原顺序合并
+      // 4. Merge in original order.
       const segments = request.segments.map(s => ({ id: s.id, text: translated.get(s.id) ?? '' }))
       return { ok: true, result: { segments, provider: provider.id, model: model || undefined }, cached }
     } catch (e) {
@@ -316,8 +316,8 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
   }
 
   const cancel = (scope: string): number => {
-    // 先登记再排空：登记是同步的，还挂在读缓存上的调用醒来就能看到；
-    // 先撤批处理再撤请求队列，反过来攒着的批次会在两次排空之间刷出新任务（Read Frog translation-queues.ts:616）
+    // Register cancellation before draining: synchronous registration is visible when pending cache reads resume.
+    // Cancel batching before request queues; reversing them lets accumulated batches flush new tasks between drains (Read Frog translation-queues.ts:616).
     cancelledScopes.markScope(scope)
     let cancelled = 0
     for (const { requestQueue, batchQueue } of queues.values()) {
@@ -330,7 +330,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
   return { translate, cancel }
 }
 
-/** 一次调用里多段失败时报哪个：配置错误优先（run.ts 据此停下），其次真正的失败，最后才是取消 */
+/** For multiple segment failures, prefer configuration errors (run.ts halts on them), then actual failures, then cancellations. */
 function pickError(errors: unknown[]): unknown {
   const kinds = errors.map(e => toErrorInfo(e).kind)
   const fatal = kinds.findIndex(kind => kind === 'no-key' || kind === 'auth')

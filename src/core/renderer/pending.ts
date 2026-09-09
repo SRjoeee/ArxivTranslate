@@ -1,6 +1,6 @@
-// 等待态的译文节点（DESIGN §7.6，照 Read Frog 的做法）：请求发出之前先插在原块后面，里面只有一个圆环；
-// 译文到达后被真译文替换——renderText / renderTable 开头的 clearTranslation 会删掉同 data-axt-for 的兄弟。
-// 与 §7.1 一致：它只是原块的下一个兄弟，原节点不动。
+// Pending translation nodes (DESIGN §7.6, following Read Frog): insert a spinner-only sibling before sending a request.
+// Real translations replace them; renderText / renderTable call clearTranslation to remove siblings with the same data-axt-for.
+// Consistent with §7.1: next sibling only; original nodes stay untouched.
 import type { Block, TextBlock } from '@/core/extractor'
 import { FOR_ATTR, INLINE_ATTR, clearTranslation, setState, shouldInline, translationClass } from './index'
 import { cancelSpinnersIn, createSpinnerInside } from './spinner'
@@ -13,20 +13,20 @@ function pendingOf(block: Block): Element | null {
 }
 
 /**
- * 插 pending 节点：与原块同标签（表格块用 div——整表克隆到了才是 table）、沿用原块 class 加 axt-t axt-pending。
- * 幂等：已有就返回它。短标题按 §7.3 同行，圆环跟在标题后面，译文到达时版式不跳
+ * Insert pending with the original tag (div for tables until their real clone arrives), original classes plus axt-t axt-pending.
+ * Idempotent: return existing nodes. Short titles pair inline (§7.3), placing spinners after titles without shifts on completion.
  */
 export function renderPending(block: Block): Element {
   const existing = pendingOf(block)
   if (existing) return existing
-  // 重试路径要**整块回到等待态**，上一轮留下的东西一样不能剩：
-  //   - 失败小部件（`.axt-error`）：`pendingOf` 认不出它，圆环会插在原块与它之间，
-  //     读者同时看到"正在翻"和"！重试"，side 模式下右栏还多一项（Codex 在 #36 指出）；
-  //   - `data-axt-state="failed"`：modes.css 按它画红线，不清的话重试期间圆环在转、红线还在（#76）；
-  //   - **半翻的表格**：`cells.size > 0` 那条路走的是 `renderTable` + `markPartial`，
-  //     **不建小部件**却把块记成 failed（run.ts:240-246）。所以重置不能挂在"删掉了小部件"上——
-  //     那种块 `clearFailed` 返回 false，旧克隆、`data-axt-partial` 与 translated 状态会原样留着（#81）。
-  // `clearTranslation` 把同 id 的译文 / 半成品 / 小部件一并清掉，`setState` 顺带清掉 partial 标记
+  // Retry must reset the entire block to pending; nothing from the previous attempt may remain:
+  //   - Failure widgets (.axt-error) are invisible to pendingOf, so a spinner would insert before them,
+  //     showing pending and Retry together and adding a right-column item in side mode (Codex #36).
+  //   - data-axt-state="failed" draws a red border in modes.css; clear it during retry (#76).
+  //   - Partial tables: cells.size > 0 uses renderTable + markPartial,
+  //     marking the run outcome failed without a widget (run.ts:240-246). Reset must not depend on widget removal:
+  //     clearFailed returns false for these, leaving the old clone, data-axt-partial, and translated state (#81).
+  // clearTranslation removes translations / partial results / widgets sharing the ID; setState also removes partial.
   clearTranslation(block)
   setState(block, 'pending')
   const doc = block.el.ownerDocument
@@ -42,7 +42,7 @@ export function renderPending(block: Block): Element {
   return node
 }
 
-/** 删掉块的 pending 节点（失败 / 停止时）；译文到达走 renderText，不用调这个 */
+/** Remove pending on failure / stop; successful translations use renderText instead. */
 export function clearPending(block: Block): boolean {
   const node = pendingOf(block)
   if (!node) return false
@@ -51,7 +51,7 @@ export function clearPending(block: Block): boolean {
   return true
 }
 
-/** 停止会话：页面上所有 pending 节点一起删，返回删掉的数量 */
+/** Stop session: remove all pending nodes; return count removed. */
 export function clearAllPending(doc: Document): number {
   const nodes = Array.from(doc.querySelectorAll(`.${PENDING_CLASS}`))
   for (const node of nodes) {

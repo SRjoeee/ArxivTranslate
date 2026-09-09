@@ -1,5 +1,5 @@
-// #axt-debug 调试描边：标记块并给块加虚线框。样式只在调试时注入（不走 manifest CSS），
-// 以便恢复原文时能整体移除（DESIGN §7.1）。不监听 hashchange，改 hash 后需刷新页面。
+// #axt-debug marks blocks and adds dashed outlines. Inject styles only for debugging (not manifest CSS),
+// allowing complete removal on restore (DESIGN §7.1). No hashchange listener: refresh after changing the hash.
 import { ID_ATTR, markBlocks, type Block } from '@/core/extractor'
 import { STYLE_ATTR } from '@/core/renderer'
 
@@ -11,7 +11,7 @@ const STYLE = `
 [${DEBUG_ATTR}] table[${ID_ATTR}] { outline: 2px dashed rgba(37, 99, 235, 0.7); }
 `
 
-/** 幂等：重复调用不会注入第二份样式 */
+/** Idempotent: repeated calls do not inject duplicate styles. */
 export function enableDebug(blocks: Block[]): void {
   markBlocks(blocks)
   document.documentElement.setAttribute(DEBUG_ATTR, '')

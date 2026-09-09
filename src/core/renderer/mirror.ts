@@ -1,12 +1,12 @@
-// side 模式的镜像节点（DESIGN §7.2）：左栏里没有译文的内容，在右栏放一份副本，
-// 否则右栏空着、左栏内容横跨两栏，对照就断了。
+// Side-mode mirrors (DESIGN §7.2): copy untranslated left-column content into the right column,
+// avoiding empty right cells or left content spanning both columns and breaking alignment.
 //
-// 判定按结构而不是按类名清单：容器里**没有配对、内部也不含译文**的直接子元素就是镜像目标。
-// 早期版本列举 .ltx_equation / .ltx_graphics 之类，于是参考文献的序号、作者姓名、
-// 列表编号这些同样没有译文的内容都漏在外面（实测 2609.00097）。
+// Structural classification, not a class list: mirror direct children without a pair or translations inside.
+// The initial .ltx_equation / .ltx_graphics list missed equally untranslated bibliography numbers,
+// author names, and list markers (observed in 2609.00097).
 //
-// 块一标记（翻译开始的第一刻）就生成，不等译文；之后留在 DOM 里由 CSS 控制显隐，
-// 所以模式切换仍然只改 <html> 上的一个属性。
+// Generate immediately after marking blocks, without waiting for translations. CSS controls visibility thereafter,
+// so switching mode still changes just one <html> attribute.
 import { DOCUMENT_ROOT, MARGIN_ASIDE } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
 import { INJECTED_SELECTOR, isInjected, stripInjected } from '@/core/marks'
@@ -14,57 +14,57 @@ import { FOR_ATTR, T_CLASS } from './index'
 import { MIRROR_CONTAINER, SIDE_STACK, isMirrorContainer } from './side-layout'
 
 export const MIRROR_CLASS = 'axt-mirror'
-/** 镜像用的 data-axt-for 前缀，避免与真实块 id 撞车 */
+/** Mirror data-axt-for prefix, distinct from real block IDs. */
 const MIRROR_ID_PREFIX = 'mirror:'
-/** 没有文字也没有这些内容的元素不值得镜像（纯装饰、空白） */
+/** Elements without text or this content do not need mirrors (decoration / whitespace). */
 const MEDIA = 'img, svg, object, math, table, canvas, video'
 
 function needsMirror(child: Element): boolean {
-  // 我们自己的节点（译文、镜像、图片叠加层）不镜像
+  // Never mirror injected nodes (translations, mirrors, overlays).
   if (isInjected(child)) return false
-  // ar5iv 浮到页面外缘的边注与出版元数据：镜像只会多一份重复（§7.2）
+  // ar5iv margin notes and publication metadata already float outside the page; mirroring only duplicates them (§7.2).
   if (child.matches(MARGIN_ASIDE)) return false
-  // 翻译单元：已经有译文，或译文还在路上，都不该再来一份副本
+  // Translation units either have a translation or await one; neither needs a mirror.
   if (child.hasAttribute(ID_ATTR)) return false
-  // 后面紧跟译文或图片叠加层（§15.2）：已经配对，右栏不空
+  // An adjacent translation or overlay already forms a pair (§15.2), filling the right column.
   const next = child.nextElementSibling
   if (next && isInjected(next)) return false
-  // 内部含译文的元素本身是容器，它的子元素各自处理
+  // Elements containing translations are containers; handle their children separately.
   if (child.querySelector(INJECTED_SELECTOR)) return false
-  // 内部还有等待翻译的块：整块复制过去，译文到达后就会既有副本又有译文。
-  // **这道闸只在块标记完整时有效**——它分辨不出"还没轮到标记的翻译单元"与"永远没有译文的静态内容"。
-  // 安全由 run.ts 提供：块标记在 startTranslation 里同步写完，第一趟 side prep 看到的一定是全集（issue #67）
+  // Do not clone containers with pending blocks, or later translations would duplicate the copied content.
+  // This guard requires complete block marking; it cannot distinguish unmarked translation units from permanently static content.
+  // run.ts guarantees this by marking synchronously in startTranslation before the first side-prep pass (issue #67).
   if (child.querySelector(`[${ID_ATTR}]`)) return false
   return /\S/.test(child.textContent ?? '') || child.querySelector(MEDIA) !== null || child.matches(MEDIA)
 }
 
 /**
- * 为容器内还没有配对的内容生成镜像；幂等，重复调用不会叠加。
- * 返回新建的镜像数量。
+ * Mirror unpaired content within containers, idempotently.
+ * Return the number of mirrors created.
  */
 export function createMirrors(root: Document | Element): number {
   const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))
   if (!scope) return 0
-  // 翻译根也要满足"内部含有译文或已标记的块"才算容器。少了这一条，翻译开始前调用会把摘要、
-  // 章节这些顶层元素整块复制到右栏——它们那时既没有译文也没有块标记（实测：整页内容重复一遍）
+  // The translation root must also contain translations or marked blocks to qualify as a container. Otherwise, before startup,
+  // top-level abstracts / sections with neither would be copied wholesale into the right column (observed full-page duplication).
   if (!isMirrorContainer(scope)) return 0
   const containers = [scope, ...Array.from(scope.querySelectorAll(MIRROR_CONTAINER))].filter(isMirrorContainer)
   let made = 0
   for (const container of containers) {
     if (container.classList.contains(MIRROR_CLASS)) continue
-    // 堆叠区里没有右栏，镜像只会在同一列里多出一份重复（实测 2312.17141 的多面板插图）
+    // Stacked regions have no right column; mirrors would duplicate content vertically (2312.17141 multi-panel figure).
     if (container.closest(SIDE_STACK)) continue
     for (const child of Array.from(container.children)) {
       if (!needsMirror(child)) continue
       const clone = child.cloneNode(true) as Element
-      // 克隆进镜像的内容不能带 id 与块标记，也不能带上别人的译文
+      // Cloned mirrors must not retain IDs, block markers, or other translations.
       stripInjected(clone)
       clone.classList.add(T_CLASS, MIRROR_CLASS)
-      // 镜像是右栏的视觉配平副本，内容与左栏完全相同、没有译文。不藏起来的话屏幕阅读器
-      // 会把同一张图、同一个公式念两遍。
-      // `inert` 是必须的那一半（A/B 审计在 2401.00596 上抓到，issue #72）：只标 aria-hidden 的话，
-      // 副本里的链接仍在 Tab 序列里——参考文献条目就带着 DOI / arXiv 链接——键盘用户会跳进一个
-      // 屏幕阅读器完全忽略的装饰副本，焦点落下去什么都不播报（axe: aria-hidden-focus）
+      // Mirrors only balance columns visually; their content is identical to the left. Hide them from screen readers
+      // to avoid reading each image or formula twice.
+      // inert is also required (A/B audit of 2401.00596, issue #72). aria-hidden alone leaves cloned links in the Tab order,
+      // including bibliography DOI / arXiv links. Keyboard focus would enter a decorative copy
+      // ignored by screen readers, producing no announcement (axe: aria-hidden-focus).
       clone.setAttribute('aria-hidden', 'true')
       clone.setAttribute('inert', '')
       clone.setAttribute(FOR_ATTR, `${MIRROR_ID_PREFIX}${made}`)

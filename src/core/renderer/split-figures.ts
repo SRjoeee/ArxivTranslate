@@ -1,14 +1,14 @@
-// side 模式下把整张插图拆成两份（DESIGN §7.2）：左栏原文说明、右栏译文说明。
+// Split whole figures for side mode (DESIGN §7.2): source captions on the left, translated captions on the right.
 //
-// 插图里的图与公式没有译文，按块配对的话右栏就空着；让整张图跨两栏又等于放弃对照。
-// 所以整块克隆：克隆件删掉每对的原文成员、只留译文，原件在 side 模式下隐藏内部译文。
-// 两份结构完全相同，行天然对齐。表格浮动体不走这条路——它的表本来就有译文克隆。
+// Images and formulas lack translations, so block pairing leaves the right empty; spanning both columns loses comparison.
+// Clone the whole figure: remove each original pair member from the clone, retaining translations; hide translations inside the original in side mode.
+// Matching structure aligns rows naturally. Table floats do not use this path; their tables already have translated clones.
 //
-// **不缩放**（用户决定，2026-09-05）：栏窄了让 ar5iv 自己重排——`.ltx_flex_figure` 本身就是
-// `flex-flow: wrap`，面板会自己竖排（实测 2312.17141：满栏 342px 高、半栏 546px，不溢出）。
-// 实在不能重排的（宽公式、宽 SVG，实测 8 张图里有 3 张溢出 78 / 102 / 209px）退化为栏内横滑，
-// 字号一律不动。试过把栏宽喂给 ar5iv 的 `--main-width`（它按 .33/.5 的比例算面板宽），
-// 实测更糟：面板缩成 160px 还溢出 555px，所以那个变量保持不动。
+// Do not scale (user decision, 2026-09-05). Let ar5iv reflow narrower columns: .ltx_flex_figure already uses
+// flex-flow: wrap, stacking panels naturally (2312.17141: 342 px tall full-width, 546 px half-width, no overflow).
+// Content that cannot reflow (wide formulas / SVG; 3 of 8 figures overflowed by 78 / 102 / 209 px) scrolls horizontally within its column.
+// Never change font size. Feeding column width into ar5iv's --main-width (used for .33/.5 panel widths)
+// made it worse: 160 px panels still overflowed by 555 px. Leave that variable untouched.
 import { DOCUMENT_ROOT, FIGURE_MEDIA } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
 import { IMG_CLASS } from '@/core/marks'
@@ -17,40 +17,40 @@ import { MIRROR_CLASS } from './mirror'
 import { PENDING_CLASS } from './pending'
 import { FOR_ATTR, T_CLASS } from './index'
 
-/** 真正的译文：等待态的 pending 节点与失败态的小部件（§7.6）都不算 */
+/** Real translations, excluding pending spinners and failure widgets (§7.6). */
 
-/** 原件上的标记（原节点只允许追加 data-axt-*，§7.1） */
+/** Original marker; only data-axt-* may be added to original nodes (§7.1). */
 export const SPLIT_ATTR = 'data-axt-split'
-/** 克隆件的 class；它同时带 T_CLASS，所以配对规则会把它放进右栏 */
+/** Clone class; also carries T_CLASS so pairing rules place it in the right column. */
 export const SPLIT_CLASS = 'axt-split'
 
 /**
- * 真译文：与 §7.5 预设选择器同一条界线——圆环、失败小部件、**镜像、拆分克隆**都带 .axt-t 只是为了配对，不是译文。
- * 漏掉 .axt-mirror 时（issue #46 实测 2312.17141）：说明还 pending 的图被镜像了媒体，下一趟全量把镜像当成"有译文"，
- * 删掉镜像、克隆一份没有任何译文的图——右栏是一份原文副本。基线每趟全量，7 张拆图里 2 张是这种假拆
+ * Real translations use the same boundary as §7.5 presets: spinners, errors, mirrors, and split clones carry .axt-t only for pairing.
+ * Missing the .axt-mirror exclusion (issue #46, 2312.17141) let pending-caption figures mirror their media; a later full pass treated mirrors as translations,
+ * removed them, and cloned a figure with no translated text. In the full-pass baseline, 2 of 7 split figures were these false splits.
  */
 const REAL_TRANSLATION = `.${T_CLASS}:not(.${PENDING_CLASS}, .axt-error, .${MIRROR_CLASS}, .${SPLIT_CLASS})`
-/** 图片叠加层（§15.2）也算真译文：只有它的插图同样要拆，且它到达时签名要变、副本要重建 */
+/** Overlays (§15.2) count as translations: split figures containing only overlays; update signatures and rebuild clones when overlays arrive. */
 const REAL_OR_IMAGE = `${REAL_TRANSLATION}, .${IMG_CLASS}`
-/** 克隆时译文内容的签名，用来判断译文有没有增加或改变、要不要重建 */
+/** Translation-content signature captured at cloning, used to detect additions / changes requiring a rebuild. */
 const KEY_ATTR = 'data-axt-split-key'
 
-/** 译文的签名：数量相同但内容变了（换目标语言重翻）也要重建，只数个数会一直用陈旧的副本（Codex 在 #26 指出） */
+/** Rebuild when text changes even at the same count (e.g. new target); counting alone would retain stale clones (Codex #26). */
 function translationKey(fig: Element): string {
   const texts = Array.from(fig.querySelectorAll(REAL_OR_IMAGE), t => t.textContent ?? '')
   return `${texts.length}:${hashText(JSON.stringify(texts))}`
 }
 
 /**
- * 有没有"游离"的媒体：不在任何翻译块、也不在译文里。
- * 说明文字里的行内公式也是 `math`，只看"有没有媒体"会把表格浮动体误判成插图
- * （实测 2312.17527 两个表格浮动体全被拆了，Codex 在 #26 指出）
+ * Whether media is unowned: outside all translation blocks and translated nodes.
+ * Inline caption formulas are also math; checking only for media would misclassify table floats as figures
+ * (both table floats in 2312.17527 were split; Codex #26).
  */
 function hasLooseMedia(fig: Element): boolean {
   return Array.from(fig.querySelectorAll(FIGURE_MEDIA)).some(m => m.closest(`[${ID_ATTR}], .${T_CLASS}`) === null)
 }
 
-/** 元素所在的最外层 figure（嵌套分图交给最外层一起复制）；不在图里返回 null */
+/** Outermost enclosing figure, or null; nested panels are cloned together with the outer figure. */
 export function outermostFigure(el: Element): Element | null {
   let fig = el.closest('figure')
   while (fig?.parentElement) {
@@ -62,21 +62,21 @@ export function outermostFigure(el: Element): Element | null {
 }
 
 function needsSplit(fig: Element): boolean {
-  if (fig.classList.contains(T_CLASS)) return false // 克隆件自己
-  if (fig.parentElement?.closest('figure')) return false // 嵌套的分图交给最外层一起复制
-  if (!fig.querySelector(REAL_OR_IMAGE)) return false // 内部没有译文（pending 不算）：整块没配对，交给镜像
-  return hasLooseMedia(fig) // 没有游离媒体的浮动体（如表格）不必整块复制，它的表本来就有译文克隆
+  if (fig.classList.contains(T_CLASS)) return false // The clone itself.
+  if (fig.parentElement?.closest('figure')) return false // Nested panels are handled by the outer figure.
+  if (!fig.querySelector(REAL_OR_IMAGE)) return false // No real translations (pending does not count); leave unpaired figures to mirroring.
+  return hasLooseMedia(fig) // Floats without unowned media, e.g. tables, already have translated clones and need no whole-figure copy.
 }
 
-/** 克隆件里记着自己对应原件的哪个 id：页内锚点靠它找到克隆中对应的那一处（issue #44） */
+/** Original ID retained on the clone for local anchors to find the corresponding position (issue #44). */
 export const SPLIT_OF_ATTR = 'data-axt-split-of'
 
 /**
- * 克隆件不能带原件的 id 与块标记（会造成重复 id）。但**对应关系不能一起丢**：
- * only 模式下原件整个被藏，指向图内某一行的锚点（实测 2312.17141 有 21 个，
- * `#S3.Ex73`–`#S3.Ex79` 都是 Figure 6 里的公式行）只能落到克隆上，
- * 没有对应关系就只能滚到整张图的顶部，要找的那行可能还在视口外（Codex 在 #80 指出）。
- * 所以把原 id 挪进 `data-axt-split-of`——不是 id，不会重复，克隆整个被删时一起消失
+ * Clones must not retain original IDs or block markers, but must preserve their correspondence.
+ * Only mode hides the original; anchors to internal rows (21 in 2312.17141,
+ * including #S3.Ex73–#S3.Ex79 in Figure 6) must navigate to the clone.
+ * Without correspondence they can reach only the figure top, possibly leaving the intended row offscreen (Codex #80).
+ * Move IDs into data-axt-split-of: no duplicate IDs; removed together with the clone.
  */
 function stripIds(root: Element): void {
   for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
@@ -88,8 +88,8 @@ function stripIds(root: Element): void {
 }
 
 /**
- * 给内含配对的插图生成"只有译文"的副本；幂等，译文变多或变了会重建。
- * 返回新建的副本数量。
+ * Generate translation-only copies of paired figures, idempotently; rebuild when translations are added or changed.
+ * Return the number of copies created.
  */
 export function splitFigures(root: Document | Element): number {
   const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))
@@ -103,16 +103,16 @@ export function splitFigures(root: Document | Element): number {
     if (existing && existing.getAttribute(KEY_ATTR) === key) continue
     existing?.remove()
 
-    // 镜像与整块复制是两套方案，图里留着镜像会重复一份（都是我们自己的节点，可以删）。
-    // 没有图注的插图在会话开始时会被整张镜像（figure 级的下一个兄弟），叠加层到达后拆图时一并删掉，否则右栏三份
+    // Mirroring and whole-figure cloning are alternatives; existing injected mirrors would duplicate content, so remove them.
+    // Captionless figures may have a whole-figure sibling mirror from startup; remove it when an overlay triggers splitting, or the right column gets three copies.
     for (const stale of Array.from(fig.querySelectorAll(`.${MIRROR_CLASS}`))) stale.remove()
     const figureMirror = fig.nextElementSibling
     if (figureMirror?.classList.contains(MIRROR_CLASS)) figureMirror.remove()
 
     const clone = fig.cloneNode(true) as Element
-    // 还在等译文 / 翻失败的对：副本里去掉圆环与小部件、留原文，译文到了 key 变化会重建
+    // Pending / failed pairs: remove spinners and widgets from the clone, retain source text; arrival changes the key and rebuilds.
     for (const pending of Array.from(clone.querySelectorAll(`.${PENDING_CLASS}, .axt-error`))) pending.remove()
-    // 克隆件只留译文：每对里把原文成员摘掉（译文自己不会被摘）
+    // Retain only translations in the clone: remove each original pair member, leaving translated members intact.
     for (const original of Array.from(clone.querySelectorAll('*'))) {
       if (original.classList.contains(T_CLASS)) continue
       if (original.nextElementSibling?.classList.contains(T_CLASS)) original.remove()
@@ -130,10 +130,10 @@ export function splitFigures(root: Document | Element): number {
 }
 
 /**
- * 非 side 模式下丢掉签名过期的副本（§15.2）：side → only 之后 OCR 才到，叠加层进了被隐藏的原件，
- * 副本里没有它；只在 side 才重建的话叠加层要等回到 side 才可见。删掉副本、摘掉原件的标记，
- * 只显示原件（stack 本来就显示原件；only 下原件的译文照常可见），回 side 时全量整理再重建。
- * 返回丢掉的副本数
+ * Discard stale clones outside side mode (§15.2): OCR arriving after side → only inserts an overlay into the hidden original,
+ * leaving its clone stale. Rebuilding only in side mode would hide the overlay until returning there. Remove the clone and original marker,
+ * showing the original (already visible in stack; its translations remain visible in only). A full side-mode cleanup later rebuilds it.
+ * Return the number of discarded copies.
  */
 export function dropStaleSplits(root: Document | Element): number {
   const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))

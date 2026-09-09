@@ -4,7 +4,7 @@ import {
   createLightweightSpinner, createSpinnerInside,
 } from '@/core/renderer/spinner'
 
-// 圆环照搬 Read Frog：内联样式、WAAPI 旋转、最多 60 个在转（§7.6）。happy-dom 是否有 Element.animate 决定走哪个分支
+// Read Frog spinners: inline styles, WAAPI rotation, and at most 60 animated spinners (§7.6). Element.animate availability selects the branch.
 const canAnimate = typeof HTMLElement.prototype.animate === 'function'
 
 afterEach(() => {
@@ -13,17 +13,17 @@ afterEach(() => {
 })
 
 describe('spinner', () => {
-  it('是一个 6px 的行内小环，样式内联且带 !important，站点 CSS 盖不掉', () => {
+  it('a 6px inline spinner uses important inline styles that site CSS cannot override', () => {
     const spinner = createLightweightSpinner(document)
     expect(spinner.tagName).toBe('SPAN')
     expect(spinner.className).toBe(SPINNER_CLASS)
     expect(spinner.style.cssText).toContain('width: 6px')
     expect(spinner.style.cssText).toContain('important')
     expect(spinner.style.cssText).toContain('--axt-muted')
-    cancelSpinnerAnimation(spinner) // 没挂进文档的圆环 afterEach 够不着，自己收
+    cancelSpinnerAnimation(spinner) // afterEach cannot reach detached spinners; clean them up explicitly.
   })
 
-  it('createSpinnerInside 放在宿主末尾', () => {
+  it('createSpinnerInside appends to the host', () => {
     const host = document.createElement('p')
     host.textContent = 'x'
     document.body.append(host)
@@ -32,16 +32,16 @@ describe('spinner', () => {
     cancelSpinnerAnimation(spinner)
   })
 
-  it(`最多 ${MAX_ANIMATED_SPINNERS} 个在转，超出的是静止环；取消后名额释放`, () => {
+  it(`animates at most ${MAX_ANIMATED_SPINNERS} spinners; excess spinners stay static and cancellation releases slots`, () => {
     const spinners = Array.from({ length: MAX_ANIMATED_SPINNERS + 1 }, () => createLightweightSpinner(document))
     if (canAnimate) {
       expect(activeSpinnerAnimations()).toBe(MAX_ANIMATED_SPINNERS)
-      // 第 61 个没有动画，靠静止的灰弧表示等待
+      // the 61st spinner has no animation and shows a static gray waiting arc
       expect(spinners[MAX_ANIMATED_SPINNERS]!.style.borderTopColor).toContain('--axt-muted')
       cancelSpinnerAnimation(spinners[0]!)
       expect(activeSpinnerAnimations()).toBe(MAX_ANIMATED_SPINNERS - 1)
     } else {
-      // 没有 WAAPI（happy-dom）：全部静止，计数不动
+      // without WAAPI in happy-dom, all spinners remain static and the count does not change
       expect(activeSpinnerAnimations()).toBe(0)
       expect(spinners.every(s => s.style.borderTopColor.includes('--axt-muted'))).toBe(true)
     }
@@ -49,7 +49,7 @@ describe('spinner', () => {
     expect(activeSpinnerAnimations()).toBe(0)
   })
 
-  it('cancelSpinnersIn：删子树前把里面的圆环（含根自己）全部取消，不抛错', () => {
+  it('cancelSpinnersIn cancels every spinner in a subtree including its root before removal, without throwing', () => {
     const wrap = document.createElement('div')
     document.body.append(wrap)
     createSpinnerInside(wrap)

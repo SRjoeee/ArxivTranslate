@@ -1,12 +1,12 @@
 import { defineConfig } from 'vitest/config'
 import { WxtVitest } from 'wxt/testing/vitest-plugin'
 
-// WxtVitest：浏览器扩展 API 的内存实现、自动导入、@/ 别名
+// WxtVitest: in-memory extension APIs, auto-imports, and the @/ alias
 export default defineConfig({
   plugins: [WxtVitest()],
   test: {
     environment: 'happy-dom',
-    // fixture 里有外链 CSS / 脚本，测试环境一律不加载，也不执行页面脚本
+    // Fixtures reference external CSS / scripts; never load them or execute page scripts in tests.
     environmentOptions: {
       happyDOM: {
         settings: {
@@ -19,7 +19,7 @@ export default defineConfig({
     },
     include: ['tests/**/*.test.ts'],
     setupFiles: ['tests/setup.ts'],
-    // fixture 级测试要遍历 1.8 MB 页面的全部元素，CI 机器上单例可达 6 s；默认 5 s 会误报
+    // Fixture tests traverse all elements of 1.8 MB pages; one case can take 6 s in CI, exceeding the default 5 s timeout.
     testTimeout: 30_000,
   },
 })

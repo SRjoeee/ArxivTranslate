@@ -1,11 +1,11 @@
-// Chrome 内置翻译（DESIGN §8.4，Phase 0 实测见 RESEARCH §6）。离线、免 key、单句 10–20 ms，
-// 是降级链上唯一不依赖网络也不花钱的一环。隔离世界同样暴露 `Translator`（2026-09-05 实测，RESEARCH §6.3）。
+// Chrome built-in translation (DESIGN §8.4; Phase 0 measurements in RESEARCH §6): offline, no key, 10–20 ms per sentence.
+// The only fallback engine requiring neither network nor payment. `Translator` is also exposed in isolated worlds (2026-09-05, RESEARCH §6.3).
 //
-// 硬规则 4：免费接口视为不稳定——错误独立分类，失败可回退到链上的下一个引擎。
+// Hard rule 4: free interfaces are unstable; classify errors separately and allow fallback to the next engine.
 import { toBcp47 } from '@/config/languages'
 import { ProviderError, type TranslateRequest, type TranslateResult, type TranslationProvider } from './types'
 
-/** 只用到静态的两个方法；注入以便测试（happy-dom 里没有这个全局） */
+/** Only two static methods are needed; injectable for tests (happy-dom lacks this global). */
 export interface TranslatorApi {
   availability(options: { sourceLanguage: string; targetLanguage: string }): Promise<string>
   create(options: { sourceLanguage: string; targetLanguage: string; signal?: AbortSignal; monitor?: (m: unknown) => void }): Promise<TranslatorSession>
@@ -16,29 +16,29 @@ export interface TranslatorSession {
 }
 
 export interface ChromeBuiltinDeps {
-  /** 默认取全局 `Translator`；拿不到就是这个浏览器不支持 */
+  /** Defaults to global `Translator`; missing means this browser does not support it. */
   translator?: TranslatorApi | null
-  /** 会话创建的独立超时；注入以便测试 */
+  /** Independent session-creation timeout, injectable for tests. */
   createTimeoutMs?: number
 }
 
 export const BUILTIN_SOURCE_LANGUAGE = 'en'
 
-/** 同时最多推理多少条；也是 provider 声明的 maxBatchItems */
+/** Maximum concurrent inference calls; also the provider's declared maxBatchItems. */
 export const BUILTIN_MAX_ITEMS = 20
 
 /**
- * 会话创建的独立超时。实测模型就绪后 `create()` 仍要约 8.6 s 本地加载（RESEARCH §6.1），
- * 60 s 留足余量。有这道闸是因为共用的会话 Promise **不接任何一批的 signal**：
- * 没有它，一次永不返回的 `create()` 会永远留在缓存里，之后每次重试都在等同一个死 Promise
- *（Codex 在 #50 指出）
+ * Independent session-creation timeout. Even after the model is ready, create() takes about 8.6s to load locally (RESEARCH §6.1).
+ * 60s leaves ample headroom. This gate is required because the shared session Promise **uses no batch signal**:
+ * otherwise a create() that never returns would stay cached forever, with every retry waiting on the same dead Promise
+ * (Codex #50).
  */
 export const SESSION_CREATE_TIMEOUT_MS = 60_000
 
 /**
- * 极简信号量。本地推理的并发闸要**跨调用**：provider 声明 `maxBatchItems: 20`，
- * 而队列可以同时派发好几个批次，每个批次各自 20 条就是上百个并发推理压在同一个本地模型上。
- * 在调用内部分批只管得住一次调用，管不住整体（Codex 在 #50 指出）
+ * Minimal semaphore. Local inference concurrency must be limited **across calls**: maxBatchItems is 20,
+ * and the queue can dispatch multiple batches at once, producing hundreds of concurrent calls to one local model.
+ * Splitting within each call controls only that call, not the total (Codex #50).
  */
 export function createSemaphore(limit: number) {
   let active = 0
@@ -48,8 +48,8 @@ export function createSemaphore(limit: number) {
       active++
       return Promise.resolve()
     }
-    // 额度由 release 直接转交，等待者醒来时不再自己加计数：
-    // 先减后唤醒会留一个微任务的空档，新来的调用看到有空位也加一次，上限就被冲破（Codex 在 #50 指出）
+    // release transfers the permit directly; a woken waiter must not increment the count again.
+    // Decrementing before waking leaves a microtask gap where new arrivals also take the slot, exceeding the limit (Codex #50).
     return new Promise<void>(resolve => waiting.push(resolve))
   }
   const release = (): void => {
@@ -73,8 +73,8 @@ function globalTranslator(): TranslatorApi | null {
 }
 
 /**
- * 中日韩标点后面多出来的空格：模型逐句翻译后用空格拼接，中文里就成了「。 我们」。
- * 实测见 RESEARCH §6.2。归一化是这个引擎自己的事，不进 protector——占位符协议不关心排版空格。
+ * Extra spaces after CJK punctuation: the model translates sentences separately and joins them with spaces, e.g. "。 我们".
+ * See RESEARCH §6.2. This normalization belongs to the engine, not protector: the placeholder protocol does not handle typographic spacing.
  */
 export function normalizeSpacing(text: string): string {
   return text.replace(/([。，、；：？！）」』】])[ \t]+/g, '$1')
@@ -84,54 +84,54 @@ function toProviderError(e: unknown): ProviderError {
   if (e instanceof ProviderError) return e
   const name = (e as { name?: unknown })?.name
   const message = e instanceof Error ? e.message : String(e)
-  // 没有用户手势就 create()：链上自动降级时拿不到手势，重试也没用，按"配置未就绪"处理，让链永久降级它
-  if (name === 'NotAllowedError') return new ProviderError('no-key', `内置翻译需要用户手势下载语言包：${message}`, { cause: e })
-  if (name === 'NotSupportedError') return new ProviderError('no-key', `这个语言对不支持内置翻译：${message}`, { cause: e })
-  if (name === 'AbortError') return new ProviderError('aborted', '请求已取消', { cause: e })
+  // create() without a user gesture: automatic fallback cannot obtain one and retries cannot help; treat as unconfigured and demote for the session.
+  if (name === 'NotAllowedError') return new ProviderError('no-key', `Built-in translation needs a user gesture to download the language pack: ${message}`, { cause: e })
+  if (name === 'NotSupportedError') return new ProviderError('no-key', `Built-in translation does not support this language pair: ${message}`, { cause: e })
+  if (name === 'AbortError') return new ProviderError('aborted', 'Request cancelled', { cause: e })
   return new ProviderError('unknown', message, { cause: e })
 }
 
 /**
- * @param target 目标语言的 ISO 639-3 码（配置里的形状）；内部转成 BCP-47 给 API
+ * @param target Target ISO 639-3 code from config, converted internally to BCP-47 for the API.
  */
 export function createChromeBuiltinProvider(target: string, deps: ChromeBuiltinDeps = {}): TranslationProvider {
   const api = deps.translator === undefined ? globalTranslator() : deps.translator
   const createTimeoutMs = deps.createTimeoutMs ?? SESSION_CREATE_TIMEOUT_MS
-  // 一个 provider 实例一把闸，所有调用共用
+  // One gate per provider instance, shared across all calls.
   const withPermit = createSemaphore(BUILTIN_MAX_ITEMS)
   const targetLanguage = toBcp47(target)
   const pair = { sourceLanguage: BUILTIN_SOURCE_LANGUAGE, targetLanguage }
   /**
-   * 会话按语言对缓存（照 KISS builtinAI.js 的 #translatorMap）：模型就绪后 create() 仍要约 8.6 s 本地加载
-   *（RESEARCH §6.1），每批新建会话会把 10 ms 的翻译拖成秒级。缓存 Promise 而不是实例，失败时删掉以便重试
+   * Cache sessions by language pair (as in KISS builtinAI.js #translatorMap): create() still takes about 8.6s after the model is ready
+   * (RESEARCH §6.1); creating per batch turns 10 ms translations into seconds. Cache the Promise, deleting it on failure for real retries.
    */
   const sessions = new Map<string, Promise<TranslatorSession>>()
 
   /**
-   * **不接任何一批的 signal**：会话是所有批次共用的，模型加载要几秒到十几秒，
-   * 期间并发的批次都在等同一个 Promise。把首个批次的 signal 传给 create()，
-   * 那一批一超时就会把共用的会话连根拒掉，其余批次全收到 `aborted`——
-   * 而降级链对 `aborted` 既不重试也不降级，等于整页翻译在这里断掉（Codex 在 #50 指出）。
-   * 单次翻译的取消仍然生效，见 translate() 里逐条传的 signal
+   * **Do not use any batch signal**: every batch shares the session, and model loading takes several to tens of seconds.
+   * Concurrent batches wait on one Promise. Passing the first batch's signal to create()
+   * lets its timeout reject the shared session, returning aborted to every other batch.
+   * The fallback chain neither retries nor demotes aborted, so this would halt page translation (Codex #50).
+   * Individual translation cancellation still applies through the per-item signal in translate().
    */
   const sessionFor = (): Promise<TranslatorSession> => {
     const key = `${pair.sourceLanguage}_${pair.targetLanguage}`
     const existing = sessions.get(key)
     if (existing) return existing
     let timer: ReturnType<typeof setTimeout> | undefined
-    // provider 自己的 AbortController：超时不只拒掉包装的 Promise，还要真的中止底层的模型加载，
-    // 否则重试会再起一次加载、挂着的那次照旧在跑，一个标签页里越积越多（Codex 在 #50 指出）。
-    // 与任何一批请求的 signal 无关
+    // Provider-owned AbortController: timeout must abort the underlying model load as well as reject the wrapper Promise.
+    // Otherwise retries start new loads while the old one keeps running, accumulating in the tab (Codex #50).
+    // Independent of every batch request signal.
     const creation = new AbortController()
     const created = new Promise<TranslatorSession>((resolve, reject) => {
       timer = setTimeout(() => {
-        const error = new ProviderError('timeout', `内置翻译会话创建超过 ${createTimeoutMs} ms 未完成`)
+        const error = new ProviderError('timeout', `Built-in translation session creation exceeded ${createTimeoutMs} ms`)
         creation.abort(error)
         reject(error)
       }, createTimeoutMs)
       api!.create({ ...pair, signal: creation.signal }).then(resolve, reject)
     }).catch((e: unknown) => {
-      // 失败（含超时）就把缓存清掉，下一次重试会真的重新创建
+      // Clear the cache on failure, including timeout, so the next attempt actually creates a new session.
       sessions.delete(key)
       throw toProviderError(e)
     }).finally(() => clearTimeout(timer))
@@ -141,20 +141,20 @@ export function createChromeBuiltinProvider(target: string, deps: ChromeBuiltinD
 
   return {
     id: 'chrome-builtin',
-    displayName: 'Chrome 内置翻译（离线）',
+    displayName: 'Chrome built-in translation (offline)',
     kind: 'builtin',
-    // 实测保留 HTML 标签与 void / paired 占位符（RESEARCH §6.2），走 markup 路径
+    // Verified to preserve HTML and void/paired placeholders (RESEARCH §6.2), so use markup.
     preservesMarkup: true,
-    // 本地推理没有网络往返，批大一点省调度开销
+    // Local inference has no network round trip; larger batches reduce scheduling overhead.
     maxBatchChars: 4000,
     maxBatchItems: BUILTIN_MAX_ITEMS,
-    // 本地不需要限流，但保留闸门，免得一次涌入几百条把主线程排满
+    // Local execution needs no network rate limit, but keep a gate to prevent hundreds of calls from flooding the main thread.
     rateLimit: { rate: 20, capacity: 20 },
     async isAvailable() {
       if (!api) return false
       try {
-        // 只认 available：downloadable / downloading 都要用户手势才能 create()，
-        // 链上自动降级时拿不到手势。下载入口在 popup（§8.4）
+        // Only available qualifies: downloadable/downloading require a user gesture for create(),
+        // which automatic fallback cannot obtain. Downloads are initiated from the popup (§8.4).
         return (await api.availability(pair)) === 'available'
       } catch {
         return false
@@ -162,13 +162,13 @@ export function createChromeBuiltinProvider(target: string, deps: ChromeBuiltinD
     },
     async translate(request: TranslateRequest): Promise<TranslateResult> {
       if (request.segments.length === 0) return { segments: [], provider: 'chrome-builtin' }
-      if (!api) throw new ProviderError('no-key', '这个浏览器没有内置翻译 API')
+      if (!api) throw new ProviderError('no-key', 'This browser has no built-in translation API')
       const session = await sessionFor()
       try {
-        // **守住自己声明的上限**：批次是 pipeline 按**首选**引擎的上限规划的，降级链把同一个调用
-        // 原样转过来——首选是 google-web（8000 字 / 100 条）时，这里会一口气对本地模型发起 100 个
-        // 并发推理，正好在需要兜底的时候把它压垮。闸门是 provider 级的：队列可以同时派发多个批次，
-        // 只在一次调用内分批管不住整体（Codex 在 #50 指出）
+        // **Enforce our declared limit**: pipeline plans batches against the preferred engine's limits; fallback passes the same call unchanged.
+        // With google-web preferred (8000 characters / 100 items), that could start 100 local inference calls at once,
+        // overwhelming the fallback exactly when needed. The gate is provider-wide because the queue can dispatch multiple batches;
+        // splitting only within each call does not control the total (Codex #50).
         const texts = await Promise.all(request.segments.map(segment => withPermit(() =>
           session.translate(segment.text, request.signal ? { signal: request.signal } : undefined),
         )))

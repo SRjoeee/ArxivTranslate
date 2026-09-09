@@ -1,17 +1,17 @@
-// 译文到达后的整理（DESIGN §7.2 / §10，issue #46）：脚注归位、拆图、镜像、缩表、对齐边距。
+// Post-render cleanup (DESIGN §7.2 / §10, issue #46): localize notes, split figures, mirror, fit tables, align margins.
 //
-// 以前每一趟都对整个 document 跑一遍五个步骤。实测 2312.17141：一次会话 31 趟、累计 1.9 秒，
-// 而单独一趟只要 34 ms——代价全在重复，尤其两处：
-//   - `createMirrors` 每趟用裸 `:has()` 扫 5 万节点，可译文到达根本不改变任何镜像判定
-//     （块标记在会话开始就写完了，§7.3），第一趟之后全是白扫；
-//   - `fitTables` 里 `measureColumn` 读 `gridTemplateColumns` 的解析值要强制布局，而它是三个写 DOM
-//     的步骤之后第一个读几何的，整篇的强制布局都算在它头上（上游有写的趟 130–158 ms）。
+// Previously all five steps rescanned document on every pass. 2312.17141 took 31 passes / 1.9 s per session,
+// although one pass was only 34 ms. Repetition dominated, especially:
+//   - createMirrors scanned 50,000 nodes with bare :has() every time, though translations never change mirror eligibility
+//     (all blocks are marked at startup, §7.3), making every later scan redundant;
+//   - fitTables' measureColumn forced layout to resolve gridTemplateColumns. As the first geometry read after three DOM-writing steps,
+//     it absorbed the entire page's forced-layout cost (130–158 ms when preceding steps wrote).
 //
-// 现在：pipeline 每批把刚动过 DOM 的块交出来（`onRendered`），合并器攒成脏集合，每趟只整理这些块
-// 所在的那几个容器；镜像整个会话只跑一次；栏宽在每趟**开头、写任何东西之前**读，且只在标记为
-// 陈旧时读——prep 是 setTimeout 任务，开头那一刻浏览器刚渲染过，布局是干净的。
+// Now onRendered reports changed blocks per batch; the coalescer accumulates a dirty set, limiting cleanup to their containers.
+// Mirror once per session. Read column width at the start, before any writes, and only when stale:
+// prep runs in a setTimeout task just after browser rendering, when layout is clean.
 //
-// 五个整理步骤的签名本来就收 `Document | Element`，这里只是终于给了它们一个更窄的根。
+// All five steps already accept Document | Element; this simply supplies narrower roots.
 import { ID_ATTR } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { createCoalescer, type Coalescer } from '@/core/scheduler/coalesce'
@@ -22,33 +22,33 @@ import { dropStaleSplits, outermostFigure, splitFigures } from './split-figures'
 import { fitTables, measureColumn, resetFitCache, watchFontLoads } from './table-fit'
 
 export interface Prep {
-  /** 这些块（或图片目标，§15）刚动过 DOM：排一趟只碰它们所在容器的整理 */
+  /** Schedule cleanup only for containers of blocks / image targets whose DOM just changed (§15). */
   touch(items: ReadonlyArray<{ el: Element }>): void
-  /** 排一趟全量（进 side、栏宽变化、会话开始） */
+  /** Schedule a full pass (enter side, column-width change, session start). */
   touchAll(): void
-  /** 撤掉排着的那一趟（离开 side） */
+  /** Cancel the scheduled pass on leaving side mode. */
   cancel(): void
-  /** 新会话：镜像重新允许跑一次、量宽缓存清空、栏宽重读 */
+  /** New session: allow mirroring again, clear measurements, reread column width. */
   reset(): void
-  /** 栏宽可能变了（窗口宽度变化）：下一趟开头重读 */
+  /** Column width may have changed after resize; reread at the next pass's start. */
   refreshColumn(): void
 }
 
 export interface PrepOptions {
   isSide: () => boolean
-  /** 每趟结束报一行（有变化时）；e2e 与手测靠它 */
+  /** Report each changed pass for e2e and manual checks. */
   trace?: (line: string) => void
-  /** 测试注入：栏宽 */
+  /** Test injection: column width. */
   columnWidth?: (root: Element) => number
   delay?: number
   maxWait?: number
 }
 
 /**
- * 一个脏块要整理的根：它的父元素（同容器里的配对，含相邻兄弟边距的那一对）、
- * 它所有祖先块各自的父元素（内层脚注先于外层块到达时外层的副本要能补上），
- * 以及它所在最外层 figure 的父元素（`splitFigures` 只扫后代，根得比 figure 高一层）。
- * 被别的根包含的根去掉——整理步骤都幂等，重复只是白做
+ * Cleanup roots for a dirty block: its parent (including adjacent pairs whose margins may change),
+ * each ancestor block's parent (refresh outer copies when inner footnotes arrive first),
+ * and its outermost figure's parent (splitFigures searches descendants, so the root must be above the figure).
+ * Remove roots contained by others; cleanup is idempotent, so repeated work is wasteful.
  */
 export function rootsOf(blocks: Iterable<Element>): Element[] {
   const roots = new Set<Element>()
@@ -72,38 +72,38 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
 
   const run = (scope: Element[] | null) => {
     const t0 = performance.now()
-    // 栏宽：写任何东西之前读。这一刻布局是干净的（上一帧刚渲染完），不会付整篇强制布局的钱。
-    // 要拿**翻译根**去量，不是 <html>：measureColumn 靠 closest(DOCUMENT_ROOT) 找网格轨道，
-    // 从 <html> 出发找不到、退路的 parentElement 又是 null，结果栏宽 0、整趟一张表都不缩
-    //（e2e 抓到：1440px 下 0 张缩放、3 张超栏）
+    // Read column width before writing anything, while layout is clean after the previous frame; avoid forced page layout.
+    // Measure from the translation root, not <html>. measureColumn uses closest(DOCUMENT_ROOT) to find grid tracks;
+    // <html> cannot find it and has no fallback parent, yielding zero width and fitting no tables
+    // (e2e caught zero fitted tables and three overflowing columns at 1440 px).
     if (options.isSide() && columnStale) {
       const root = doc.querySelector(DOCUMENT_ROOT) ?? doc.documentElement
       column = columnWidth(root)
       columnStale = false
     }
     const roots: Array<Document | Element> = scope === null ? [doc] : rootsOf(scope)
-    // 边距先**读**：这一刻还没写任何东西，样式是干净的（上一帧刚渲染完，pipeline 插的译文早就算过了）。
-    // 放到插节点之后再读，`:has()` 的失效会让这一次 getComputedStyle 花掉整篇重算的钱
+    // Read margins before any writes, while styles are clean; the previous frame already accounted for inserted translations.
+    // Reading after insertion would charge this getComputedStyle for the full :has() invalidation recalculation.
     let margins: PairMarginPlan[] = options.isSide() ? roots.map(r => readPairMargins(r)) : []
     let notes = 0
     for (const r of roots) notes += localizeNotes(r)
     const t1 = performance.now()
-    // 签名过期的拆图副本先丢掉：非 side 下叠加层进了被隐藏的原件那种（§15.2），回 side 全量再重建；
-    // side 下也要——插图唯一的译文（叠加层）被摘掉后 needsSplit 为假、splitFigures 会跳过它，旧副本就一直挂着（Codex 在 #89 指出）
+    // Discard stale split copies first: overlays may enter hidden originals outside side mode (§15.2); rebuild on returning to side.
+    // Also in side mode: removing a figure's only translation (overlay) makes needsSplit false, so splitFigures would leave its stale clone (Codex #89).
     for (const r of roots) dropStaleSplits(r)
     if (!options.isSide()) return
 
-    // 先整块拆插图，再补镜像：拆过的插图不再参与镜像（两套方案会重复一份）
+    // Split whole figures before adding mirrors; split figures are excluded from mirroring to avoid duplication.
     let split = 0
     for (const r of roots) split += splitFigures(r)
     const t2 = performance.now()
-    // 镜像整个会话只跑一次，而且要等块标记写完（否则整块克隆，issue #67）：
-    // 判定全看 data-axt-id 与 .axt-t 兄弟，译文到达不会改变任何一处
+    // Mirror once per session, after all block markers are written (otherwise wholesale cloning, issue #67).
+    // Eligibility uses only data-axt-id and .axt-t siblings; translation arrivals change neither.
     let made = 0
     if (scope === null && !mirrorsDone && doc.querySelector(`[${ID_ATTR}]`)) {
       made = createMirrors(doc)
       mirrorsDone = true
-      // 镜像也是译文节点，同样受站点相邻兄弟规则影响，得在它们插进来之后再读一次——整个会话只有这一趟
+      // Mirrors also inherit adjacent-sibling site rules; read margins once more after insertion, only on this one session pass.
       if (made) margins = [readPairMargins(doc)]
     }
     const t3 = performance.now()
@@ -115,12 +115,12 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
       scrolled += fit.scrolled
     }
     const t4 = performance.now()
-    // 边距最后**写**：读是趟开头做的
+    // Write margins last; readings were taken at the start.
     let aligned = 0
     for (const plan of margins) aligned += writePairMargins(plan)
     const t5 = performance.now()
 
-    // 每趟都报（包括什么都没做的）：累计耗时要把"白跑"的趟也算进去，e2e 的整理成本断言靠它
+    // Report every pass, including no-ops: e2e's cleanup-cost assertions need total time, including wasted passes.
     options.trace?.(
       `side prep${scope === null ? ' (full)' : ` (${scope.length} blocks, ${roots.length} roots)`}: `
       + `+${split} figures split, +${made} mirrors, ${fitted} tables scaled, ${scrolled} scrollable, ${aligned} margins aligned, ${notes} notes localized; `
@@ -129,7 +129,7 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
   }
 
   const coalescer: Coalescer<Element> = createCoalescer(run, { delay: options.delay ?? 150, maxWait: options.maxWait ?? 1000 })
-  // 字体加载完成：自然宽度变了（缓存由 watchFontLoads 清），栏宽也顺手重读一次，然后全量整理一趟
+  // Loaded fonts change natural width (watchFontLoads clears its cache); reread column width and schedule a full pass too.
   watchFontLoads(doc, () => {
     columnStale = true
     coalescer.schedule()

@@ -1,13 +1,13 @@
-/* 三种模式的样式（DESIGN §7.2 / §7.3 / §7.4 / §7.5）。模式由 <html data-axt-mode> 决定，切换只改这一个属性。
-   预设颜色由 presets.css 的 --axt-* 变量提供 */
+/* Three reading modes (DESIGN §7.2 / §7.3 / §7.4 / §7.5), controlled solely by <html data-axt-mode>.
+   Preset colors come from presets.css --axt-* variables. */
 
-/* 译文节点复制了原块的 class（§7.1），字体、字号、行高由站点样式决定；这里不能再写 font: inherit，
-   我们的 <style> 排在站点样式之后，同等特异度会把 .ltx_title_abstract 的 1.4rem、.ltx_bibitem 的字体覆盖掉（实测 2609.00064） */
+/* Translations copy original classes (§7.1), inheriting site font, size, and line height. Never add font:inherit here:
+   our later <style> would override equal-specificity .ltx_title_abstract 1.4rem and .ltx_bibitem fonts (2609.00064). */
 .axt-t {
   color: var(--axt-color, inherit);
 }
 
-/* 等待态（§7.6）：pending 译文节点里只有一个圆环，圆环颜色照 Read Frog 的 host-theme.css（浅 / 深两档） */
+/* Pending (§7.6): translation nodes contain only spinners, colored from Read Frog host-theme.css (light / dark). */
 html[data-axt-on] {
   --axt-muted: oklch(0.556 0 0);
 }
@@ -17,12 +17,12 @@ html[data-axt-on] {
   }
 }
 
-/* stack / only：译文紧跟原文，压掉站点为该标签留的大边距。
-   side 模式不能这么做——译文与原文同处一行，边距不一致会让两边错位
-   （实测 h2 差 19px、figure 差 64px），那里让译文沿用 class 自带的边距 */
-/* 译文与原文逐字相同（默认提示词让模型保留人名、期刊名等原文，引文作者段整段返回原样）：
-   stack 是上下两行，重复显示没有意义，藏掉。side 要靠它撑住右栏、only 把原块藏了，两边都保留。
-   `data-axt-identity` 由 renderText 判定后打上（Codex 在 #74 指出） */
+/* Stack / only: translations follow originals with reduced site margins.
+   In side mode, unequal margins misalign paired rows (measured h2: 19 px, figure: 64 px);
+   retain class-provided margins there. */
+/* Identical source / translation (default prompts preserve names, journals, etc.; citation author segments may return unchanged):
+   hide redundant stacked rows. Retain them in side for alignment and in only where originals are hidden.
+   renderText sets data-axt-identity after comparison (Codex #74). */
 html[data-axt-mode="stack"] .axt-t[data-axt-identity] {
   display: none;
 }
@@ -31,7 +31,7 @@ html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption,
   margin: 0.25em 0 0;
 }
 
-/* 短标题同行（§7.3）：inline-block 保留标题自身的上下 margin，译文紧跟其后 */
+/* Inline short titles (§7.3): inline-block retains vertical margins, with the translation immediately after. */
 [data-axt-inline] {
   display: inline-block;
   vertical-align: baseline;
@@ -40,77 +40,70 @@ html:not([data-axt-mode="side"]) :is(p, div, h1, h2, h3, h4, h5, h6, figcaption,
   margin-inline-start: 0.5em;
 }
 
-/* 翻译失败的块：左侧一条细提示线，原文照常可读（§7.4）。
-   翻了一半的表（data-axt-partial）同样画线，但它仍是 translated，only 模式下照常只显示克隆 */
+/* Failed blocks: thin left border, source still readable (§7.4).
+   Partial tables get the same border via data-axt-partial but remain translated, so only mode still shows just their clones. */
 [data-axt-state="failed"],
 [data-axt-partial],
 [data-axt-partial] + .axt-t {
   box-shadow: inset 3px 0 0 var(--axt-failed-color, rgba(220, 38, 38, 0.6));
 }
 
-/* 高度为 0 的分页标记（`\newpage` 的产物，屏幕上没有任何内容）：块布局里它那 32px 上边距会与
-   相邻的边距**折叠**，只占一段；side 模式下 .ltx_document 是网格容器（列线只在它身上定义一次，见下），
-   网格禁用子元素间的外边距折叠，于是每个标记都实打实地贡献 32px。
-   实测 2609.03001v1（摘要与第一节之间夹着**两个**标记，中间那个 nav.ltx_TOC 被我们隐藏了）：
-   摘要块底到第一节顶，未翻译 32px、side 96px（用户反馈"间距被拉大"）。
+/* Zero-height pagination markers (from \newpage, with no visible content) have 32 px top margins that collapse in block layout.
+   Side-mode .ltx_document is a grid (tracks defined once below); child margins cannot collapse, so each marker adds a full 32 px.
+   In 2609.03001v1, two markers between abstract and first section, with the intervening nav.ltx_TOC hidden,
+   expanded the gap from 32 px untranslated to 96 px in side mode (user report).
 
-   **单独出现的标记也一起归零**，理由是实测（Codex 在 #73 建议只归零成对的，核实后没采纳）：
-   2312.17141 那个夹在两个普通段落之间的独立标记，块布局下前后间距 32px——它的 32px 上边距
-   与前段的 24px 下边距折叠，净贡献只有 8px。同一处在 side 网格下：不归零是 56px（24 + 32 累加，
-   比原始多 24），归零是 24px（只剩前段的下边距，比原始少 8）。网格里没法用静态 CSS 复现
-   「取最大值」的折叠语义，两种都不准，归零偏离得更少；而成对那种（用户实际报告的场景）
-   只有归零才回得到 32px。代价是独立标记处少 8px 的分隔 */
+   Zero isolated markers too, based on measurements (Codex #73 suggested paired markers only; verification led us to reject that).
+   In 2312.17141 an isolated marker between ordinary paragraphs contributes only 8 px in block layout:
+   its 32 px top margin collapses with the previous 24 px bottom margin, giving a 32 px total gap.
+   In side grid, retaining it yields 56 px (24 + 32, 24 px too much); zeroing gives 24 px (8 px too little).
+   Static grid CSS cannot reproduce max-of-margins collapsing. Both differ, but zeroing is closer;
+   paired markers, the reported problem, return to 32 px only when zeroed. Cost: isolated-marker gaps shrink by 8 px. */
 html[data-axt-mode="side"] .ltx_pagination {
   margin-block: 0;
 }
 
-/* ── side：左右对照（§7.2）────────────────────────────────────────────────
-   两条列线**只在 .ltx_document 上定义一次**，其余容器用 subgrid 继承同一组线。
-   否则每个容器按自己的宽度各切一半，列表里缩进的段落、参考文献条目的分界线会和正文错开
-   （实测同一页出现 720 / 715 / 736 三个位置）。 */
+/* ── side: side-by-side (§7.2) ──
+   Define column tracks once on .ltx_document; other containers inherit them via subgrid.
+   Splitting each container independently misaligns indented list paragraphs / bibliography dividers
+   (measured positions 720 / 715 / 736 on one page). */
 html[data-axt-mode="side"] {
-  /* 用 rem 不用 em：右侧沟槽的规则要拿它算栏宽，em 会在脚注的 .85rem 字号里被重新解释 */
+  /* Use rem, not em: gutter rules calculate column widths from this; em would be reinterpreted at footnotes' .85rem font size. */
   --axt-gap: 1.5rem;
 }
 
 html[data-axt-mode="side"] .ltx_document {
   display: grid;
-  /* 必须是 minmax(0, 1fr) 而不是 1fr：1fr 等价于 minmax(auto, 1fr)，
-     那个 auto 下限是轨道内容的 min-content 宽度。英文列的下限是最长单词（还有宽表格、长公式），
-     中文可以逐字换行、下限接近 0，于是空间不够时英文列守住下限、中文列被单方面压窄
-     （实测文章列 600px 时两栏变成 317 / 227）。归零下限后两栏恒等宽，实测 272 / 272 */
+  /* Must use minmax(0, 1fr), not 1fr (= minmax(auto, 1fr)). The auto minimum is track min-content width:
+     English is limited by long words / wide tables / formulas, while Chinese wraps per character with a near-zero minimum.
+     When space is tight, English keeps its minimum and squeezes Chinese (600 px article: 317 / 227 px columns).
+     Zero minima keep equal widths, measured 272 / 272 px. */
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   column-gap: var(--axt-gap);
   align-items: start;
 }
 
-/* 参与配对的容器 = **内部含有译文或块标记（data-axt-id）的元素**，减去一小撮明确排除的。
-   块标记在翻译会话一开始就打上（§10），所以开翻那一刻整页一次性变成两栏，之后不再横向跳动；
-   只认译文的话，懒加载下预翻译距离之外的块一直通栏、进入边距才缩到左栏（用户反馈，2026-09-05 修订）。
-   早期版本在这里列举容器类名（.ltx_para、.ltx_section……），但那是个开放集合：
-   定理环境 .ltx_theorem、\resizebox 的包裹层 .ltx_transformed_inner、证明块 .ltx_proof、
-   作者注 .ltx_author_notes 都是逐个被用户发现后才补进去的，补一个漏一个。
-   改成按结构判定后（实测 2609.00097：右栏元素 250→254、未配对 5→1；2609.00095：108→111），
-   新出现的包裹层自动生效，不需要维护清单。
-   排除项各有理由（清单的事实来源在 src/core/renderer/side-layout.ts，测试守着两边一致）：
-   译文自身不是容器；表格内部结构改成网格会毁掉表格；
-   .ltx_inline-block / .ltx_listing 是行内与预格式化上下文——但 `\resizebox` 的包裹层
-   （.ltx_transformed_outer）不算：ar5iv 自己把它的宽高与内层 transform 抹平了，它只是个装一件东西的壳，
-   排除它会让里面的表格配对够不到列线、横跨分割线（实测 2606.07636v2）；
-   脚注要连**整棵子树**一起排除——ar5iv 把折叠状态写在 .ltx_note_outer 的 display:none 上，
-   译文一插进脚注内部，容器规则就会命中 :has(.axt-t) 把它改成 grid，折叠的脚注被掀开、
-   165px 高 781px 宽横在正文中间，与中栏译文互相干扰（实测 2312.17141，用户反馈）；
-   .ltx_p / .ltx_title / .ltx_caption / .ltx_bibblock 本身就是配对的成员，
-   内部若有译文（脚注那种嵌套）不该再开一套两栏。
-   多面板插图（有任何一个格子不是整栏 ltx_flex_size_1 的 .ltx_flex_figure）用 flex 让面板并排，接管成网格后每个面板各占一行、
-   撑满整个文章列（实测 2410.00260：原本 left 321 / 721 各 398 宽，接管后都在 321、798 宽），所以连整棵子树一起排除，
-   里面的配对按块级上下堆叠、不生成镜像。所有格子都是 size_1 的单列 flex 图不排除：格子整栏宽，
-   表格与脚注照常左右配对（实测 2609.03768v1 的 Table 1，以前按类名整类排除，被堆叠成上下排）。
-   排除项只能是**本身不是网格**的元素：排除一个网格祖先并不能阻止它的后代去 subgrid 那个外来网格。
-   ar5iv 的 .ltx_enumerate 曾经在排除清单里，结果列表项内的段落 subgrid 了它的编号网格，
-   英文横跨分割线、中文挤成 39px 的窄条（实测 2609.00097）；这类网格必须接管而不是排除。
-   整体包在 :where() 里让权重为 0，否则会压过下面的配对规则（实测过这个坑）。
-   column-gap 要显式写——.ltx_biblist 自带 3em 的间距，subgrid 会用容器自己的值，右栏偏 12px */
+/* Pairing containers contain translations or block markers (data-axt-id), minus explicit exclusions.
+   Marking at session start (§10) makes the whole page two columns at once, avoiding later horizontal shifts.
+   Translation-only matching left distant lazy blocks full-width until they entered the prefetch margin (user report, revised 2026-09-05).
+   Earlier class enumeration (.ltx_para, .ltx_section, etc.) was open-ended: .ltx_theorem, resizebox's
+   .ltx_transformed_inner, .ltx_proof, and .ltx_author_notes were added one by one after user reports, always leaving more gaps.
+   Structural classification handles new wrappers automatically (2609.00097: right-column items 250→254, unpaired 5→1; 2609.00095: 108→111).
+   Exclusion reasons (source of truth: src/core/renderer/side-layout.ts; tests keep lists aligned):
+   translations are not containers; making table internals grids breaks tables;
+   .ltx_inline-block / .ltx_listing are inline / preformatted contexts, except resizebox's .ltx_transformed_outer.
+   ar5iv removes its dimensions and inner transform, leaving a single-content shell; excluding it prevents table pairs from reaching tracks,
+   so they cross the divider (2606.07636v2).
+   Exclude entire footnote subtrees: ar5iv collapses .ltx_note_outer with display:none. A nested translation would match :has(.axt-t),
+   override display to grid, and expose a 165 px tall, 781 px wide note amid body text, interfering with translations (2312.17141; user report).
+   .ltx_p / .ltx_title / .ltx_caption / .ltx_bibblock are pair members themselves; nested translations must not create another two-column grid.
+   Multi-panel .ltx_flex_figure (any cell not ltx_flex_size_1) uses flex to place panels side by side. Grid takeover puts each panel on its own full-width row
+   (2410.00260: originally left 321 / 721, width 398 each; afterward both left 321, width 798). Exclude their entire subtrees: pairs stack, no mirrors.
+   Single-column size_1 figures remain included: full-width cells pair tables and footnotes normally (2609.03768v1 Table 1 was wrongly stacked by class-wide exclusion).
+   Exclusions must be nongrid elements: excluding an existing grid cannot stop descendants subgridding the site's tracks.
+   Excluding ar5iv .ltx_enumerate let paragraphs inherit its numbering grid, pushing English over the divider and squeezing Chinese to 39 px (2609.00097).
+   Such grids must be taken over. Wrap in :where() for zero specificity, or it overrides pairing rules below (observed).
+   Set column-gap explicitly: .ltx_biblist's own 3em gap would otherwise be used by subgrid, shifting the right column 12 px. */
 html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(:is(.axt-t, table, thead, tbody, tr, td, th, .ltx_inline-block:not(.ltx_transformed_outer), .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *, .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)), .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)) *))) {
   display: grid;
   grid-template-columns: subgrid;
@@ -119,9 +112,9 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
   align-items: start;
 }
 
-/* 配对按结构：带块标记（data-axt-id）的块一律占左栏、右栏等译文；没有块标记但后面紧跟 .axt-t 兄弟的
-   （镜像的原件）同样占左栏。容器内其余内容默认通栏——标题、图表说明、参考文献片段都不必各写一条规则。
-   版式由"这一块在翻译会话里"决定，不由"译文到了没"决定（§7.2）。构建会把嵌套编译成扁平选择器 */
+/* Structural pairing: marked blocks occupy the left, reserving the right for translation. Unmarked nodes with adjacent .axt-t mirrors also occupy the left.
+   Other container content spans both columns; headings, captions, and bibliography segments need no separate rules.
+   Session membership determines layout, not translation arrival (§7.2). The build flattens nested selectors. */
 html[data-axt-mode="side"] .ltx_document,
 html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(:is(.axt-t, table, thead, tbody, tr, td, th,
   .ltx_inline-block:not(.ltx_transformed_outer), .ltx_note, .ltx_note *, .ltx_listing, .ltx_p, .ltx_title, .ltx_caption, .ltx_bibblock, [data-axt-split], [data-axt-split] *, .axt-split, .axt-split *, .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)), .ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1)) *))) {
@@ -129,8 +122,8 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
     grid-column: 1 / -1;
   }
 
-  /* 参考文献条目里没有配对的内容（序号、作者段）留在左栏，不要横跨分割线（实测 2609.00097）。
-     必须排在配对规则之前：两者特异度相同，写在后面会把译文也钉进左栏 */
+  /* Unpaired bibliography content (numbers, author segments) stays left, without crossing the divider (2609.00097).
+     Must precede equal-specificity pairing rules, or translations would also be pinned left. */
   &.ltx_bibitem > * {
     grid-column: 1;
   }
@@ -143,27 +136,26 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
     grid-column: 2;
   }
 
-  /* 网格不与子元素折叠外边距：块布局里**最后一行**的下边距会并进容器自己的下边距，
-     网格里它变成实打实的一段空白（实测摘要块因此高出 24px）。最后一行 = 最后一个子元素，
-     加上"译文正好是最后一个"时它前面的那个原文 */
+  /* Grid does not collapse child margins: the last row's bottom margin normally merges with its container's margin,
+     but adds real space in grid (abstract grew 24 px). The last row includes the last child
+     and its preceding original if that last child is a translation. */
   & > :last-child,
   & > :nth-last-child(2):has(+ .axt-t) {
     margin-block-end: 0;
   }
 
-  /* 只有同行短标题需要清掉那 0.5em；对其余译文清零会压掉 .ltx_centering 的 auto 边距，
-     镜像图片就会贴着栏首而不是像原图那样居中（实测 2609.00097） */
+  /* Clear 0.5em only for inline short titles. Clearing all translations would override .ltx_centering auto margins,
+     left-aligning mirrored images instead of centering like originals (2609.00097). */
   & > .axt-t[data-axt-inline] {
     margin-inline-start: 0;
   }
 
-  /* 列表标记（§7.2）：ar5iv 有三套排法——itemize 用 margin-inline-start: -2.5rem 悬挂、
-     enumerate 用自己的两列网格加 grid-area: 1/1、description 用 float。把列表项接管成网格后，
-     这三种都会被**网格项块级化**：标记变成整行的块，单独占一行落在正文上方
-     （实测 2312.17141：89 个列表项全部如此，标记被拉到 388px 宽）。
-     两栏各自是一份完整的列表，所以标记也要有两份：原件挂左栏的槽，镜像挂右栏的槽。
-     绝对定位的子元素不是网格项、不会被块级化；50% 落在两栏正中，加半个间距正好是右栏起点
-     （项目跨满两栏，宽度 = 2×栏宽 + 间距，故 50% + 间距/2 ≡ 栏宽 + 间距，实测精确命中 732px） */
+  /* List markers (§7.2): ar5iv uses negative margin-inline-start: -2.5rem for itemize,
+     a two-column grid with grid-area:1/1 for enumerate, and float for description. Grid takeover blockifies all three,
+     turning markers into separate full rows above content (all 89 items in 2312.17141, markers stretched to 388 px).
+     Each column needs a complete list: original markers use the left slot, mirrors the right.
+     Absolutely positioned children are not grid items and avoid blockification. 50% is the midpoint; adding half the gap reaches the right-column start.
+     Item width = 2 × column width + gap, so 50% + gap/2 = column width + gap (measured exactly 732 px). */
   &.ltx_item:has(> .ltx_tag) {
     position: relative;
     padding-inline-start: 0;
@@ -184,30 +176,29 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
     inset-inline-start: calc(50% + var(--axt-gap) / 2);
   }
 
-  /* 缩进也要两栏各一份。不能加在列表容器或列表项上：**subgrid 容器自己的 inline padding
-     会吃掉第一条轨道**，于是左栏窄一截、右栏顶格（实测 2312.17141：左 444 / 右 484，
-     左侧文字缩进 40px 而中文顶格——就是用户看到的"译文没有缩进"）。
-     加在格子内容上则只影响它自己，两栏因此对称（实测 83/83 项：文字 264 / 772，栏宽 484 / 484） */
+  /* Indent both columns separately. Inline padding on a list / item subgrid container consumes its first track,
+     narrowing only the left (2312.17141: 444 / 484 px, 40 px English indent while Chinese starts flush; reported missing translation indent).
+     Padding cell contents affects only that cell, restoring symmetry (83/83 items: text x=264 / 772, columns 484 / 484 px). */
   &:is(.ltx_itemize, .ltx_enumerate, .ltx_description) {
     padding-inline-start: 0;
   }
 
-  /* 只缩进**容器的直接子元素**，不能写成后代选择器：列表项里任意深度的译文都会被缩进，
-     包括深埋在脚注里的那份——实测 2312.17141 的脚注译文被塞了 40px 的标记槽，
-     在边注里比原文缩进一截（用户反馈"位置是乱的"）。配对放置本来也只作用于直接子元素，这里保持一致 */
+  /* Indent direct container children only. Descendant selectors would indent translations at every depth,
+     including footnotes (2312.17141 gained a 40 px marker slot inside margin notes, misaligning translations; user report).
+     Pair placement also targets direct children; keep the same boundary. */
   &:is(.ltx_item, .ltx_item *) > :where([data-axt-id], :has(+ .axt-t), .axt-t):not(.ltx_tag) {
     padding-inline-start: 2.5rem;
   }
 
-  /* 没有配对的项（只有公式的项、被跳过的项）及其镜像也走同一个标记槽。它们不是网格、保留着 ar5iv 的悬挂式标记
-     （itemize：margin-inline-start: -2.5rem），而列表容器的内边距已经归零，悬挂的标记就伸出文章列压到导航栏上
-     （实测 2609.04056v1 Definition 1.2：标记 x=208、兄弟项 248；镜像同样悬挂进栏间距）。
-     display: block 是为了脱离 ar5iv 给 enumerate 项的自带网格 */
+  /* Unpaired items (formula-only / skipped) and mirrors use the same marker slot. They are not grids and retain ar5iv's hanging markers
+     (itemize margin-inline-start:-2.5rem). With list padding zeroed, markers would extend into navigation
+     (2609.04056v1 Definition 1.2: marker x=208 vs. siblings 248; mirrors also hang into the column gap).
+     display:block escapes ar5iv's enumerate-item grid. */
   &:is(.ltx_itemize, .ltx_enumerate, .ltx_description) > .ltx_item:not(:has(.axt-t, [data-axt-id])) {
     display: grid;
-    /* 标记列**至少** 2.5rem（与配对项的槽同宽，窄标记两边对齐），需要时长到标记的实际宽度：
-       写死 2.5rem 的话 \item[(Assumption 1)] 这类宽标记会盖住正文（Codex 在 #40 指出）。
-       这里不能像配对项那样用绝对定位——绝对定位不占位，槽宽就没法跟着标记走 */
+    /* Marker tracks are at least 2.5rem, matching paired slots for narrow-marker alignment, and grow to fit wider labels.
+       Fixed 2.5rem makes \item[(Assumption 1)] overlap text (Codex #40).
+       Unlike paired markers, these cannot be absolute: absolute elements reserve no space, so the slot cannot grow with them. */
     grid-template-columns: minmax(2.5rem, max-content) minmax(0, 1fr);
     margin-inline-start: 0;
     padding-inline-start: 0;
@@ -225,11 +216,11 @@ html[data-axt-mode="side"] .ltx_document :where(:has(.axt-t, [data-axt-id]):not(
   }
 }
 
-/* 表格装进自己那一栏（§7.2）：论文里的数值表最小内容宽度普遍超过半栏——实测同一页三张表是
-   509 / 551 / 613px，栏宽只有 484px——塞进一栏会溢出到隔壁与译文表重叠（实测 2609.00095）。
-   表格压不到 min-content 以下，所以按比例缩小：renderer 量出需要的比例、落到下面这几档，
-   实测那三张只需 0.85 / 0.95 / 0.75，六列齐全、字仍清楚，左右对照得以保留。
-   缩到 0.7 还装不下的极端表格退化为栏内横向滚动，至少不会压到隔壁。 */
+/* Fit tables within their columns (§7.2): numeric tables often exceed half-column min-content width.
+   Measured 509 / 551 / 613 px tables in a 484 px column overlapped translated tables (2609.00095).
+   Tables cannot shrink below min-content; renderer measures ratios and chooses these zoom tiers.
+   Those three needed only 0.85 / 0.95 / 0.75, retaining six columns, legibility, and comparison.
+   Tables still too wide at 0.7 scroll locally instead of overlapping adjacent columns. */
 html[data-axt-mode="side"] [data-axt-fit="95"] { zoom: 0.95; }
 html[data-axt-mode="side"] [data-axt-fit="90"] { zoom: 0.9; }
 html[data-axt-mode="side"] [data-axt-fit="85"] { zoom: 0.85; }
@@ -243,51 +234,51 @@ html[data-axt-mode="side"] [data-axt-fit="scroll"] {
   max-width: 100%;
 }
 
-/* 堆叠区：这些格子里不做左右分栏，配对降级为上下堆叠。
-   表格单元格与 inline-block 是段内嵌套的容器，硬分两列会溢出，而且它们够不到文档的轨道，
-   不降级就会各自长出隐式两列（多面板 flex 图不在这里：它整棵子树都不是容器，见上面的排除清单）。
-   内层用 :is(...) 而不是 :where(...)：要压过上面 (0,2,1) 的容器规则。
-   脚注子树要排除：改它的 display 会把 ar5iv 折叠起来的脚注掀开。
-   嵌套的 .ltx_flex_figure 也要排除：它本身是 flex（面板并排），含译文时会命中 :has(.axt-t) 被压成 block，
-   内层面板就竖着摞起来（2312.17141 有这种嵌套；Codex 在 #25 指出） */
+/* Stacked regions: pair vertically, not side by side. Table cells and inline-block are nested within blocks,
+   cannot reach document tracks, and would overflow or create implicit columns without fallback.
+   Multi-panel flex figures are excluded as entire subtrees above, not here.
+   Use :is(), not :where(), inside to override the (0,2,1) container rule.
+   Exclude footnote subtrees to preserve collapsed display states.
+   Also exclude nested .ltx_flex_figure: matching :has(.axt-t) would override flex with block and stack its panels
+   (nested examples in 2312.17141; Codex #25). */
 html[data-axt-mode="side"] :is(.ltx_td, .ltx_inline-block:not(.ltx_transformed_outer)) :is(.ltx_para, .ltx_abstract, :has(.axt-t, [data-axt-id])):not(:is(.ltx_note, .ltx_note *, .ltx_flex_figure)) {
   display: block;
 }
 
-/* 单列 flex 图接管成子网格后，ar5iv 的换行占位 .ltx_flex_break 是个零高的空网格项，隐藏 */
+/* After single-column flex figures become subgrids, hide ar5iv's empty zero-height .ltx_flex_break grid items. */
 html[data-axt-mode="side"] .ltx_flex_figure:not(.ltx_flex_figure:has(> .ltx_flex_cell:not(.ltx_flex_size_1))) > .ltx_flex_break {
   display: none;
 }
 
-/* 镜像节点只在 side 模式出现（§7.2）：其他模式下它会让公式、图表重复一份 */
+/* Mirrors appear only in side mode (§7.2); elsewhere they duplicate formulas and figures. */
 html:not([data-axt-mode="side"]) .axt-mirror {
   display: none;
 }
 
-/* 脚注（§7.2）：arXiv 把脚注渲染成挂在**页面右缘**的边注（视口 ≥ 96rem 时常驻，
-   `.ltx_note_outer` 用 float 加负的 margin-inline-end 推到文章外；更窄则折叠、hover 弹出）。
-   那个位置是对的，不要动它——试过把边注收进本栏，正文被挤、列表项还被盖住（用户反馈"影响阅读"）。
-   要解决的是**同一条脚注出现两次**：段落译文由占位符协议回填，脚注是受保护节点，
-   于是译文段落里会重建一份原文脚注。localizeNotes 把译文复制进那份副本（副本因此是原文 + 译文，
-   上下排），原件那份就多余了——它标上 data-axt-note 后由这条规则整框隐藏。
-   只隐藏**确实复制过**的那份：没复制成时原样显示，不会把脚注弄丢 */
+/* Footnotes (§7.2): arXiv displays them at the page's right edge, persistent at viewport ≥96rem;
+   .ltx_note_outer uses float plus negative margin-inline-end, collapsing to hover popups at narrower widths.
+   Preserve this position: moving notes into the column squeezed body text and covered list items (user reported impaired reading).
+   The problem is duplication: placeholder rehydration reconstructs protected source footnotes inside translated paragraphs.
+   localizeNotes copies their translations into these clones, stacking source above translation.
+   The original is now redundant; data-axt-note marks it for whole-box hiding here.
+   Hide only after a successful copy. Otherwise retain the original, never lose the note. */
 html[data-axt-on] .ltx_note[data-axt-note] > .ltx_note_outer {
   display: none;
 }
 
-/* 搬进副本的译文：另起一行接在原文下面。它已经被摘掉 .ltx_note_content，
-   不再套一层 ar5iv 的脚注框（那会多一条 double 顶边线与 9.6px 缩进） */
+/* Copied translation starts a new line after the source. Its .ltx_note_content class was removed,
+   avoiding nested ar5iv footnote boxes with extra double top borders and 9.6 px indents. */
 html[data-axt-on] .axt-note-t {
   display: block;
   margin-top: 0.35em;
 }
 
-/* 整块拆开的插图（§7.2）：左份是原件、只显示原文，右份是副本、只有译文。
-   插图里的图与公式没有译文，按块配对右栏就空着；整张图跨两栏又等于放弃对照，
-   所以整块复制一份。两份结构相同，行天然对齐。
-   **不缩放**：栏窄了让 ar5iv 自己重排（.ltx_flex_figure 本身就是 flex-flow: wrap，
-   实测 2312.17141 满栏 342px 高、半栏 546px 且不溢出）；实在不能重排的（宽公式、宽 SVG，
-   实测 8 张图里 3 张溢出 78 / 102 / 209px）退化为栏内横滑，字号一律不动 */
+/* Whole split figures (§7.2): original with source text on the left, translation-only clone on the right.
+   Images / formulas lack translations, leaving gaps under block pairing; spanning both columns loses comparison.
+   Whole-figure clones retain matching structure and naturally aligned rows.
+   Do not scale: ar5iv's .ltx_flex_figure already wraps (2312.17141: 342 px full-width height, 546 px half-width, no overflow).
+   Content that cannot reflow (wide formulas / SVG; 3 of 8 measured figures overflowed 78 / 102 / 209 px)
+   scrolls horizontally within its column. Never change font size. */
 html[data-axt-mode="side"] [data-axt-split] .axt-t {
   display: none;
 }
@@ -297,7 +288,7 @@ html[data-axt-mode="side"] :is([data-axt-split], .axt-split) {
   overflow: auto hidden;
 }
 
-/* stack 只看原件（它内部本来就是原文 + 译文上下排），only 只看副本（它只有译文） */
+/* Stack shows originals (already source + translation); only shows translation-only copies. */
 html[data-axt-mode="stack"] .axt-split {
   display: none;
 }
@@ -306,24 +297,24 @@ html[data-axt-mode="only"] [data-axt-split] {
   display: none;
 }
 
-/* ── 宽度契约（§7.2 [决定]，2026-09-05 定稿）──────────────────────────────
-   arXiv 的 body 是五列网格 `1fr nav article aside 1fr`（主题 `--nav-width: minmax(14rem, 25rem)`、
-   文章 52rem 居中；第 4 列没有命名区域，只给 ar5iv 挂在文章右侧的边注 / 致谢 / 出版说明留位）。
-   side 模式要把文章列拉宽成两栏，三列一起定，次序是**正文优先**：
-   - 两侧先按"正文吃满 96rem 之后还剩多少"取，下限 14rem、上限 25rem——两个数都是 arXiv 主题 --nav-width 的原生范围
-   - 正文吃掉其余的，封顶 96rem（arXiv 自己的上限）：宽窗口下每栏 740px，与改动之前逐像素相同
-   - 两侧对称，所以文章始终居中；封顶之后多出来的宽度落到两侧的 1fr 页边距（--axt-margin-w）
-   三个 token 都是 100vw 的闭式函数：依赖列宽的规则直接引用，不需要 JS 去量轨道。
-   ar5iv 的 --main-width / --main-width-margin 跟着文章列走。
+/* ── Width contract (§7.2 [Decided], finalized 2026-09-05) ──
+   arXiv body uses five tracks: 1fr nav article aside 1fr. Theme navigation is minmax(14rem,25rem), article centered at 52rem;
+   the unnamed fourth track reserves space for ar5iv right-margin notes / acknowledgements / publication metadata.
+   Side mode widens the article to two columns, sizing all three central tracks with article priority:
+   - sides take space left after a full 96rem article, clamped to 14–25rem (arXiv's native navigation range);
+   - article takes the rest, capped at arXiv's 96rem maximum; wide-window columns stay 740 px, pixel-identical to before;
+   - symmetric sides keep the article centered; excess beyond caps goes into outer 1fr margins (--axt-margin-w).
+   All three tokens are closed-form functions of 100vw; dependent rules reference them without JS track measurements.
+   ar5iv --main-width / --main-width-margin follow the article track.
 
-   **旧版把两侧写死在 minmax(8rem, 12rem)**：导航永远 176px（目录条目最多折 4 行），2560px 视口下
-   两侧各有 512px 的纯空白却不分给导航——用户反馈的就是这个。现在导航从空出来的页边距里拿，
-   1440–2000px 得到 208–216px（折行降到 3 行）、2560px 得到 384px，**正文一个像素都没让**。
-   中途走错的两版：(1) 把导航压到 12rem、正文拿 96rem —— 就是旧版，导航过窄；
-   (2) 按视口给导航 14–25rem、右侧只在 ≥ 96rem 留位 —— 1333px 窗口里导航 267、右侧 16，整篇被推到右边（用户打回）；
-   (3) 正文 clamp(58rem, 62vw, 84rem)、剩余空间两侧均分 —— 居中对称了，但 2000px 下正文从 1536 缩到 1240，
-   每栏 740 → 592，这篇论文 145 张行间公式里 25 张放不下（用户反馈"公式出界"）。按 62vw 分是**让两侧去分正文的宽度**，
-   方向反了：两侧只该拿正文用不掉的那部分。 */
+   Previously sides were fixed at minmax(8rem,12rem): navigation stayed 176 px, wrapping entries up to four lines,
+   while a 2560 px viewport wasted 512 px per side (user report). Navigation now uses unused margins:
+   208–216 px at 1440–2000 px (three-line wrapping), 384 px at 2560 px, without taking a pixel from the article.
+   Rejected iterations: (1) 12rem navigation + 96rem article reproduced the narrow-navigation problem;
+   (2) viewport-based 14–25rem navigation, right gutter only at ≥96rem: at 1333 px, nav 267 / right 16 px pushed the article right (user rejected);
+   (3) article clamp(58rem,62vw,84rem), remaining space split symmetrically: centered, but at 2000 px article shrank 1536→1240,
+   columns 740→592, leaving 25 of 145 display equations too wide (user report). Allocating by 62vw gives article space to the sides;
+   sides must take only what the article cannot use. */
 html[data-axt-mode="side"] {
   --axt-side-w: clamp(14rem, calc((100vw - 96rem) / 2), 25rem);
   --axt-article-w: min(96rem, calc(100vw - 2 * var(--axt-side-w)));
@@ -331,11 +322,11 @@ html[data-axt-mode="side"] {
   --main-width: var(--axt-article-w);
   --main-width-margin: calc(var(--axt-article-w) + 1rem);
 }
-/* 正文轨道再套一层"容器宽度减两侧"的上限：token 是按 100vw 算的，而 body 是 width: 100%，
-   非覆盖式滚动条（Windows / Linux 默认）下 100vw 比容器宽出一条滚动条，三条固定轨道的和就会超出容器、
-   横向溢出（Codex 在 #40 指出）。这里的 100% 在 grid-template-columns 里就是网格容器的宽度，正好扣掉滚动条。
-   **不能把三条都写成 minmax(0, …)**：两侧的 1fr 增长上限是无穷，会在"最大化轨道"那一步跟正文一起分空间，
-   实测 1280px 下正文从 832 掉到 704、两侧各多出 64px 空白 */
+/* Cap the article track by container width minus sides. Tokens use 100vw, but body is width:100%; non-overlay scrollbars
+   (Windows / Linux default) make 100vw wider than the container, overflowing three fixed tracks (Codex #40).
+   Here 100% in grid-template-columns is the grid-container width, accounting for scrollbars.
+   Do not make all three tracks minmax(0,…): infinite 1fr growth limits let sides share space with the article during track maximization;
+   measured at 1280 px, article shrank 832→704 while each side gained 64 px whitespace. */
 html[data-axt-mode="side"] body {
   grid-template-columns:
     1fr var(--axt-side-w)
@@ -343,25 +334,22 @@ html[data-axt-mode="side"] body {
     var(--axt-side-w) 1fr;
 }
 
-/* frontmatter 的致谢 / 通讯作者注：**有译文的一律留在文章列里按两栏排**，不进右侧沟槽。
-   两个宽度档各有一个坏法，成因不同但都指向同一个结论：
+/* Frontmatter acknowledgements / corresponding-author notes with translations stay in the article, paired in two columns, not the right gutter.
+   Two width ranges fail differently but support the same rule:
+   - 1280–1535 px: side is active before gutter rules. ar5iv keeps notes in flow with fixed 800 px .ltx_note_outer,
+     harmless in its original 800 px article but overflowing the 652 px side article at 1280 px by 156 px.
+     Translations stack below source while adjacent names / affiliations pair horizontally, looking stranded in the left column
+     (user report, reproduced 2026-09-06 in 2609.04169v1).
+   - ≥1536 px: ar5iv absolutely positions gutter notes at 160 px author intervals, assuming source-only heights.
+     Translation grows each from 26–50 px to 148–194 px, causing overlap (1800 px: five original notes / zero overlaps;
+     same five with extension / one overlap). The 192 px gutter also breaks text awkwardly, e.g. giangnh@huce.e-du.vn.
 
-   - 1280–1535px（side 已生效、沟槽规则还没生效）：ar5iv 把它留在正文流里并给 `.ltx_note_outer`
-     写死 800px 宽。原页面的文章正好也是 800px 所以看不出问题；side 模式下文章列在 1280px 时只有 652px，
-     这条注**横着溢出文章右缘 156px**，译文只能堆在原文正下方，旁边的姓名与机构却是左右配对的，
-     看上去就像译文掉进了左栏（用户反馈，2026-09-06 复现于 2609.04169v1）。
-   - ≥ 1536px（沟槽档）：ar5iv 按每位作者 160px 的固定节奏把这些注绝对定位在沟槽里，
-     **高度是按只有原文算的**。塞进译文后每条从 26–50px 涨到 148–194px，第一条就压到第二条
-     （实测 1800px：原始页面 5 条 0 对重叠，装扩展后同样 5 条 1 对重叠）。沟槽只有 192px 宽，
-     换行也断得很难看（`giangnh@huce.e-du.vn` 被拦腰折断）。
-
-   所以带译文的一律回到文章列、按两栏排；**没有译文的保持沟槽原样**（译文还没到、或翻译失败时
-   不去动 arXiv 自己的版式）。判定只认**真译文**——圆环是 `.axt-t.axt-pending`、失败小部件是
-   `.axt-t.axt-error`，光写 `:has(.axt-t)` 的话请求一发出注就跳出沟槽、失败后还永远留在错位状态，
-   与上面这句承诺正好相反（Codex 在 #73 指出）。frontmatter 的注永远可见、没有折叠态，所以不受
-   「`.ltx_note` 整棵子树排除在配对之外」那条的顾虑——那条是给正文脚注的。 */
+   Therefore translated notes return to article pairing. Untranslated / failed notes keep arXiv's original gutter layout.
+   Match real translations only: .axt-t.axt-pending spinners and .axt-t.axt-error widgets must not move notes out immediately
+   or leave them misplaced after failure (Codex #73). Frontmatter notes are always visible, never collapsed,
+   so the whole-footnote-subtree exclusion for body footnotes does not apply here. */
 html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter:has(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)) {
-  /* ar5iv 在 ≥96rem 时把它绝对定位到页边；带译文的要回到正文流里参与配对 */
+  /* At ≥96rem ar5iv absolutely positions this at the page margin; translated notes return to flow for pairing. */
   position: static;
   inline-size: auto;
 }
@@ -375,80 +363,79 @@ html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer:has(
   align-items: start;
 }
 
-/* 右侧沟槽（≥ 96rem，与 ar5iv 显示边注的断点一致）：ar5iv 的四组规则都用 (100vw - --main-width) / 2 当沟槽宽、
-   边注宽度按 96 / 109rem 写死 20 / 27rem——那是给 52rem 文章配的，我们的沟槽在 1600px 只有 19rem，照写会溢出视口。
-   这些几何改成跟 --axt-side-w 走，显隐与 hover / focus 交互原样不动。盒子一律占 [文章右缘 + 1rem, 文章右缘 + side - 1rem]。
-   96rem 以下 ar5iv 本来就不显示边注（折叠成 hover 弹出），沟槽只是对称的留白。 */
+/* Right gutter (≥96rem, matching ar5iv margin-note visibility): four ar5iv rule groups derive width from (100vw - --main-width)/2,
+   fixing notes at 20 / 27rem for 96 / 109rem breakpoints, suitable for a 52rem article. Our 1600 px gutter is only 19rem, so that overflows.
+   Use --axt-side-w for geometry, preserving visibility and hover / focus behavior. Boxes occupy [article right + 1rem, article right + side - 1rem].
+   Below 96rem, ar5iv collapses notes into hover popups; the gutter is symmetric whitespace only. */
 @media (width >= 96rem) {
-  /* 边注：float: inline-end + 负的 margin-inline-end 推到文章外（ar5iv 按 96 / 109rem 写死 20 / 27rem 两档） */
+  /* Margin notes: float:inline-end and negative margin-inline-end place them outside the article (ar5iv fixes 20 / 27rem at 96 / 109rem). */
   html[data-axt-mode="side"] .ltx_note_outer {
     box-sizing: border-box;
     width: calc(var(--axt-side-w) - 2rem);
     margin-inline-end: calc(1rem - var(--axt-side-w));
     padding-inline-end: 1rem;
   }
-  /* 还没翻译的段落里，脚注原件从**左栏**起浮：再多推一栏加一个间距，否则它会横在右栏等译文的位置上
-     （译文到达后原件被 localizeNotes 标记隐藏、副本从右栏起浮，用上面的基本偏移） */
+  /* Before paragraph translation, original footnotes float from the left column. Shift an extra column plus gap to avoid occupying the pending right column.
+     After translation, localizeNotes hides originals and copies float from the right using the base offset above. */
   html[data-axt-mode="side"] [data-axt-id]:not(.axt-t) .ltx_note_outer {
-    /* 栏宽 = (文章列 - 主题给 .ltx_page_content 的 1rem 左右外边距 - 栏距) / 2 */
+    /* Column width = (article - theme's 1rem margins on each side of .ltx_page_content - column gap) / 2. */
     margin-inline-end: calc(1rem - var(--axt-side-w) - (var(--axt-article-w) - 2rem - var(--axt-gap)) / 2 - var(--axt-gap));
   }
-  /* 出版说明（float）与致谢（absolute，参照文章盒子的右缘） */
+  /* Publication notes (float) and acknowledgements (absolute, relative to the article's right edge). */
   html[data-axt-mode="side"] .ltx_pubnotes.ltx_pubnotes_meta .ltx_pubnotes_content {
     width: calc(var(--axt-side-w) - 2rem);
     margin-inline-end: calc(1rem - var(--axt-side-w));
   }
-  /* 只给**没有译文**的那些：带译文的已经回到文章列按两栏排（见上），
-     这里再给个沟槽宽度会把它压成 192px（实测原文与译文各剩 76px） */
+  /* Only untranslated notes: translated ones already pair inside the article above.
+     A gutter width here would squeeze them to 192 px (measured source and translation at just 76 px each). */
   html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter.ltx_role_thanks:not(:has(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split))) {
     width: calc(var(--axt-side-w) - 2rem);
     inset-inline-end: calc(1rem - var(--axt-side-w));
   }
-  /* 作者区末位的单位 / 地址块：ar5iv 用 absolute 把它铺到文章正下方居中（inset = (100dvw - main) / 2） */
+  /* Last author's affiliation / address: ar5iv centers it absolutely below the article, inset = (100dvw - main)/2. */
   html[data-axt-mode="side"] .ltx_authors > :last-child:is(.ltx_role_affiliation, .ltx_role_address) {
     width: var(--axt-article-w);
     inset-inline-start: calc(var(--axt-margin-w) + var(--axt-side-w));
   }
 }
 
-/* 文档主标题与它的译文通栏居中，像论文页眉那样；不参与左右配对。
-   ar5iv 给 .ltx_title 设了 max-inline-size: 52rem，文章列变宽后它会靠左，所以要 margin-inline: auto（实测 Bug） */
+/* Main document title and translation span both columns and remain centered, like a paper header, outside pairing.
+   ar5iv caps .ltx_title at 52rem; a widened article would leave it left-aligned without margin-inline:auto (observed bug). */
 html[data-axt-mode="side"] .ltx_document > .ltx_title_document,
 html[data-axt-mode="side"] .ltx_document > .ltx_title_document + .axt-t {
   grid-column: 1 / -1;
   margin-inline: auto;
 }
 
-/* 图片、代码块、单元格的 max-width 在 ar5iv 里跟着 --main-width 走。
-   side 模式下它们要装进的是**一栏**而不是整个文章列，所以约束成所在格子的 100%
-   （2026-09-04 实测：钉成 52rem 会让 832px 的插图塞进 484px 的栏里，撑出栏外）。
-   宽高比由浏览器按内在尺寸保持，不需要额外写 height。 */
+/* ar5iv ties image / code / cell max-width to --main-width. Side mode must fit them to one column,
+   so cap at 100% of their cell (2026-09-04: fixed 52rem put an 832 px image into a 484 px column, overflowing).
+   Intrinsic dimensions preserve aspect ratio automatically; no extra height rule needed. */
 html[data-axt-mode="side"] :is(.ltx_graphics, .ltx_listing, .ltx_td, img, svg) {
   max-width: 100%;
 }
 
-/* 行内收缩包裹里的图形要豁免。`.ltx_inline-block` 的宽度由内容决定，而内容（这里是图）的
-   max-width: 100% 又回过头去参照它 —— 循环依赖被解成一个病态的窄值：实测 2312.17141 的弦图
-   viewBox 68.3×97.88 被压成 10.5×97.9，页面上就是一个看不清的小点。豁免后与原版式逐张一致 */
+/* Exempt graphics in inline shrink-to-fit wrappers. .ltx_inline-block width depends on contents, whose max-width:100% refers back to it,
+   creating a pathological circular constraint: 2312.17141 string diagrams with viewBox 68.3×97.88 shrank to 10.5×97.9, illegible dots.
+   Exempting them restored every graphic to its original layout. */
 html[data-axt-mode="side"] .ltx_inline-block :is(img, svg) {
   max-width: none;
 }
 
-/* ── only：仅译文（§7.4）──────────────────────────────────────────────────
-   原块隐藏而不是删除，切回来只改 data-axt-mode。 */
+/* ── only: translation only (§7.4) ──
+   Hide originals rather than delete them; switching back changes only data-axt-mode. */
 html[data-axt-mode="only"] [data-axt-state="translated"] {
   display: none;
 }
 
-/* 未翻译成功的块保持原文可见：上面的隐藏规则只匹配 translated，pending / failed 不被匹配即可。
-   不要给它们写 display: revert——revert 会把站点的 display 一并撤销（.ltx_bibblock 从 block 变回 inline），
-   曾经这么写过（Codex 在 #19 指出） */
+/* Keep untranslated originals visible: the hiding rule matches only translated, excluding pending / failed.
+   Never set display:revert on them; it also undoes site display (.ltx_bibblock goes from block to inline).
+   This was a previous implementation error (Codex #19). */
 
-/* 参考文献不再豁免（2026-09-04 修订）：条目改为按 .ltx_bibblock 分段翻译后，
-   作者段本来就不翻、没有 data-axt-state，只译文模式下它自然保留，条目仍然完整可读，
-   不需要整条双语。旧的豁免规则是"整条翻译"时代的遗留。 */
+/* Bibliography exemption removed (revision 2026-09-04): after segmenting entries by .ltx_bibblock,
+   untranslated author segments have no data-axt-state and naturally remain visible in only mode, preserving readable entries.
+   Whole-entry bilingual display is unnecessary; that exemption predates segmented translation. */
 
-/* 同行显示的短标题在 only 模式下译文要顶回行首 */
+/* In only mode, inline short-title translations return to the start of the line. */
 html[data-axt-mode="only"] .axt-t[data-axt-inline] {
   margin-inline-start: 0;
 }

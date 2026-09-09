@@ -1,8 +1,8 @@
-// side 模式的布局守卫（DESIGN §7.2）。
-// 这里不测样式效果（happy-dom 没有布局引擎），测的是**结构覆盖**：
-// 每个译文节点到翻译根之间的每一层，要么是配对容器，要么在明确排除的清单里。
-// 早期版本用类名白名单挑容器，于是 .ltx_theorem、.ltx_transformed_inner、.ltx_proof、
-// .ltx_author_notes 一个个漏，每次都得等用户在页面上发现。这条测试把那类漏洞变成构建期失败。
+// Side-layout guards (DESIGN §7.2).
+// These test structural coverage, not visual styling, because happy-dom has no layout engine:
+// every ancestor between a translation and its root must be a pairing container or explicitly excluded.
+// The original class allowlist repeatedly missed ltx_theorem, ltx_transformed_inner, ltx_proof,
+// and ltx_author_notes until users noticed broken pages. This turns those gaps into build-time failures.
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -13,26 +13,26 @@ import { docOf } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 const CSS = readFileSync(join(import.meta.dirname, '../../src/styles/modes.css'), 'utf8')
-/** 注释里也写着选择器（讲取舍用的），做文本断言前先去掉 */
+/** Comments discuss selectors too; strip them before text assertions */
 const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
 
 /**
- * 样式表里**每一处**容器判定的排除清单。同一份清单在 modes.css 里写了不止一次（网格声明与配对规则各一份），
- * 以前只取第一处核对，第二份可以静默漂移（issue #46 指出）。空白按单个空格归一，跨行的那份才好比
+ * Every container exclusion list in the stylesheet. modes.css repeats the list for grid declarations and pairing rules.
+ * Checking only the first allowed the second to drift silently (issue #46). Normalize whitespace to compare multiline lists.
  */
 function denyListsFromCss(): string[] {
   const re = /:where\(:has\(\.axt-t, \[data-axt-id\]\):not\(:is\(([\s\S]*?)\)\)\)/g
   const lists = [...RULES.matchAll(re)].map(m => m[1]!.replace(/\s+/g, ' ').trim())
-  if (lists.length === 0) throw new Error('modes.css 里找不到容器判定选择器')
+  if (lists.length === 0) throw new Error('No container selector found in modes.css')
   return lists
 }
 
-/** 容器选择器取样式表里的第一份；每一份都与 TS 一致由下面的测试守着 */
+/** Use the first stylesheet container selector; tests below ensure every copy matches TypeScript */
 function containerFromCss(): string {
   return `:has(.${T_CLASS}, [data-axt-id]):not(:is(${denyListsFromCss()[0]!}))`
 }
 
-/** 模拟渲染：给每个块插一个译文兄弟，形状与 renderText 一致 */
+/** Simulate renderText by inserting one translated sibling per block */
 function fakeTranslate(doc: Document): number {
   let n = 0
   for (const block of extract(doc)) {
@@ -46,39 +46,39 @@ function fakeTranslate(doc: Document): number {
   return n
 }
 
-describe('side 模式的容器覆盖', () => {
+describe('side-mode container coverage', () => {
   const container = containerFromCss()
   const files = readdirSync(FIXTURE_DIR).filter(f => f.endsWith('.html')).sort()
 
-  it('样式表里每一处排除清单都与 side-layout.ts 一致（TS 是事实来源；清单在样式表里写了两份）', () => {
+  it('every stylesheet exclusion list matches side-layout.ts, the source of truth; CSS contains two copies', () => {
     const parts = (v: string) => v.split(',').map(x => x.trim()).filter(Boolean)
     const normalize = (v: string[]) => [...new Set(v)].sort().join(',')
-    // 子树排除在样式表里写成 `X, X *` 两条；TS 侧由 isSideContainer 用 closest 实现
-    //（happy-dom 的 :is(X *) 恒为 false，并进 SIDE_CONTAINER 会让测试与线上行为不一致）
+    // CSS expresses subtree exclusion as X and X *; TypeScript implements it with closest in isSideContainer.
+    //happy-dom always rejects :is(X *), so folding it into SIDE_CONTAINER would diverge from browser behavior.
     const subtrees = parts(SIDE_DENY_SUBTREE).flatMap(x => [x, `${x} *`])
     const expected = normalize([...parts(SIDE_DENY), ...subtrees])
     const lists = denyListsFromCss()
-    // 数目钉死：今天是两份（网格声明 + 配对规则各一份）。变成 1 要么是合并了（更新这里），
-    // 要么是有一份写坏了、从上面的正则里溜走——没有这一条，溜走的那份就等于没核
+    // Pin the count at two: grid declarations and pairing rules. A count of one means either intentional consolidation requiring a test update,
+    // or a malformed list escaped the regex; without this count assertion that copy would go unchecked.
     expect(lists).toHaveLength(2)
     for (const [i, list] of lists.entries()) expect({ copy: i + 1, deny: normalize(parts(list)) }).toEqual({ copy: i + 1, deny: expected })
   })
 
-  it('排除项只允许是本身不成网格的元素：ar5iv 自己的网格必须接管而不是排除', () => {
-    // 排除一个网格祖先挡不住后代 subgrid 它的轨道（实测 2609.00097 的有序列表）
+  it('exclusions may contain only nongrid elements; ar5iv grids must be adopted rather than excluded', () => {
+    // Excluding a grid ancestor does not stop descendants from subgridding its tracks, as observed in 2609.00097 ordered lists.
     for (const grid of ['.ltx_enumerate', '.ltx_biblist', '.ltx_bibitem', '.ltx_item']) {
       expect(SIDE_DENY).not.toContain(grid)
     }
   })
 
-  it('多面板插图不接管，单列 flex 图照常接管：只看格子是不是整栏（ltx_flex_size_1）', () => {
-    // ar5iv 用 flex 让面板并排，接管成网格后每个面板各占一行、撑满文章列（实测 2410.00260）；
-    // 但所有格子都是 size_1 的单列 flex 图格子整栏宽，排除它只会把表格与脚注堆成上下排（实测 2609.03768v1 的 Table 1）
+  it('excludes multipanel figures but adopts single-column flex figures based on full-width ltx_flex_size_1 cells', () => {
+    // ar5iv flex places panels side by side; converting it to grid makes each panel fill a separate article-width row (2410.00260).
+    // But single-column flex figures contain only size_1 full-width cells; excluding them stacks tables and notes vertically (2609.03768v1 Table 1).
     let multi = 0
     let single = 0
     for (const file of files) {
       const html = readFileSync(join(FIXTURE_DIR, file), 'utf8')
-      // 没有 flex 图的 fixture 不解析：12 篇全解析一遍会把 worker 的堆撑爆（实测 4.4 GB RSS 后 OOM）
+      // Skip parsing fixtures without flex figures: parsing all 12 exhausted the worker heap after reaching 4.4 GB RSS.
       if (!html.includes('ltx_flex_figure')) continue
       const doc = new DOMParser().parseFromString(html, 'text/html')
       const root = doc.querySelector(DOCUMENT_ROOT)
@@ -89,62 +89,62 @@ describe('side 模式的容器覆盖', () => {
         const isMulti = cells.some(cell => !cell.classList.contains('ltx_flex_size_1'))
         expect(figure.matches(MULTI_PANEL_FLEX)).toBe(isMulti)
         for (const el of [figure, ...cells]) {
-          // 多面板：整棵子树都不接管；单列：含译文的就是普通容器。
-          // 用 isSideContainer 而不是原始选择器：happy-dom 对 :not(:is(带 :has 的复杂选择器)) 判定有误，线上 Chrome 没问题
+          // Multipanel figures exclude their whole subtree; single-column figures with translations remain ordinary containers.
+          // Use isSideContainer because happy-dom mishandles complex :not(:is(...:has...)) selectors that Chrome handles correctly.
           expect(isSideContainer(el)).toBe(!isMulti && el.querySelector(`.${T_CLASS}`) !== null)
         }
         if (isMulti) multi++
         else single++
       }
     }
-    expect(multi).toBeGreaterThan(0) // fixture 里两种都有，这条测试不是空跑
+    expect(multi).toBeGreaterThan(0) // Fixtures contain both shapes, preventing a vacuous test.
     expect(single).toBeGreaterThan(0)
   })
 
-  it('列表标记要脱离网格流，并且两栏各挂一份', () => {
-    // happy-dom 没有布局引擎，这里守的是规则本身；效果的实测记录在 DESIGN §7.2
+  it('list markers stay outside grid flow with one copy per column', () => {
+    // happy-dom has no layout engine; verify the rules here and see DESIGN §7.2 for visual measurements.
     expect(RULES).toMatch(/&\.ltx_item > \.ltx_tag \{[^}]*position: absolute/)
-    // 镜像标记要落到右栏的槽里，否则它和原标记叠在左栏，右栏没有编号
+    // Mirrored markers need the right-column slot or they overlap left markers and leave the right column unnumbered.
     expect(RULES).toMatch(/&\.ltx_item > \.ltx_tag\.axt-t \{[^}]*inset-inline-start: calc\(50% \+ var\(--axt-gap\) \/ 2\)/)
   })
 
-  it('列表缩进只能加在格子内容上：subgrid 容器自己的 inline padding 会吃掉第一条轨道', () => {
-    // 加在列表容器 / 列表项上会让左栏窄一截、右栏顶格（实测 2312.17141：左 444 / 右 484）
+  it('list indentation applies only to cell content because inline padding on a subgrid container consumes the first track', () => {
+    // Indenting list containers or items narrows the left column while leaving the right full-width (2312.17141: 444px versus 484px).
     expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) \{\s*padding-inline-start: 0/)
     expect(RULES).toMatch(/&\.ltx_item:has\(> \.ltx_tag\) \{[^}]*padding-inline-start: 0/)
-    // 只缩进容器的直接子元素：写成后代选择器会连脚注里的译文一起缩进（实测）
+    // Indent direct container children only; descendant selectors also indent translations inside footnotes.
     expect(RULES).toMatch(/&:is\(\.ltx_item, \.ltx_item \*\) > :where\(\[data-axt-id\], :has\(\+ \.axt-t\), \.axt-t\):not\(\.ltx_tag\) \{\s*padding-inline-start: 2\.5rem/)
     expect(RULES).not.toMatch(/&\.ltx_item :where\(:has\(\+ \.axt-t\), \.axt-t\)/)
   })
 
-  it('没有配对的列表项及其镜像也用同一个标记槽：不是网格的项保留 ar5iv 的悬挂标记会伸出栏外', () => {
-    // 实测 2609.04056v1 Definition 1.2：只有公式的第一项标记 x=208、兄弟项 248，压到导航栏上
-    // 槽宽要跟着标记走：写死 2.5rem 时 \item[(Assumption 1)] 这类宽标记会盖住正文（Codex 在 #40 指出）
+  it('unpaired list items and mirrors share the marker slot; retaining ar5iv hanging markers would protrude beyond the column', () => {
+    // 2609.04056v1 Definition 1.2 placed a formula-only first marker at x=208 versus sibling x=248, overlapping navigation.
+    // Slot width must follow marker width; fixed 2.5rem lets wide markers such as item[(Assumption 1)] cover body text (Codex #40).
     expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) > \.ltx_item:not\(:has\(\.axt-t, \[data-axt-id\]\)\) \{[^}]*grid-template-columns: minmax\(2\.5rem, max-content\)/)
     expect(RULES).toMatch(/&:is\(\.ltx_itemize, \.ltx_enumerate, \.ltx_description\) > \.ltx_item:not\(:has\(\.axt-t, \[data-axt-id\]\)\) \{[\s\S]*?& > \.ltx_tag \{[^}]*grid-column: 1/)
   })
 
-  it('堆叠区清单：样式表与 side-layout.ts 保持一致（TS 是事实来源）', () => {
-    // 样式表里的堆叠区规则直接引用 TS 清单的原文（顺序与写法都要一致，选择器里有嵌套括号，不再用正则去抠）
+  it('stylesheet stack-region lists match side-layout.ts as source of truth', () => {
+    // CSS directly includes the TypeScript list with identical order and syntax; nested selector parentheses make regex extraction unsuitable.
     expect(RULES).toContain(`:is(${SIDE_STACK}) :is(.ltx_para, .ltx_abstract, :has(.axt-t, [data-axt-id]))`)
   })
 
-  it('堆叠区规则不碰嵌套的 .ltx_flex_figure：它本身是 flex，压成 block 会把面板竖着摞起来（Codex 在 #25 指出）', () => {
+  it('stack-region rules leave nested ltx_flex_figure unchanged because display:block would stack its panels (Codex #25)', () => {
     expect(RULES).toMatch(/:not\(:is\(\.ltx_note, \.ltx_note \*, \.ltx_flex_figure\)\)\s*\{\s*display: block/)
   })
 
-  it('only 模式不用 display: revert 让 pending / failed 露出来：revert 会撤销站点的 display（Codex 在 #19 指出）', () => {
+  it('only mode does not use display:revert for pending or failed blocks because it would undo site display rules (Codex #19)', () => {
     expect(RULES).not.toMatch(/display:\s*revert/)
   })
 
-  it('行内收缩包裹里的图形要豁免 max-width：否则宽度会解成病态的窄值', () => {
+  it('graphics in inline shrink-wrap containers are exempt from max-width to avoid pathological narrow widths', () => {
     expect(RULES).toMatch(/\.ltx_inline-block :is\(img, svg\) \{\s*max-width: none/)
   })
 
-  it('\\resizebox 包着的表格能连到列线：包裹层带 .ltx_inline-block，但它不是行内上下文（实测 2606.07636v2）', () => {
-    // LaTeXML 给 \\resizebox 生成 div.ltx_inline-block.ltx_transformed_outer > span.ltx_transformed_inner > table，
-    // ar5iv 自己把宽高与 transform 抹平了。把包裹层当行内上下文排除，里面的表格配对就够不到两条列线：
-    // 原表与译表是两个 inline-table，在通栏的壳子里居中排成一行、横跨分割线
+  it('resizebox-wrapped tables reach column lines despite their ltx_inline-block wrapper not being an inline context (2606.07636v2)', () => {
+    // LaTeXML renders resizebox as div.ltx_inline-block.ltx_transformed_outer > span.ltx_transformed_inner > table.
+    // ar5iv already neutralizes size and transforms; excluding the wrapper as inline prevents paired tables from reaching column lines:
+    // the original and translated inline-tables center together in a full-width wrapper across the divider.
     const doc = docOf('<figure class="ltx_table"><figcaption class="ltx_caption" data-axt-id="c1">Table 1</figcaption>'
       + `<figcaption class="ltx_caption ${T_CLASS}" data-axt-for="c1">表 1</figcaption>`
       + '<div class="ltx_inline-block ltx_align_center ltx_transformed_outer" style="width:345.0pt"><span class="ltx_transformed_inner" style="transform:scale(1.16)">'
@@ -155,9 +155,9 @@ describe('side 模式的容器覆盖', () => {
     const inner = doc.querySelector('.ltx_transformed_inner')!
     expect(isSideContainer(outer)).toBe(true)
     expect(isSideContainer(inner)).toBe(true)
-    // 堆叠区不认它：认了的话内层被压成 block，两个 inline-table 反而在一行里居中
+    // It is not a stack region; otherwise the inner wrapper becomes block and both inline-tables center on one row.
     expect(outer.matches(SIDE_STACK)).toBe(false)
-    // 真正的行内上下文照旧排除
+    // Real inline contexts remain excluded.
     const plain = docOf('<div class="ltx_para"><div class="ltx_inline-block" id="ib">'
       + `<p class="ltx_p" data-axt-id="p1">x</p><p class="ltx_p ${T_CLASS}" data-axt-for="p1">甲</p></div></div>`)
     const inlineBlock = plain.getElementById('ib')!
@@ -165,37 +165,37 @@ describe('side 模式的容器覆盖', () => {
     expect(inlineBlock.matches(SIDE_STACK)).toBe(true)
   })
 
-  it('脚注内部永远不算配对容器：改它的 display 会把 ar5iv 折叠的脚注掀开', () => {
-    // ar5iv 把折叠状态写在 .ltx_note_outer 的 display:none 上；容器规则一命中就把它改成 grid，
-    // 脚注被掀开横在正文中间（实测 2312.17141：165px 高、781px 宽，与中栏译文互相干扰）
+  it('footnote descendants are never pairing containers because changing display would expose collapsed ar5iv notes', () => {
+    // ar5iv collapses notes with display:none on ltx_note_outer; container rules would override it with grid,
+    // exposing a note across the body (2312.17141: 165px tall, 781px wide, overlapping center-column translations).
     const doc = docOf(`<div class="ltx_para"><span class="ltx_note"><span class="ltx_note_outer">
       <span class="ltx_note_content"><span class="ltx_p">note</span
       ><span class="ltx_p ${T_CLASS}" data-axt-for="1">脚注译文</span></span></span></span></div>`)
     const content = doc.querySelector('.ltx_note_content')!
-    expect(content.matches(container)).toBe(true) // 只看选择器的话它够格当容器
-    expect(isSideContainer(content)).toBe(false) // 子树排除把它挡在外面
+    expect(content.matches(container)).toBe(true) // The raw selector alone would accept it as a container.
+    expect(isSideContainer(content)).toBe(false) // Subtree exclusion rejects it.
   })
 
-  it('脚注只留一份：译文复制进副本后，原件那份由样式隐藏', () => {
-    // 边注挂在页面右缘是 arXiv 自己的排法，不要改；要解决的是同一条脚注出现两次
+  it('keeps one footnote: after copying translation into the clone, CSS hides the original', () => {
+    // Keep arXiv marginal notes at the right page edge; the problem is duplicate notes, not their placement.
     expect(RULES).toMatch(/\.ltx_note\[data-axt-note\] > \.ltx_note_outer \{\s*display: none/)
-    // 别再把边注收进本栏：正文被挤、列表项还会被 ar5iv 写死的 height:0 盖住
+    // Do not pull marginal notes into the column: they squeeze body text and ar5iv height:0 can obscure list items.
     expect(RULES).not.toMatch(/\.ltx_note_outer \{[^}]*margin-inline-end: 0/)
-    // 搬进副本的译文另起一行，且不再套一层脚注框
+    // Copied translations start on a new line without another footnote frame.
     expect(RULES).toMatch(/\.axt-note-t \{[^}]*display: block/)
   })
 
   for (const file of files) {
-    it(`${file}：配对能否连到翻译根，快照记录被排除项挡住的数量`, () => {
+    it(`${file}: pairs reach the translation root; snapshots count pairs blocked by exclusions`, () => {
       const doc = new DOMParser().parseFromString(readFileSync(join(FIXTURE_DIR, file), 'utf8'), 'text/html')
       const root = doc.querySelector(DOCUMENT_ROOT)
       if (!root) return
       const total = fakeTranslate(doc)
       expect(total).toBeGreaterThan(0)
 
-      // 一个配对只有在祖先链每一层都是容器时才会真的左右分栏；
-      // 链上出现被排除的元素就会退化为上下堆叠。快照记录每类排除项挡住了多少，
-      // 往排除清单里加东西、或者容器判定退回白名单，这里的数字都会变。
+      // A pair becomes side by side only when every ancestor is a container.
+      // An excluded ancestor falls back to stacking. Snapshots count pairs blocked by each exclusion class;
+      // adding exclusions or reverting container detection to an allowlist changes these counts.
       let connected = 0
       const blockedBy = new Map<string, number>()
       for (const node of Array.from(doc.querySelectorAll(`.${T_CLASS}`))) {
@@ -219,18 +219,18 @@ describe('side 模式的容器覆盖', () => {
     })
   }
 
-  it('块标记本身就让容器成为两栏网格：会话一开始整页变两栏，不等译文（2026-09-05 修订）', () => {
+  it('block markers alone create two-column containers at session startup without waiting for translations (2026-09-05 revision)', () => {
     const doc = new DOMParser().parseFromString(
       '<!doctype html><html><body><article class="ltx_document"><section class="ltx_section"><div class="ltx_para"><p class="ltx_p" id="p1">Text.</p></div></section></article></body></html>',
       'text/html',
     )
-    // happy-dom 会按选择器字符串缓存 matches() 的结果、后代改属性也不刷新，所以"打标记前"用另一份文档
+    // happy-dom caches matches() by selector without invalidating for descendant attributes; use a separate document before marking.
     const untouched = new DOMParser().parseFromString(doc.documentElement.outerHTML, 'text/html')
     expect(isSideContainer(untouched.querySelector('.ltx_section')!)).toBe(false)
     markBlocks(extract(doc))
     expect(isSideContainer(doc.querySelector('.ltx_section')!)).toBe(true)
     expect(isSideContainer(doc.querySelector('.ltx_para')!)).toBe(true)
-    // 配对规则：带标记的块占左栏，不再要求后面紧跟译文
+    // pairing rules place marked blocks in the left column without requiring an immediate translated sibling
     expect(RULES).toMatch(/& > :is\(\[data-axt-id\], :has\(\+ \.axt-t\)\) \{\s*grid-column: 1/)
   })
 })

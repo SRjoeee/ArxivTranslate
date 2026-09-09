@@ -1,7 +1,7 @@
-// 失败态的小部件（DESIGN §7.6）：失败块旁边一个"重试"按钮与带原因的"！"，放在 Shadow DOM 里不受站点样式影响。
-// 对应 Read Frog 的 components/translation/error/*（React + jotai + @tabler/icons + base-ui，每个失败块一个 React root）；
-// 那套依赖与逐块 React root 是负担（它自己吃过 #1831 的泄漏亏），这里用几十行原生 DOM 做同样的两个控件（§12 的取舍）。
-// 与 §7.1 一致：它只是原块的下一个兄弟，restore 删掉宿主节点就干净了。
+// Failure widget (DESIGN §7.6): Retry and an exclamation mark with the reason beside the failed block, isolated in Shadow DOM.
+// Corresponds to Read Frog components/translation/error/* (React + jotai + @tabler/icons + base-ui, one React root per failed block).
+// Those dependencies and per-block roots add overhead (including its #1831 leak); native DOM implements the same two controls here (§12).
+// Consistent with §7.1: only an adjacent sibling; restore removes the host for complete cleanup.
 import type { Block } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
 import { FOR_ATTR, clearTranslation, setState } from './index'
@@ -15,7 +15,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .mark { color: var(--axt-failed-color, rgba(220, 38, 38, 0.9)); font-weight: 700; cursor: help; }
 `
 
-/** 删掉块旁边的失败小部件（重试开始时）；返回是否删掉了 */
+/** Remove the adjacent failure widget when retry starts; return whether it existed. */
 export function clearFailed(block: Block): boolean {
   const parent = block.el.parentElement
   if (!parent) return false
@@ -30,8 +30,8 @@ export function clearFailed(block: Block): boolean {
 }
 
 /**
- * 失败：删掉 pending / 旧译文、标 failed（红线照旧），再插小部件。
- * 点"重试"时按钮禁用并调 retry；小部件由 renderPending 在插圆环之前删掉（见那里）
+ * Failure: remove pending / old translation, mark failed (retaining the red border), then insert the widget.
+ * Retry disables the button and invokes retry; renderPending removes the widget before inserting the spinner.
  */
 export function renderFailed(block: Block, reason: string, retry: () => void): Element {
   clearTranslation(block)
@@ -46,7 +46,7 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
   style.textContent = STYLE
   const button = doc.createElement('button')
   button.type = 'button'
-  button.textContent = '重试'
+  button.textContent = 'Retry'
   button.addEventListener('click', () => {
     button.disabled = true
     retry()
@@ -54,7 +54,7 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
   const mark = doc.createElement('span')
   mark.className = 'mark'
   mark.title = reason
-  mark.textContent = '！'
+  mark.textContent = '!'
   root.append(style, button, mark)
   block.el.after(host)
   return host

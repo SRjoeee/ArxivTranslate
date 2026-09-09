@@ -7,7 +7,7 @@ import { htmlOf, stripIds } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 
-describe('fixture 往返', () => {
+describe('fixture round trips', () => {
   const files = readdirSync(FIXTURE_DIR).filter(f => f.endsWith('.html')).sort()
 
   for (const f of files) {
@@ -25,13 +25,13 @@ describe('fixture 往返', () => {
         const block = serialize(target)
         if (block.voidCount > VOID_DENSE_THRESHOLD) dense++
         const v = validate(block.text, block)
-        expect(v.ok, `${f} 恒等校验失败：${target.id || target.className}`).toBe(true)
-        expect(htmlOf(rehydrate(block.text, block, doc)), `${f} 回填不等价：${target.id || target.className}`).toBe(stripIds(target.innerHTML))
+        expect(v.ok, `${f} identity validation failed: ${target.id || target.className}`).toBe(true)
+        expect(htmlOf(rehydrate(block.text, block, doc)), `${f} rehydration differs: ${target.id || target.className}`).toBe(stripIds(target.innerHTML))
         const layout = splitRuns(block)
         joinRuns(layout.runs, layout, block, doc)
       }
       const ms = Math.round(performance.now() - t0)
-      console.info(`[protector] ${f}: ${targets.length} 个块/单元格往返，${dense} 个公式密集块，${ms} ms`)
+      console.info(`[protector] ${f}: ${targets.length} block/cell round trips, ${dense} formula-dense blocks, ${ms} ms`)
       expect(ms).toBeLessThan(10000)
       expect(doc.documentElement.outerHTML).toBe(before)
     })

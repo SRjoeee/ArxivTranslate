@@ -1,28 +1,28 @@
-// 注入节点的共同标记：译文、镜像、拆分副本都带 axt-t（CLAUDE.md 硬规则 5 的前缀）。
-// 放在 core 顶层：extractor 与 protector 要把这些节点当空气（再次翻译时它们已经在原块内部），
-// 但它们不能反过来依赖 renderer。
+// Shared injected-node marker: translations, mirrors, and split copies carry axt-t (CLAUDE.md hard rule 5).
+// Defined at core level: extractor and protector must ignore these nodes, already inside originals on retranslation,
+// without depending on renderer.
 export const T_CLASS = 'axt-t'
 /**
- * 图片叠加层（DESIGN §15.2）：第三种注入标记，**不带** axt-t——带了会被 side 的配对网格排到右栏、
- * 拆图时把 <img> 当配对原件删掉、抑制镜像、被二十个样式预设装饰。它只是"我们的节点"，不是"译文节点"
+ * Image overlays (DESIGN §15.2) use a third marker, without axt-t. That class would put them in the side grid's right column,
+ * remove paired <img> originals when splitting figures, suppress mirrors, and apply twenty style presets. These are injected nodes, not translation nodes.
  */
 export const IMG_CLASS = 'axt-img'
-/** 所有注入节点：提取、序列化、克隆清理、恢复原文都用这一个选择器 */
+/** Selector shared by extraction, serialization, clone cleanup, and restoration for all injected nodes. */
 export const INJECTED_SELECTOR = `.${T_CLASS}, .${IMG_CLASS}`
 
-/** 是不是我们注入的节点（译文 / 镜像 / 拆分副本 / 图片叠加层）——提取与序列化都要跳过它们 */
+/** Whether a node is injected (translation / mirror / split copy / image overlay); extraction and serialization skip these. */
 export function isInjected(el: Element): boolean {
   return el.classList.contains(T_CLASS) || el.classList.contains(IMG_CLASS)
 }
 
-/** 所有注入属性的前缀（CLAUDE.md 硬规则 5） */
+/** Prefix for all injected attributes (CLAUDE.md hard rule 5). */
 export const AXT_ATTR_PREFIX = 'data-axt-'
 
 /**
- * 克隆件入页之前的清理：删掉克隆里已有的注入节点（别人的译文 / 镜像会被整块复制进来），
- * 再剥掉 id（避免重复锚点，DESIGN §6.4）与全部 data-axt-* 标记（原块、占位符回填的脚注都可能带着块标记）。
- * 镜像、译文表、占位符回填、拆图以前各有一份几乎一样的实现，漂移过（issue #46）；现在只有这一份。
- * `includeRoot=false` 用于根节点是新建的译文壳、只清理被搬进来的子树
+ * Before inserting a clone, remove existing injected nodes (other translations / mirrors may have been copied wholesale).
+ * Strip IDs to avoid duplicate anchors (§6.4), and all data-axt-* markers (original blocks and rehydrated footnotes may carry them).
+ * Mirroring, translated tables, rehydration, and figure splitting once had near-duplicate implementations that drifted (issue #46); now shared.
+ * `includeRoot=false` keeps a newly created translation shell and cleans only its imported descendants.
  */
 export function stripInjected(root: Element, includeRoot = true): void {
   for (const stale of Array.from(root.querySelectorAll(INJECTED_SELECTOR))) stale.remove()

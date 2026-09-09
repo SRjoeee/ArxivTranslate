@@ -1,5 +1,5 @@
-// DOM-free 分词器：把带占位符的字符串切成四种 token，validate 与 rehydrate 共用，可在 service worker 里跑。
-// 借鉴 Read Frog html-attribute-markers.ts 的思路（字符串级校验，不依赖 DOM），协议不同，未移植代码。
+// DOM-free tokenizer: split placeholder text into four token types, shared by validate and rehydrate; usable in service workers.
+// Inspired by Read Frog html-attribute-markers.ts (string validation without DOM); different protocol, no code ported.
 
 export type Token =
   | { kind: 'text'; text: string }
@@ -7,7 +7,7 @@ export type Token =
   | { kind: 'open'; id: number }
   | { kind: 'close' }
 
-// 容忍模型常见写法：<x id="1"/>、<x id="1" />、单引号 / 无引号、<x id="1"></x>；其余一律当文本
+// Accept common model variants: <x id="1"/>, <x id="1" />, single / unquoted IDs, <x id="1"></x>; treat everything else as text.
 const TOKEN_RE = /<x\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*(?:\/>|>\s*<\/x\s*>)|<t\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*>|<\/t\s*>/g
 
 export function tokenize(s: string): Token[] {

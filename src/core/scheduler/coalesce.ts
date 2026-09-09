@@ -1,30 +1,30 @@
-// 合并连续事件（DESIGN §10）：去抖之外加一个"最长等待"。
+// Coalesce consecutive events (DESIGN §10): debounce with a maximum wait.
 //
-// 纯去抖会被连续事件饿死：翻译进行中每秒来几十次进度回调，150ms 的计时器一直被重置，
-// side 模式的镜像 / 拆图 / 表格缩放直到整篇翻完才跑一次——实测 2312.17141：
-// 413 个镜像全部在最后一刻同时出现，之前公式一直居中横跨两栏（用户反馈）。
-// 加上最长等待后，事件再密也至少每 maxWait 跑一次。
+// Continuous events starve a plain debounce: dozens of progress callbacks per second keep resetting the 150 ms timer.
+// Side-mode mirroring / figure splitting / table fitting would run only after all translations finished. In 2312.17141,
+// all 413 mirrors appeared at the end; until then formulas stayed centered across both columns (user report).
+// A maximum wait guarantees a run at least every maxWait, even with continuous events.
 
 export interface CoalesceOptions {
-  /** 最后一次事件之后再等多久 */
+  /** Wait after the last event. */
   delay: number
-  /** 从第一次未处理的事件算起最多等多久 */
+  /** Maximum wait since the first unprocessed event. */
   maxWait: number
 }
 
 export interface Coalescer<T = never> {
   /**
-   * 排一次整理。带参数 = 把这个项攒进本轮的脏集合；不带参数 = 本轮**全量**。
-   * 同一轮里出现过一次不带参数的调用，跑的时候就拿到 null，脏集合作废
+   * Schedule cleanup. With an item: add it to this cycle's dirty set. Without one: request a full pass.
+   * Any argument-free call makes the cycle receive null, discarding the dirty set.
    */
   schedule(item?: T): void
   cancel(): void
 }
 
 /**
- * `run` 收到的是这一轮攒下的项（去重、按加入顺序），或 null 表示全量（issue #46）。
- * 攒项而不只是攒"要不要跑"：合并器把几十次进度回调压成一趟，整理步骤得知道这一趟该碰哪些块，
- * 否则每趟都只能全篇重扫——实测 2312.17141 一次会话 31 趟、累计 1.9 秒，单趟只要 34 ms
+ * `run` receives collected items (unique, insertion order), or null for a full pass (issue #46).
+ * Collect items, not just a run flag: coalescing dozens of callbacks into one pass still requires knowing which blocks changed.
+ * Otherwise each pass rescans the paper: 31 passes totaled 1.9 s in a 2312.17141 session, though one pass took only 34 ms.
  */
 export function createCoalescer<T = never>(run: (scope: T[] | null) => void, { delay, maxWait }: CoalesceOptions): Coalescer<T> {
   let timer = 0
@@ -48,7 +48,7 @@ export function createCoalescer<T = never>(run: (scope: T[] | null) => void, { d
       const now = Date.now()
       if (!firstPending) firstPending = now
       clearTimeout(timer)
-      // 不能再往后推了就按最长等待到期的时刻跑
+      // Once further delay is disallowed, run at the maximum-wait deadline.
       const wait = Math.max(0, Math.min(delay, firstPending + maxWait - now))
       timer = window.setTimeout(fire, wait)
     },

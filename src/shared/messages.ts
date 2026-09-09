@@ -1,4 +1,4 @@
-// 扩展内部消息协议。popup / content / background 之间只允许使用这里定义的类型。
+// Internal extension message protocol. Popup/content/background may use only the types defined here.
 import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
 import type { Progress } from '@/core/pipeline/run'
@@ -8,52 +8,52 @@ import type { TranslateCall, TranslateMessageResponse } from '@/providers/transl
 import type { HelperStatus, ImageProgress, OcrCall, OcrMessageResponse } from './ocr'
 
 export interface PageStatus {
-  /** 当前页面的 arXiv id；不是 arXiv HTML 页面时为 null */
+  /** Current arXiv paper id; null outside arXiv HTML pages. */
   paper: string | null
-  /** 实际生效的模式；窄视口下 side 会自动降级为 stack（§7.2） */
+  /** Effective mode; side automatically falls back to stack in narrow viewports (§7.2). */
   mode: Mode
-  /** 用户选定的模式，自动降级不改它 */
+  /** User-selected mode, unaffected by automatic fallback. */
   preference: Mode
   progress: Progress
-  /** 图片翻译的进度（§15）；helper 不可用或设置里全关时没有 */
+  /** Image translation progress (§15); absent when the helper is unavailable or all modes are disabled. */
   images?: ImageProgress
 }
 
-/** 消息表：type → { request, response } */
+/** Message map: type → { request, response }. */
 export interface AxtMessages {
-  /** popup → content：开始翻译当前页面 */
+  /** popup → content: start translating the current page. */
   'axt:translate-page': { request: { mode?: Mode }; response: { started: boolean; reason?: string } }
-  /** popup → content：中止并恢复原文 */
+  /** popup → content: abort and restore the original. */
   'axt:restore-page': { request: Record<never, never>; response: { removedNodes: number } }
-  /** popup → content：切换模式（只改 <html> 上的属性，不重新翻译；§4 第 9 步） */
+  /** popup → content: switch mode via <html> attributes, without translating again (§4, step 9). */
   'axt:set-mode': { request: { mode: Mode }; response: { mode: Mode; preference: Mode } }
-  /** popup → content：进度 */
+  /** popup → content: progress. */
   'axt:page-status': { request: Record<never, never>; response: PageStatus }
-  /** popup → background：连通性 */
+  /** popup → background: connectivity. */
   'axt:ping': { request: Record<never, never>; response: { ok: true; version: string } }
-  /** popup → content script：内存中 Block[] 的统计 */
+  /** popup → content: statistics from the in-memory Block[]. */
   'axt:stats': { request: Record<never, never>; response: BlockStats }
-  /** content / options → background：翻译一批 segment（§8.0：建链、排队、发请求都在 background） */
+  /** content/options → background: translate a segment batch (§8.0: chain, queues and requests all run in background). */
   'axt:translate': { request: TranslateCall; response: TranslateMessageResponse }
-  /** content → background：撤掉一次会话排队与在飞的请求（恢复原文、重开） */
+  /** content → background: cancel queued/in-flight session requests on restore or restart. */
   'axt:cancel-scope': { request: { scope: string }; response: { cancelled: number } }
-  /** popup / options / content → background：引擎链的能力与实时状态 */
+  /** popup/options/content → background: engine-chain capabilities and live status. */
   'axt:provider-status': { request: Record<never, never>; response: ProviderStatus }
-  /** 清空缓存，或只清某篇论文 */
+  /** Clear all cache entries or one paper. */
   'axt:cache-clear': { request: { paper?: string }; response: { ok: true; removed: number } | { ok: false; message: string } }
   'axt:cache-stats': { request: Record<never, never>; response: { ok: true; entries: number; bytes: number } | { ok: false; message: string } }
-  /** popup → content：把翻失败的块再翻一遍（§7.6） */
+  /** popup → content: retry failed blocks (§7.6). */
   'axt:retry-failed': { request: Record<never, never>; response: { retried: number } }
-  /** popup → background：某个引擎刚被用户修好（语言包下载完）；重建引擎链，让它重新参与降级（§8.5） */
+  /** popup → background: an engine became ready (language pack downloaded); rebuild the chain to include it (§8.5). */
   'axt:engine-ready': { request: { id: string }; response: { reset: boolean } }
-  /** options / content → background：本机 OCR helper 是否可用（DESIGN §15.4 的 ping 检测） */
+  /** options/content → background: local OCR helper availability (DESIGN §15.4 ping check). */
   'axt:helper-status': { request: Record<never, never>; response: HelperStatus }
-  /** content → background：给一张位图做 OCR；结果按 imageHash 缓存（§15.2） */
+  /** content → background: OCR one bitmap; cache by imageHash (§15.2). */
   'axt:ocr': { request: OcrCall; response: OcrMessageResponse }
 }
 
 export type AxtMessageType = keyof AxtMessages
-/** 分配式条件类型：让 switch (message.type) 能按 type 收窄到对应的 request 形状 */
+/** Distributive conditional type lets switch(message.type) narrow to the matching request shape. */
 export type AxtMessage<T extends AxtMessageType = AxtMessageType> = T extends unknown ? { type: T } & AxtMessages[T]['request'] : never
 export type AxtResponse<T extends AxtMessageType> = AxtMessages[T]['response']
 
@@ -63,14 +63,14 @@ export function isAxtMessage(value: unknown): value is AxtMessage {
     && (value as { type: string }).type.startsWith('axt:')
 }
 
-/** 发给 background；MV3 下 sendMessage 不传回调即返回 Promise */
+/** Send to background; MV3 sendMessage without a callback returns a Promise. */
 export function sendMessage<T extends AxtMessageType>(message: AxtMessage<T>): Promise<AxtResponse<T>> {
   return browser.runtime.sendMessage(message) as Promise<AxtResponse<T>>
 }
 
-/** 发给当前活动标签页的 content script；标签页上没有接收方时 Promise 会 reject。不读 url，无需 tabs 权限 */
+/** Send to the active tab's content script; rejects if no receiver exists. Does not read URL, so no tabs permission is needed. */
 export async function sendToActiveTab<T extends AxtMessageType>(message: AxtMessage<T>): Promise<AxtResponse<T>> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
-  if (tab?.id == null) throw new Error('没有活动标签页')
+  if (tab?.id == null) throw new Error('No active tab')
   return browser.tabs.sendMessage(tab.id, message) as Promise<AxtResponse<T>>
 }

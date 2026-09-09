@@ -1,37 +1,39 @@
-# 第三方代码登记
+# Third-party code register
 
-本项目以 GPL-3.0 发布。下列文件移植自同为 GPL-3.0 的参考项目（源码在 `reference/`，gitignore），按 GPL §5 保留来源并标明已修改。每个移植文件的文件头也写有同样的来源行与移植日期（GPL §5(a) 要求修改声明带相关日期）。
+This project is released under GPL-3.0. The files below were ported from reference projects also licensed under GPL-3.0 (source in the gitignored `reference/` directory); attribution and modification notices are retained under GPL §5. Each ported file also carries the same attribution and port date in its header (GPL §5(a) requires modification notices to include the relevant date).
 
-参考项目与快照：
+Reference projects and snapshots:
 
-| 项目 | 仓库 | 快照 commit |
+| Project | Repository | Snapshot commit |
 |---|---|---|
-| KISS Translator | https://github.com/fishjar/kiss-translator | `c95bd46`（2026-08-30） |
-| Read Frog | https://github.com/mengxi-ream/read-frog | `9b44f82`（2026-09-02） |
-| FluentRead | https://github.com/Bistutu/FluentRead | `536a819`（2026-09-03） |
-| macos-vision-ocr（MIT，非 GPL；按 MIT 保留版权声明） | https://github.com/bytefer/macos-vision-ocr | `91a236a`（2026-09-07） |
-| ImageTrans Chrome 扩展 | https://github.com/xulihang/ImageTrans_chrome_extension | `ef11ca7`（2026-09-07） |
+| KISS Translator | https://github.com/fishjar/kiss-translator | `c95bd46` (2026-08-30) |
+| Read Frog | https://github.com/mengxi-ream/read-frog | `9b44f82` (2026-09-02) |
+| FluentRead | https://github.com/Bistutu/FluentRead | `536a819` (2026-09-03) |
+| macos-vision-ocr (MIT, not GPL; copyright notice retained under MIT) | https://github.com/bytefer/macos-vision-ocr | `91a236a` (2026-09-07) |
+| ImageTrans Chrome extension | https://github.com/xulihang/ImageTrans_chrome_extension | `ef11ca7` (2026-09-07) |
 
-## 移植文件
+## Ported files
 
-| 本项目文件 | 来源 | 移植日期 | 修改说明 |
+| Project file | Source | Port date | Modifications |
 |---|---|---|---|
-| `src/providers/prompt-library.ts` | `reference/read-frog/src/utils/constants/prompt.ts` + `src/utils/prompts/translate.ts@9b44f82` | 2026-09-05 | 模板变量换成论文语义（标题 / 摘要 / 章节 / 术语表）、去掉字幕与分隔符式批处理与网页摘要；保留内置提示词表、自定义 patterns、按 id 选择与回退逻辑 |
-| `src/cache/store.ts` | `reference/FluentRead/src/services/translation/cache.ts@536a819` | 2026-09-03 | 移植并改造：键计算移到 `key.ts`（Web Crypto），记录加 `paper` 索引，TTL / 容量按论文场景放大，构造函数可注入库与容量；保留内存热层与故障降级策略。**淘汰逻辑改写**：原版每次 `set` 都 `orderBy('lastAccessedAt').toArray()` 扫全库求和（O(n)/次），改为增量维护总量 + 超限时批量淘汰，见 DESIGN §9 |
-| `src/providers/google-web.ts` | `reference/read-frog/src/utils/host/translate/api/google.ts@9b44f82` | 2026-09-04 | 端点、API key 常量、请求体与响应解析照搬；改为一次请求多条（原版一条一请求）；去掉 preserveLineBreaks 的换行标记与 `entities` 依赖（我们送的是占位符标记文本，protector 已转义）；错误按本项目的 ProviderError 分类 |
-| `src/providers/request/retry-policy.ts` | `reference/read-frog/src/utils/request/retry-policy.ts@9b44f82` | 2026-09-03 | 整段移植；加文件头来源行，按本项目严格类型检查微调；由同目录的 `request-queue.ts` 驱动（2026-09-05 起；此前由已删除的 `src/providers/retry.ts` 驱动） |
-| `src/providers/request/request-queue.ts` | `reference/read-frog/src/utils/request/request-queue.ts@9b44f82` | 2026-09-05 | 整段移植（2026-09-05 二次修改：新增 `maxConcurrent` 与 `maxTotalMs` 两个可选项，默认值不改原行为，见 DESIGN §10 与 issue #43）：`deepmerge-ts` 换成对象展开、配置 schema 换成本目录 `config.ts`、UUID 换成 `src/shared/uuid.ts`、计时器类型改 `ReturnType<typeof setTimeout>`、超时错误加 `name` 便于服务层归类 |
-| `src/providers/request/batch-queue.ts` | `reference/read-frog/src/utils/request/batch-queue.ts@9b44f82` | 2026-09-05 | 整段移植：只改配置 schema 与 UUID 的 import、计时器类型（2026-09-05 二次修改，issue #43：`BatchExecutionMeta` 增加 `startedAt`（批次创建时刻）、`executeIndividual` 同样接收 meta、新增可选 `maxTotalMs` 让批级退避受总时限约束） |
-| `src/providers/request/priority-queue.ts` | `reference/read-frog/src/utils/request/priority-queue.ts@9b44f82` | 2026-09-05 | 原样移植，仅加文件头 |
-| `src/providers/request/cancellation.ts` | `reference/read-frog/src/utils/request/cancellation.ts@9b44f82` | 2026-09-05 | 原样移植，仅加文件头 |
-| `src/shared/uuid.ts` | `reference/read-frog/src/utils/crypto-polyfill.ts@9b44f82` | 2026-09-05 | 原样移植，改名 |
-| `tests/providers/request/*.test.ts` | `reference/read-frog/src/utils/request/__tests__/*@9b44f82` | 2026-09-05 | 六个测试文件移植：改 import 路径；`batch-queue.test.ts` 依赖的分隔符解析、hash、`executeTranslate` 换成测试内替身。`batch-separator-parsing.test.ts` 测的是它自己的分隔符解析，不搬 |
-| `src/core/renderer/spinner.ts` | `reference/read-frog/src/utils/host/translate/ui/spinner.ts@9b44f82` | 2026-09-05 | 圆环与动画注册表原样；class / 颜色变量改本项目前缀；去掉它的请求胶水 `getTranslatedTextAndRemoveSpinner`（含 React 错误组件），加 `cancelSpinnersIn` |
-| `src/core/scheduler/pacer.ts` | `reference/read-frog/src/utils/scheduler.ts@9b44f82` | 2026-09-05 | 原样移植，仅加文件头 |
-| `src/config/languages.ts` | `@read-frog/definitions@0.4.4`（Read Frog 的依赖包，`LANG_CODE_ISO6393_OPTIONS`、`LANG_CODE_TO_EN_NAME`、`LANG_CODE_TO_ZH_NAME`、`LANG_CODE_TO_LOCALE_NAME`、`ISO6393_TO_6391`） | 2026-09-05 | 只搬五张语言表（整包 98% 是它的 SRS / 电子书 schema，不装依赖）；辅助函数（英文名、标签、BCP-47 双向转换）是本项目的 |
-| `helper/Sources/axt-helper/main.swift` | `reference/macos-vision-ocr/Sources/ocr.swift@91a236a`（MIT；非 GPL，许可与免责声明全文照抄在 `helper/LICENSE-macos-vision-ocr.txt`，Codex 在 #87 指出只留版权行不够） | 2026-09-07 | Vision 调用参数（accurate、语言纠错、最新 revision）与四角坐标翻 y 照搬；去掉命令行参数、批处理、调试画框，改成 Native Messaging 的 stdio 帧循环，图片从 base64 经 ImageIO 解码，四角输出改成 `[[x, y] × 4]`，加 ping 与错误信封 |
-| `src/styles/presets.css` | `reference/kiss-translator/src/config/styles.js` + `src/libs/style.js@c95bd46`；`green` / `tint` 取自 `reference/read-frog/src/assets/styles/custom-translation-node.css@9b44f82` | 2026-09-05 | 整套预设照搬 KISS：改用 `data-axt-style` 属性选择器与 `--axt-*` 变量、去掉 emotion 运行时；排除 pending / error / mirror / split 节点；gradient 与 glow 改静态、荧光笔按 `1lh` 重复；Read Frog 只取译文默认绿与淡色底两个值 |
-| `src/providers/prompt-file.ts` | `reference/read-frog/src/components/prompt-configurator/utils/prompt-file.ts@9b44f82` | 2026-09-05 | 功能重写：文件形状相同（可互相导入），校验换 zod，去掉 file-saver |
-| `src/core/scheduler/session.ts` | `reference/read-frog/src/utils/host/translate/translation-session.ts@9b44f82` | 2026-09-05 | 去掉 providerRef 的两个函数；函数改名 begin / end / getSessionId |
+| `src/providers/prompt-library.ts` | `reference/read-frog/src/utils/constants/prompt.ts` + `src/utils/prompts/translate.ts@9b44f82` | 2026-09-05 | Replaced template variables with paper context (title / abstract / section / glossary); removed subtitles, separator-based batching, and webpage summaries; retained built-in prompt tables, custom patterns, selection by id, and fallback logic |
+| `src/cache/store.ts` | `reference/FluentRead/src/services/translation/cache.ts@536a819` | 2026-09-03 | Ported and adapted: moved key computation to `key.ts` (Web Crypto), added a `paper` index, increased TTL / capacity for papers, and allowed database and capacity injection in the constructor; retained the in-memory hot layer and failure degradation strategy. **Rewrote eviction**: the original scanned and summed the entire database with `orderBy('lastAccessedAt').toArray()` on every `set` (O(n) per call); now maintains totals incrementally and evicts in batches only when over capacity. See DESIGN §9 |
+| `src/providers/google-web.ts` | `reference/read-frog/src/utils/host/translate/api/google.ts@9b44f82` | 2026-09-04 | Copied endpoint, API key constant, request body, and response parsing; batched multiple items per request (originally one request per item); removed preserveLineBreaks newline markers and the `entities` dependency (we send placeholder markup already escaped by the protector); classified errors using this project’s ProviderError |
+| `src/providers/request/retry-policy.ts` | `reference/read-frog/src/utils/request/retry-policy.ts@9b44f82` | 2026-09-03 | Ported in full; added attribution header and minor adjustments for strict type checking; driven by `request-queue.ts` in the same directory since 2026-09-05 (previously driven by the now-deleted `src/providers/retry.ts`) |
+| `src/providers/request/request-queue.ts` | `reference/read-frog/src/utils/request/request-queue.ts@9b44f82` | 2026-09-05 | Ported in full (modified again on 2026-09-05: added optional `maxConcurrent` and `maxTotalMs`, whose defaults preserve original behavior; see DESIGN §10 and issue #43): replaced `deepmerge-ts` with object spread, configuration schema with local `config.ts`, UUID with `src/shared/uuid.ts`, timer types with `ReturnType<typeof setTimeout>`; added `name` to timeout errors for service-layer classification |
+| `src/providers/request/batch-queue.ts` | `reference/read-frog/src/utils/request/batch-queue.ts@9b44f82` | 2026-09-05 | Ported in full: changed only configuration-schema and UUID imports and timer types (modified again on 2026-09-05, issue #43: added `startedAt`, the batch creation time, to `BatchExecutionMeta`; passed meta to `executeIndividual` too; added optional `maxTotalMs` to bound batch-level backoff by a total time limit) |
+| `src/providers/request/priority-queue.ts` | `reference/read-frog/src/utils/request/priority-queue.ts@9b44f82` | 2026-09-05 | Copied unchanged, with an added header only |
+| `src/providers/request/cancellation.ts` | `reference/read-frog/src/utils/request/cancellation.ts@9b44f82` | 2026-09-05 | Copied unchanged, with an added header only |
+| `src/shared/uuid.ts` | `reference/read-frog/src/utils/crypto-polyfill.ts@9b44f82` | 2026-09-05 | Copied unchanged and renamed |
+| `tests/providers/request/*.test.ts` | `reference/read-frog/src/utils/request/__tests__/*@9b44f82` | 2026-09-05 | Ported six test files and adjusted import paths; replaced separator parsing, hash, and `executeTranslate` dependencies in `batch-queue.test.ts` with test-local substitutes. Did not port `batch-separator-parsing.test.ts`, which tests the upstream separator parser |
+| `src/core/renderer/spinner.ts` | `reference/read-frog/src/utils/host/translate/ui/spinner.ts@9b44f82` | 2026-09-05 | Retained the ring and animation registry; changed classes / color variables to this project’s prefixes; removed request glue `getTranslatedTextAndRemoveSpinner` (including its React error component); added `cancelSpinnersIn` |
+| `src/core/scheduler/pacer.ts` | `reference/read-frog/src/utils/scheduler.ts@9b44f82` | 2026-09-05 | Copied unchanged, with an added header only |
+| `src/config/languages.ts` | `@read-frog/definitions@0.4.4` (Read Frog dependency: `LANG_CODE_ISO6393_OPTIONS`, `LANG_CODE_TO_EN_NAME`, `LANG_CODE_TO_ZH_NAME`, `LANG_CODE_TO_LOCALE_NAME`, `ISO6393_TO_6391`) | 2026-09-05 | Copied only five language tables (98% of the package is its SRS / ebook schema, so the dependency is not installed); helper functions for English names, labels, and bidirectional BCP-47 conversion are project-owned |
+| `helper/Sources/axt-helper/main.swift` | `reference/macos-vision-ocr/Sources/ocr.swift@91a236a` (MIT, not GPL; full license and disclaimer copied to `helper/LICENSE-macos-vision-ocr.txt`; Codex noted in #87 that a copyright line alone was insufficient) | 2026-09-07 | Copied Vision parameters (accurate, language correction, latest revision) and y-axis inversion for all four corners; removed CLI arguments, batching, and debug boxes; replaced them with a Native Messaging stdio frame loop, decoded base64 images through ImageIO, changed corner output to `[[x, y] × 4]`, and added ping and error envelopes |
+| `src/styles/presets.css` | `reference/kiss-translator/src/config/styles.js` + `src/libs/style.js@c95bd46`; `green` / `tint` from `reference/read-frog/src/assets/styles/custom-translation-node.css@9b44f82` | 2026-09-05 | Copied the full KISS preset set: switched to `data-axt-style` attribute selectors and `--axt-*` variables; removed the emotion runtime; excluded pending / error / mirror / split nodes; made gradient and glow static and repeated the highlighter every `1lh`; took only the default translation green and tinted-background values from Read Frog |
+| `src/providers/prompt-file.ts` | `reference/read-frog/src/components/prompt-configurator/utils/prompt-file.ts@9b44f82` | 2026-09-05 | Reimplemented behavior: retained the file shape (mutually importable), replaced validation with zod, and removed file-saver |
+| `src/core/scheduler/session.ts` | `reference/read-frog/src/utils/host/translate/translation-session.ts@9b44f82` | 2026-09-05 | Removed two providerRef functions; renamed functions to begin / end / getSessionId |
 
-登记格式：`src/<path>` ← `reference/<repo>/<path>@<commit>`，一句话说明改了什么（改名、去掉配置依赖、适配块模型等）。改写幅度大到不再像原文件的也要登记。
+Register format: `src/<path>` ← `reference/<repo>/<path>@<commit>`, followed by one sentence explaining changes (renaming, removing configuration dependencies, adapting the block model, etc.). Register substantial rewrites even when they no longer resemble the original file.
+
+Maintenance note (2026-09-09): project-authored attribution comments, documentation, diagnostics, and UI descriptions were translated to English. Original upstream identifiers, versions, dates, license notices, and historical modification records remain intact. In `src/config/languages.ts`, UI display values now reuse the established English language names; the legacy `LANG_CODE_TO_ZH_NAME` export name and native-name / provider-mapping tables are preserved. Actual model prompts are unchanged.

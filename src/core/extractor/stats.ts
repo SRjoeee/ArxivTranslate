@@ -1,6 +1,6 @@
 import type { Block } from './index'
 
-/** popup 展示与测试快照共用的块统计 */
+/** Block statistics shared by the popup and test snapshots. */
 export interface BlockStats {
   total: number
   text: number

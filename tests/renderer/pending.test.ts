@@ -9,9 +9,9 @@ import { docOf, frag } from './helpers'
 const page = '<h2 class="ltx_title ltx_title_section" id="s1">Intro</h2><p class="ltx_p" id="p1">Text.</p>'
   + '<table class="ltx_tabular" id="T1"><tbody><tr><td class="ltx_td">Model</td><td class="ltx_td">1</td></tr></tbody></table>'
 
-// 等待态节点（§7.6）：请求前插在原块后，只有一个圆环；译文到达被真译文替换
+// Pending nodes (§7.6): one spinner after the original before requests, replaced by the real translation on arrival.
 describe('renderPending', () => {
-  it('与原块同标签、沿用 class 加 axt-t axt-pending、带 data-axt-for，里面只有圆环；插在原块后面', () => {
+  it('matches the original tag and classes, adds axt-t, axt-pending, and data-axt-for, and inserts only a spinner after the original', () => {
     const doc = docOf(page)
     const p = extract(doc).find(b => b.id === 'p1') as TextBlock
     const node = renderPending(p)
@@ -24,14 +24,14 @@ describe('renderPending', () => {
     expect(node.textContent).toBe('')
   })
 
-  it('幂等：再调一次返回同一个节点', () => {
+  it('repeated calls return the same node', () => {
     const doc = docOf(page)
     const p = extract(doc).find(b => b.id === 'p1') as TextBlock
     expect(renderPending(p)).toBe(renderPending(p))
     expect(doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(1)
   })
 
-  it('表格块用 div 占位（整表克隆到了才是 table）', () => {
+  it('table blocks use div placeholders until the translated table clone arrives', () => {
     const doc = docOf(page)
     const t = extract(doc).find(b => b.kind === 'table') as TableBlock
     const node = renderPending(t)
@@ -40,7 +40,7 @@ describe('renderPending', () => {
     expect(node.previousElementSibling).toBe(t.el)
   })
 
-  it('短标题：pending 节点与标题同行（§7.3），译文到达时版式不跳', () => {
+  it('short-heading pending nodes stay inline (§7.3) to avoid layout jumps when translations arrive', () => {
     const doc = docOf(page)
     const title = extract(doc).find(b => b.id === 's1') as TextBlock
     const node = renderPending(title)
@@ -48,7 +48,7 @@ describe('renderPending', () => {
     expect(node.hasAttribute(INLINE_ATTR)).toBe(true)
   })
 
-  it('译文到达：renderText 删掉 pending，只剩真译文', () => {
+  it('renderText removes pending so only the real translation remains', () => {
     const doc = docOf(page)
     const p = extract(doc).find(b => b.id === 'p1') as TextBlock
     renderPending(p)
@@ -59,7 +59,7 @@ describe('renderPending', () => {
     expect(node.classList.contains(PENDING_CLASS)).toBe(false)
   })
 
-  it('clearPending / clearTranslation / clearAllPending / restore 都能把 pending 连圆环一起清掉', () => {
+  it('clearPending, clearTranslation, clearAllPending, and restore remove pending nodes and spinners', () => {
     const doc = docOf(page)
     const blocks = extract(doc)
     const [s1, p1] = blocks as [TextBlock, TextBlock]

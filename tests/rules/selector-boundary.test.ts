@@ -2,53 +2,53 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-// CLAUDE.md 硬规则 2：任何 ltx_* 选择器只能写在 src/core/rules/latexml.ts，
-// 其他 TS 文件通过规则模块访问；唯一例外是 src/styles/*.css（布局要声明式地写在样式表里）。
-// 这条规则原来只写在文档里，于是 renderer/side-layout.ts 悄悄攒了 5 处（Codex 在 #22 指出）。
+// CLAUDE.md hard rule 2: ltx_* selectors belong only in src/core/rules/latexml.ts.
+// Other TypeScript modules use that rule module; only src/styles/*.css may use them for declarative layout.
+// This formerly documentation-only rule allowed five selectors to accumulate in renderer/side-layout.ts (Codex #22).
 
 const SRC = join(import.meta.dirname, '../../src')
 const RULES_MODULE = join(SRC, 'core/rules/latexml.ts')
 
 /**
- * 剥掉注释，保留字符串。**不能用正则**（Codex 在 #79 指出）：
- * `/\/\*[\s\S]*?\*\//` 会把 `'https://arxiv.org/html/*'` 里的 `/*` 当成块注释开头，
- * 一路吞到下一个 `*​/`——实测 `src/entrypoints/content/index.ts` 240 行里第 18–37 行整段消失，
- * `defineContentScript` 连同初始化代码全被跳过，守卫自己开了个 20 行的天窗。
+ * Strip comments but preserve strings. Regex alone is unsafe (Codex #79):
+ * a slash-star comment regex mistakes the wildcard in https://arxiv.org/html/* for a block-comment opener,
+ * consuming through the next terminator. In the 240-line content/index.ts, lines 18–37 disappeared,
+ * including defineContentScript and initialization, leaving a 20-line hole in the guard.
  *
- * 这个状态机只做一件事：认出真正的注释。字符串（含模板串）原样留下，因为选择器就写在那里。
- * 正则字面量不必单独处理——把 `/` 当除号读，里面的 `ltx_` 照样留在输出里，正是想要的结果；
- * 而 `/a*​/` 这种也不会被误认成注释开头（`/` 后面不是 `*` 或 `/`）。
+ * This state machine identifies real comments and retains strings, including templates, where selectors are written.
+ * Regex literals need no separate handling here: reading slash as division still retains their ltx_ text, as required;
+ * a regex ending in star-slash is not a comment opener because its opening slash is followed by neither star nor slash.
  */
-/** `/` 出现在这些词之后开的是正则，不是除号 */
+/** A slash after these keywords begins a regex rather than division */
 const EXPR_KEYWORDS = ['return', 'typeof', 'instanceof', 'in', 'of', 'case', 'do', 'else', 'yield', 'await', 'delete', 'void', 'new', 'throw']
-/** 这些的括号收尾之后同样期望表达式：`if (ready) /re/.test(x)` */
+/** Closing these control-statement parentheses also expects an expression, as in if (ready) /re/.test(x) */
 const CONTROL_KEYWORDS = ['if', 'while', 'for', 'switch', 'catch', 'with']
 
 const wordBefore = (out: string) => /[A-Za-z$_][A-Za-z0-9$_]*$/.exec(out.trimEnd())?.[0]
 
 /**
- * 剥掉注释，保留字符串。**不能用正则**（Codex 在 #79 指出）：
- * `/\/\*[\s\S]*?\*\//` 会把 `'https://arxiv.org/html/*'` 里的 `/*` 当成块注释开头，
- * 一路吞到下一个 `*​/`——实测 `src/entrypoints/content/index.ts` 240 行里第 18–37 行整段消失，
- * `defineContentScript` 连同初始化代码全被跳过，守卫自己开了个 20 行的天窗。
+ * Strip comments but preserve strings. Regex alone is unsafe (Codex #79):
+ * a slash-star comment regex mistakes the wildcard in https://arxiv.org/html/* for a block-comment opener,
+ * consuming through the next terminator. In the 240-line content/index.ts, lines 18–37 disappeared,
+ * including defineContentScript and initialization, leaving a 20-line hole in the guard.
  *
- * 认出真注释要先认出**正则字面量**，它的字符类里可以有 `/*`（`/[/*]/`）。判据是标准那条：
- * 斜杠出现在**期望表达式**的位置时才是正则——标点之后、箭头之后、`return` 这类关键字之后
- * （仓库里 mirror.ts 就写着 `return /\S/.test(…)`），以及 `if (…)` / `while (…)` 的括号收尾之后
- * （Codex 在 #79 / #81 分三轮各找到一个入口，所以这里跟踪括号属于谁，而不只看前一个字符）。
+ * Real comment detection must first recognize regex literals, whose character classes can contain slash-star.
+ * A slash begins a regex where an expression is expected: after punctuation, arrows, return-like keywords,
+ * or closing parentheses of control statements such as if and while. mirror.ts uses return followed by a regex.
+ * Codex #79 / #81 found these cases across three rounds, so track which construct owns each parenthesis rather than just the previous character.
  *
- * 启发式终究可能还有没想到的入口，所以另有两道兜底：块注释找不到收尾就**不吞**（认错时最严重的
- * 后果正是一路吞到文件末尾），以及一条逐文件核对"末尾的代码还在不在"的断言。
- * 比例判据试过，没有判别力——这个项目正常文件的注释占比就能到 67%（side-layout.ts）。
+ * Heuristics may still miss cases, so two safeguards remain: never consume an unterminated apparent block comment,
+ * which could otherwise swallow the rest of a file, and assert that each file retains its final executable code.
+ * A comment-ratio check proved ineffective: legitimate files here can be 67% comments, such as side-layout.ts.
  */
 function stripComments(text: string): string {
   let out = ''
   let i = 0
-  /** 上一个有意义的字符 */
+  /** Previous significant character */
   let prev = ''
-  /** 每一层括号是不是 if / while / for 这类控制语句开的 */
+  /** Whether each parenthesis level belongs to a control statement such as if, while, or for */
   const parens: boolean[] = []
-  /** 上一个 `)` 收的是不是控制语句的括号 */
+  /** Whether the previous closing parenthesis ended a control statement */
   let afterControlParen = false
   const expectsExpression = () =>
     prev === '' || '(,=:[!&|?+-*%~^{};'.includes(prev) || out.trimEnd().endsWith('=>')
@@ -72,7 +72,7 @@ function stripComments(text: string): string {
         if (r === '[') inClass = true
         else if (r === ']') inClass = false
         else if (r === '/' && !inClass) break
-        else if (r === '\n') break // 没闭合就当它不是正则，别把整份文件吞了
+        else if (r === '\n') break // Without a terminator, treat it as nonregex rather than swallowing the whole file.
       }
       prev = '/'
       afterControlParen = false
@@ -81,8 +81,8 @@ function stripComments(text: string): string {
     if (c === '/' && next === '*') {
       let j = i + 2
       while (j < text.length && !(text[j] === '*' && text[j + 1] === '/')) j++
-      // 找不到收尾说明这不是注释——多半是某个没认出来的正则字面量。**不吞**：
-      // 一路吞到文件末尾正是最严重的那种失效（守卫全绿、违规全漏，Codex 在 #79 / #81 反复指出）
+      // No closing delimiter likely means an unrecognized regex, not a comment. Do not consume it:
+      // swallowing the rest of a file is the worst failure, silently passing all violations (Codex #79 / #81).
       if (j >= text.length) { out += c; i++; if (!/\s/.test(c)) prev = c; continue }
       i = j + 2
       continue
@@ -122,10 +122,10 @@ function walk(dir: string): string[] {
   })
 }
 
-describe('ltx_* 选择器只能出现在规则模块里（CLAUDE.md 硬规则 2）', () => {
+describe('ltx_* selectors belong only in the rules module (CLAUDE.md hard rule 2)', () => {
   const files = walk(SRC).filter(f => f !== RULES_MODULE)
 
-  it('规则模块之外的 TS / TSX 代码里没有 ltx_ 字面量', () => {
+  it('TypeScript and TSX outside the rules module contain no ltx_ literals', () => {
     const offenders = files
       .map(f => ({ file: f.slice(SRC.length + 1), hits: ltxIn(readFileSync(f, 'utf8')) }))
       .filter(x => x.hits.length > 0)
@@ -133,55 +133,55 @@ describe('ltx_* 选择器只能出现在规则模块里（CLAUDE.md 硬规则 2�
     expect(offenders).toEqual([])
   })
 
-  it('扫到的文件数是合理的——避免走查器自己空转', () => {
+  it('The scanned file count is plausible, preventing an empty scan from passing.', () => {
     expect(files.length).toBeGreaterThan(30)
   })
 
-  it('每个文件的最后一行代码都还在——吞到文件末尾就是认错了', () => {
-    // 认错一个 `/*` 最严重的后果是一路吞到文件结尾。逐个文件核对末尾的可执行内容还在不在
+  it('every file retains its final code line; swallowing through EOF indicates misclassification', () => {
+    // Misreading slash-star can swallow the rest of a file; check the final executable content of each file.
     const truncated = files
       .map(f => ({ file: f.slice(SRC.length + 1), text: readFileSync(f, 'utf8') }))
       .map(x => ({ ...x, tail: x.text.trimEnd().split('\n').at(-1)?.trim() ?? '' }))
       .filter(x => x.tail !== '' && !stripComments(x.text).includes(x.tail))
-      .map(x => `${x.file}: 末尾的 ${JSON.stringify(x.tail.slice(0, 40))} 被吞了`)
+      .map(x => `${x.file}: trailing code ${JSON.stringify(x.tail.slice(0, 40))} was swallowed`)
     expect(truncated).toEqual([])
   })
 })
 
-describe('剥注释不能吞掉代码（Codex 在 #79 指出）', () => {
-  it('注释里的 ltx_ 不算违规，代码里的要抓到', () => {
-    expect(ltxIn('// 这里说 .ltx_para\nconst a = 1')).toEqual([])
-    expect(ltxIn('/** .ltx_note 的说明 */\nconst b = 2')).toEqual([])
+describe('comment stripping must preserve code (Codex #79)', () => {
+  it('ignores ltx_ in comments but detects it in code', () => {
+    expect(ltxIn('// mentions .ltx_para\nconst a = 1')).toEqual([])
+    expect(ltxIn('/** description of .ltx_note */\nconst b = 2')).toEqual([])
     expect(ltxIn("const c = '.ltx_p'")).toEqual(['ltx_p'])
-    // 模板串同样算字符串
+    // template literals also count as strings
     expect(ltxIn('const d = `.ltx_td`')).toEqual(['ltx_td'])
   })
 
-  it('字符串里的 /* 不是注释开头：后面的代码必须留下', () => {
-    // 正则版会从 URL 里的 /* 一路吞到下一个 */，把 const e 整行吃掉
-    const src = "const url = 'https://arxiv.org/html/*'\n/* 普通注释 */\nconst e = '.ltx_abstract'"
+  it('slash-star inside strings does not start a comment and subsequent code survives', () => {
+    // The regex version consumed from the URL wildcard through the next comment terminator, including the entire const e line.
+    const src = "const url = 'https://arxiv.org/html/*'\n/* ordinary comment */\nconst e = '.ltx_abstract'"
     expect(ltxIn(src)).toEqual(['ltx_abstract'])
     expect(stripComments(src)).toContain('const e')
-    expect(stripComments(src)).not.toContain('普通注释')
+    expect(stripComments(src)).not.toContain('ordinary comment')
   })
 
-  it('真实文件上不丢内容：content 入口的 defineContentScript 还在', () => {
-    // 正则版在这个文件上吞掉第 18–37 行，其中就有整个 defineContentScript 调用
+  it('preserves real source content, including the content entrypoint defineContentScript call', () => {
+    // The regex version swallowed lines 18–37 here, including the complete defineContentScript call.
     const text = readFileSync(join(SRC, 'entrypoints/content/index.ts'), 'utf8')
     expect(text).toContain('defineContentScript')
     expect(stripComments(text)).toContain('defineContentScript')
-    // 而注释确实被剥掉了
-    expect(stripComments(text)).not.toContain('注入 arxiv.org/html/*')
+    // Comments really were removed.
+    expect(stripComments(text)).not.toContain('Inject on arxiv.org/html/*')
   })
 
-  it('正则字面量与除号不会被当成注释', () => {
+  it('regex literals and division are not mistaken for comments', () => {
     expect(stripComments('const r = /a*/\nconst s = 1')).toContain('const s')
     expect(ltxIn('const r = /ltx_[a-z]+/')).toEqual(['ltx_'])
     expect(stripComments('const q = a / b\nconst t = 2')).toContain('const t')
   })
 
-  it('return / 箭头之后的正则也要认出来（Codex 在 #81 第二轮指出）', () => {
-    // 仓库里 mirror.ts 就有 `return /\S/.test(…)` 这种写法
+  it('recognizes regexes after return and arrows (Codex #81, round 2)', () => {
+    // mirror.ts contains this return-followed-by-regex pattern.
     for (const prefix of ['return', 'const f = () =>', 'if (x) return', 'yield']) {
       const src = `${prefix} /[/*]/\nconst z = '.ltx_theorem'`
       expect(stripComments(src)).toContain('const z')
@@ -189,42 +189,42 @@ describe('剥注释不能吞掉代码（Codex 在 #79 指出）', () => {
     }
   })
 
-  it('正则的字符类里带 /* 也不会吞掉后面的代码（Codex 在 #81 指出）', () => {
-    // `/[/*]/` 的字符类里就有 slash-star；当成块注释开头的话，后面没有 */ 就整份文件作废
+  it('slash-star inside regex character classes does not consume later code (Codex #81)', () => {
+    // A slash-star character class can look like a comment opener; without a later terminator this would swallow the entire file.
     const src = "const re = /[/*]/\nconst z = '.ltx_theorem'"
     expect(stripComments(src)).toContain('const z')
     expect(ltxIn(src)).toEqual(['ltx_theorem'])
   })
 
-  it('控制语句的括号之后也是正则位置（Codex 在 #81 第三轮指出）', () => {
-    // 后面**跟一个真注释**，这样"未闭合就不吞"那道兜底救不了：认不出正则的话，
-    // 字符类里的 slash-star 会一路吞到真注释的收尾，中间的代码全没
+  it('closing control-statement parentheses also permits regex literals (Codex #81, round 3)', () => {
+    // Follow with a real comment so the unterminated-comment safeguard cannot rescue a misread regex:
+    // the character-class slash-star would consume through the real comment terminator and erase the intervening code.
     for (const prefix of ['if (ready)', 'while (x)', 'for (;;)', 'if (a && b)']) {
-      const src = `${prefix} /[/*]/.test(v)\nconst z = '.ltx_theorem'\n/* 真注释 */`
+      const src = `${prefix} /[/*]/.test(v)\nconst z = '.ltx_theorem'\n/* real comment */`
       expect(stripComments(src)).toContain('const z')
       expect(ltxIn(src)).toEqual(['ltx_theorem'])
     }
   })
 
-  it('未闭合的块注释一律不吞：启发式万一还有漏网的入口，也不会整份文件作废', () => {
-    // 正常代码里不存在未闭合的块注释，遇到它基本可以断定是把某个正则认错了。
-    // 宁可把注释文字当代码（顶多误报），也不能静默吞掉后面的违规（Codex 在 #79 / #81 反复指出）
-    const src = "const a = 1\n/* 这里没有收尾\nconst z = '.ltx_p'"
+  it('never consumes unterminated block comments, preventing missed heuristic cases from discarding whole files', () => {
+    // Valid source cannot contain unterminated block comments; this almost certainly means a misread regex.
+    // A false positive from retaining comment text is preferable to silently swallowing later violations (Codex #79 / #81).
+    const src = "const a = 1\n/* no closing delimiter here\nconst z = '.ltx_p'"
     expect(stripComments(src)).toContain('const z')
   })
 
-  it('函数调用的括号之后是除号，不是正则', () => {
-    // `f(x) / 2` 里的斜杠必须当除号，否则会把后面的代码吃进"正则"
+  it('slashes after function-call parentheses are division, not regexes', () => {
+    // The slash in f(x) / 2 must be division or later code would be consumed as a regex.
     const src = "const n = f(x) / 2\nconst z = '.ltx_caption'"
     expect(ltxIn(src)).toEqual(['ltx_caption'])
   })
 
-  it('没闭合的斜杠不会把整份文件吞掉', () => {
+  it('an unterminated slash does not consume the whole file', () => {
     const src = "const a = 1 / 2\nconst b = '.ltx_caption'"
     expect(ltxIn(src)).toEqual(['ltx_caption'])
   })
 
-  it('转义引号不会让字符串提前结束', () => {
+  it('escaped quotes do not end strings early', () => {
     expect(ltxIn(`const a = 'it\\'s /* not a comment */ .ltx_p'`)).toEqual(['ltx_p'])
   })
 })

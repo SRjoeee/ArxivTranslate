@@ -1,13 +1,13 @@
-// 批次规划（DESIGN §8.2 / §6.2）：按章节与字符预算切批；公式密集块单独成批；表格整表一批。
+// Batch planning (DESIGN §8.2 / §6.2): split by section and character budget; formula-dense blocks and whole tables get separate batches.
 import type { Block, Cell, TableBlock } from '@/core/extractor'
 import { VOID_DENSE_THRESHOLD, serialize, type ProtectedBlock } from '@/core/protector'
 
 export interface Segment {
   id: string
-  /** 带占位符的文本 */
+  /** Text with placeholders. */
   text: string
   block: Block
-  /** 表格块的单元格 */
+  /** Cells of a table block. */
   cell?: Cell
   protected: ProtectedBlock
 }
@@ -16,7 +16,7 @@ export interface Batch {
   kind: 'text' | 'table'
   segments: Segment[]
   sectionTitle?: string
-  /** 仅 table */
+  /** Table blocks only. */
   block?: TableBlock
 }
 
@@ -25,8 +25,8 @@ const TITLE_MAX = 80
 const titleOf = (block: Block) => (block.el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX)
 
 /**
- * 每个块所属的章节标题：按文档序扫一遍，标题块之后的块都归它。
- * 按视口翻时一批里多半没有标题块（标题早在视口上方），所以要在开始时对整篇算一次（§10）
+ * Section title for each block: scan in document order; blocks following a title belong to that section.
+ * Viewport batches often exclude their title (already above the viewport), so compute this once for the entire paper at startup (§10).
  */
 export function sectionTitles(blocks: Block[]): Map<Block, string> {
   const map = new Map<Block, string>()
@@ -38,7 +38,7 @@ export function sectionTitles(blocks: Block[]): Map<Block, string> {
   return map
 }
 
-/** 不传 sectionOf 时从传入的块序列里推章节（标题块开启新批次）；传了就按它，章节变化处切批 */
+/** Without sectionOf, infer sections from the supplied blocks (titles start batches); otherwise use it and split on section changes. */
 export function planBatches(
   blocks: Block[],
   options: { maxBatchChars: number; maxBatchItems: number },
@@ -65,7 +65,7 @@ export function planBatches(
         sectionTitle = next
       }
     } else if (block.kind === 'text' && block.unit === 'title') {
-      // 标题：更新章节上下文，并开启新批次
+      // Title: update section context and start a new batch.
       flush()
       sectionTitle = titleOf(block)
     }

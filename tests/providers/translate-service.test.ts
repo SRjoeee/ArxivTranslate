@@ -10,7 +10,7 @@ const provider = (translate: TranslationProvider['translate'], id = 'mock', extr
   ...extra,
 })
 
-/** 记录调用的假缓存端口 */
+/** Fake cache port that records calls */
 function fakePort(seed: Record<string, string> = {}) {
   const store = new Map(Object.entries(seed))
   const reads: string[][] = []
@@ -35,7 +35,7 @@ afterEach(() => {
 })
 
 describe('createTranslateService', () => {
-  it('缓存读写各一次批量调用，不是每段一次；同一次调用的段落攒成一批发给 provider', async () => {
+  it('reads and writes cache once per batch, not per segment; segments from a call are batched for the provider', async () => {
     const { port, reads, writes } = fakePort()
     const calls: string[][] = []
     const service = createTranslateService({
@@ -52,7 +52,7 @@ describe('createTranslateService', () => {
     expect(calls).toEqual([['a', 'b', 'c']])
   })
 
-  it('命中的段落不再发给 provider，返回按原顺序合并', async () => {
+  it('cache hits bypass the provider and merge into results in original order', async () => {
     const { port } = fakePort()
     const calls: string[][] = []
     const service = createTranslateService({
@@ -69,7 +69,7 @@ describe('createTranslateService', () => {
     expect(second.ok && second.result.model).toBe('m/1')
   })
 
-  it('不带 cache 字段时完全不碰缓存（设置页的连接测试）', async () => {
+  it('omitting cache bypasses it entirely for settings connection tests', async () => {
     const { port, reads, writes } = fakePort()
     const service = createTranslateService({
       getProvider: async () => provider(async r => ({ segments: r.segments, provider: 'mock' })),
@@ -81,7 +81,7 @@ describe('createTranslateService', () => {
     expect(writes).toHaveLength(0)
   })
 
-  it('provider 抛错转成错误响应，不抛出；auth 不重试', async () => {
+  it('converts provider exceptions into error responses without throwing; auth is not retried', async () => {
     let calls = 0
     const service = createTranslateService({
       getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }),
@@ -90,7 +90,7 @@ describe('createTranslateService', () => {
     expect(calls).toBe(1)
   })
 
-  it('缓存读失败不影响翻译（端口自行降级为未命中）', async () => {
+  it('cache read failures do not block translation because the port treats them as misses', async () => {
     const port: CachePort = { getMany: async keys => keys.map(() => null), putMany: vi.fn(async () => {}) }
     const service = createTranslateService({
       getProvider: async () => provider(async r => ({ segments: r.segments.map(s => ({ ...s, text: '译' })), provider: 'mock' })),
@@ -101,7 +101,7 @@ describe('createTranslateService', () => {
     expect(port.putMany).toHaveBeenCalled()
   })
 
-  it('cache.bypass：只写不读，重发不会拿回缓存里那份坏译文（Codex 在 #9 指出）', async () => {
+  it('cache.bypass writes without reading so retries cannot reuse corrupt cached translations (Codex #9)', async () => {
     const { port, reads, writes } = fakePort()
     let calls = 0
     const service = createTranslateService({
@@ -115,14 +115,14 @@ describe('createTranslateService', () => {
     expect(reads).toHaveLength(1)
     expect(writes).toHaveLength(2)
     expect(again.ok && again.result.segments[0]?.text).toBe('译2:text-a')
-    // 覆盖后普通请求命中的是新译文
+    // After replacement, ordinary requests hit the new translation.
     const third = await service.translate(req(['a']))
     expect(calls).toBe(2)
     expect(third.ok && third.result.segments[0]?.text).toBe('译2:text-a')
   })
 
-  it('占位符校验不过的译文照常返回，但不写缓存（Codex 在 #30 指出）', async () => {
-    // 期望从请求文本反推，不再靠调用方传 accept 回调（issue #42）：a 的译文丢了 <x id="1"/>
+  it('returns translations that fail placeholder validation but does not cache them (Codex #30)', async () => {
+    // Infer expectations from request text instead of a caller accept callback (issue #42): the translation of a drops <x id="1"/>.
     const { port, writes } = fakePort()
     const service = createTranslateService({
       getProvider: async () => provider(async r => ({
@@ -142,7 +142,7 @@ describe('createTranslateService', () => {
     expect(writes[0]!.map(w => w.translation)).toEqual(['译:公式 <x id="1"/>。'])
   })
 
-  it('反推的期望对纯文本同样生效：runs 路径的译文凭空多出标签也不入库', async () => {
+  it('inferred expectations also protect plain-text runs: invented tags cannot enter the cache', async () => {
     const { port, writes } = fakePort()
     const service = createTranslateService({
       getProvider: async () => provider(async r => ({
@@ -156,10 +156,10 @@ describe('createTranslateService', () => {
     expect(writes[0]!.map(w => w.translation)).toEqual(['译:text-b'])
   })
 
-  it('一次调用横跨两批、一批失败：成功的那批照样写缓存，调用整体报失败', async () => {
+  it('if one of two batches fails, caches the successful batch while reporting overall failure', async () => {
     const { port, writes } = fakePort()
     const service = createTranslateService({
-      // 每批最多 2 条：a、b 一批，c 一批；含 c 的批报错
+      // Two segments per batch: a and b share one batch; c forms another that fails.
       getProvider: async () => provider(async r => {
         if (r.segments.some(s => s.id === 'c')) throw new ProviderError('invalid-response', 'bad')
         return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' }
@@ -173,12 +173,12 @@ describe('createTranslateService', () => {
     expect(writes.flat().map(w => w.translation)).toEqual(['译:text-a', '译:text-b'])
   })
 
-  it('id 对不上：BatchQueue 整批重试后逐条兜底，RequestQueue 自己不重试（否则兜底前要打 12 次）', async () => {
+  it('ID mismatches trigger BatchQueue retry then individual fallback, without RequestQueue retries that would require 12 requests before fallback', async () => {
     const seen: string[][] = []
     const service = createTranslateService({
       getProvider: async () => provider(async r => {
         seen.push(r.segments.map(s => s.id))
-        if (r.segments.length > 1) throw new ProviderError('invalid-response', 'id 对不上')
+        if (r.segments.length > 1) throw new ProviderError('invalid-response', 'ID mismatch')
         return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' }
       }),
       batch: { maxRetries: 1 },
@@ -186,13 +186,13 @@ describe('createTranslateService', () => {
     })
     const res = await service.translate(req(['a', 'b']))
     expect(res.ok).toBe(true)
-    // 整批 1 次 + 重试 1 次 + 逐条 2 次
+    // One batch attempt + one retry + two individual requests
     expect(seen).toEqual([['a', 'b'], ['a', 'b'], ['a'], ['b']])
   })
 })
 
-describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06）', () => {
-  /** 记录 provider 每次真的收到哪些段 */
+describe('batching depends on capacity, not engine category (§8.3, 2026-09-06)', () => {
+  /** Record which segments the provider actually receives in each call */
   const recorder = (extra: Partial<TranslationProvider> = {}) => {
     const calls: string[][] = []
     return {
@@ -207,7 +207,7 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
     request: { segments: ids.map(id => ({ id, text: `text-${id}` })), source: 'en' as const, target: 'zh-CN', context: { paperTitle: 'P', sectionTitle } },
   })
 
-  it('免费引擎（kind: mt）的多次调用攒进同一个请求：以前只有 LLM 攒批，它一次调用一个请求', async () => {
+  it('coalesces calls to free mt engines into one request, whereas previously only LLM calls were batched', async () => {
     vi.useFakeTimers()
     const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 100, maxBatchChars: 8000 })
     const service = createTranslateService({ getProvider: async () => mt })
@@ -217,7 +217,7 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
     expect((await all).every(r => r.ok)).toBe(true)
   })
 
-  it('装得下多少就攒多少：超过 maxBatchItems 的部分另起一批', async () => {
+  it('fills batches to capacity and starts another beyond maxBatchItems', async () => {
     vi.useFakeTimers()
     const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 2, maxBatchChars: 8000 })
     const service = createTranslateService({ getProvider: async () => mt })
@@ -227,7 +227,7 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
     expect((await all).every(r => r.ok)).toBe(true)
   })
 
-  it('不看上下文的引擎，章节标题不进批次键：否则每换一节就换一次键，跨不了章节攒批', async () => {
+  it('context-insensitive engines omit section titles from batch keys so batching can span sections', async () => {
     vi.useFakeTimers()
     const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 100, maxBatchChars: 8000 })
     const service = createTranslateService({ getProvider: async () => mt })
@@ -237,7 +237,7 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
     expect((await all).every(r => r.ok)).toBe(true)
   })
 
-  it('有提示词的引擎照旧按上下文分批：章节标题会进 prompt，混批会串味', async () => {
+  it('prompt-based engines still separate batches by context to avoid mixing section titles', async () => {
     vi.useFakeTimers()
     const { calls, provider: llm } = recorder({ kind: 'llm', maxBatchItems: 100, maxBatchChars: 8000, promptKey: 'default' })
     const service = createTranslateService({ getProvider: async () => llm })
@@ -247,12 +247,12 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
     expect((await all).every(r => r.ok)).toBe(true)
   })
 
-  it('provider 声明的 maxConcurrent 生效：并发闸与令牌桶是两种闸', async () => {
+  it('honors provider maxConcurrent independently of the token bucket', async () => {
     vi.useFakeTimers()
     let inFlight = 0
     let peak = 0
     const release: (() => void)[] = []
-    // 速率放开（20/s、突发 20），只靠并发闸卡住：同时在飞不能超过 2
+    // Allow 20/s with burst 20 so only concurrency limits in-flight requests to two.
     const mt = provider(async r => {
       inFlight++
       peak = Math.max(peak, inFlight)
@@ -275,51 +275,51 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
   })
 })
 
-describe('系统性失败不该被批级重试放大（Codex 在 #61 指出）', () => {
+describe('systemic failures must not be amplified by batch retries (Codex #61)', () => {
   const callOf = (n: number) => ({
     request: { segments: Array.from({ length: n }, (_, i) => ({ id: `s${i}`, text: `text-${i}` })), source: 'en' as const, target: 'zh-CN' },
   })
 
-  it('声明 isolatable: false 的 invalid-response 立刻上报，不重试不逐条兜底', async () => {
+  it('reports nonisolatable invalid-response immediately without retry or individual fallback', async () => {
     let calls = 0
     const service = createTranslateService({
       getProvider: async () => provider(async () => {
         calls++
-        // 免费引擎返回的整个响应就不是 JSON：拆多小都一样
-        throw new ProviderError('invalid-response', '返回的不是 JSON', { isolatable: false })
+        // The free engine returned non-JSON for the entire response; smaller batches cannot help.
+        throw new ProviderError('invalid-response', 'Response is not JSON', { isolatable: false })
       }, 'mock', { kind: 'mt', maxBatchItems: 100 }),
     })
     const res = await service.translate(callOf(8))
     expect(res).toMatchObject({ ok: false, error: { kind: 'invalid-response' } })
-    // 一次就够：转成批次错误的话是 1 + 3 次重试 + 8 次逐条 = 12 次
+    // One request suffices; treating it as a batch error would cause 1 + 3 retries + 8 individual attempts = 12 requests.
     expect(calls).toBe(1)
   })
 
-  it('可拆分的 invalid-response 照旧重试并逐条兜底：拆小能定位到闯祸的那一段', async () => {
+  it('isolatable invalid-response still retries and falls back individually to identify the offending segment', async () => {
     let calls = 0
     const service = createTranslateService({
       getProvider: async () => provider(async r => {
         calls++
-        // 只有多段一起发才坏；单段发就好了
-        if (r.segments.length > 1) throw new ProviderError('invalid-response', 'id 对不上')
+        // Only multi-segment requests fail; individual requests succeed.
+        if (r.segments.length > 1) throw new ProviderError('invalid-response', 'ID mismatch')
         return { segments: r.segments, provider: 'mock' }
       }, 'mock', { kind: 'llm', maxBatchItems: 100 }),
       batch: { maxRetries: 1 },
     })
     const res = await service.translate(callOf(3))
     expect(res.ok).toBe(true)
-    // 首次 + 1 次重试 + 3 次逐条
+    // Initial attempt + one retry + three individual attempts
     expect(calls).toBe(5)
   })
 })
 
-describe('createTranslateService：限流、超时、取消（fake timers）', () => {
+describe('createTranslateService: rate limits, timeouts, and cancellation with fake timers', () => {
   const log = () => {
     const calls: { id: string; t: number }[] = []
     return { calls, note: (ids: string[]) => calls.push({ id: ids.join('+'), t: Date.now() }) }
   }
 
-  it('429：暂停窗口内后来的请求不发；窗口过后只剩一个令牌、按 scheduleAt 先来先发，其余按速率放行（Codex 在 #6 / #10 / #30 指出）', async () => {
+  it('429 pauses later requests; afterward one token remains, scheduleAt determines order, and rate limits release the rest (Codex #6 / #10 / #30)', async () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)
     const { calls, note } = log()
@@ -335,14 +335,14 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
     await vi.advanceTimersByTimeAsync(100)
     expect(calls.map(c => c.id)).toEqual(['a'])
     const b = service.translate(req(['b']))
-    // 基础暂停 5s：4.9s 内 b 不能发
+    // Base pause 5 s: b cannot dispatch within 4.9 s.
     await vi.advanceTimersByTimeAsync(4_900)
     expect(calls).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(300)
-    // 暂停结束（基础 5s，Math.random 钉 0 没有抖动）：暂停期间桶按速率补满（容量 1）。
-    // b 的批一直被派发闸扣着（暂停期间没有空位就继续攒），所以队列里只有 a 的重试，它先用掉那个令牌
+    // The base 5 s pause ends with Math.random fixed at 0 to remove jitter; refill restores the one-token capacity during the pause.
+    // The dispatch gate holds batch b while no slots are available, so only the retry of a is queued and consumes that token first.
     expect(calls.map(c => c.id)).toEqual(['a', 'a'])
-    // 闸每秒探一次，b 刷出后再等下一个令牌：与 a 的重试至少隔一个令牌周期
+    // The gate probes once per second; after flushing, b waits for another token, at least one token interval after the retry of a.
     for (let i = 0; i < 50 && calls.length < 3; i++) await vi.advanceTimersByTimeAsync(100)
     expect(calls.map(c => c.id)).toEqual(['a', 'a', 'b'])
     expect(calls[2]!.t - calls[1]!.t).toBeGreaterThanOrEqual(1_000)
@@ -350,7 +350,7 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
     expect(ra.ok && rb.ok).toBe(true)
   })
 
-  it('两个同时撞 429：算一个暂停窗口，窗口内谁都不发，窗口过后都重发成功', async () => {
+  it('two simultaneous 429 responses create one pause window with no dispatches, then both retry successfully', async () => {
     vi.useFakeTimers()
     vi.spyOn(Math, 'random').mockReturnValue(0)
     const { calls, note } = log()
@@ -366,10 +366,10 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
     const b = service.translate(req(['b']))
     await vi.advanceTimersByTimeAsync(100)
     expect(calls).toHaveLength(2)
-    // 基础窗口 5s 内一个都不重发
+    // Neither retries during the base five-second window.
     await vi.advanceTimersByTimeAsync(4_900)
     expect(calls).toHaveLength(2)
-    // 窗口过后（第二个 429 可能把窗口延长）两个都重发：暂停期间桶按速率补回容量 2，一起放行
+    // Both retry after the window, which the second 429 may extend; the bucket refills to capacity two during the pause and releases both.
     for (let i = 0; i < 120 && calls.length < 4; i++) await vi.advanceTimersByTimeAsync(100)
     expect(calls).toHaveLength(4)
     expect(calls[2]!.t - calls[0]!.t).toBeGreaterThanOrEqual(5_000)
@@ -377,12 +377,12 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
     expect(ra.ok && rb.ok).toBe(true)
   })
 
-  it('provider 挂住不返回：按字数算的超时到了就重试，重试用尽转成 timeout 错误响应，不会永远等', async () => {
-    // 实测 2312.17527：最后一块等了 220s 还没回，整篇停在"进行中"
+  it('a hung provider retries at the character-based timeout and eventually returns timeout instead of waiting forever', async () => {
+    // Observed in 2312.17527: the last block was still pending after 220 seconds, leaving the whole paper in progress.
     vi.useFakeTimers()
     let calls = 0
     const service = createTranslateService({
-      getProvider: async () => provider(() => { calls++; return new Promise(() => {}) }), // 不配合 signal 也不返回
+      getProvider: async () => provider(() => { calls++; return new Promise(() => {}) }), // Ignores the signal and never returns
       queue: { timeoutMs: 20, maxRetries: 1, baseRetryDelayMs: 0 },
     })
     const pending = service.translate({ request: { segments: [{ id: 'a', text: 'x' }], source: 'en', target: 'zh' } })
@@ -390,11 +390,11 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
     const res = await pending
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.error.kind).toBe('timeout')
-    expect(calls).toBe(2) // 首次 + 重试一次
+    expect(calls).toBe(2) // Initial attempt + one retry
   })
 
-  it('cancel(scope)：排队与在飞的请求一起撤，signal 被 abort，不写缓存；同 scope 的后续调用直接 aborted', async () => {
-    // 真计时器：算缓存键要走 crypto.subtle，fake timers 下不会返回
+  it('cancel(scope) cancels queued and in-flight requests, aborts signals, prevents cache writes, and immediately aborts later calls in that scope', async () => {
+    // Use real timers: cache hashing uses crypto.subtle, which does not complete with fake timers here.
     const { port, writes } = fakePort()
     let signal: AbortSignal | undefined
     let calls = 0
@@ -402,7 +402,7 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
       getProvider: async () => provider(async r => {
         calls++
         signal = r.signal
-        await new Promise(() => {}) // 挂住，等被取消
+        await new Promise(() => {}) // Remain pending until cancelled
         return { segments: r.segments, provider: 'mock' }
       }, 'mock', { maxBatchItems: 1 }),
       cache: port,

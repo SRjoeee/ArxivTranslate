@@ -1,4 +1,4 @@
-// 占位符引擎（DESIGN §6）：serialize → 翻译 → validate → rehydrate；免费引擎或校验失败走 splitRuns / joinRuns。
+// Placeholder engine (DESIGN §6): serialize → translate → validate → rehydrate; free engines or validation failures use splitRuns / joinRuns.
 export { VOID_DENSE_THRESHOLD, serialize, type ProtectedBlock } from './serialize'
 export { PlaceholderIntegrityError, expectationsFromText, validate, type IntegrityReason, type PlaceholderExpectations, type ValidationResult } from './validate'
 export { rehydrate } from './rehydrate'

@@ -3,7 +3,7 @@ import { extract } from '@/core/extractor'
 import { enableDebug } from '@/entrypoints/content/debug'
 
 describe('enableDebug', () => {
-  it('标记块、在 <html> 上打开调试属性、注入唯一的样式，且幂等', () => {
+  it('marks blocks, enables the html debug attribute, and injects exactly one stylesheet idempotently', () => {
     document.body.innerHTML =
       '<article class="ltx_document"><p class="ltx_p" id="p1">Text.</p>'
       + '<table class="ltx_tabular" id="T"><tbody><tr><td class="ltx_td">Model</td><td class="ltx_td">1</td></tr></tbody></table></article>'

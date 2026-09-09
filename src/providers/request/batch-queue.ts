@@ -1,6 +1,6 @@
-// 移植自 reference/read-frog/src/utils/request/batch-queue.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：
-// 只改配置 schema 与 UUID 的 import、计时器类型。按批次键攒批（字数 / 条数 / 攒批时长）、派发闸、
-// 整批结果数对不上时重试再逐条兜底、按 scope 取消；由 translate-service 组装（DESIGN §8.2、§10）。
+// Ported from reference/read-frog/src/utils/request/batch-queue.ts@9b44f82 (GPL-3.0), 2026-09-05; modified:
+// Changed only schema/UUID imports and timer types. Groups by batch key with character/item/time limits, dispatch gating,
+// retries and individual fallback on result-count mismatch, and scope cancellation; wired by translate-service (DESIGN §8.2, §10).
 import { getRandomUUID } from "@/shared/uuid"
 import { batchQueueConfigSchema } from "./config"
 import { TranslationCancelledError } from "./cancellation"
@@ -67,9 +67,9 @@ export interface BatchExecutionMeta {
    */
   scopes: readonly string[] | undefined
   /**
-   * 本项目新增（issue #43）：本批次**创建**（首条入队）的时刻，不是派发时刻——派发闸可以把
-   * 欠满的批次按住最多 MAX_BATCH_HOLD_MS，这段等待也要算进总时限。同一个 meta 会原样传给
-   * 每次批级重试与逐条兜底，调用方据此给整批算一个不随重试重置的截止时刻（Codex 在 #56 指出）
+   * Project addition (issue #43): batch creation time (first item enqueued), not dispatch time. The gate can hold
+   * an underfilled batch for MAX_BATCH_HOLD_MS; that wait counts toward the total deadline. The same meta is passed unchanged
+   * through batch retries and individual fallback so the caller's batch deadline never resets on retry (Codex #56).
    */
   startedAt: number
 }
@@ -80,8 +80,8 @@ export interface BatchOptions<T, R> {
   batchDelay: number
   maxRetries?: number
   /**
-   * 本项目新增（issue #43）：整批的总时限，与下游队列的 maxTotalMs 同一个数。批级重试的退避
-   * 也要受它约束——否则临近截止时仍会先睡 1–8 s 再入队，下游才发现已过期（Codex 在 #56 指出）
+   * Project addition (issue #43): total batch budget, matching downstream maxTotalMs. Batch retry backoff
+   * must respect it too, avoiding a 1–8s wait near expiry before the downstream queue discovers the deadline passed (Codex #56).
    */
   maxTotalMs?: number
   enableFallbackToIndividual?: boolean
@@ -94,7 +94,7 @@ export interface BatchOptions<T, R> {
   // batch was outside every cancellable structure (retry backoff sleep).
   isScopeCancelled?: (scopeKey: string) => boolean
   executeBatch: (dataList: T[], meta: BatchExecutionMeta) => Promise<R[]>
-  /** meta 与 executeBatch 拿到的是同一个对象：逐条兜底也要用同一个批次期限（Codex 在 #56 指出） */
+  /** Same meta object as executeBatch receives; individual fallback must share the batch deadline (Codex #56). */
   executeIndividual?: (data: T, meta: BatchExecutionMeta) => Promise<R>
   onError?: (
     error: Error,
@@ -268,8 +268,8 @@ export class BatchQueue<T, R> {
       }
 
       const ageMs = now - batch.createdAt
-      // 持批上限还要受总时限约束：期限到了就放行，让下游队列按 deadlineAt 当场拒掉，
-      // 否则 maxTotalMs 短于 MAX_BATCH_HOLD_MS 时批次会在门闸后面多挂几十秒（本项目新增，issue #43；Codex 在 #56 指出）
+      // Bound hold time by the total deadline too: release at expiry for immediate downstream rejection by deadlineAt.
+      // Otherwise a maxTotalMs shorter than MAX_BATCH_HOLD_MS leaves the batch behind the gate for extra tens of seconds (issue #43; Codex #56).
       const holdCapMs = Math.min(MAX_BATCH_HOLD_MS, this.maxTotalMs ?? Number.POSITIVE_INFINITY)
       // A dispatch slot is (nearly) available downstream — flushing now costs
       // nothing. Without a gate this is always true, preserving the original
@@ -282,7 +282,7 @@ export class BatchQueue<T, R> {
 
       // Hold: wake when the min-age elapses, or poll the gate again soon —
       // whichever is later — so held batches keep absorbing arrivals while
-      // dispatch is blocked. 但不能晚于期限
+      // dispatch is blocked, but never beyond the deadline.
       const wakeMs = Math.min(
         Math.max(
           this.batchDelay - ageMs,
@@ -400,7 +400,7 @@ export class BatchQueue<T, R> {
 
       // Only retry on count mismatch errors (LLM returned wrong number of results)
       const delay = this.calculateBackoffDelay(retryCount)
-      // 退避之后还得有预算再试一次；没有就直接走逐条兜底（本项目新增，issue #43）
+      // Backoff must leave budget for another attempt; otherwise go directly to individual fallback (project addition, issue #43).
       const withinBudget = this.maxTotalMs === undefined || Date.now() - meta.startedAt + delay < this.maxTotalMs
       if (retryCount < this.maxRetries && err instanceof BatchCountMismatchError && withinBudget) {
         await this.sleep(delay)

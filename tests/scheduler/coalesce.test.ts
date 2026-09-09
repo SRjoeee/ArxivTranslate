@@ -1,4 +1,4 @@
-// 进度事件合并（DESIGN §10）：去抖之外加最长等待，连续事件不能把整理饿死。
+// Progress coalescing (DESIGN §10): a maximum wait supplements debounce so continuous events cannot starve preparation.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCoalescer } from '@/core/scheduler'
 
@@ -6,7 +6,7 @@ describe('createCoalescer', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('安静 delay 之后跑一次', () => {
+  it('runs once after a quiet delay', () => {
     const run = vi.fn()
     const c = createCoalescer(run, { delay: 150, maxWait: 1000 })
     c.schedule()
@@ -16,20 +16,20 @@ describe('createCoalescer', () => {
     expect(run).toHaveBeenCalledTimes(1)
   })
 
-  it('连续事件不会饿死：从第一个未处理事件起最多等 maxWait', () => {
-    // 实测 2312.17141：翻译中每秒几十次进度回调，纯去抖直到整篇翻完才跑一次
+  it('continuous events cannot starve work: runs within maxWait of the first unprocessed event', () => {
+    // 2312.17141 emitted dozens of progress callbacks per second; pure debounce ran only after the entire paper finished.
     const run = vi.fn()
     const c = createCoalescer(run, { delay: 150, maxWait: 1000 })
     for (let t = 0; t < 3000; t += 50) {
       c.schedule()
       vi.advanceTimersByTime(50)
     }
-    // 3 秒里事件每 50ms 一次，纯去抖是 0 次；带最长等待应约每秒一次
+    // Events every 50 ms for three seconds yield zero pure-debounce calls; maxWait should run about once per second.
     expect(run.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(run.mock.calls.length).toBeLessThanOrEqual(4)
   })
 
-  it('最后一次事件之后仍会补跑一次（尾随）', () => {
+  it('also runs once after the final event as a trailing call', () => {
     const run = vi.fn()
     const c = createCoalescer(run, { delay: 150, maxWait: 1000 })
     for (let t = 0; t < 1200; t += 50) { c.schedule(); vi.advanceTimersByTime(50) }
@@ -38,7 +38,7 @@ describe('createCoalescer', () => {
     expect(run.mock.calls.length).toBe(before + 1)
   })
 
-  it('cancel 之后不再跑', () => {
+  it('does not run after cancel', () => {
     const run = vi.fn()
     const c = createCoalescer(run, { delay: 150, maxWait: 1000 })
     c.schedule()
@@ -48,11 +48,11 @@ describe('createCoalescer', () => {
   })
 })
 
-describe('createCoalescer 攒脏集合（issue #46）', () => {
+describe('createCoalescer accumulates dirty items (issue #46)', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
-  it('多次 schedule 的项攒在一起、去重、按加入顺序交给 run', () => {
+  it('combines scheduled items, deduplicates them, and passes them to run in insertion order', () => {
     const run = vi.fn()
     const c = createCoalescer<string>(run, { delay: 150, maxWait: 1000 })
     c.schedule('a')
@@ -62,7 +62,7 @@ describe('createCoalescer 攒脏集合（issue #46）', () => {
     expect(run).toHaveBeenCalledWith(['a', 'b'])
   })
 
-  it('不带参数 = 全量：run 拿到 null，即使这一轮也攒过项', () => {
+  it('argument-free scheduling means a full pass: run receives null even when the cycle already has items', () => {
     const run = vi.fn()
     const c = createCoalescer<string>(run, { delay: 150, maxWait: 1000 })
     c.schedule('a')
@@ -72,7 +72,7 @@ describe('createCoalescer 攒脏集合（issue #46）', () => {
     expect(run).toHaveBeenCalledWith(null)
   })
 
-  it('跑过一次之后集合清空，下一轮从头攒', () => {
+  it('clears accumulated items after each run so the next cycle starts fresh', () => {
     const run = vi.fn()
     const c = createCoalescer<string>(run, { delay: 150, maxWait: 1000 })
     c.schedule('a')
@@ -82,7 +82,7 @@ describe('createCoalescer 攒脏集合（issue #46）', () => {
     expect(run.mock.calls).toEqual([[['a']], [['b']]])
   })
 
-  it('全量标记也只管一轮', () => {
+  it('the full-pass flag lasts only one cycle', () => {
     const run = vi.fn()
     const c = createCoalescer<string>(run, { delay: 150, maxWait: 1000 })
     c.schedule()
@@ -92,7 +92,7 @@ describe('createCoalescer 攒脏集合（issue #46）', () => {
     expect(run.mock.calls).toEqual([[null], [['c']]])
   })
 
-  it('cancel 把攒下的项一起丢掉', () => {
+  it('cancel discards accumulated items', () => {
     const run = vi.fn()
     const c = createCoalescer<string>(run, { delay: 150, maxWait: 1000 })
     c.schedule('a')
@@ -102,7 +102,7 @@ describe('createCoalescer 攒脏集合（issue #46）', () => {
     expect(run).toHaveBeenCalledWith(['b'])
   })
 
-  it('不传类型参数、只用无参 schedule 的老用法照旧能用', () => {
+  it('preserves the old untyped API using only argument-free schedule', () => {
     const run = vi.fn()
     const c = createCoalescer(run, { delay: 150, maxWait: 1000 })
     c.schedule()

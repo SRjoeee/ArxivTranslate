@@ -1,6 +1,6 @@
-// Phase 0 任务 2：规则覆盖率审计。
-// 对 tests/fixtures/arxiv/*.html 逐篇解析，用 src/core/rules/latexml.ts 的规则做逐文本节点归属判定，
-// 输出 Markdown 报表到 stdout；--json <path> 另存全量数据。用法：pnpm fixtures:stats [--json out.json]
+// Phase 0 task 2: rule coverage audit.
+// Parse tests/fixtures/arxiv/*.html and classify each text node with src/core/rules/latexml.ts rules.
+// Print Markdown to stdout; --json <path> also saves complete data. Usage: pnpm fixtures:stats [--json out.json]
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { performance } from 'node:perf_hooks'
@@ -24,13 +24,13 @@ interface FixtureStats {
   parseMs: number
   textNodes: number
   byKind: Record<Kind, number>
-  byRule: Counter                 // 规则 id → 归属文本节点数（unit / protected / skipped）
-  ruleElements: Counter           // 规则 id → 全文档匹配元素数（用于 (a)）
-  multi: Counter                  // 同一单元元素同时命中的规则组合 → 文本节点数
-  histogram: Counter              // 有直接文本的元素：tag.ltx_* → 次数
+  byRule: Counter                 // Rule id → assigned text-node count (unit / protected / skipped).
+  ruleElements: Counter           // Rule id → matching elements in the entire document (for (a)).
+  multi: Counter                  // Rule combinations matching the same unit element → text-node count.
+  histogram: Counter              // Elements with direct text: tag.ltx_* → count.
   uncovered: Record<string, { count: number; sample: string }>
-  outside: Counter                // 根外文本节点按最近可识别祖先归类
-  classes: string[]               // 根内出现过的 ltx_* 类名
+  outside: Counter                // Text outside the root, grouped by nearest identifiable ancestor.
+  classes: string[]               // ltx_* classes present within the root.
   svg: { total: number; withText: number; graphics: number; figures: number }
 }
 
@@ -49,7 +49,7 @@ function parse(html: string): Document {
   return new window.DOMParser().parseFromString(html, 'text/html')
 }
 
-/** 深度优先收集子树内所有文本节点（显式栈，避免深层递归） */
+/** Collect subtree text nodes depth-first with an explicit stack to avoid deep recursion. */
 function* textNodes(root: Element): Generator<Text> {
   const stack: Element[] = [root]
   while (stack.length) {
@@ -72,7 +72,7 @@ function auditFixture(file: string): FixtureStats {
   const doc = parse(readFileSync(file, 'utf8'))
   const parseMs = Math.round(performance.now() - t0)
   const root = doc.querySelector(DOCUMENT_ROOT)
-  if (!root) throw new Error(`${id}: 找不到翻译根 ${DOCUMENT_ROOT}`)
+  if (!root) throw new Error(`${id}: translation root not found: ${DOCUMENT_ROOT}`)
 
   const s: FixtureStats = {
     id, parseMs, textNodes: 0,
@@ -81,16 +81,16 @@ function auditFixture(file: string): FixtureStats {
     svg: { total: 0, withText: 0, graphics: 0, figures: 0 },
   }
 
-  // 每个元素只分类一次；分类逻辑完全来自规则模块的 classify()，审计口径与运行时一致
+  // Classify each element once through the rule module's classify(), keeping audit and runtime semantics aligned.
   const classCache = new WeakMap<Element, Classification | null>()
   const classOf = (el: Element): Classification | null => {
-    // 脚本用的是 happy-dom 自带的 Element 类型，与规则模块的 DOM 类型仅在类型层面不同
+    // happy-dom Element differs from the rule module's DOM Element only at the type level.
     if (!classCache.has(el)) classCache.set(el, classify(el as unknown as globalThis.Element))
     return classCache.get(el) ?? null
   }
 
-  // 规则命中的元素数也走 classify()：光按选择器数，带环境名的 tag（isNamedTag 放行的那 368 个）
-  // 会被记成 protect/tag，审计口径就与运行时脱节（Codex 在 #53 指出）
+  // Count matched elements through classify() too: selector-only counts would classify the 368 named environment tags
+  // accepted by isNamedTag as protect/tag, diverging from runtime behavior (Codex #53).
   for (const r of [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES]) s.ruleElements[r.id] = 0
   s.ruleElements.table = 0
   for (const el of Array.from(doc.querySelectorAll('*'))) {
@@ -108,12 +108,12 @@ function auditFixture(file: string): FixtureStats {
   for (const t of textNodes(root)) {
     if (!hasText(t)) continue
     s.textNodes++
-    let stop: { el: Element; rule: string } | null = null // 最近的 skip / protect 祖先
-    let unit: { el: Element; rule: string } | null = null // 最近的 unit / table 祖先
+    let stop: { el: Element; rule: string } | null = null // Nearest skip/protect ancestor.
+    let unit: { el: Element; rule: string } | null = null // Nearest unit/table ancestor.
     for (let el: Element | null = t.parentElement; el; el = el === root ? null : el.parentElement) {
       const c = classOf(el)
       if (c) {
-        // protect-but-descend（脚注容器）之下若已找到单元，说明文本属于嵌套块，容器不算 stop
+        // A unit below protect-but-descend (footnote container) owns the text as a nested block; the container is not a stop.
         const isStop = c.kind === 'skip' || (c.kind === 'protect' && !(c.descend && unit))
         if (!stop && isStop) stop = { el, rule: c.rule }
         if (!unit && (c.kind === 'unit' || c.kind === 'table')) unit = { el, rule: c.rule }
@@ -141,10 +141,10 @@ function auditFixture(file: string): FixtureStats {
     s.byKind[kind]++
   }
 
-  // 根外文本：按最近的带 ltx_* 类名或带 class/id 的祖先归类
+  // Outside-root text: group by nearest ancestor with ltx_* classes, class or id.
   for (const t of textNodes(doc.body as Element)) {
     if (!hasText(t) || root.contains(t)) continue
-    let key = '(无可识别祖先)'
+    let key = '(no identifiable ancestor)'
     for (let el = t.parentElement; el; el = el.parentElement) {
       if (ltxClasses(el).length) { key = label(el); break }
       if (el.id || el.classList.length) { key = `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : `.${el.classList[0]}`}`; break }
@@ -162,7 +162,7 @@ function auditFixture(file: string): FixtureStats {
   return s
 }
 
-// ---------- 报表 ----------
+// ---------- Report ----------
 const pct = (n: number, d: number) => (d ? `${((100 * n) / d).toFixed(1)}%` : '-')
 const row = (...cells: (string | number)[]) => `| ${cells.join(' | ')} |`
 const table = (head: string[], rows: (string | number)[][]) =>
@@ -172,10 +172,10 @@ function report(all: FixtureStats[]): string {
   const out: string[] = []
   const n = all.length
   const totalText = all.reduce((a, s) => a + s.textNodes, 0)
-  out.push(`## 规则覆盖率审计（RULES_VERSION ${RULES_VERSION}，${n} 篇，${totalText} 个文本节点）`, '')
+  out.push(`## Rule coverage audit (RULES_VERSION ${RULES_VERSION}, ${n} papers, ${totalText} text nodes)`, '')
 
-  out.push('### 每篇概览', '', table(
-    ['fixture', '解析 ms', '文本节点', 'unit', 'protected', 'skipped', 'uncovered'],
+  out.push('### Per-paper overview', '', table(
+    ['fixture', 'parse ms', 'text nodes', 'unit', 'protected', 'skipped', 'uncovered'],
     all.map(s => [s.id, s.parseMs, s.textNodes, pct(s.byKind.unit, s.textNodes), pct(s.byKind.protected, s.textNodes), pct(s.byKind.skipped, s.textNodes), `${s.byKind.uncovered} (${pct(s.byKind.uncovered, s.textNodes)})`]),
   ), '')
 
@@ -186,8 +186,8 @@ function report(all: FixtureStats[]): string {
   }
   const byRule = sumBy(s => s.byRule)
   const ruleElements = sumBy(s => s.ruleElements)
-  out.push('### 规则命中（文本节点数 / 匹配元素数）', '', table(
-    ['类型', 'id', 'selector', '文本节点', '元素数'],
+  out.push('### Rule matches (text nodes / matching elements)', '', table(
+    ['kind', 'id', 'selector', 'text nodes', 'elements'],
     [...UNIT_RULES.map(r => ['unit', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0]),
      ['table', 'table', `\`${TABLE_RULES.root}\``, byRule.table ?? 0, ruleElements.table ?? 0],
      ...SKIP_RULES.map(r => ['skip', r.id, `\`${r.selector}\``, byRule[r.id] ?? 0, ruleElements[r.id] ?? 0]),
@@ -196,7 +196,7 @@ function report(all: FixtureStats[]): string {
 
   const dead = [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES, { id: 'table', selector: TABLE_RULES.root }]
     .filter(r => (ruleElements[r.id] ?? 0) === 0)
-  out.push('### (a) 在所有 fixture 中都没有匹配元素的规则', '', dead.length ? dead.map(r => `- \`${r.selector}\` (${r.id})`).join('\n') : '（无）', '')
+  out.push('### (a) Rules with no matching elements in any fixture', '', dead.length ? dead.map(r => `- \`${r.selector}\` (${r.id})`).join('\n') : '(none)', '')
 
   const unc: Record<string, { count: number; sample: string; fixtures: Set<string> }> = {}
   for (const s of all) for (const [sig, e] of Object.entries(s.uncovered)) {
@@ -205,15 +205,15 @@ function report(all: FixtureStats[]): string {
     u.count += e.count; u.fixtures.add(s.id)
   }
   const uncRows = Object.entries(unc).sort((a, b) => b[1].count - a[1].count)
-  out.push('### (b) 未被任何规则覆盖的文本节点（按最近祖先链签名，近端在前）', '', table(
-    ['签名', '文本节点', 'fixture 数', '样本'],
+  out.push('### (b) Uncovered text nodes (ancestor-chain signatures, nearest first)', '', table(
+    ['signature', 'text nodes', 'fixtures', 'sample'],
     uncRows.map(([sig, u]) => [`\`${sig}\``, u.count, u.fixtures.size, u.sample.replace(/\|/g, '\\|')]),
   ), '')
 
   const multi = sumBy(s => s.multi)
-  out.push('### 同一单元元素命中多条 unit 规则的组合', '', Object.keys(multi).length
-    ? table(['组合', '文本节点'], Object.entries(multi).sort((a, b) => b[1] - a[1]))
-    : '（无）', '')
+  out.push('### Multiple unit rules matching the same unit element', '', Object.keys(multi).length
+    ? table(['combination', 'text nodes'], Object.entries(multi).sort((a, b) => b[1] - a[1]))
+    : '(none)', '')
 
   const presence: Record<string, string[]> = {}
   for (const s of all) for (const c of s.classes) {
@@ -221,43 +221,43 @@ function report(all: FixtureStats[]): string {
     presence[c]!.push(s.id)
   }
   const partial = Object.entries(presence).filter(([, f]) => f.length < n).sort((a, b) => a[1].length - b[1].length)
-  out.push(`### (c) 只在部分 fixture 出现的 ltx_* 类名（共 ${Object.keys(presence).length} 个类名，${partial.length} 个未全覆盖；全部 fixture 同为 oxide 0.7.6，此处反映的是内容分布而非版本差异）`, '', table(
-    ['类名', '出现篇数', 'fixture'],
+  out.push(`### (c) ltx_* classes present in only some fixtures (${Object.keys(presence).length} classes total, ${partial.length} not universal; all fixtures use oxide 0.7.6, so this reflects content distribution, not version differences)`, '', table(
+    ['class', 'paper count', 'fixture'],
     partial.map(([c, f]) => [`\`${c}\``, f.length, f.join(' ')]),
   ), '')
 
-  out.push('### SVG 图占比（§15.1，仅统计翻译根内）', '', table(
-    ['fixture', 'svg', '含 <text> 的 svg', 'img.ltx_graphics', '.ltx_figure'],
+  out.push('### SVG image counts (§15.1, translation root only)', '', table(
+    ['fixture', 'svg', 'svg containing <text>', 'img.ltx_graphics', '.ltx_figure'],
     all.map(s => [s.id, s.svg.total, s.svg.withText, s.svg.graphics, s.svg.figures]),
   ), '')
 
   const outside = sumBy(s => s.outside)
-  out.push('### 翻译根之外的文本节点（应只有导航栏与 arXiv 页头页脚）', '', table(
-    ['最近可识别祖先', '文本节点'], Object.entries(outside).sort((a, b) => b[1] - a[1]),
+  out.push('### Text nodes outside the translation root (expected: navigation and arXiv header/footer only)', '', table(
+    ['nearest identifiable ancestor', 'text nodes'], Object.entries(outside).sort((a, b) => b[1] - a[1]),
   ), '')
 
   const hist = sumBy(s => s.histogram)
-  out.push(`### 有直接文本的元素直方图（tag.ltx_* → 次数，合计 ${Object.keys(hist).length} 种）`, '', table(
-    ['元素', '次数', '出现篇数'],
+  out.push(`### Histogram of elements with direct text (tag.ltx_* → count; ${Object.keys(hist).length} types total)`, '', table(
+    ['element', 'count', 'paper count'],
     Object.entries(hist).sort((a, b) => b[1] - a[1]).map(([k, v]) => [`\`${k}\``, v, all.filter(s => s.histogram[k]).length]),
   ), '')
   return out.join('\n')
 }
 
-// ---------- 主流程 ----------
+// ---------- Main ----------
 const jsonIdx = process.argv.indexOf('--json')
 const jsonPath = jsonIdx > -1 ? process.argv[jsonIdx + 1] : null
 const files = readdirSync(FIXTURE_DIR).filter(f => f.endsWith('.html')).sort().map(f => join(FIXTURE_DIR, f))
 const results: FixtureStats[] = []
 for (const f of files) {
-  process.stderr.write(`审计 ${basename(f)} … `)
+  process.stderr.write(`Auditing ${basename(f)} … `)
   const s = auditFixture(f)
-  process.stderr.write(`${s.parseMs} ms，${s.textNodes} 文本节点，uncovered ${s.byKind.uncovered}\n`)
+  process.stderr.write(`${s.parseMs} ms, ${s.textNodes} text nodes, uncovered ${s.byKind.uncovered}\n`)
   results.push(s)
 }
 process.stdout.write(`${report(results)}\n`)
 if (jsonPath) {
   writeFileSync(jsonPath, JSON.stringify(results, null, 2))
-  process.stderr.write(`全量数据已写入 ${jsonPath}\n`)
+  process.stderr.write(`Complete data written to ${jsonPath}\n`)
 }
 process.exit(0)

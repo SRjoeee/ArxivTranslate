@@ -1,16 +1,16 @@
-/* 图片叠加层（DESIGN §15.2）：<img> 的下一个兄弟 .axt-img，内部每个 span 一个译文标签。
-   叠加层**不带 .axt-t**——带了会被 side 的配对网格排到右栏、拆图时把 <img> 当配对原件删掉、被预设装饰。
+/* Image overlay (DESIGN §15.2): .axt-img is the next sibling of <img>; each span is a translated label.
+   Do not add .axt-t: it would place overlays in the side grid's right column, remove paired <img> originals during splitting, and apply presets.
 
-   定位用 CSS 锚点定位（Chrome ≥131，anchor-scope）：图声明锚点名，叠加层用 anchor() / anchor-size()
-   贴到图的盒子上——零 JS 几何读取、零 ResizeObserver，图随栏宽缩放时自动跟随；拆图副本结构相同，
-   锚点自动成立。父元素做定位祖先并限定锚点作用域，一个父元素里多张图各找各的（同名锚点按"前面最近的"解析，
-   兄弟关系一旦被别的节点插进来就会串到上一张图，作用域是第二道保险）。
-   不支持锚点定位的浏览器：@supports 不成立，叠加层一直 display: none，不会掉到图下面。
+   CSS anchor positioning (Chrome ≥131, anchor-scope) attaches the layer to the image with anchor() / anchor-size().
+   No JS geometry reads or ResizeObserver: resizing follows column width automatically; split copies retain the same anchoring structure.
+   The parent supplies a positioning context and anchor scope. Multiple images resolve their own nearest preceding matching anchor;
+   an intervening sibling can otherwise associate with the previous image, so scope provides a second safeguard.
+   Without anchor support, @supports fails and overlays stay display:none rather than falling below images.
 
-   可见性只看 <html> 上的两个属性：当前模式 + 用户勾选的模式集合（data-axt-img-modes，空格分隔）。
-   叠加层自己没有状态属性——拆图克隆会把 data-axt-* 全剥掉。 */
+   Visibility uses only <html>'s active mode and space-separated selected modes (data-axt-img-modes).
+   Overlays carry no state attributes: split cloning strips data-axt-*. */
 
-/* 基线在 @supports 之外：不支持锚点定位的浏览器也不能让叠加层掉成一段普通文字排在图下面（Codex 在 #89 指出） */
+/* Keep the hidden baseline outside @supports: unsupported browsers must not show overlay text below images (Codex #89). */
 .axt-img {
   display: none;
 }
@@ -32,9 +32,9 @@
     left: anchor(left);
     width: anchor-size(width);
     height: anchor-size(height);
-    /* 标签字号用容器查询单位（cqh / cqw）按框高与字数算，不读布局 */
+    /* Size labels with cqh / cqw from box height and text length, without layout reads. */
     container-type: size;
-    /* 图所在的 figure 可能是配对网格容器：脱离网格流（先例 modes.css 的 .ltx_item > .ltx_tag） */
+    /* The enclosing figure may be a pairing grid; stay out of grid flow (see modes.css .ltx_item > .ltx_tag). */
     grid-column: auto;
     grid-row: auto;
     margin: 0;
@@ -42,7 +42,7 @@
     border: 0;
     pointer-events: none;
     z-index: 1;
-    /* 站点给 figure 里的块加的居中 / 字号不该传给标签 */
+    /* Do not inherit site centering / font sizes applied to figure blocks. */
     text-align: initial;
     font-size: initial;
     line-height: initial;
@@ -54,7 +54,7 @@
     display: block;
   }
 
-  /* 照 Safari 的样子：白色圆角半透明框盖住原文字，字号随框高；hover 显示原文（title） */
+  /* Safari-style translucent white rounded boxes cover source text; font size follows box height. Hover shows source via title. */
   .axt-img > span {
     position: absolute;
     box-sizing: border-box;
@@ -76,9 +76,9 @@
     cursor: default;
   }
 
-  /* side：插图整块拆两份（§7.2），叠加层属于「只有译文」的副本，原件那份隐藏。
-     只限 side——stack 显示原件、only 显示副本，叠加层跟着显示的那份走。
-     特异度与上面的显示规则相同，必须写在后面 */
+  /* Side mode splits whole figures (§7.2): show overlays in the translation-only copy, hiding the originals.
+     Only in side mode: stack shows originals, only shows copies; overlays follow whichever is visible.
+     Same specificity as the visibility rules above; must follow them. */
   html[data-axt-mode="side"] [data-axt-split] .axt-img {
     display: none;
   }

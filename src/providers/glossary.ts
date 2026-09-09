@@ -1,14 +1,14 @@
-// 术语表的文本形式与结构形式互转（DESIGN §8.2）。
-// 形状照 KISS 的 parseAITerms（reference/kiss-translator/src/libs/utils.js@c95bd46）：一行一条、逗号分隔，
-// 这里加上制表符（方便从表格粘贴）、注释行与行号级的错误报告——论文术语通常是整段粘进来的，
-// 静默丢掉写错的那一行会让用户以为术语生效了。
+// Convert glossaries between text and structured forms (DESIGN §8.2).
+// Based on KISS parseAITerms (reference/kiss-translator/src/libs/utils.js@c95bd46): one comma-separated entry per line.
+// Adds tabs (for pasting from spreadsheets), comment lines and errors with line numbers. Paper glossaries are often pasted in bulk;
+// silently discarding a malformed line would make users think the term was applied.
 export interface GlossaryEntry {
   term: string
   translation: string
 }
 
 export interface GlossaryIssue {
-  /** 从 1 开始，对应用户在文本框里看到的行号 */
+  /** One-based line number, matching what the user sees in the text box. */
   line: number
   text: string
   reason: string
@@ -19,20 +19,20 @@ export interface ParsedGlossary {
   issues: GlossaryIssue[]
 }
 
-/** 一行里第一个逗号（半角或全角）或制表符作分隔：译文本身可能含逗号，只切一次 */
+/** Split on the first comma (ASCII or full-width) or tab only: the translation itself may contain commas. */
 const SEPARATOR = /[,，\t]/
 
 /**
- * 解析术语表文本。空行与 `#` 开头的注释行跳过；
- * 同一 term 后面出现的覆盖前面的，但保持**首次出现**的顺序，改一条译法不会让它跳到表尾
+ * Parse glossary text, skipping blank lines and comments starting with `#`.
+ * Later entries override the same term, preserving its **first occurrence** order so editing a translation does not move it to the end.
  */
 export function parseGlossary(text: string): ParsedGlossary {
   const entries: GlossaryEntry[] = []
   const issues: GlossaryIssue[] = []
   const index = new Map<string, number>()
 
-  // 一行一条。**分号不作分隔符**：译文里出现分号是正常的（`kernel, 核; 统计学中称核函数`），
-  // 当成记录分隔会把它悄悄拆成两条不相干的映射（Codex 在 #52 指出）。DESIGN §8.2 写的也是按行分隔
+  // One entry per line. **Semicolons are not separators**: translations may contain them (`kernel, core; a statistical kernel`).
+  // Treating them as record separators silently creates two unrelated mappings (Codex #52). DESIGN §8.2 also specifies line separation.
   const lines = text.split('\n')
   let lineNumber = 0
   for (const rawLine of lines) {
@@ -41,17 +41,17 @@ export function parseGlossary(text: string): ParsedGlossary {
     if (line === '' || line.startsWith('#')) continue
     const match = SEPARATOR.exec(line)
     if (!match) {
-      issues.push({ line: lineNumber, text: line, reason: '缺少分隔符，应写成「原文, 译文」' })
+      issues.push({ line: lineNumber, text: line, reason: 'Missing separator; use "source, translation"' })
       continue
     }
     const term = line.slice(0, match.index).trim()
     const translation = line.slice(match.index + 1).trim()
     if (term === '') {
-      issues.push({ line: lineNumber, text: line, reason: '原文为空' })
+      issues.push({ line: lineNumber, text: line, reason: 'Source term is empty' })
       continue
     }
     if (translation === '') {
-      issues.push({ line: lineNumber, text: line, reason: '译文为空' })
+      issues.push({ line: lineNumber, text: line, reason: 'Translation is empty' })
       continue
     }
     const existing = index.get(term)
@@ -65,7 +65,7 @@ export function parseGlossary(text: string): ParsedGlossary {
   return { entries, issues }
 }
 
-/** 回写成文本框里的形式，一行一条 */
+/** Format for the text box, one entry per line. */
 export function formatGlossaryText(entries: readonly GlossaryEntry[]): string {
   return entries.map(entry => `${entry.term}, ${entry.translation}`).join('\n')
 }

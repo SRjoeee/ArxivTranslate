@@ -1,46 +1,46 @@
-// side 模式下让表格与行间公式装进自己那一栏（DESIGN §7.2）。
-// 论文里的数值表最小内容宽度普遍超过半栏（实测同一页三张表 509 / 551 / 613px，栏宽 484px），
-// 行间公式同样不能换行（实测 2609.04056v1：栏宽 436px 时 (1.8) 宽 800px、(1.15) 宽 900px，
-// 左栏的式子横到右栏、公式编号跑到镜像的开头上）。两者都压不到 min-content 以下，所以按比例缩小：
-// 量出需要的比例，落到一档离散的 zoom 上（写成 data-axt-fit，样式在 modes.css）。
-// 缩到 MIN_FIT 还装不下的极端内容退化为栏内横向滚动（ar5iv 自己在 .ltx_td / .ltx_inline-block 里也这么处理公式表）。
+// Fit side-mode tables and display equations to their own columns (DESIGN §7.2).
+// Numeric tables often exceed half-column min-content width (three measured tables: 509 / 551 / 613 px; column: 484 px).
+// Display equations cannot wrap either (2609.04056v1: column 436 px; (1.8) 800 px, (1.15) 900 px),
+// spilling left equations into the right and their numbers over mirrors. Neither can shrink below min-content; scale proportionally.
+// Measure the required ratio and choose a discrete zoom tier via data-axt-fit, styled in modes.css.
+// Beyond MIN_FIT, use column-local horizontal scrolling (as ar5iv does for equation tables in .ltx_td / .ltx_inline-block).
 //
-// **量法只读，不克隆、不写 DOM**。早先每张表克隆一份插进 body 量 min-content，那是"写一次、读一次"的循环，
-// 每张都强制整页重排：目标扩到公式后 2312.17141 有 392 张，实测一趟 45 秒的长任务、页面无响应、
-// 134 秒只翻出 6 块（用户反馈）；同一页只读量法 1 毫秒。
+// Measurement is read-only: no cloning or DOM writes. Previously each table was cloned into body to measure min-content,
+// forcing full-page layout per write/read cycle. With equations included, 2312.17141 had 392 targets: a 45 s long task froze the page,
+// translating only six blocks in 134 s (user report). Read-only measurement on that page took 1 ms.
 //
-// **读写分批，且量过的不重量**（issue #46）。"只读量法 1 毫秒"是目标只有几张表时的数字：扩到 392 张后，
-// 逐张"读几何 → 写 data-axt-fit → 读下一张"仍是读写交错——写完的 zoom 让下一次读强制同步布局，
-// 一趟最多 392 次；而且每趟对每张表全部重量，不看上次结果。side prep 一次会话跑 30 多趟，
-// 实测 2312.17141 累计 991 ms（占整个 prep 的一半）。现在一趟里先把所有几何读完（只触发一次布局），
-// 再只写有变化的那几个；量过的表按「栏宽 + 译文节点」缓存——每条渲染路径（renderTable / renderPending /
-// 重试）都会换掉那个兄弟节点，镜像整个会话只造一次，所以**节点身份就是内容版本**，不必哈希。
+// Batch reads and writes, and cache measured targets (issue #46). The 1 ms claim covered only a few tables; with 392 targets,
+// alternating geometry reads and data-axt-fit writes still forced synchronous layout after each changed zoom,
+// up to 392 times per pass. Every pass also remeasured everything. Over 30 side-prep passes per session,
+// 2312.17141 totaled 991 ms, half of prep time. Now read all geometry first (one layout),
+// then write only changes. Cache by column width + translation node: renderTable / renderPending / retry
+// replace that sibling, while mirrors are created once per session. Node identity is therefore the content version; no hash needed.
 import { DOCUMENT_ROOT, EQUATION_PAD_CELL, EQUATION_TABLE, FIT_TARGETS } from '@/core/rules/latexml'
 import { FOR_ATTR, T_CLASS } from './index'
 
-/** 原节点只允许追加 data-axt-*（§7.1），所以比例用属性而不是内联样式表达 */
+/** Original nodes permit only data-axt-* additions (§7.1), so express zoom as an attribute, not inline style. */
 export const FIT_ATTR = 'data-axt-fit'
-/** 离散档位：少数几条 CSS 规则就能覆盖，也避免每次改窗口都写新值 */
+/** Discrete tiers need few CSS rules and avoid new attribute values on every resize. */
 export const FIT_BUCKETS = [95, 90, 85, 80, 75, 70] as const
-/** 低于这个比例字就太小了，改用栏内滚动 */
+/** Below this scale, text is too small; use column-local scrolling instead. */
 export const MIN_FIT = 0.7
 export const FIT_SCROLL = 'scroll'
 /**
- * 放松缩放（去掉标记或换更大的档）要求的富余。公式表装得下时自然宽度只能估算（见 measureNatural），
- * 估算值比真实值小 1–2%（实测 145 张最大差 28px），没有余量的话会在"放松 → 溢出 → 收紧"之间来回跳
+ * Headroom required to loosen fit (remove the marker or choose a larger scale). When equation tables fit, natural width is estimated (measureNatural).
+ * Estimates can be 1–2% low (up to 28 px across 145 tables); without slack, fitting oscillates between loosening, overflow, and tightening.
  */
 export const LOOSEN_SLACK = 0.05
 
 export interface NaturalWidth {
   width: number
-  /** 精确值可以用来收紧；估算值只用来放松，且要留 LOOSEN_SLACK 的余量 */
+  /** Exact measurements may tighten fit; estimates may only loosen it, with LOOSEN_SLACK headroom. */
   exact: boolean
 }
 
 export interface FitDeps {
-  /** 表格不受栏宽约束时的自然宽度；返回数字视为精确值。原表与译表各量一次，按更宽的那张定档 */
+  /** Natural unconstrained table width; numeric results are exact. Measure both original and translation, and use the wider one. */
   naturalWidth?: (table: Element) => number | NaturalWidth
-  /** 表格所在容器一栏的宽度 */
+  /** One column's width in the table's container. */
   columnWidth?: (table: Element) => number
 }
 
@@ -50,12 +50,12 @@ function currentZoom(table: Element): number {
 }
 
 /**
- * 只读地量自然宽度，按当前状态分三种：
- * - 栏内横滑（scroll）：盒子被 max-width 压在栏宽，scrollWidth 就是内容宽度，精确
- * - 盒子比栏宽（已含当前缩放）：表格压不到 min-content 以下，盒宽 ÷ zoom 就是自然宽度，精确
- * - 装得下且有富余：.ltx_tabular 按内容定宽，盒宽仍是自然宽度，精确；
- *   公式表是 width: 100%，盒宽说明不了内容，改用各行非填充单元格之和（填充格按它的 min-width 计，
- *   ar5iv 给了 2em），取最宽的一行——这是估算
+ * Read natural width without writes, in three states:
+ * - Horizontal scrolling: max-width caps the box, so scrollWidth is exact content width.
+ * - Box wider than column, including current zoom: tables cannot shrink below min-content; box width / zoom is exact natural width.
+ * - Fits with slack: .ltx_tabular is content-sized, so box width is still exact.
+ *   Equation tables use width: 100%, making box width uninformative. Sum nonfiller cells per row, using filler min-width
+ *   (ar5iv supplies 2em), and take the widest row; this is an estimate.
  */
 function measureNatural(table: Element, column: number): NaturalWidth {
   const zoom = currentZoom(table)
@@ -82,8 +82,8 @@ function measureNatural(table: Element, column: number): NaturalWidth {
 }
 
 /**
- * 栏宽以翻译根的第一条网格轨道为准：所有容器都是它的 subgrid，栏宽处处相同（§7.2）。
- * 直接读轨道比"父容器宽度减间距再除二"更可靠——表格的父级不一定是我们设的网格容器。
+ * Read column width from the translation root's first grid track; all containers subgrid those tracks (§7.2).
+ * More reliable than halving parent width minus gap, since the table's parent need not be one of our grids.
  */
 export function measureColumn(table: Element): number {
   const view = table.ownerDocument.defaultView
@@ -92,7 +92,7 @@ export function measureColumn(table: Element): number {
     const first = Number.parseFloat(view.getComputedStyle(root).gridTemplateColumns.split(' ')[0] ?? '')
     if (Number.isFinite(first) && first > 0) return first
   }
-  // 退路：还没进 side 或读不到轨道时，按父容器折半估算
+  // Fallback before side mode or when tracks cannot be read: estimate half the parent's width.
   const holder = table.parentElement
   if (!holder || !view) return 0
   const gap = Number.parseFloat(view.getComputedStyle(holder).columnGap) || 0
@@ -103,7 +103,7 @@ const paired = (table: Element): boolean =>
   table.nextElementSibling?.classList.contains(T_CLASS) === true
   && table.nextElementSibling?.getAttribute(FOR_ATTR) !== null
 
-/** 松紧序：无标记最松，scroll 最紧 */
+/** Tightness order: no marker is loosest, scroll is tightest. */
 function tightness(value: string | null): number {
   if (value === null) return 0
   if (value === FIT_SCROLL) return FIT_BUCKETS.length + 1
@@ -117,7 +117,7 @@ function decide(natural: number, column: number): string | null {
   return bucket === undefined || needed < MIN_FIT ? FIT_SCROLL : String(bucket)
 }
 
-/** 量过一次就记下来：同一栏宽、同一个译文节点，自然宽度不可能变（原表本身不可变） */
+/** Cache measurements: natural width cannot change with the same column width and translation node; the original table is immutable. */
 interface FitEntry {
   column: number
   translation: Element
@@ -126,15 +126,15 @@ interface FitEntry {
 
 let cache = new WeakMap<Element, FitEntry>()
 
-/** 清掉量宽缓存。会话重开、字体加载完成时调 */
+/** Clear width cache on session restart or font loading completion. */
 export function resetFitCache(): void {
   cache = new WeakMap()
 }
 
 /**
- * 网页字体加载完成后自然宽度会变，可译文节点与栏宽都没变、缓存照样命中，档位就停在字体没到时的
- * 那一档（Codex 在 #84 指出）。`document.fonts` 的 `loadingdone` 是这类变化唯一的事件源：
- * 清缓存并让调用方排一趟整理。返回卸载函数；没有 FontFaceSet 的环境什么都不做
+ * Web-font loading changes natural width without changing the translation node or column width, leaving cached tiers stale (Codex #84).
+ * document.fonts loadingdone is the event source for these changes:
+ * clear the cache and ask the caller to schedule cleanup. Return disposal; no-op without FontFaceSet.
  */
 export function watchFontLoads(doc: Document, onDone: () => void): () => void {
   const fonts = (doc as Document & { fonts?: EventTarget }).fonts
@@ -145,11 +145,11 @@ export function watchFontLoads(doc: Document, onDone: () => void): () => void {
 }
 
 /**
- * 给每对表格 / 行间公式标上合适的缩放档；重复调用按当前栏宽重判，栏宽或译文节点没变的表直接用上次结果。
- * 配对 = 后面紧跟译文克隆或镜像（都是带 data-axt-for 的 .axt-t）。
- * 没有布局信息的环境（测试、display:none）直接跳过，也不进缓存。
+ * Assign fit tiers to table / display-equation pairs. Reevaluate when column width or translation node changes; otherwise use cached results.
+ * A pair is followed immediately by a translated clone or mirror (.axt-t with data-axt-for).
+ * Skip and do not cache targets without layout information (tests, display:none).
  *
- * 三段：先收集（不碰布局），再一次读完（一次强制布局），最后只写有变化的——照 pair-margins.ts 的纪律
+ * Three phases: collect without layout, read all geometry with one forced layout, then write only changes, following pair-margins.ts.
  */
 export function fitTables(root: Document | Element, deps: FitDeps = {}): { fitted: number; scrolled: number } {
   const columnWidth = deps.columnWidth ?? measureColumn
@@ -158,7 +158,7 @@ export function fitTables(root: Document | Element, deps: FitDeps = {}): { fitte
     return typeof measured === 'number' ? { width: measured, exact: true } : measured
   }
 
-  // ── 1. 收集：只看属性与兄弟，不读几何 ──
+  // ── 1. Collect: attributes and siblings only, no geometry reads. ──
   const targets: Array<{ table: Element; translation: Element | null; current: string | null }> = []
   for (const table of Array.from(root.querySelectorAll(FIT_TARGETS))) {
     if (table.classList.contains(T_CLASS)) continue
@@ -166,13 +166,13 @@ export function fitTables(root: Document | Element, deps: FitDeps = {}): { fitte
   }
   const first = targets.find(t => t.translation)
   if (!first) {
-    // 没有一对要处理：只把陈旧标记擦掉（有才擦，别白写）
+    // No pair to fit: remove only existing stale markers, avoiding redundant writes.
     for (const { table, current } of targets) if (current !== null) table.removeAttribute(FIT_ATTR)
     return { fitted: 0, scrolled: 0 }
   }
 
-  // ── 2. 读：栏宽一次，未命中缓存的表各量一次；全程不写 ──
-  // 栏宽一次调用里处处相同（所有容器都是同一组 subgrid 轨道），读一次就够
+  // ── 2. Read: column width once, each uncached table once; no writes. ──
+  // All containers share subgrid tracks, so one column-width read suffices per call.
   const column = columnWidth(first.table)
   const decided: Array<{ table: Element; translation: Element | null; current: string | null; next: string | null; cacheable: boolean }> = []
   for (const t of targets) {
@@ -183,16 +183,16 @@ export function fitTables(root: Document | Element, deps: FitDeps = {}): { fitte
       decided.push({ ...t, next: hit.fit, cacheable: false })
       continue
     }
-    // **两张都量，按更宽的那张定档**：译表可能比原表宽——中文表头更长（实测 2606.07636v2 的 Table 4：
-    // 原表按 0.75 档正好 648 装进栏里，译表同档却是 827，右栏溢出 179px）。两张必须同一档，
-    // 不然行高不一致、左右对不上，所以取 max 而不是各判各的。读都在这一段，仍然只触发一次布局
+    // Measure both and fit to the wider one. Translated headers can be longer: 2606.07636v2 Table 4
+    // fit the original at 0.75 / 648 px, but the translation was 827 px, overflowing 179 px. Both need the same tier
+    // to align row heights, so take max rather than fit separately. All reads remain here, forcing only one layout.
     const own = measureOne(t.table, column)
     const other = measureOne(t.translation, column)
     const natural = Math.max(own.width, other.width)
     const exact = own.exact && other.exact
     if (!(natural > 0)) { decided.push({ ...t, next: null, cacheable: false }); continue }
     let next = decide(natural, column)
-    // 估算值永远不用来收紧（它量的是"装得下"的状态，收紧没有依据）；放松要按加了余量的宽度重新判
+    // Never tighten from an estimate (measured while fitting, so tightening lacks evidence); loosen only after applying slack.
     if (!exact && tightness(next) !== tightness(t.current)) {
       next = tightness(next) < tightness(t.current) ? decide(natural * (1 + LOOSEN_SLACK), column) : t.current
       if (tightness(next) > tightness(t.current)) next = t.current
@@ -200,7 +200,7 @@ export function fitTables(root: Document | Element, deps: FitDeps = {}): { fitte
     decided.push({ ...t, next, cacheable: true })
   }
 
-  // ── 3. 写：只写和现状不同的属性；记缓存 ──
+  // ── 3. Write: changed attributes only; update cache. ──
   let fitted = 0
   let scrolled = 0
   for (const { table, translation, next, cacheable } of decided) {

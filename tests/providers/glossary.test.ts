@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 
 describe('parseGlossary', () => {
-  it('逗号、全角逗号、制表符都能分隔原文与译文', () => {
+  it('accepts commas, fullwidth commas, and tabs between source and translation', () => {
     const { entries, issues } = parseGlossary('weights, 权重\nbias，偏置\nloss\t损失\nlogits, 对数几率\nprior, 先验')
     expect(entries).toEqual([
       { term: 'weights', translation: '权重' },
@@ -14,18 +14,18 @@ describe('parseGlossary', () => {
     expect(issues).toEqual([])
   })
 
-  it('只按第一个分隔符切：译文里的逗号原样保留', () => {
+  it('splits only at the first delimiter, preserving commas in the translation', () => {
     const { entries } = parseGlossary('i.i.d., 独立同分布, 简称 iid')
     expect(entries).toEqual([{ term: 'i.i.d.', translation: '独立同分布, 简称 iid' }])
   })
 
-  it('空行与 # 注释跳过', () => {
+  it('skips blank lines and hash comments', () => {
     const { entries, issues } = parseGlossary('# 深度学习\nweights, 权重\n\n   \n# 尾注\n')
     expect(entries).toEqual([{ term: 'weights', translation: '权重' }])
     expect(issues).toEqual([])
   })
 
-  it('同一原文后者覆盖前者，但保持首次出现的顺序', () => {
+  it('later entries override the same source while preserving first-occurrence order', () => {
     const { entries } = parseGlossary('weights, 重量\nbias, 偏置\nweights, 权重')
     expect(entries).toEqual([
       { term: 'weights', translation: '权重' },
@@ -33,34 +33,34 @@ describe('parseGlossary', () => {
     ])
   })
 
-  it('写错的行报行号，不静默丢弃', () => {
+  it('reports malformed line numbers instead of silently dropping entries', () => {
     const { entries, issues } = parseGlossary('weights, 权重\nbias\n, 偏置\nloss,   ')
     expect(entries).toEqual([{ term: 'weights', translation: '权重' }])
     expect(issues).toEqual([
-      { line: 2, text: 'bias', reason: '缺少分隔符，应写成「原文, 译文」' },
-      { line: 3, text: ', 偏置', reason: '原文为空' },
-      { line: 4, text: 'loss,', reason: '译文为空' },
+      { line: 2, text: 'bias', reason: 'Missing separator; use "source, translation"' },
+      { line: 3, text: ', 偏置', reason: 'Source term is empty' },
+      { line: 4, text: 'loss,', reason: 'Translation is empty' },
     ])
   })
 
-  it('分号不是记录分隔符：译文里的分号原样留在译文里（Codex 在 #52 指出）', () => {
-    // 当成分隔会把一条合法映射悄悄拆成两条不相干的（`kernel` → `核`，外加一条读不懂的残句）
+  it('semicolons are not record delimiters and remain in translated text (Codex #52)', () => {
+    // Treating semicolons as delimiters would silently split a valid kernel mapping into an unrelated entry and an unintelligible fragment.
     const { entries, issues } = parseGlossary('kernel, 核; 统计学中称核函数')
     expect(entries).toEqual([{ term: 'kernel', translation: '核; 统计学中称核函数' }])
     expect(issues).toEqual([])
   })
 
-  it('行号按原始行计', () => {
+  it('line numbers refer to the original input', () => {
     const { issues } = parseGlossary('weights, 权重\nbias')
-    expect(issues).toEqual([{ line: 2, text: 'bias', reason: '缺少分隔符，应写成「原文, 译文」' }])
+    expect(issues).toEqual([{ line: 2, text: 'bias', reason: 'Missing separator; use "source, translation"' }])
   })
 
-  it('空文本得到空表', () => {
+  it('empty input produces an empty glossary', () => {
     expect(parseGlossary('')).toEqual({ entries: [], issues: [] })
     expect(parseGlossary('   \n\n')).toEqual({ entries: [], issues: [] })
   })
 
-  it('format 与 parse 往返一致', () => {
+  it('format and parse round-trip consistently', () => {
     const entries = [
       { term: 'weights', translation: '权重' },
       { term: 'i.i.d.', translation: '独立同分布' },
@@ -70,7 +70,7 @@ describe('parseGlossary', () => {
     expect(parseGlossary(text).entries).toEqual(entries)
   })
 
-  it('空表格式化成空串', () => {
+  it('formats an empty glossary as an empty string', () => {
     expect(formatGlossaryText([])).toBe('')
   })
 })

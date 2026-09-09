@@ -1,4 +1,4 @@
-// Phase 0：§5.3 数值格正则校准。用法：pnpm exec tsx scripts/phase0/td-numeric-calib.ts
+// Phase 0: calibrate the §5.3 numeric-cell regex. Usage: pnpm exec tsx scripts/phase0/td-numeric-calib.ts
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Window } from 'happy-dom'
@@ -16,9 +16,9 @@ for (const f of readdirSync(dir).filter(f => f.endsWith('.html'))) {
   for (const td of Array.from(root.querySelectorAll(TD))) {
     tot.cells++
     const hasMath = !!td.querySelector(MATH)
-    // 可见文本：排除 math 子树
+    // Visible text, excluding math subtrees.
     const parts: string[] = []
-    // biome-ignore lint/suspicious/noExplicitAny: Phase 0 脚本，happy-dom 的节点类型不值得引
+    // biome-ignore lint/suspicious/noExplicitAny: Phase 0 script; importing happy-dom node types adds little value.
     const walk = (n: any) => { for (const c of Array.from(n.childNodes) as any[]) { if (c.nodeType === 3) parts.push(c.data); else if (c.nodeType === 1 && !c.matches(MATH)) walk(c) } }
     walk(td)
     const txt = parts.join('').replace(/\s+/g, ' ').trim()
@@ -28,7 +28,7 @@ for (const f of readdirSync(dir).filter(f => f.endsWith('.html'))) {
   }
 }
 const top = (m: Map<string, number>, n: number) => Array.from(m).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => `${v}× ${JSON.stringify(k)}`).join('\n')
-console.log('合计', tot)
-console.log(`\n--- 正则未命中、长度≤10 的短单元格（疑似漏判的数值/符号）---\n${top(missSamples, 30)}`)
-console.log(`\n--- 正则命中但含 ≥2 个字母（疑似误判为数值）---\n${top(fpSamples, 15)}`)
-console.log(`\n--- 正则未命中、长度 11–40 的散文单元格样本 ---\n${top(textSamples, 12)}`)
+console.log('Total', tot)
+console.log(`\n--- Unmatched cells of length ≤10 (possible missed numbers/symbols) ---\n${top(missSamples, 30)}`)
+console.log(`\n--- Matched cells with ≥2 letters (possible false numeric classification) ---\n${top(fpSamples, 15)}`)
+console.log(`\n--- Unmatched prose cells of length 11–40 ---\n${top(textSamples, 12)}`)

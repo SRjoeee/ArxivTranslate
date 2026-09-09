@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { joinRuns, serialize, splitRuns } from '@/core/protector'
 import { el, htmlOf, stripIds } from './helpers'
 
-describe('runs 路径', () => {
+describe('runs path', () => {
   const para = () => el('<p class="ltx_p">Let <math class="ltx_Math"><mi>x</mi></math> be <em class="ltx_emph">bold</em> per <a class="ltx_ref" href="#S2">2</a>.</p>')
 
-  it('以 void 切段，paired 文字并入所在段', () => {
+  it('splits at void slots and includes paired text in its surrounding run', () => {
     const layout = splitRuns(serialize(para()))
     expect(layout.runs).toEqual(['Let ', ' be bold per ', '.'])
     expect(layout.items).toEqual([
@@ -13,14 +13,14 @@ describe('runs 路径', () => {
     ])
   })
 
-  it('纯空白段不送翻译，原样保留', () => {
+  it('preserves whitespace-only runs without translation', () => {
     const b = serialize(el('<p class="ltx_p"><math class="ltx_Math"><mi>a</mi></math> <math class="ltx_Math"><mi>b</mi></math></p>'))
     const layout = splitRuns(b)
     expect(layout.runs).toEqual([])
     expect(layout.items).toEqual([{ kind: 'void', id: 1 }, { kind: 'raw', text: ' ' }, { kind: 'void', id: 2 }])
   })
 
-  it('拼回：恒等时样式丢失但文字齐全，void 位置不变', () => {
+  it('identity reconstruction loses styling but preserves all text and void positions', () => {
     const p = para()
     const b = serialize(p)
     const layout = splitRuns(b)
@@ -28,21 +28,21 @@ describe('runs 路径', () => {
     expect(html).toBe(stripIds('Let <math class="ltx_Math"><mi>x</mi></math> be bold per <a class="ltx_ref" href="#S2">2</a>.'))
   })
 
-  it('拼回译文，段落里的实体正确', () => {
+  it('reconstructs translated runs with correct paragraph entities', () => {
     const b = serialize(el('<p class="ltx_p">a &lt; b <math class="ltx_Math"><mi>x</mi></math> c</p>'))
     const layout = splitRuns(b)
     expect(layout.runs).toEqual(['a < b ', ' c'])
     expect(htmlOf(joinRuns(['甲 < 乙 ', ' 丙'], layout, b, document))).toBe('甲 &lt; 乙 <math class="ltx_Math"><mi>x</mi></math> 丙')
   })
 
-  it('译文段数不符时抛错', () => {
+  it('throws on a mismatched translated-run count', () => {
     const b = serialize(para())
     const layout = splitRuns(b)
     expect(() => joinRuns(['only one'], layout, b, document)).toThrow()
   })
 })
 
-describe('降级不能把可点击的内容变成纯文字（issue #44）', () => {
+describe('fallback must not turn clickable content into plain text (issue #44)', () => {
   const runsOf = (html: string) => {
     const node = el(html)
     const block = serialize(node)
@@ -55,7 +55,7 @@ describe('降级不能把可点击的内容变成纯文字（issue #44）', () =
     return holder
   }
 
-  it('普通链接整块保留，href 与文字都在，周围照常翻译', () => {
+  it('preserves whole links including href and text while translating surrounding content', () => {
     const holder = render('<p class="ltx_p">Read <a href="https://example.org">the project</a> now.</p>')
     const link = holder.querySelector('a')
     expect(link).not.toBeNull()
@@ -65,24 +65,24 @@ describe('降级不能把可点击的内容变成纯文字（issue #44）', () =
     expect(holder.textContent).toContain('译[ now.]')
   })
 
-  it('链接内部的文字不进 runs：降级路径不翻它，但也不丢它', () => {
+  it('link text stays outside runs: fallback neither translates nor drops it', () => {
     const { layout } = runsOf('<p class="ltx_p">Read <a href="https://example.org">the project</a> now.</p>')
     expect(layout.runs).toEqual(['Read ', ' now.'])
   })
 
-  it('链接里嵌套元素时整棵子树一起保留，不会被内层的结束标记提前收尾', () => {
+  it('preserves entire nested link subtrees without ending at an inner closing tag', () => {
     const holder = render('<p class="ltx_p">See <a href="/x"><em>this <b>paper</b></em></a> too.</p>')
     expect(holder.querySelector('a em b')?.textContent).toBe('paper')
     expect(holder.textContent).toContain('译[See ]')
     expect(holder.textContent).toContain('译[ too.]')
   })
 
-  it('没有 href 的 <a> 仍按普通 paired 处理：它本来就不可点', () => {
+  it('anchors without href remain ordinary paired slots because they are not clickable', () => {
     const { layout } = runsOf('<p class="ltx_p">Read <a name="anchor">the project</a> now.</p>')
     expect(layout.runs).toEqual(['Read the project now.'])
   })
 
-  it('样式标签照旧并入文本（既定取舍：样式可丢，行为不可丢）', () => {
+  it('style tags still merge into text: the accepted tradeoff permits losing styling, never behavior', () => {
     const holder = render('<p class="ltx_p">We <em>follow</em> it.</p>')
     expect(holder.querySelector('em')).toBeNull()
     expect(holder.textContent).toBe('译[We follow it.]')

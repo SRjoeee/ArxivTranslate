@@ -1,19 +1,19 @@
-// 序列化（DESIGN §6.2）：块 → 带占位符的文本 + 槽位表。纯读，不改 DOM。
-// void / paired 的判定完全复用规则模块：classify() 命中任何类别（skip / protect / unit / table）即 void——
-// 这同时覆盖了嵌套单元（脚注容器、段内 .ltx_p）；未命中且含文本的元素是 paired，未命中且无文本的也作 void。
-// 唯一例外是表格单元格（§5.3）：extractor 不下钻表格，格里的 .ltx_p / 标题不会另成块，
-// 序列化时要当普通 paired 走进去，否则整格只剩一个占位符、文字全丢（实测 2410.00260 表 1；Codex 在 #5 指出）。
+// Serialization (DESIGN §6.2): block → placeholder text + slot map. Read-only; no DOM writes.
+// Reuse rule classification for void / paired: any classify() match (skip / protect / unit / table) is void.
+// This covers nested units (footnote containers, inline .ltx_p). Unmatched elements with text are paired; those without text are void.
+// Table cells are the sole exception (§5.3): extraction does not descend into tables, so their .ltx_p / titles are not separate blocks.
+// Serialize them as ordinary paired elements; otherwise the entire cell becomes one placeholder and loses its text (2410.00260 table 1; Codex #5).
 import { isInjected } from '@/core/marks'
 import { classify, isTableCell } from '@/core/rules/latexml'
 import { escapeText } from './text'
 
 export interface ProtectedBlock {
-  /** 带占位符的文本；文本节点里的 & < > 已转义 */
+  /** Placeholder text; & < > in text nodes are escaped. */
   text: string
-  /** id → 原节点：void 为整个节点，paired 为元素本身（回填时浅克隆） */
+  /** ID → original node: the entire node for void; the element itself for paired (shallow-cloned on rehydration). */
   slots: Map<number, Node>
   paired: Set<number>
-  /** 超过 VOID_DENSE_THRESHOLD 的块视为公式密集，由 pipeline 单独成批 */
+  /** Blocks exceeding VOID_DENSE_THRESHOLD are formula-dense and get their own pipeline batch. */
   voidCount: number
 }
 
@@ -38,7 +38,7 @@ export function serialize(root: Element): ProtectedBlock {
         parts.push(escapeText((child as Text).data))
       } else if (child.nodeType === ELEMENT_NODE) {
         const el = child as Element
-        // 我们自己插的译文 / 镜像不是原文：再次翻译时它们已经在原块内部（Codex 在 #8 指出）
+        // Injected translations and mirrors are not original text; they may already be inside original blocks on retranslation (Codex #8).
         if (isInjected(el)) continue
         const id = next++
         slots.set(id, el)
@@ -54,7 +54,7 @@ export function serialize(root: Element): ProtectedBlock {
           parts.push('</t>')
         }
       }
-      // 注释等其他节点忽略
+      // Ignore comments and other node types.
     }
   }
   walk(root)

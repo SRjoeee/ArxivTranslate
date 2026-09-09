@@ -7,28 +7,28 @@ const make = (limits?: Partial<CacheLimits>) =>
   new TranslationCache({ db: createCacheDb(`axt-test-${++n}`, { indexedDB, IDBKeyRange }), limits })
 
 describe('TranslationCache', () => {
-  it('set / get 往返，未命中为 null', async () => {
+  it('set/get round trip; cache misses return null', async () => {
     const c = make()
     expect(await c.get('k')).toBeNull()
     expect(await c.set('k', '译文', '2410.00260')).toBe(true)
     expect(await c.get('k')).toBe('译文')
   })
 
-  it('过期返回 null', async () => {
+  it('expired entries return null', async () => {
     const c = make({ ttlMs: 1000 })
     await c.set('k', 'v', 'p', 0)
     expect(await c.get('k', 500)).toBe('v')
     expect(await c.get('k', 2000)).toBeNull()
   })
 
-  it('内存热层：持久层被清空后仍能命中', async () => {
+  it('the memory hot cache still hits after persistent storage is cleared', async () => {
     const c = make()
     await c.set('k', 'v', 'p')
     await c.db.entries.clear()
     expect(await c.get('k')).toBe('v')
   })
 
-  it('超容量按最久未访问淘汰，热层同步删除', async () => {
+  it('evicts the least recently accessed entry over capacity and removes it from the hot cache too', async () => {
     const c = make({ maxEntries: 2 })
     await c.set('a', 'A', 'p', 1)
     await c.set('b', 'B', 'p', 2)
@@ -40,7 +40,7 @@ describe('TranslationCache', () => {
     expect((await c.stats()).entries).toBe(2)
   })
 
-  it('clear(paper) 只删该论文，clear() 全删', async () => {
+  it('clear(paper) deletes only that paper; clear() deletes everything', async () => {
     const c = make()
     await c.set('k1', 'v1', 'A')
     await c.set('k2', 'v2', 'B')
@@ -51,7 +51,7 @@ describe('TranslationCache', () => {
     expect((await c.stats()).entries).toBe(0)
   })
 
-  it('stats 统计条数与字节', async () => {
+  it('stats reports entry count and bytes', async () => {
     const c = make()
     await c.set('k', 'v', 'p')
     const s = await c.stats()
@@ -59,8 +59,8 @@ describe('TranslationCache', () => {
     expect(s.bytes).toBeGreaterThan(0)
   })
 
-  it('过期条目会被 cleanup 清掉，统计随之变准（Codex 在 #52 指出）', async () => {
-    // get() 只是把过期条目当未命中，从不删除；统计若照数索引，设置页会一直显示一堆用不了的条数与体积
+  it('cleanup removes expired entries so statistics become accurate (Codex #52)', async () => {
+    // get() treats expired entries as misses without deleting them; counting the index alone leaves unusable entries and bytes in settings statistics.
     const c = make()
     await c.set('old', 'v', 'p')
     const later = Date.now() + 31 * 24 * 60 * 60 * 1000
@@ -69,16 +69,16 @@ describe('TranslationCache', () => {
     expect((await c.stats()).entries).toBe(0)
   })
 
-  it('cleanup 失败时拒绝而不是吞掉：统计不能把清不掉的过期条目当成功结果（Codex 在 #52 指出）', async () => {
+  it('cleanup failures reject rather than being swallowed, so undeletable expired entries cannot appear in successful statistics (Codex #52)', async () => {
     const c = make()
     const db = (c as unknown as { db: { entries: { where: unknown } } }).db
     const original = db.entries.where
-    db.entries.where = () => { throw new Error('IndexedDB 不可用') }
-    await expect(c.cleanup()).rejects.toThrow('IndexedDB 不可用')
+    db.entries.where = () => { throw new Error('IndexedDB unavailable') }
+    await expect(c.cleanup()).rejects.toThrow('IndexedDB unavailable')
     db.entries.where = original
   })
 
-  it('超大单条与空译文不入库', async () => {
+  it('does not store oversized entries or empty translations', async () => {
     const c = make({ maxEntryBytes: 10 })
     expect(await c.set('k', 'x'.repeat(100), 'p')).toBe(false)
     expect(await c.set('k', '', 'p')).toBe(false)
@@ -86,8 +86,8 @@ describe('TranslationCache', () => {
   })
 })
 
-describe('TranslationCache：写入不扫全库', () => {
-  it('未超限时 set 不再排序整库；总量只在首次统计一次', async () => {
+describe('TranslationCache: writes do not scan the entire database', () => {
+  it('set avoids sorting the database below capacity; totals are computed only on first use', async () => {
     const c = make({ maxEntries: 1000 })
     await c.set('warm', 'v', 'p')
     const spy = vi.spyOn(c.db.entries, 'orderBy')
@@ -97,7 +97,7 @@ describe('TranslationCache：写入不扫全库', () => {
     spy.mockRestore()
   })
 
-  it('覆盖同一个键不会让字节数只增不减', async () => {
+  it('overwriting a key adjusts bytes instead of only incrementing them', async () => {
     const c = make({ maxEntries: 10 })
     await c.set('k', 'x'.repeat(500), 'p')
     const big = (await c.stats()).bytes
@@ -107,7 +107,7 @@ describe('TranslationCache：写入不扫全库', () => {
     expect((await c.stats()).entries).toBe(1)
   })
 
-  it('按字节上限淘汰最旧的条目', async () => {
+  it('evicts the oldest entries to respect the byte limit', async () => {
     const c = make({ maxBytes: 400 })
     await c.set('a', 'x'.repeat(150), 'p', 1)
     await c.set('b', 'x'.repeat(150), 'p', 2)
@@ -118,49 +118,49 @@ describe('TranslationCache：写入不扫全库', () => {
   })
 })
 
-describe('账面（totals）的正确性（Codex 在 #14 指出）', () => {
-  /** 私有字段，测试里按内部状态断言：账面错了才是这两条 bug 的本体，看 stats() 是看不出来的 */
+describe('totals bookkeeping correctness (Codex #14)', () => {
+  /** Assert the private bookkeeping state: these bugs are incorrect totals that stats() cannot reveal. */
   const totalsOf = (cache: TranslationCache) => (cache as unknown as { totals: { count: number; bytes: number } | null }).totals
 
-  it('并发的首批写入共用同一份账面：各自赋值一份的话，只有最后那份留下、先前的增量全丢', async () => {
+  it('concurrent initial writes share one totals object so later initialization cannot discard earlier increments', async () => {
     const c = make()
-    // 先塞两条已存在的记录，让首次统计有非零结果
+    // Seed two existing entries so the initial totals are nonzero.
     await c.set('seed-1', 'v', 'p')
     await c.set('seed-2', 'v', 'p')
-    // 作废账面，模拟 worker 刚醒来：接着并发写 6 条
-    await c.clear('不存在的论文')
+    // Invalidate totals to simulate a waking worker, then write six entries concurrently.
+    await c.clear('nonexistent-paper')
     expect(totalsOf(c)).toBeNull()
     await Promise.all(Array.from({ length: 6 }, (_, i) => c.set(`k${i}`, `译文${i}`, 'p')))
     expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
     expect(totalsOf(c)!.bytes).toBe((await c.stats()).bytes)
   })
 
-  it('惰性删除过期条目要减账面：持久层命中的那条路径', async () => {
+  it('lazy deletion of expired persistent-cache hits decrements totals', async () => {
     const c = make({ ttlMs: 1000, memoryEntries: 0 })
     await c.set('old', 'v', 'p', 0)
     await c.set('new', 'v', 'p', 0)
     const before = totalsOf(c)!.count
-    // 热层容量为 0，读会走持久层；此时 old 已过期
+    // With hot-cache capacity 0, reads use persistent storage; old has now expired.
     expect(await c.get('old', 2000)).toBeNull()
     expect(totalsOf(c)!.count).toBe(before - 1)
     expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
   })
 
-  it('惰性删除过期条目要减账面：热层命中的那条路径', async () => {
+  it('lazy deletion of expired hot-cache hits decrements totals', async () => {
     const c = make({ ttlMs: 1000 })
     await c.set('old', 'v', 'p', 0)
     await c.set('new', 'v', 'p', 0)
     const before = totalsOf(c)!.count
     expect(await c.get('old', 2000)).toBeNull()
-    // 热层那条是 fire-and-forget 的删除，等它落地
+    // Wait for the fire-and-forget hot-cache deletion to finish.
     for (let i = 0; i < 50 && totalsOf(c)!.count === before; i++) await new Promise(r => setTimeout(r, 5))
     expect(totalsOf(c)!.count).toBe(before - 1)
     expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
   })
 
-  it('同一条过期记录被并发读到：账面只减一次（Codex 在 #63 指出）', async () => {
-    // 一批里出现重复的键时 getMany 会并发 get 同一条；Dexie 对已删的行照样算删除成功，
-    // 按「delete 有没有 resolve」减账就会减多次，账面少算、后续写入突破上限
+  it('concurrent reads of the same expired entry decrement totals only once (Codex #63)', async () => {
+    // getMany can concurrently get a duplicate key; Dexie treats deleting an already deleted row as success.
+    // Decrementing on every resolved delete undercounts totals and allows later writes beyond capacity.
     const c = make({ ttlMs: 1000, memoryEntries: 0 })
     await c.set('old', 'v', 'p', 0)
     await c.set('keep', 'v', 'p', 0)
@@ -170,39 +170,39 @@ describe('账面（totals）的正确性（Codex 在 #14 指出）', () => {
     expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
   })
 
-  it('账面不多算时不会误淘汰没过期的条目', async () => {
-    // 上限 2 条：写满 → 让第一条过期并读掉它 → 再写一条，不该把没过期的那条也淘汰掉
+  it('accurate bookkeeping avoids evicting unexpired entries', async () => {
+    // Capacity 2: fill it, expire and read the first entry, then add another; the unexpired entry must survive.
     const c = make({ maxEntries: 2, ttlMs: 1000, memoryEntries: 0 })
     await c.set('a', 'v', 'p', 0)
-    await c.set('b', 'v', 'p', 1500) // b 晚建，2000 时还没过期
-    expect(await c.get('a', 2000)).toBeNull() // a 过期，被惰性删掉
+    await c.set('b', 'v', 'p', 1500) // b was created later and is still valid at 2000.
+    expect(await c.get('a', 2000)).toBeNull() // a expired and was lazily deleted.
     await c.set('c', 'v', 'p', 2000)
     expect(await c.get('b', 2000)).toBe('v')
     expect(await c.get('c', 2000)).toBe('v')
   })
 
-  it('过期记录在读到之后被并发 set 覆盖：不删新记录，也不拿旧尺寸减账（Codex 在 #63 指出）', async () => {
+  it('if set replaces an expired entry after a concurrent read, keeps the new entry and does not subtract the old size (Codex #63)', async () => {
     const c = make({ ttlMs: 1000, memoryEntries: 0 })
     await c.set('k', '短', 'p', 0)
-    // 读到过期记录、还没删掉时，同一个键被写入一条新的
+    // After reading the expired entry but before deletion, write a new value under the same key.
     const reading = c.get('k', 2000)
     await c.set('k', '长很多的新译文内容', 'p', 2000)
     expect(await reading).toBeNull()
-    // 新记录必须还在，且账面与库一致（拿旧的 byteSize 减账会让 bytes 对不上）
+    // The new entry must survive and totals must match storage; subtracting the old byteSize would corrupt bytes.
     expect(await c.get('k', 2000)).toBe('长很多的新译文内容')
     expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
     expect(totalsOf(c)!.bytes).toBe((await c.stats()).bytes)
   })
 
-  it('统计进行中被 clear 作废：过时的快照不落地', async () => {
+  it('clear invalidates in-progress totals computation so a stale snapshot cannot be committed', async () => {
     const c = make()
     await c.set('a', 'v', 'p')
     await c.set('b', 'v', 'p')
-    // 与 clear 赛跑地写：统计若把 clear 之前的 2 条算进来，账面就会多算
+    // Race a write against clear: counting the two pre-clear entries would overstate totals.
     const clearing = c.clear()
     await c.set('c', 'v', 'p')
     await clearing
-    // clear 收尾时账面作废；再写一条，重算出来的必须与库一致
+    // clear invalidates totals on completion; a subsequent write must recompute totals matching storage.
     await c.set('d', 'v', 'p')
     expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
     expect(totalsOf(c)!.bytes).toBe((await c.stats()).bytes)

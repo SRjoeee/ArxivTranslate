@@ -17,41 +17,41 @@ import type { ImageProgress } from '@/shared/ocr'
 import { createMessageTransport } from '@/shared/transport'
 import { enableDebug } from './debug'
 
-// 注入 arxiv.org/html/*。页面加载只 extract（不写 DOM），Block[] 留在内存里；
-// popup 发 axt:translate-page 才开始翻译（DESIGN §4.1）。URL 带 #axt-debug 描边、#axt-translate 自动开始，便于调试与自动化验证。
+// Inject on arxiv.org/html/*. Page load only extracts (no DOM writes), retaining Block[] in memory.
+// Translation starts on popup axt:translate-page (DESIGN §4.1). #axt-debug outlines blocks; #axt-translate auto-starts for debugging/automation.
 export default defineContentScript({
   matches: ['https://arxiv.org/html/*'],
   runAt: 'document_idle',
   main() {
     const t0 = performance.now()
     const blocks: Block[] = extract(document)
-    // 标题 + 摘要在这里抽一次：此时 DOM 里还没有译文，翻译过再抽会把上一轮的译文也算进摘要
+    // Extract title/abstract once before translations exist, avoiding previous translations being included in the abstract on a later pass.
     const paperContextValue = paperContext(document)
     console.debug(`[axt] extracted ${blocks.length} blocks in ${Math.round(performance.now() - t0)} ms`)
 
     const paper = paperIdFromUrl(location.href)
-    // 模式：偏好存配置，实际生效的由 ModeController 按视口决定（§7.2）。
-    // 翻译开始前不建控制器，免得往没翻译过的页面写 data-axt-mode；popup 这时看到的是配置里的偏好。
-    // 引擎链、队列与请求都在 background（DESIGN §8.0）：content 的 fetch 带页面 origin、要走 CORS 预检，
-    // 而且 https 页面够不着 http 端点（本地 Ollama），实测见 RESEARCH §6.7。这里只留一条消息代理
+    // Store mode preference in config; ModeController determines the effective mode from viewport width (§7.2).
+    // Do not create the controller before translation, avoiding data-axt-mode on untouched pages; popup sees the stored preference then.
+    // Engine chain, queues and requests live in background (DESIGN §8.0): content fetch uses page origin and CORS preflight,
+    // and HTTPS pages cannot reach HTTP endpoints such as local Ollama (RESEARCH §6.7). Keep only a message proxy here.
     const backend = createMessageTransport()
     let modes: ModeController | null = null
-    /** 页内锚点兜底的卸载函数（issue #44）：会话开始时装、恢复原文时拆 */
+    /** Anchor fallback teardown (issue #44): install on session start, remove on restore. */
     let uninstallAnchors: (() => void) | null = null
     let savedMode: Mode = 'stack'
-    /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性；开始翻译时从配置读一次 */
+    /** Translation style (§7.5): like mode, an <html> attribute; read config once at translation start. */
     let style: Config['style'] = { preset: 'none', customCss: '' }
     void getConfig().then(config => { savedMode = config.mode; style = config.style })
-    // 一次会话 = 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
+    // One session = one run (observers/requests) + a session id as cancellation scope (DESIGN §10).
     let run: TranslationRun | null = null
     let title: TitleTranslator | null = null
-    /** 图片翻译（§15）：helper 可用且设置里至少勾了一种模式时才有 */
+    /** Image translation (§15), only with an available helper and at least one enabled mode. */
     let images: ImageRun | null = null
     let imageProgress: ImageProgress | null = null
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
     let progress: Progress = idle()
 
-    /** 结束当前会话：断开观察器、删 pending、撤掉排队与在飞的请求；页面上的译文留着 */
+    /** End this session: disconnect observers, remove pending nodes, cancel queued/in-flight requests; retain rendered translations. */
     function endRun(): void {
       title?.stop()
       title = null
@@ -61,39 +61,39 @@ export default defineContentScript({
       images = null
       imageProgress = null
       const session = endSession()
-      // 撤请求是尽力而为：排队的批次不再发出、在飞的 fetch 被 abort，撤不掉的由下面的会话 id 比对挡住
+      // Best-effort cancellation: queued batches stop, fetches abort; session-id checks below reject any uncancelled results.
       if (session) void backend.cancel(session)
     }
 
     async function start(requested?: Mode): Promise<{ started: boolean; reason?: string }> {
-      if (progress.state === 'on') return { started: false, reason: '翻译已开启，滚动会继续翻' }
-      if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
-      if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
+      if (progress.state === 'on') return { started: false, reason: 'Translation is already on; scroll to continue' }
+      if (!paper) return { started: false, reason: 'Not an arXiv HTML page' }
+      if (blocks.length === 0) return { started: false, reason: 'No translatable blocks on this page' }
       const tStart = performance.now()
       const config = await getConfig()
-      // 术语表随每批发出（§8.2）。**空表不带这个字段**：带上会让所有既有缓存键变一遍，一次性全失效
+      // Send glossary in every batch (§8.2). Omit empty glossaries: including the field would invalidate every existing cache key at once.
       const context = config.glossary.length > 0 ? { ...paperContextValue, glossary: config.glossary } : paperContextValue
-      // 引擎链在 background；这里只取规划批次与选择渲染路径要用的能力（§2 第 3 条）
+      // The chain lives in background; fetch only capabilities needed for batch planning and rendering-path selection (§2, rule 3).
       let status: Awaited<ReturnType<typeof backend.status>>
       try {
         status = await backend.status()
       } catch (e) {
-        return { started: false, reason: `扩展后台未响应：${e instanceof Error ? e.message : String(e)}` }
+        return { started: false, reason: `Extension background did not respond: ${e instanceof Error ? e.message : String(e)}` }
       }
-      // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上（§8.5）
-      if (!status.available && !status.fallback) return { started: false, reason: '未配置 API key，请先到设置页填写' }
+      // Start normally when a fallback exists even if the preferred engine is unavailable; requests go directly to a free engine (§8.5).
+      if (!status.available && !status.fallback) return { started: false, reason: 'API key not configured; add it in Settings' }
       console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
       modes?.stop()
       modes = createModeController(document, requested ?? config.mode, { onChange: enterSide })
       style = config.style
-      endRun() // 上一轮停下但没恢复原文的会话（致命错误后重试）
-      // 页内锚点兜底（issue #44）：only 模式下目标块被隐藏，交叉引用点了不动窝
+      endRun() // Previous halted session not yet restored, e.g. retry after a fatal error.
+      // Anchor fallback (issue #44): only mode hides target blocks, otherwise cross-references appear unresponsive.
       uninstallAnchors?.()
       uninstallAnchors = installAnchorFallback(document)
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
-      prep.reset() // 新会话：镜像允许再跑一次、量宽缓存清空、栏宽重读
+      prep.reset() // New session: allow mirroring again, clear measurement cache and reread column width.
       enterSide(modes.effective())
       const t1 = performance.now()
       let wasBusy = false
@@ -104,22 +104,22 @@ export default defineContentScript({
         mode: modes.effective(),
         style,
         paper,
-        // 标题 + 摘要每批都带（DESIGN §8.2）
+        // Include title/abstract in every batch (DESIGN §8.2).
         context,
         capabilities: { maxBatchChars: status.maxBatchChars, maxBatchItems: status.maxBatchItems, preservesMarkup: status.preservesMarkup },
         transport: request => backend.translate(request),
         scope: session,
         preload: config.preload,
-        // 这一批刚动过 DOM 的块交给整理层：只碰它们所在的容器，不再每趟全篇重扫（issue #46）
+        // Pass this batch's changed blocks to preparation; touch only their containers, avoiding a full-page rescan each time (issue #46).
         onRendered: blocks => {
           if (getSessionId() !== session) return
           prep.touch(blocks)
         },
         onProgress: p => {
-          // 会话已结束（恢复原文 / 重开）：旧运行的回调一律忽略
+          // Ignore callbacks from old runs after restore or restart ends their session.
           if (getSessionId() !== session) return
           progress = p
-          // 翻译是"开着"的状态，没有终点；每次从忙到闲打一条日志，e2e 与手测靠它
+          // Translation stays on without a final endpoint; log each busy-to-idle transition for e2e and manual tests.
           const busy = p.inFlight > 0
           if (wasBusy && !busy) {
             console.debug(`[axt] session idle: ${p.done}/${p.requested} requested of ${p.total}, ${p.failed} failed, ${p.cached} cached, ${Math.round(performance.now() - t1)} ms${p.fatal ? `, fatal: ${p.fatal}` : ''}`)
@@ -128,7 +128,7 @@ export default defineContentScript({
         },
       })
       run.ready.catch(e => console.error('[axt] translation crashed', e))
-      // 标签页标题也翻（§10）：走同一个服务、同一份缓存；标题是纯文本，按占位符协议转义再解码
+      // Translate the tab title too (§10), using the same service/cache; escape plain text for the placeholder protocol, then decode.
       title = translateTitle(document, {
         isCurrent: () => getSessionId() === session,
         translate: async text => {
@@ -145,12 +145,12 @@ export default defineContentScript({
     }
 
     /**
-     * 图片翻译（§15）：先问 background 本机 helper 在不在，不在就整条路径不跑，页面翻译不受影响。
-     * 位图与文字块一样按视口懒加载；当前模式不在用户勾选的集合里时进入视口的图先停着，切回来再翻
+     * Image translation (§15): ask background whether the local helper exists; otherwise skip this path while leaving page translation unaffected.
+     * Bitmaps lazy-load by viewport like text blocks; images entering view in a disabled mode wait until an enabled mode is selected.
      */
     function startImages(session: string, config: Config, context: Parameters<typeof startTranslation>[0]['context']): void {
-      // 上一轮（致命错误后没恢复原文就重开）留下的叠加层与模式闸先摘掉：helper 没了、图片翻译关了、
-      // 目标语言换了，旧的都不该再显示；新一轮处理到那张图时会替换它（Codex 在 #89 指出）
+      // Remove prior overlays and mode gates when restarting after a fatal error without restore: the helper may be gone, image translation disabled,
+      // or target changed. Old overlays must not remain; the new run replaces them as it reaches each image (Codex #89).
       setImageModes(document, [])
       if (config.image.modes.length === 0) return
       sendMessage({ type: 'axt:helper-status' }).then(status => {
@@ -179,45 +179,45 @@ export default defineContentScript({
             if (wasBusy && !busy) console.debug(`[axt] images idle: ${p.done}/${p.requested} of ${p.total}, ${p.failed} failed, ${Math.round(performance.now() - t1)} ms`)
             wasBusy = busy
           },
-          // 叠加层插好了：side 模式下所在插图要拆两份（§7.2），交给整理层
+          // Overlay inserted: preparation splits its figure into two in side mode (§7.2).
           onRendered: rendered => {
             if (getSessionId() !== session) return
             prep.touch(rendered)
           },
         })
         console.debug(`[axt] images: ${targets.length} bitmaps, helper ${status.version ?? ''}, modes ${config.image.modes.join('/')}`)
-      }).catch(e => console.debug('[axt] helper-status 失败', e))
+      }).catch(e => console.debug('[axt] helper-status failed', e))
     }
 
     let fitObserver: ResizeObserver | null = null
 
     /**
-     * 译文到达后的整理（DESIGN §7.2 / §10，issue #46）：脚注归位、拆图、镜像、缩表、对齐边距。
-     * 由 pipeline 每批交出的脏块驱动，每趟只碰它们所在的容器；镜像整个会话只跑一次；
-     * 栏宽在每趟开头、写任何东西之前读。全部在 renderer/prep.ts，这里只接线
+     * Post-translation preparation (DESIGN §7.2 / §10, issue #46): relocate notes, split figures, mirror, fit tables and align margins.
+     * Driven by each pipeline batch's changed blocks, touching only their containers. Mirror once per session.
+     * Read column width before any writes on each pass. Implementation lives in renderer/prep.ts; this only wires it up.
      */
     const prep = createPrep(document, {
       isSide: () => modes?.effective() === 'side',
       trace: line => console.debug(`[axt] ${line}`),
     })
 
-    /** 进入 side 时的准备：右栏补一份公式与图表（§7.2），并把表格缩到能装进一栏 */
+    /** Prepare side mode: mirror formulas/figures into the right column (§7.2) and shrink tables to fit one column. */
     function enterSide(effective: Mode): void {
-      // 模式闸可能刚打开：停着的图放出去（§15）
+      // A mode gate may have just opened; release waiting images (§15).
       images?.resume()
       if (effective !== 'side') {
         fitObserver?.disconnect()
         fitObserver = null
         prep.cancel()
-        // 对齐用的内联边距只服务于左右分栏，其他模式下要还给站点样式
+        // Inline alignment margins serve side mode only; restore site styling for other modes.
         clearPairMargins(document)
         return
       }
-      // 进 side：栏宽重读、全量整理一趟（stack / only 回来时对齐边距已被清掉，得从头算）
+      // Entering side: reread column width and run full preparation; stack/only cleared alignment margins, so recalculate.
       prep.refreshColumn()
       prep.touchAll()
-      // 栏宽随窗口变化，缩放比例要跟着重算。只在宽度真的变了才重算——
-      // 缩放表格本身也会让观察目标报告一次尺寸变化，不设这道闸就会自激振荡
+      // Window changes require rescaling tables, but only when column width actually changes.
+      // Table scaling itself triggers an observed resize; without this gate, it would oscillate.
       if (!fitObserver && typeof ResizeObserver === 'function') {
         let lastWidth = 0
         fitObserver = new ResizeObserver(entries => {
@@ -233,7 +233,7 @@ export default defineContentScript({
     }
 
     async function setPageMode(mode: Mode): Promise<{ mode: Mode; effective: Mode }> {
-      // 没在翻译时也允许切换：控制器会把属性写到 <html> 上，样式立刻生效
+      // Allow switching even while not translating; the controller updates <html> and styles apply immediately.
       if (!modes) modes = createModeController(document, mode, { onChange: enterSide })
       const effective = modes.choose(mode)
       enterSide(effective)

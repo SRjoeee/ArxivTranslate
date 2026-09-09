@@ -2,11 +2,11 @@
 > arxiv-html-translator@0.0.0 fixtures:stats /Users/cheongzhiyan/Developer/ArxivTranslate
 > tsx scripts/fixtures-stats.ts
 
-## 规则覆盖率审计（RULES_VERSION 0.4.0，11 篇，112320 个文本节点）
+## Rule coverage audit (RULES_VERSION 0.4.0, 11 papers, 112320 text nodes)
 
-### 每篇概览
+### Per-paper overview
 
-| fixture | 解析 ms | 文本节点 | unit | protected | skipped | uncovered |
+| fixture | Parse ms | Text nodes | unit | protected | skipped | uncovered |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2312.17141 | 234 | 18375 | 15.5% | 48.2% | 36.3% | 0 (0.0%) |
 | 2312.17527 | 58 | 4294 | 17.1% | 52.9% | 29.9% | 0 (0.0%) |
@@ -20,9 +20,9 @@
 | 2609.00246 | 269 | 16279 | 23.4% | 37.1% | 39.5% | 0 (0.0%) |
 | synthetic-structures | 2 | 52 | 71.2% | 21.2% | 7.7% | 0 (0.0%) |
 
-### 规则命中（文本节点数 / 匹配元素数）
+### Rule hits (text nodes / matched elements)
 
-| 类型 | id | selector | 文本节点 | 元素数 |
+| Type | id | selector | Text nodes | Elements |
 | --- | --- | --- | --- | --- |
 | unit | p | `.ltx_p` | 11770 | 2308 |
 | unit | title | `.ltx_title:not(.ltx_title_acknowledgements):not(.ltx_title_keywords), .ltx_subtitle` | 573 | 571 |
@@ -60,22 +60,22 @@
 | protect | img | `img` | 0 | 73 |
 | protect | br | `br` | 0 | 69 |
 
-### (a) 在所有 fixture 中都没有匹配元素的规则
+### (a) Rules with no matching elements in any fixture
 
 - `.ltx_bibitem:not(:has(.ltx_bibblock))` (bibitem)
 
-### (b) 未被任何规则覆盖的文本节点（按最近祖先链签名，近端在前）
+### (b) Text nodes not covered by any rule (nearest-ancestor-chain signature, nearest first)
 
-| 签名 | 文本节点 | fixture 数 | 样本 |
+| Signature | Text nodes | Fixture count | Sample |
 | --- | --- | --- | --- |
 
-### 同一单元元素命中多条 unit 规则的组合
+### Combinations of multiple unit rules matching the same unit element
 
-（无）
+(None)
 
-### (c) 只在部分 fixture 出现的 ltx_* 类名（共 292 个类名，290 个未全覆盖；全部 fixture 同为 oxide 0.7.6，此处反映的是内容分布而非版本差异）
+### (c) ltx_* classes present in only some fixtures (292 classes total, 290 absent from at least one fixture; all fixtures use oxide 0.7.6, so this reflects content distribution, not version differences)
 
-| 类名 | 出现篇数 | fixture |
+| Class | Paper count | fixture |
 | --- | --- | --- |
 | `ltx_affiliation_city` | 1 | 2312.17141 |
 | `ltx_affiliation_country` | 1 | 2312.17141 |
@@ -368,9 +368,9 @@
 | `ltx_title` | 10 | 2312.17141 2312.17527 2401.00418 2401.00596 2410.00260 2507.00150 2608.29808 2609.00245 2609.00246 synthetic-structures |
 | `ltx_title_document` | 10 | 2312.17141 2312.17527 2401.00418 2401.00596 2410.00260 2507.00150 2608.29808 2609.00245 2609.00246 synthetic-structures |
 
-### SVG 图占比（§15.1，仅统计翻译根内）
+### SVG figure share (§15.1, within translation roots only)
 
-| fixture | svg | 含 <text> 的 svg | img.ltx_graphics | .ltx_figure |
+| fixture | svg | svg containing <text> | img.ltx_graphics | .ltx_figure |
 | --- | --- | --- | --- | --- |
 | 2312.17141 | 43 | 0 | 2 | 11 |
 | 2312.17527 | 0 | 0 | 0 | 1 |
@@ -384,9 +384,9 @@
 | 2609.00246 | 5 | 0 | 0 | 12 |
 | synthetic-structures | 0 | 0 | 0 | 2 |
 
-### 翻译根之外的文本节点（应只有导航栏与 arXiv 页头页脚）
+### Text nodes outside translation roots (should contain only navigation and arXiv headers / footers)
 
-| 最近可识别祖先 | 文本节点 |
+| Nearest identifiable ancestor | Text nodes |
 | --- | --- |
 | span.ltx_ref_title.ltx_text | 197 |
 | span.ltx_tag.ltx_tag_ref | 140 |
@@ -423,9 +423,9 @@
 | math.ltx_math_unparsed | 9 |
 | span.ltx_font_typewriter.ltx_text | 3 |
 
-### 有直接文本的元素直方图（tag.ltx_* → 次数，合计 226 种）
+### Histogram of elements with direct text (tag.ltx_* → count, 226 types total)
 
-| 元素 | 次数 | 出现篇数 |
+| Element | Count | Paper count |
 | --- | --- | --- |
 | `mo` | 36515 | 9 |
 | `mi` | 24731 | 9 |

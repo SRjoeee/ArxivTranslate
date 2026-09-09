@@ -1,9 +1,9 @@
-// 占位符完整性校验（DESIGN §6.3）。DOM-free，可在 background 里跑。
+// Placeholder integrity validation (DESIGN §6.3). DOM-free; can run in the background.
 import { tokenize } from './tokens'
 
 /**
- * 校验只需要知道「原文有哪些槽位、其中哪些是成对的」，不需要 DOM 节点。
- * `ProtectedBlock` 天然满足这个形状；跨消息边界的调用方用 `expectationsFromText` 从请求文本反推。
+ * Validation needs only the original slot IDs and which are paired, not DOM nodes.
+ * `ProtectedBlock` already has this shape; callers across message boundaries derive it with `expectationsFromText`.
  */
 export interface PlaceholderExpectations {
   slots: ReadonlyMap<number, unknown>
@@ -11,9 +11,9 @@ export interface PlaceholderExpectations {
 }
 
 /**
- * 从请求文本反推期望。`serialize` 已经把原文里字面的 `<` `>` 转义掉（§6.1），
- * 所以请求文本里出现的每个 `<x>` / `<t>` 都必然是真占位符，扫一遍就能还原两个集合。
- * 有了它，background 不必跨消息接收 `accept` 回调也能把坏译文挡在缓存之外（issue #42）。
+ * Derive expectations from request text. `serialize` has already escaped literal `<` and `>` (§6.1),
+ * so every `<x>` / `<t>` in a request is a real placeholder. One scan reconstructs both sets.
+ * This lets the background reject invalid translations before caching without receiving an `accept` callback (issue #42).
  */
 export function expectationsFromText(text: string): PlaceholderExpectations {
   const slots = new Map<number, null>()
@@ -32,14 +32,14 @@ export type ValidationResult = { ok: true } | { ok: false; reason: IntegrityReas
 
 export class PlaceholderIntegrityError extends Error {
   constructor(readonly reason: IntegrityReason, readonly detail: string) {
-    super(`占位符校验失败（${reason}）：${detail}`)
+    super(`Placeholder validation failed (${reason}): ${detail}`)
     this.name = 'PlaceholderIntegrityError'
   }
 }
 
 /**
- * 通过条件：void id 集合与原文一致且各出现一次；paired 成对、嵌套合法、各出现一次；
- * 没有原文里不存在的 id；void / paired 种类不能互换。占位符顺序可以与原文不同。
+ * Pass conditions: void IDs match the original, each exactly once; paired IDs occur once, balanced and properly nested.
+ * No unknown IDs or void / paired swaps. Placeholder order may differ from the original.
  */
 export function validate(translated: string, block: PlaceholderExpectations): ValidationResult {
   const fail = (reason: IntegrityReason, detail: string): ValidationResult => ({ ok: false, reason, detail })
@@ -49,21 +49,21 @@ export function validate(translated: string, block: PlaceholderExpectations): Va
   for (const t of tokenize(translated)) {
     if (t.kind === 'text') continue
     if (t.kind === 'close') {
-      if (stack.length === 0) return fail('unbalanced', '多余的 </t>')
+      if (stack.length === 0) return fail('unbalanced', 'Unexpected </t>')
       stack.pop()
       continue
     }
-    if (!block.slots.has(t.id)) return fail('unknown', `id ${t.id} 不存在于原文`)
+    if (!block.slots.has(t.id)) return fail('unknown', `ID ${t.id} is not in the original`)
     const isPaired = block.paired.has(t.id)
-    if (t.kind === 'void' && isPaired) return fail('kind-mismatch', `id ${t.id} 应为 <t id="${t.id}">…</t>`)
-    if (t.kind === 'open' && !isPaired) return fail('kind-mismatch', `id ${t.id} 应为 <x id="${t.id}"/>`)
-    if (seen.has(t.id)) return fail('duplicate', `id ${t.id} 出现多次`)
+    if (t.kind === 'void' && isPaired) return fail('kind-mismatch', `ID ${t.id} must be <t id="${t.id}">…</t>`)
+    if (t.kind === 'open' && !isPaired) return fail('kind-mismatch', `ID ${t.id} must be <x id="${t.id}"/>`)
+    if (seen.has(t.id)) return fail('duplicate', `ID ${t.id} occurs more than once`)
     seen.add(t.id)
     if (t.kind === 'open') stack.push(t.id)
   }
 
-  if (stack.length > 0) return fail('unbalanced', `<t id="${stack[stack.length - 1]}"> 未闭合`)
+  if (stack.length > 0) return fail('unbalanced', `Unclosed <t id="${stack[stack.length - 1]}">`)
   const missing = [...block.slots.keys()].filter(id => !seen.has(id))
-  if (missing.length > 0) return fail('missing', `缺少 id ${missing.join(', ')}`)
+  if (missing.length > 0) return fail('missing', `Missing IDs: ${missing.join(', ')}`)
   return { ok: true }
 }

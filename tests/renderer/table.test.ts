@@ -11,7 +11,7 @@ const table =
   + '</tbody></table><figcaption class="ltx_caption">Table 1</figcaption></figure>'
 
 describe('renderTable', () => {
-  it('整表克隆插在原表之后：非数值格替换为译文，数值格与公式格原样，克隆内无 id，原表未动', () => {
+  it('inserts a whole-table clone after the original, translating nonnumeric cells while preserving numeric/formula cells, stripping clone IDs, and leaving the original unchanged', () => {
     const doc = docOf(table)
     const t = extract(doc).find(b => b.kind === 'table') as TableBlock
     const before = t.el.outerHTML
@@ -30,7 +30,7 @@ describe('renderTable', () => {
     expect(t.el.outerHTML).toBe(before.replace('<table class="ltx_tabular" id="T1">', `<table class="ltx_tabular" id="T1" ${STATE_ATTR}="translated">`))
   })
 
-  it('克隆不带原表的 data-axt-id / data-axt-state', () => {
+  it('clones omit original data-axt-id and data-axt-state', () => {
     const doc = docOf(table)
     const blocks = extract(doc)
     markBlocks(blocks)
@@ -43,7 +43,7 @@ describe('renderTable', () => {
     expect(t.el.getAttribute(STATE_ATTR)).toBe('translated')
   })
 
-  it('重复渲染只保留最新一份', () => {
+  it('repeated rendering retains only the latest clone', () => {
     const doc = docOf(table)
     const t = extract(doc).find(b => b.kind === 'table') as TableBlock
     renderTable(t, new Map([[t.cells[0]!.el, frag(doc, '一')]]))
@@ -53,7 +53,7 @@ describe('renderTable', () => {
     expect(clones[0]?.querySelector(TABLE_RULES.cell)?.textContent).toBe('二')
   })
 
-  it('嵌套 tabular：外层格的译文带着内层表的克隆，内层格随后在新克隆里替换（§5.3）', () => {
+  it('nested tabular: outer-cell translations include an inner-table clone whose cells are then replaced (§5.3)', () => {
     const doc = docOf(
       '<table class="ltx_tabular" id="outer"><tbody><tr><td class="ltx_td">Outer cell'
       + '<table class="ltx_tabular" id="inner"><tbody><tr><td class="ltx_td">Alpha</td><td class="ltx_td">Beta</td></tr></tbody></table>'
@@ -61,7 +61,7 @@ describe('renderTable', () => {
     )
     const t = extract(doc).find(b => b.kind === 'table') as TableBlock
     expect(t.cells).toHaveLength(3)
-    // 模拟 rehydrate：外层格的译文里含内层表的克隆（英文）
+    // Simulate rehydrate: the outer-cell translation includes an English inner-table clone.
     const outer = frag(doc, '外层<table class="ltx_tabular"><tbody><tr><td class="ltx_td">Alpha</td><td class="ltx_td">Beta</td></tr></tbody></table>')
     const node = renderTable(t, new Map([[t.cells[0]!.el, outer], [t.cells[1]!.el, frag(doc, '甲')], [t.cells[2]!.el, frag(doc, '乙')]]))
     const tds = Array.from(node.querySelectorAll(TABLE_RULES.cell))

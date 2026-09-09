@@ -1,42 +1,42 @@
-# 依赖
+# Dependencies
 node_modules/
 
-# WXT 构建产物
+# WXT build output
 .output/
 .wxt/
 stats.html
 stats-*.json
 
-# 测试
+# Tests
 coverage/
 tests/e2e/.profile*/
 tests/e2e/.shots/
-# no-CORS e2e 用的打过补丁的扩展副本（只多一条本机 host 权限）
+# Patched no-CORS e2e extension copy (one additional local host permission)
 tests/e2e/.ext-local/
 
-# 参考仓库（GPL 源码，只读，不入库）
+# Reference repositories (GPL source, read-only, not tracked)
 reference/
 
-# 本地配置与密钥
+# Local configuration and secrets
 .env
 .env.*
 .claude/settings.local.json
 
-# 系统 / 编辑器
+# System / editor
 .DS_Store
 *.log
 .idea/
 .vscode/
 
-# WXT 生成的类型与 tsconfig
+# WXT-generated types and tsconfig
 .wxt/
 
-# Swift helper 的构建产物（DESIGN §15）
+# Swift helper build output (DESIGN §15)
 helper/.build/
 
-# 设计画布的发布产物（2 MiB，由 .dc.html 与 canvas.json 重新生成）
+# Published design canvas (2 MiB, regenerated from .dc.html and canvas.json)
 docs/design/canvas/*.html
 !docs/design/canvas/*.dc.html
 
-# git worktree 目录
+# Git worktree directories
 .worktrees/
