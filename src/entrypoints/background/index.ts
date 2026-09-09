@@ -94,7 +94,11 @@ export default defineBackground(() => {
    * 按住一会儿：这个标签页再来一次请求就说明页面还在，撤销取消
    */
   browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === 'loading') router.mayHaveLeft(tabId)
+    // **loading 与 complete 都要按一次**。跨文档导航提交得慢时，旧文档在 loading 之后还活着，
+    // 到点探针问到的是它、答的是同一个会话，撤销就被放掉了——而它随后就没了，再没人问第二次
+    //（Codex 在 #143 指出）。complete 时新文档已经就位：同文档换 hash 的话探针照样答「还在」，
+    // 真跳走的话答的就是新会话或者根本答不上
+    if (changeInfo.status === 'loading' || changeInfo.status === 'complete') router.mayHaveLeft(tabId)
   })
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {

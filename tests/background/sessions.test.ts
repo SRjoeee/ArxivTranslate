@@ -72,6 +72,27 @@ describe('createSessionRouter', () => {
     expect(transport.cancelled).toEqual(['链:session-1'])
   })
 
+  it('旧文档在提交前答了「还在」：complete 时再问一次，这次答的是新会话就撤掉', async () => {
+    // 跨文档导航提交得慢时，loading 之后旧文档还活着、还答得出同一个会话 id，撤销就被放掉了；
+    // 而它随后就没了，再没人问第二次（Codex 在 #143 指出）。background 在 complete 时再按一次
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    let answer: 'same' | 'other' | 'unknown' = 'same'
+    const router = createSessionRouter(async () => transport, { stillThere: async () => answer })
+    await router.forCall('session-1', 7)
+
+    // loading：旧文档还在，答「还在」——不撤
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(transport.cancelled).toEqual([])
+
+    // complete：新文档已经就位，答的是别的会话——撤，而且是确定的终结
+    answer = 'other'
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(transport.cancelled).toEqual(['链:session-1'])
+  })
+
   it('页面答不上来：排空，但不判死', async () => {
     // 消息没送到可能是真没了，也可能是新文档的 content script 还没装上——分不清就不能判死，
     // 判错了那个还活着的页面后半篇会永久 aborted（Codex 在 #143 指出两种情况要分开）
