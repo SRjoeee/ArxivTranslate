@@ -393,6 +393,21 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   doc.addEventListener('pointerleave', onLeave)
   view?.addEventListener('resize', onResize)
   doc.addEventListener('scroll', onScroll, { capture: true, passive: true })
+  /**
+   * The page reflowing under a pointer that never moved.
+   *
+   * Translation arrives progressively — the controller is started before the run does (`content/
+   * index.ts`) — so a block completing *above* the sentence being pointed at pushes it down while
+   * the bands stay at the coordinates they were measured at. No resize, no scroll, no pointer event
+   * (Codex on #138). Observing the body's own box catches it, along with anything else that changes
+   * the document's height: images loading, fonts swapping, a section expanding.
+   *
+   * The bands themselves cannot trigger it — they are absolutely positioned, so they contribute
+   * nothing to their container's size — and the callback costs nothing while the pointer is away,
+   * since `invalidate` returns early then.
+   */
+  const observer = view?.ResizeObserver ? new view.ResizeObserver(() => invalidate()) : undefined
+  if (doc.body) observer?.observe(doc.body)
 
   return {
     stop() {
@@ -400,6 +415,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
       doc.removeEventListener('pointerleave', onLeave)
       view?.removeEventListener('resize', onResize)
       doc.removeEventListener('scroll', onScroll, { capture: true })
+      observer?.disconnect()
       if (frame !== 0) view?.cancelAnimationFrame(frame)
       hit()
       shown = null

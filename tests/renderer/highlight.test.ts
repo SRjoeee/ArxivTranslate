@@ -55,6 +55,16 @@ function stubBrowser(doc: Document) {
     range.setEnd = (n: Node, o: number) => { if (from >= 0) starts.push([from, o]); setEnd(n, o) }
     return range
   }
+  // happy-dom has no ResizeObserver. The stub registers the callback **when `observe` is called**,
+  // not when the observer is constructed, so a controller that never observes anything reports no
+  // reflows — otherwise the test would pass without the observation being wired up at all.
+  const resizes: (() => void)[] = []
+  view.ResizeObserver = class {
+    fn: () => void
+    constructor(fn: () => void) { this.fn = fn }
+    observe() { resizes.push(this.fn) }
+    disconnect() { const at = resizes.indexOf(this.fn); if (at >= 0) resizes.splice(at, 1) }
+  }
   view.requestAnimationFrame = (fn: () => void) => frames.push(fn)
   view.cancelAnimationFrame = () => {}
   view.setTimeout = (fn: () => void, delay: number) => { timers.push({ fn, delay }); return timers.length }
@@ -91,6 +101,11 @@ function stubBrowser(doc: Document) {
     /** A scroll dispatched from `el` (capture phase) plus the frame it schedules */
     scrollOn: (el: EventTarget) => {
       el.dispatchEvent(new Event('scroll'))
+      for (const fn of frames.splice(0)) fn()
+    },
+    /** A reflow reported by the ResizeObserver, plus the frame it schedules */
+    reflow: () => {
+      for (const fn of resizes) fn()
       for (const fn of frames.splice(0)) fn()
     },
     /** A window resize plus the frame it schedules */
@@ -291,6 +306,28 @@ describe('hover sentence highlight (§7.7)', () => {
     expect(browser.bands()).toEqual([])
     browser.resize()
     expect(browser.bands()).toEqual([])
+    hl.stop()
+  })
+
+  it('repaints when the page reflows under a pointer that never moved', () => {
+    // Translation arrives progressively and the controller starts before the run does, so a block
+    // completing above the pointed-at sentence pushes it down with no resize, no scroll and no
+    // pointer event to notice (Codex on #138).
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const r = (top: number) =>
+      ({ left: 0, top, right: 200, bottom: top + 20, width: 200, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    const before = browser.bands().map(b => b.getAttribute('style'))
+
+    browser.nextLines(r(300))
+    browser.reflow()
+
+    expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
+    expect(browser.bands().every(b => (b.getAttribute('style') ?? '').includes('top:300.0px'))).toBe(true)
     hl.stop()
   })
 
