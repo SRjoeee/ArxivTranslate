@@ -50,6 +50,41 @@ describe('sentence registry (#105)', () => {
     expect(sentenceMapAt(source.firstChild!)).toBeUndefined()
   })
 
+  it('finds the block from a text node however deep the formula is', () => {
+    // The walk used to stop after twelve levels. Text nodes in the fixtures go to sixteen — a
+    // `msqrt/msub/mi` in 2401.00596 — and twelve reaches only 99.824% of the 86409 of them. Deep
+    // MathML nests without limit, so the walk goes to the root (Codex on #130).
+    const d = doc()
+    d.body.innerHTML = '<p class="ltx_p">One. Two.</p>'
+    const source = d.body.firstElementChild!
+    let deepest: Element = source
+    for (let i = 0; i < 20; i++) {
+      const wrap = d.createElement('span')
+      deepest.append(wrap)
+      deepest = wrap
+    }
+    const leaf = d.createTextNode('x')
+    deepest.append(leaf)
+
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('p')
+    target.append(fragment)
+    source.after(target)
+    const lengths = splitSentences(block.text)
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+
+    expect(sentenceMapAt(leaf)?.side).toBe('source')
+  })
+
+  // The leak this registry was restructured to avoid — an entry keyed by the original element,
+  // which `restore()` leaves in the document, holding the whole detached translation — cannot be
+  // tested here. happy-dom never releases a detached node: a control run with `--expose-gc` showed
+  // a plain object collected and a detached `<p>` that nothing referenced still alive after five
+  // collections, so a WeakRef assertion fails whichever way the registry is written and proves
+  // nothing. `tests/e2e/extension.mjs` checks it in a real browser instead, where restoring a
+  // translated page must let its translation nodes go.
+
   it('sentenceAt agrees with a linear scan at every offset', () => {
     const pairs = [0, 3, 3, 1, 12, 5].reduce<{ at: number; out: { index: number; source: { from: number; to: number }; target: { from: number; to: number } }[] }>(
       (acc, len) => {

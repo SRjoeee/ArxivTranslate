@@ -396,6 +396,15 @@ export function App() {
         <small style={{ display: 'block', color: '#666', marginTop: 4 }}>只影响显示：切到没勾的模式时叠加层隐藏，切回来再显示，不重新识别</small>
       </fieldset>
 
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>阅读</h2>
+      <label style={{ ...label, marginTop: 8 }}>
+        <input type="checkbox" checked={config.reading.sentenceHighlight} onChange={e => setLocal(c => ({ ...c, reading: { ...c.reading, sentenceHighlight: e.target.checked } }))} />
+        {' '}悬停时高亮对应的句子
+        <small style={{ display: 'block', color: '#666' }}>
+          鼠标停在原文或译文的一句上，两侧对应的那一句一起出现底色，颜色跟随上面的「高亮颜色」。只有会汇报句子边界的引擎才有这个效果（目前是微软翻译），其余引擎下悬停无变化；改动在下次开始翻译时生效
+        </small>
+      </label>
+
       <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译范围</h2>
       <label style={label}>
         预翻译距离（像素）

@@ -30,6 +30,22 @@ const HL_ATTR = 'data-axt-hl'
 const MISS_GRACE_MS = 120
 
 /**
+ * How long the fade-out in `highlight.css` takes. The ranges have to stay registered for the whole
+ * of it: deleting them first leaves `::highlight()` with nothing to paint, so the tint vanishes on
+ * the spot and the transition it was supposed to run happens to nothing (Codex pointed this out on
+ * #130). `tests/renderer/highlight.test.ts` reads the stylesheet and asserts these agree.
+ */
+const FADE_OUT_MS = 220
+
+/**
+ * Bumped whenever the highlights are cleared from outside this controller — `setMode()` and
+ * `restore()` both do it. A running controller caches which sentence it painted and skips the work
+ * when the pointer stays on it; without this it would go on believing a cleared sentence is still
+ * on screen and never repaint it (Codex pointed this out on #130).
+ */
+let epoch = 0
+
+/**
  * Whether this browser can paint the highlight.
  *
  * `caretPositionFromPoint` rather than `highlightsFromPoint`: the latter would answer the hit test
@@ -44,6 +60,7 @@ function supported(doc: Document): boolean {
  * started a highlight: `restore()` and `setMode()` use it without knowing whether one is running.
  */
 export function clearSentenceHighlights(doc: Document): void {
+  epoch++
   if (typeof CSS === 'undefined' || !('highlights' in CSS)) return
   CSS.highlights.delete(SOURCE_HIGHLIGHT)
   CSS.highlights.delete(TARGET_HIGHLIGHT)
@@ -59,7 +76,7 @@ export interface SentenceHighlight {
  * Starts following the pointer. Returns undefined when the browser cannot paint the highlight, so
  * the caller has nothing to clean up.
  *
- * Work per pointer move is one `caretPositionFromPoint`, a bounded walk up to the block, two binary
+ * Work per pointer move is one `caretPositionFromPoint`, a walk up to the block, two binary
  * searches, and — only when the sentence actually changed — building its ranges. Coalesced to one
  * frame: a pointer can produce far more `pointermove` events than frames, and every one of them
  * would otherwise cost a layout read.
@@ -71,25 +88,50 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   let y = 0
   let frame = 0
   let missTimer = 0
-  /** The sentence currently painted, as block identity plus index; null when nothing is */
-  let shown: { root: Element; index: number } | null = null
+  let fadeTimer = 0
+  /**
+   * The sentence currently painted, with the `epoch` it was painted at. The epoch is what makes
+   * this cache safe: anything that clears the highlights from outside bumps it, and a stale entry
+   * then compares unequal instead of suppressing the repaint.
+   */
+  let shown: { root: Element; index: number; at: number } | null = null
 
-  const clear = () => {
-    if (!shown) return
+  const view = doc.defaultView
+  const clearTimer = (id: number) => { if (id !== 0) view?.clearTimeout(id) }
+
+  /** Drops everything at once. For stopping, not for the pointer leaving a sentence. */
+  const clearNow = () => {
+    clearTimer(fadeTimer)
+    fadeTimer = 0
     shown = null
     clearSentenceHighlights(doc)
   }
 
+  /**
+   * Starts the fade-out: the attribute goes away now, which is what the transition runs on, and the
+   * ranges are dropped only once it has finished. Until then they are still registered, painting
+   * whatever the transitioning colour currently is.
+   */
+  const fadeOut = () => {
+    if (!shown || fadeTimer !== 0) return
+    shown = null
+    doc.documentElement.removeAttribute(HL_ATTR)
+    fadeTimer = view?.setTimeout(() => {
+      fadeTimer = 0
+      CSS.highlights.delete(SOURCE_HIGHLIGHT)
+      CSS.highlights.delete(TARGET_HIGHLIGHT)
+    }, FADE_OUT_MS) ?? 0
+  }
+
   const miss = () => {
     if (!shown || missTimer !== 0) return
-    missTimer = doc.defaultView?.setTimeout(() => {
+    missTimer = view?.setTimeout(() => {
       missTimer = 0
-      clear()
+      fadeOut()
     }, MISS_GRACE_MS) ?? 0
   }
   const hit = () => {
-    if (missTimer === 0) return
-    doc.defaultView?.clearTimeout(missTimer)
+    clearTimer(missTimer)
     missTimer = 0
   }
 
@@ -112,8 +154,11 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     hit()
     // The same sentence as last frame: the ranges have not changed and rebuilding them would be
     // pure work. This is the common case — a pointer resting on a line of text hits it every frame.
-    if (shown && shown.root === map.source.root && shown.index === sentence.index) return
-    shown = { root: map.source.root, index: sentence.index }
+    if (shown && shown.at === epoch && shown.root === map.source.root && shown.index === sentence.index) return
+    // A fade-out in flight is overtaken rather than left to delete the ranges we are about to set
+    clearTimer(fadeTimer)
+    fadeTimer = 0
+    shown = { root: map.source.root, index: sentence.index, at: epoch }
     CSS.highlights.set(SOURCE_HIGHLIGHT, new Highlight(...rangesOf(map.source.spans, sentence.source.from, sentence.source.to)))
     CSS.highlights.set(TARGET_HIGHLIGHT, new Highlight(...rangesOf(map.target.spans, sentence.target.from, sentence.target.to)))
     // Set after the ranges so the first paint of a new highlight is already the faded-in one rather
@@ -124,11 +169,12 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   const onMove = (event: PointerEvent) => {
     x = event.clientX
     y = event.clientY
-    if (frame === 0) frame = doc.defaultView?.requestAnimationFrame(update) ?? 0
+    if (frame === 0) frame = view?.requestAnimationFrame(update) ?? 0
   }
+  // Leaving the window fades out like any other departure, rather than cutting the tint off
   const onLeave = () => {
     hit()
-    clear()
+    fadeOut()
   }
 
   doc.addEventListener('pointermove', onMove, { passive: true })
@@ -139,12 +185,11 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     stop() {
       doc.removeEventListener('pointermove', onMove)
       doc.removeEventListener('pointerleave', onLeave)
-      if (frame !== 0) doc.defaultView?.cancelAnimationFrame(frame)
+      if (frame !== 0) view?.cancelAnimationFrame(frame)
       hit()
-      shown = null
-      // Unconditionally, not through `clear`: another run of this document may have left entries
-      // behind, and stopping should leave the page clean either way
-      clearSentenceHighlights(doc)
+      // Unconditionally, not conditioned on anything being shown: another run of this document may
+      // have left entries behind, and stopping should leave the page clean either way
+      clearNow()
     },
   }
 }
