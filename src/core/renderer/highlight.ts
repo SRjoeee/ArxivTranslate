@@ -129,10 +129,10 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
    * At most two `getBoundingClientRect` calls, and only once a candidate exists. Nothing has been
    * written to the DOM at this point in the frame, so neither forces a reflow.
    */
-  const inside = (rect: DOMRect | undefined): boolean =>
+  const inside = (rect: DOMRect | undefined, slack: number): boolean =>
     !!rect && !(rect.width === 0 && rect.height === 0)
-    && x >= rect.left - HIT_SLACK_PX && x <= rect.right + HIT_SLACK_PX
-    && y >= rect.top - HIT_SLACK_PX && y <= rect.bottom + HIT_SLACK_PX
+    && x >= rect.left - slack && x <= rect.right + slack
+    && y >= rect.top - slack && y <= rect.bottom + slack
 
   const charRect = (text: Text, from: number): DOMRect | undefined => {
     if (from < 0 || from + 1 > text.data.length) return undefined
@@ -154,12 +154,21 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   const offsetOn = (node: Node, offset: number): number | undefined => {
     if (node.nodeType === 1) {
       // A formula or other placeholder: its own box is the thing under the pointer
-      return inside((node as Element).getBoundingClientRect()) ? offset : undefined
+      return inside((node as Element).getBoundingClientRect(), HIT_SLACK_PX) ? offset : undefined
     }
     if (node.nodeType !== 3) return undefined
     const text = node as Text
-    if (inside(charRect(text, offset))) return offset
-    return inside(charRect(text, offset - 1)) ? offset - 1 : undefined
+    const after = charRect(text, offset)
+    const before = charRect(text, offset - 1)
+    // **Real containment first, for both, before any slack.** Two adjacent glyphs on one line have
+    // rectangles that overlap once they are widened, so preferring the character after the caret
+    // would take the next one for a pointer in the last few pixels of this one — and at a sentence
+    // boundary that is the next sentence (Codex pointed this out on #136). The slack exists to
+    // keep the outer edges of a line alive, not to decide between two candidates.
+    if (inside(after, 0)) return offset
+    if (inside(before, 0)) return offset - 1
+    if (inside(after, HIT_SLACK_PX)) return offset
+    return inside(before, HIT_SLACK_PX) ? offset - 1 : undefined
   }
 
   const update = () => {

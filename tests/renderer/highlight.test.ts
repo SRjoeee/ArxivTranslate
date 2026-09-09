@@ -33,6 +33,9 @@ function stubBrowser(doc: Document) {
   // to the hit test.
   const line1 = { left: 0, top: 0, right: 200, bottom: 20, width: 200, height: 20, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
   const line2 = { left: 0, top: 30, right: 200, bottom: 50, width: 200, height: 20, x: 0, y: 30, toJSON: () => ({}) } as DOMRect
+  /** Two glyphs side by side on one line: 0–100 and 100–200 */
+  const leftHalf = { left: 0, top: 0, right: 100, bottom: 20, width: 100, height: 20, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+  const rightHalf = { left: 100, top: 0, right: 200, bottom: 20, width: 100, height: 20, x: 100, y: 0, toJSON: () => ({}) } as DOMRect
   // Queued by call order rather than keyed by offset: happy-dom's `Range.startOffset` does not
   // report what was set on it, so the stub cannot tell the two characters apart any other way.
   const queued: DOMRect[] = []
@@ -63,7 +66,10 @@ function stubBrowser(doc: Document) {
     /** The `[from, to]` of every range that was built, in order */
     starts: () => starts.splice(0),
     /** Rects for the next `getBoundingClientRect` calls, in order. `line2` is one line down. */
-    nextRects: (...which: ('line1' | 'line2')[]) => { queued.push(...which.map(n => (n === 'line2' ? line2 : line1))) },
+    nextRects: (...which: ('line1' | 'line2' | 'left' | 'right')[]) => {
+      const by = { line1, line2, left: leftHalf, right: rightHalf }
+      queued.push(...which.map(n => by[n]))
+    },
     /** Runs whatever is scheduled, optionally only the timers of one delay */
     flushTimers: (delay?: number) => {
       const due = delay === undefined ? timers.splice(0) : timers.filter(t => t.delay === delay)
@@ -281,6 +287,28 @@ describe('hover sentence highlight (§7.7)', () => {
     expect(built.slice(0, 2)).toEqual([[5, 6], [4, 5]])
     expect(built[2]).toEqual([0, 5]) // the first sentence, not the second
     expect(target.isConnected).toBe(true)
+    hl.stop()
+  })
+
+  it('prefers the character that really contains the pointer over one the slack reaches', () => {
+    // Two adjacent glyphs on a line have rectangles that overlap once widened by the slack, so
+    // taking the character after the caret first claims a pointer in the last pixels of the one
+    // before it — and at a boundary that is the next sentence (Codex on #136). The slack is for
+    // the outer edges of a line, not for choosing between two candidates.
+    const { doc, source } = page('<p class="ltx_p">One. Two.</p>')
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const boundary = 'One. '.length
+
+    // After the caret is the right half; before it is the left half. The pointer is at x=98,
+    // inside the left half and within 4px of the right half.
+    browser.nextRects('right', 'left')
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild as Text, offset: boundary })
+    browser.move(98, 10)
+
+    const built = browser.starts()
+    expect(built.slice(0, 2)).toEqual([[5, 6], [4, 5]])
+    expect(built[2]).toEqual([0, 5]) // the first sentence
     hl.stop()
   })
 
