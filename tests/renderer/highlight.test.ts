@@ -243,6 +243,33 @@ describe('hover sentence highlight (§7.7)', () => {
     hl.stop()
   })
 
+  it('measures the bands from the layer\'s own origin, not the root element\'s', () => {
+    // The layer is `position: absolute; top: 0; left: 0`, so its rectangle is the origin of whatever
+    // containing block it landed in — the initial one normally, the body's padding box when the host
+    // positions `<body>`. Measuring against `documentElement` assumed the first case and shifted
+    // every band by the body's offset in the second (Codex on #138).
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const proto = (doc.defaultView as unknown as { Element: { prototype: Element } }).Element.prototype
+    const previous = proto.getBoundingClientRect
+    const shifted = { left: 8, top: 8, right: 8, bottom: 8, width: 0, height: 0, x: 8, y: 8, toJSON: () => ({}) } as DOMRect
+    proto.getBoundingClientRect = function (this: Element) {
+      return this.classList?.contains('axt-hl') ? shifted : browser.line1
+    }
+    const hl = startSentenceHighlight(doc)!
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+
+    // the sentence's line is at (0, 0); the layer starts 8px in, so the band has to come back by 8
+    expect(browser.bands().map(b => b.getAttribute('style'))).toEqual([
+      'left:-8.0px;top:-8.0px;width:200.0px;height:20.0px',
+      'left:-8.0px;top:-8.0px;width:200.0px;height:20.0px',
+    ])
+    hl.stop()
+    proto.getBoundingClientRect = previous
+  })
+
   it('keeps a band inside the container that clips its text', () => {
     // The layer hangs off `<body>`, outside whatever clipped the text — and `getClientRects()`
     // reports the whole layout box, including the part scrolled out of sight. A wide table in side

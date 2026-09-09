@@ -82,12 +82,14 @@ function layerOf(doc: Document): Element {
  * is always exactly one band — which is the whole point of the flat look, and what keeps a formula
  * from leaving a notch in the middle of a sentence.
  *
- * Offsets are taken against `documentElement`'s own rectangle rather than assuming the container's
- * offset parent is the page origin: a site that gives `<body>` a margin or a position would
- * otherwise shift every band.
+ * Offsets are taken against **the layer's own origin**, which the caller reads from the empty
+ * container itself. The layer is `position: absolute; top: 0; left: 0`, so its rectangle *is* the
+ * origin of whatever containing block it ended up in — the initial containing block normally, the
+ * body's padding box if the host positions `<body>`. Measuring against `documentElement` instead
+ * assumed the first case and shifted every band by the body's offset in the second (Codex on
+ * #138).
  */
-function bandsOf(doc: Document, ranges: readonly Range[], clip: Clip): { left: number; top: number; width: number; height: number }[] {
-  const origin = doc.documentElement.getBoundingClientRect()
+function bandsOf(origin: { left: number; top: number }, ranges: readonly Range[], clip: Clip): { left: number; top: number; width: number; height: number }[] {
   const rects: DOMRect[] = []
   for (const range of ranges) for (const rect of Array.from(range.getClientRects())) if (rect.width > 0 && rect.height > 0) rects.push(rect)
   const lines: { top: number; bottom: number; left: number; right: number }[] = []
@@ -209,10 +211,16 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   const view = doc.defaultView
   const clearTimer = (id: number) => { if (id !== 0) view?.clearTimeout(id) }
 
-  /** Drops everything at once. */
+  /**
+   * Drops what is painted, keeping the (empty) layer.
+   *
+   * Keeping it is what lets the repaint read its origin without having just written to the DOM:
+   * created once per controller, emptied from then on. `stop()` still takes it away, as does
+   * `clearSentenceHighlights` when `setMode()` or `restore()` calls it from outside.
+   */
   const clearNow = () => {
     shown = null
-    clearSentenceHighlights(doc)
+    doc.body?.querySelector(`:scope > .${HL_CLASS}`)?.replaceChildren()
   }
 
   const miss = () => {
@@ -304,14 +312,19 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     // pure work. This is the common case — a pointer resting on a line of text hits it every frame.
     if (shown && shown.at === epoch && shown.root === map.source.root && shown.index === sentence.index) return
     shown = { root: map.source.root, index: sentence.index, at: epoch }
+    // The layer is fetched first because its own rectangle is the origin every band is measured
+    // against, and it must be read in the same pass as the ranges. It is created at most once per
+    // controller — the miss path empties it rather than removing it — so this is a read, not a
+    // write followed by reads.
+    const layer = layerOf(doc)
+    const origin = layer.getBoundingClientRect()
     // Both sides are measured before anything is written: reads and writes never interleave
     const sides = view
       ? ([
-          { side: 'source', bands: bandsOf(doc, rangesOf(map.source.spans, sentence.source.from, sentence.source.to), clipOf(map.source.root, view)) },
-          { side: 'target', bands: bandsOf(doc, rangesOf(map.target.spans, sentence.target.from, sentence.target.to), clipOf(map.target.root, view)) },
+          { side: 'source', bands: bandsOf(origin, rangesOf(map.source.spans, sentence.source.from, sentence.source.to), clipOf(map.source.root, view)) },
+          { side: 'target', bands: bandsOf(origin, rangesOf(map.target.spans, sentence.target.from, sentence.target.to), clipOf(map.target.root, view)) },
         ] as const)
       : []
-    const layer = layerOf(doc)
     layer.textContent = ''
     for (const { side, bands } of sides) {
       for (const band of bands) {
@@ -379,9 +392,10 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
       doc.removeEventListener('scroll', onScroll, { capture: true })
       if (frame !== 0) view?.cancelAnimationFrame(frame)
       hit()
+      shown = null
       // Unconditionally, not conditioned on anything being shown: another run of this document may
       // have left entries behind, and stopping should leave the page clean either way
-      clearNow()
+      clearSentenceHighlights(doc)
     },
   }
 }

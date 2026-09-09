@@ -499,9 +499,11 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 单元测试把浏览器那半边全打了桩（happy-dom 量不出任何几何），而对齐只有微软会报，
   // 所以「底色真的画在了两侧对应的那一句上、每行一条」只能在这里验
   const hover = await page.evaluate(async () => {
-    const at = document.querySelector('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')
-    const id = at?.getAttribute('data-axt-for')
-    const src = id ? document.querySelector(`[data-axt-id="${id}"]`) : null
+    const pairs = [...document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')]
+      .map(t => ({ t, s: document.querySelector(`[data-axt-id="${t.getAttribute('data-axt-for')}"]`) }))
+      .filter(p => p.s)
+    const at = pairs[0]?.t
+    const src = pairs[0]?.s
     if (!at || !src) return { reason: 'no translated block' }
     src.scrollIntoView({ block: 'center' })
     const before = src.outerHTML + at.outerHTML
@@ -556,14 +558,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       // 只有真正的命中判定才能把它拒掉（用户 2026-09-09 反馈的第 1 条）
       gutter: await (async () => {
         // 末行行尾之后、但仍在块的框内：caretPositionFromPoint 在这里会答出末行最后一个字，
-        // 块也确实映射得到句子，所以只有真正的命中判定能拒掉它——正是用户看到的那个位置
-        const last = tail(at)
-        const box = at.getBoundingClientRect()
-        if (!last || box.right - last.right < 40) return { skipped: box.right - (last?.right ?? 0) }
-        const gx = last.right + 20
-        document.dispatchEvent(new PointerEvent('pointermove', { clientX: gx, clientY: last.top + last.height / 2, bubbles: true }))
-        await new Promise(r => setTimeout(r, 260))
-        return { bands: document.querySelectorAll('.axt-hl > div').length, gap: box.right - last.right }
+        // 块也确实映射得到句子，所以只有真正的命中判定能拒掉它——正是用户看到的那个位置。
+        // **在所有配对里挑空白最宽的那个块**：只看第一块的话，译文换行恰好排满时这一条就没得测了，
+        // 而排版随论文、视口与字体变（Codex 在 #138 指出）
+        const gaps = pairs
+          .map(p => { const r = tail(p.t); return r ? { block: p.t, r, gap: p.t.getBoundingClientRect().right - r.right } : null })
+          .filter(Boolean)
+          .sort((a, b) => b.gap - a.gap)
+        const best = gaps[0]
+        if (!best || best.gap < 40) return { skipped: true, gap: best?.gap ?? 0 }
+        best.block.scrollIntoView({ block: 'center' })
+        const r = tail(best.block)
+        if (!r) return { skipped: true, gap: 0 }
+        document.dispatchEvent(new PointerEvent('pointermove', { clientX: r.right + 20, clientY: r.top + r.height / 2, bubbles: true }))
+        await new Promise(r2 => setTimeout(r2, 260))
+        return { bands: document.querySelectorAll('.axt-hl > div').length, gap: best.gap }
       })(),
     }
   })
@@ -575,7 +584,10 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   check('悬停对照高亮：底色都落在各自的块内，没有跨块',
     hover.inSource === true && hover.inTarget === true, `原文 ${hover.inSource}、译文 ${hover.inTarget}`)
   check('悬停对照高亮：指针在右侧空白处不触发（用户 2026-09-09 反馈）',
-    hover.gutter?.bands === 0, `末行行尾右侧 ${hover.gutter?.gap?.toFixed(0)}px 空白处画了 ${hover.gutter?.bands} 条底`)
+    hover.gutter?.bands === 0 || hover.gutter?.skipped === true,
+    hover.gutter?.skipped
+      ? `跳过：所有块的末行右侧空白最宽只有 ${hover.gutter.gap.toFixed(0)}px，够不着 40px 的判据`
+      : `末行行尾右侧 ${hover.gutter?.gap?.toFixed(0)}px 空白处画了 ${hover.gutter?.bands} 条底`)
   check('悬停对照高亮：正文一个节点都没动，底色层挂在 body 上（§7.1）',
     hover.domUnchanged === true && hover.layerOnBody === 'body', `DOM ${hover.domUnchanged ? '未变' : '变了'}，层挂在 ${hover.layerOnBody}`)
 
