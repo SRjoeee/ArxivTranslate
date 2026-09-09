@@ -14,7 +14,8 @@ export default defineConfig({
     minimum_chrome_version: '131',
     description: '面向 arxiv.org/html 的保结构、可逆双语翻译',
     // nativeMessaging：Mac 上的图片翻译经本机 helper 做 OCR（DESIGN §15）；没装 helper 时这条权限闲着，不弹窗
-    permissions: ['storage', 'nativeMessaging'],
+    // contextMenus：右键菜单里的翻译开关（issue #146）。它不给页面内容的访问权，只是注册一个菜单项
+    permissions: ['storage', 'nativeMessaging', 'contextMenus'],
     // background 向 LLM 端点 fetch 需要 host 权限；默认只给 OpenRouter，自定义 baseURL 在设置页保存时按 origin 申请。
     // google-web 的端点也列进来（Codex 在 #59 指出）：它眼下返 CORS 头，普通跨域就能过，
     // 但那正是这次搬迁想摆脱的依赖——对方哪天不发这个头，免费引擎就整个不可用了

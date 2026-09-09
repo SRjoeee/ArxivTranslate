@@ -8,6 +8,7 @@ import { HELPER_HOST } from '@/shared/ocr'
 import { createHelperClient } from './helper'
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
+import { installContextMenu } from './context-menu'
 import { handlePing } from '@/shared/ping'
 
 // background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
@@ -65,6 +66,14 @@ export default defineBackground(() => {
       if (n > 0) console.debug(`[axt] 标签页 ${tabId} ${why}，撤掉 ${n} 个排队 / 在飞的请求`)
     })
   }
+  // 右键菜单（issue #146）：第二个入口，动作与 popup 走同一条消息
+  installContextMenu({
+    create: options => browser.contextMenus.create(options as Parameters<typeof browser.contextMenus.create>[0]),
+    removeAll: () => browser.contextMenus.removeAll(),
+    onClicked: handler => browser.contextMenus.onClicked.addListener(handler),
+    send: (tabId, message) => browser.tabs.sendMessage(tabId, message),
+  })
+
   browser.tabs.onRemoved.addListener(tabId => dropTab(tabId, '关闭'))
   /**
    * 导航离开也要撤（Codex 在 #59 指出）：`onRemoved` 只管关闭，标签页跳到别的网址时不触发。

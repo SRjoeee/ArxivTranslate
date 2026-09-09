@@ -826,6 +826,40 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列补上 ${q.extra} 发、其中${q.confirmed ? '有没见过的请求体（确有排队的新批次，不是同一批重发）' : '全是同一批重发——队列里没有排队的活，这条断言无效'}；导航离开再放开全部槽位后新增 ${late} 个`)
 }
 
+// ── 摘要页的双语入口（issue #146）：点一下就进到「已经在翻」的全文页 ──────────
+{
+  // 这条只有真实浏览器能证：插入点靠的是 arXiv 自己渲染的标记，而「点进去自动开始翻译」
+  // 跨了一次真实导航——两头都不是 happy-dom 里演得出来的
+  const page = await context.newPage()
+  const logs = []
+  page.on('console', m => { const t = m.text(); if (t.includes('[axt]')) logs.push({ t: Date.now(), text: t }) })
+  await page.goto(`https://arxiv.org/abs/${PAPER}`, { waitUntil: 'domcontentloaded' })
+  const link = await page.evaluate(() => {
+    const ours = document.querySelector('.axt-abs-link')
+    const html = document.querySelector('#latexml-download-link')
+    return {
+      exists: !!ours,
+      href: ours?.getAttribute('href') ?? null,
+      text: ours?.textContent ?? null,
+      afterHtmlLink: html?.closest('li')?.nextElementSibling?.contains(ours) ?? false,
+      inSameList: !!ours && ours.closest('ul') === html?.closest('ul'),
+      count: document.querySelectorAll('.axt-abs-link').length,
+    }
+  })
+  check('摘要页：双语入口插在 arXiv 的 HTML 链接后面，只有一条（#146）',
+    link.exists && link.afterHtmlLink && link.inSameList && link.count === 1 && /\/html\/.*#axt-translate$/.test(link.href ?? ''),
+    `「${link.text}」→ ${link.href}；紧跟 HTML 链接 ${link.afterHtmlLink}，同一个列表 ${link.inSameList}，共 ${link.count} 条`)
+
+  await page.click('.axt-abs-link')
+  await page.waitForURL(/\/html\/.*#axt-translate/, { timeout: 30_000 })
+  const idle = idleOf(await waitForLog(logs, IDLE, 120_000))
+  const rendered = await page.evaluate(() => document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error)').length)
+  await page.close()
+  check('摘要页：点进去不碰 popup 就已经在翻了（#146）',
+    !!idle && idle.requested > 0 && rendered > 0,
+    `${idle?.text ?? '(没等到 idle)'}；页面上 ${rendered} 个译文节点`)
+}
+
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
 {
   await options.bringToFront()
