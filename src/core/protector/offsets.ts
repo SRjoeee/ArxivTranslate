@@ -10,6 +10,8 @@
 // a text span records an anchor only where one input character did not produce exactly one output
 // character; between anchors the mapping is addition.
 
+import { isInjected } from '@/core/marks'
+
 /** One run of wire text and where it came from. Text and slot spans together tile the whole string. */
 export type WireSpan =
   | {
@@ -23,8 +25,6 @@ export type WireSpan =
        * consecutive anchors, so a lookup is a search plus an addition.
        */
       anchors: readonly (readonly [number, number])[]
-      /** A node was skipped just before this run, so it is not DOM-adjacent to the previous one */
-      breakBefore?: boolean
     }
   | {
       /**
@@ -42,8 +42,6 @@ export type WireSpan =
        * `<t id="N">` pair and bracket the element's content instead.
        */
       role: 'void' | 'open' | 'close'
-      /** A node was skipped just before this run, so it is not DOM-adjacent to the previous one */
-      breakBefore?: boolean
     }
 
 /**
@@ -121,17 +119,73 @@ function oneRange(spans: readonly WireSpan[], from: number, to: number): Range |
  * Returns an empty array when there is nothing to select: no spans, an empty interval, or an
  * interval past the end of the wire text.
  */
+/** The next node in document order, not descending into `skip`'s subtree. */
+function nextInOrder(node: Node, stop: Node): Node | undefined {
+  if (node.firstChild) return node.firstChild
+  let current: Node | null = node
+  while (current && current !== stop) {
+    if (current.nextSibling) return current.nextSibling
+    current = current.parentNode
+  }
+  return undefined
+}
+
+/**
+ * Whether a node we injected lies between these two runs right now.
+ *
+ * **Asked at range time, not recorded at serialize time.** `planBatches` serialises every selected
+ * block before `processBatch` inserts the pending node and later the translation, so a flag written
+ * during serialisation cannot know about a nested block that finished afterwards — and that is
+ * exactly the flow this guards (Codex pointed this out on #123). Adjacent runs are a few nodes
+ * apart, and ranges are built on hover, so walking the gap costs nothing.
+ */
+function injectedBetween(a: Node, b: Node): boolean {
+  const root = a.ownerDocument?.documentElement
+  if (!root) return false
+  let node: Node | undefined = a
+  while (node && node !== b) {
+    node = nextInOrder(node, root)
+    if (!node || node === b) break
+    if (node.nodeType === 1 && isInjected(node as Element)) return true
+  }
+  return false
+}
+
+/**
+ * Wire interval `[from, to)` as ranges.
+ *
+ * **Usually one range, but not always.** `serialize` skips nodes we injected ourselves, and more
+ * arrive after serialisation, so two runs that are adjacent in wire coordinates can have a
+ * translation sitting between them in the DOM. One range spanning that gap would contain the inner
+ * translation and highlight it as if it were source text, so the interval is cut at every such
+ * discontinuity. `Highlight` takes any number of ranges, so the caller just spreads them.
+ *
+ * A boundary inside a placeholder resolves to that node's own boundary, so a sentence that opens or
+ * closes on a formula still contains it.
+ *
+ * Returns an empty array when there is nothing to select: no spans, an empty interval, or an
+ * interval reaching outside the tiled wire text. Out-of-bounds is checked **before** any range is
+ * built, so a malformed request yields nothing rather than a truncated prefix.
+ */
 export function rangesOf(spans: readonly WireSpan[], from: number, to: number): Range[] {
   if (spans.length === 0 || to <= from) return []
+  const first = spans[0]!
+  const last = spans[spans.length - 1]!
+  if (from < first.from || to > last.to) return []
+
   const out: Range[] = []
   let segmentStart = from
+  let previous = spanAt(spans, from)
   for (const span of spans) {
-    if (span.from <= from || span.from >= to || !span.breakBefore) continue
-    const range = oneRange(spans, segmentStart, span.from)
-    if (range) out.push(range)
-    segmentStart = span.from
+    if (span.from <= from || span.from >= to) continue
+    if (previous && injectedBetween(previous.node, span.node)) {
+      const range = oneRange(spans, segmentStart, span.from)
+      if (range) out.push(range)
+      segmentStart = span.from
+    }
+    previous = span
   }
-  const last = oneRange(spans, segmentStart, to)
-  if (last) out.push(last)
+  const tail = oneRange(spans, segmentStart, to)
+  if (tail) out.push(tail)
   return out
 }

@@ -183,21 +183,57 @@ describe('wire offsets to DOM (#105)', () => {
     expect(textOf(block.offsets!, at, at + 8)).toBe('and then')
   })
 
-  it('cuts the interval where an injected node was skipped, instead of spanning it', () => {
+  it('cuts the interval where an injected node sits between two runs', () => {
     // An inner block that finished translating first leaves its translation in the DOM between two
     // runs that are adjacent in wire coordinates. One range across that gap would highlight the
     // inner translation as if it were source text (Codex on #123).
     const root = el('<p class="ltx_p">before <span class="axt-t" data-axt-for="x">translated</span> after</p>')
     const block = serialize(root, 'tags', { offsets: true })
     expect(block.text).toBe('before after')
-    expect(block.offsets!.map(s => Boolean(s.breakBefore))).toEqual([false, true])
-    // Two ranges, so the injected sibling between them is not covered
     expect(boundaryCalls(root, block.offsets!, 0, block.text.length)).toEqual([
       'start@text("before"):0',
       'end@text("before"):7',
       'start@text(" after"):1',
       'end@text(" after"):6',
     ])
+  })
+
+  it('sees a node injected after serialisation, which a recorded flag could not', () => {
+    // planBatches serialises every block before processBatch inserts the pending node and later the
+    // translation, so a flag written during serialisation is already stale by the time a nested
+    // block finishes (Codex on #123). The check has to run when the range is built.
+    const root = el('<p class="ltx_p">before after</p>')
+    const block = serialize(root, 'tags', { offsets: true })
+    expect(block.text).toBe('before after')
+    // One run, one range — nothing injected yet
+    expect(boundaryCalls(root, block.offsets!, 0, block.text.length)).toEqual(['start@text("before"):0', 'end@text("before"):12'])
+
+    // Now split the text node and insert a translation between the halves, as the renderer would
+    const original = block.offsets![0]!
+    if (original.kind !== 'text') return
+    const tail = original.node.splitText(7)
+    const injected = root.ownerDocument.createElement('span')
+    injected.className = 'axt-t'
+    injected.textContent = 'translated'
+    tail.parentNode!.insertBefore(injected, tail)
+    // Re-serialise to get spans over the new node layout, then the gap must be detected
+    const after = serialize(root, 'tags', { offsets: true })
+    expect(after.text).toBe('before after')
+    expect(boundaryCalls(root, after.offsets!, 0, after.text.length)).toEqual([
+      'start@text("before"):0',
+      'end@text("before"):7',
+      'start@text("after"):0',
+      'end@text("after"):5',
+    ])
+  })
+
+  it('returns nothing for an interval reaching past the tiled wire text', () => {
+    // The loop used to push the earlier segments before the final oneRange failed, so a malformed
+    // request came back as a truncated prefix instead of nothing (Codex on #123).
+    const root = el('<p class="ltx_p">before <span class="axt-t" data-axt-for="x">t</span> after</p>')
+    const block = serialize(root, 'tags', { offsets: true })
+    expect(boundaryCalls(root, block.offsets!, 0, block.text.length + 1)).toEqual([])
+    expect(boundaryCalls(root, block.offsets!, -1, block.text.length)).toEqual([])
   })
 
   it('holds on real fixture blocks: every span is well formed and its wire length matches', () => {
