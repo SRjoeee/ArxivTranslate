@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { sentenceCuts, splitSentences } from '@/core/sentences'
+import { sentenceCuts, splitSentences, type SplitContext } from '@/core/sentences'
 
-const parts = (text: string, format?: 'tags' | 'markers', isAnnotation?: (id: number) => boolean) => {
+const parts = (text: string, format?: 'tags' | 'markers', context?: SplitContext) => {
   const out: string[] = []
   let at = 0
-  for (const len of splitSentences(text, format, isAnnotation)) {
+  for (const len of splitSentences(text, format, context)) {
     out.push(text.slice(at, at + len))
     at += len
   }
@@ -93,7 +93,7 @@ describe('sentence splitting (#105)', () => {
     // "punctuation, placeholder, capitalised word". Guessing from the following word's case failed
     // on both, so the caller answers from classify() instead (Codex on #126).
     const annotations = (id: number) => id === 1 || id === 2
-    expect(parts('the method<x id="1"/>. <x id="2"/> We require more.', 'tags', annotations))
+    expect(parts('the method<x id="1"/>. <x id="2"/> We require more.', 'tags', { isAnnotation: annotations }))
       .toEqual(['the method<x id="1"/>. <x id="2"/> ', 'We require more.'])
     // A formula in the same shape opens the sentence, and needs no case check to do so
     expect(parts('the relation <x id="1"/>. <x id="2"/> Let <x id="3"/> denote it.'))
@@ -132,6 +132,28 @@ describe('sentence splitting (#105)', () => {
     // the outcome, because the rule looked at that word's case (Codex on #126). It no longer does.
     expect(parts('The proof is complete. <x id="1"/>, however, is continuous.'))
       .toEqual(['The proof is complete. ', '<x id="1"/>, however, is continuous.'])
+  })
+
+  it('lets an abbreviation that really ends a sentence do so', () => {
+    // `etc.` and `al.` can genuinely close a sentence; the rest of the list — numbers, examples,
+    // journal names — cannot, so only these two consult what follows (Codex on #126). Restricted
+    // this way it adds exactly one cut across 2330 fixture blocks and no wrong ones.
+    expect(parts('spaces, algebras, Lie algebras, etc. We refer to Section 2.'))
+      .toEqual(['spaces, algebras, Lie algebras, etc. ', 'We refer to Section 2.'])
+    expect(parts('as shown by Smith et al. in their paper.')).toEqual(['as shown by Smith et al. in their paper.'])
+    // The rest still merge unconditionally: an award number is not a sentence end
+    expect(parts('AFOSR Award No. FA9550 supported this.')).toEqual(['AFOSR Award No. FA9550 supported this.'])
+  })
+
+  it('shows what a placeholder says, when the caller can tell it', () => {
+    // A stand-in token throws away exactly what the segmenter needs. A sentence-final period can
+    // live inside the math node, and a \\citet placeholder is the subject of its sentence — neither
+    // is recoverable from a generic token (Codex on #126).
+    const textOf = (m: Record<number, string>) => ({ textOf: (id: number) => m[id] })
+    expect(parts('we define <x id="1"/><x id="2"/>In the next step.', 'tags', textOf({ 1: 'f(x) = 0.', 2: '\n' })))
+      .toEqual(['we define <x id="1"/>', '<x id="2"/>In the next step.'])
+    expect(parts('may seem surprising. <x id="1"/> show that it holds.', 'tags', textOf({ 1: 'Smith et al.' })))
+      .toEqual(['may seem surprising. ', '<x id="1"/> show that it holds.'])
   })
 
   it('never cuts inside a placeholder, which would break the wire syntax', () => {

@@ -69,6 +69,11 @@ function idOf(run: string): number | undefined {
 const STRUCTURAL = /^<\/?t(?:\s+id="\d+")?>$/
 const OPENING = /^<t(?:\s+id="\d+")?>$/
 
+/** Abbreviations that genuinely end sentences, so the text after them decides whether to merge */
+const TERMINAL_ABBR = /\b(?:etc|al)\.$/
+/** A continuation rather than a new sentence: lowercase, a number, or another abbreviation */
+const CONTINUES = /^\s*(?:[a-z0-9]|(?:[A-Z]|Fig|Figs|Eq|Eqs|Sec|Secs|Ref|Refs|Thm|Def|Lem|Prop|Cor|Rev|Phys|Lett|Nucl|Astron|Astrophys|Mon|Not|Proc|Conf|Int|J|vs|etc|cf|al|approx|resp|Dr|Prof|St|No|Vol|pp|Ed|Eds|Sci|Rep|e\.g|i\.e)\.)/
+
 const VOID_TOKEN = 'Xx'
 
 /**
@@ -87,6 +92,26 @@ const VOID_TOKEN = 'Xx'
 export type IsAnnotation = (id: number) => boolean
 
 /**
+ * The text a placeholder stands for, so the projection can show it instead of a stand-in.
+ *
+ * The stand-in throws away exactly what the segmenter needs. A sentence-final period can live
+ * *inside* the math node — `tests/fixtures/arxiv/2609.00246.html` has one — and then the wire text
+ * holds no terminal punctuation at all, so no projection of a generic token can recover the
+ * boundary. A `\citet` placeholder is the grammatical subject of its sentence, and its own text
+ * ("Smith et al.") reads as one where a token does not (Codex on #126).
+ *
+ * The caller has `slots`, so it can answer with `node.textContent`.
+ */
+export type TextOfSlot = (id: number) => string | undefined
+
+export interface SplitContext {
+  /** Placeholders that annotate the text before them — footnotes, trailing citations */
+  isAnnotation?: IsAnnotation
+  /** What each placeholder actually says */
+  textOf?: TextOfSlot
+}
+
+/**
  * Segmenting the wire text directly hides sentence ends that sit against a placeholder. A run-in
  * heading serialises as `<t id="1">Motivation.</t> Concurrent programs …`, and `Intl.Segmenter` sees
  * `.` followed by `<` rather than by whitespace, so it reports no boundary at all — measured, and
@@ -95,7 +120,7 @@ export type IsAnnotation = (id: number) => boolean
  * So segment a projection where each placeholder becomes whitespace, except a void that opens a
  * sentence, which becomes a word so the boundary stays visible.
  */
-function project(text: string, format: WireFormat, isAnnotation?: IsAnnotation): { visible: string; toWire: number[]; openEnds: Map<number, number> } {
+function project(text: string, format: WireFormat, context: SplitContext): { visible: string; toWire: number[]; openEnds: Map<number, number> } {
   let visible = ''
   // toWire[i] is the wire offset that visible offset i starts at
   const toWire: number[] = []
@@ -120,10 +145,15 @@ function project(text: string, format: WireFormat, isAnnotation?: IsAnnotation):
       token = ' '
       if (OPENING.test(run)) openEnds.set(after, index)
     } else {
-      // An annotation belongs to the text before it and must not open a sentence; content has to
-      // read as a word so a sentence starting on a formula keeps its boundary.
+      // An annotation belongs to the text before it and must not open a sentence. Content shows its
+      // own text when the caller can supply it — that is what carries punctuation living inside a
+      // math node, and what makes a citation read as the subject it is. Otherwise a stand-in word.
       const id = idOf(run)
-      token = id !== undefined && isAnnotation?.(id) ? ' ' : VOID_TOKEN
+      if (id !== undefined && context.isAnnotation?.(id)) token = ' '
+      else {
+        const own = id !== undefined ? context.textOf?.(id) : undefined
+        token = own && own.trim() ? own.replace(/[\t\n\f\r ]+/g, ' ') : VOID_TOKEN
+      }
     }
     for (let i = 0; i < token.length; i++) toWire.push(index)
     visible += token
@@ -144,9 +174,9 @@ function project(text: string, format: WireFormat, isAnnotation?: IsAnnotation):
  * the text it describes, so a splitter that lost or duplicated a character would simply produce no
  * highlight. Returns a single length for text with no interior boundary.
  */
-export function splitSentences(text: string, format: WireFormat = 'tags', isAnnotation?: IsAnnotation): number[] {
+export function splitSentences(text: string, format: WireFormat = 'tags', context: SplitContext = {}): number[] {
   if (text.length === 0) return []
-  const cuts = sentenceCuts(text, format, isAnnotation)
+  const cuts = sentenceCuts(text, format, context)
   const lengths: number[] = []
   let prev = 0
   for (const cut of cuts) {
@@ -158,15 +188,20 @@ export function splitSentences(text: string, format: WireFormat = 'tags', isAnno
 }
 
 /** Cut points inside the text, i.e. the boundaries between sentences, excluding 0 and `length`. */
-export function sentenceCuts(text: string, format: WireFormat = 'tags', isAnnotation?: IsAnnotation): number[] {
+export function sentenceCuts(text: string, format: WireFormat = 'tags', context: SplitContext = {}): number[] {
   if (text.length === 0) return []
-  const { visible, toWire, openEnds } = project(text, format, isAnnotation)
+  const { visible, toWire, openEnds } = project(text, format, context)
   const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' })
   const pieces: string[] = []
   for (const { segment } of segmenter.segment(visible)) {
     const prev = pieces[pieces.length - 1]
-    // The previous piece ended on an abbreviation, so the boundary between them is spurious.
-    if (prev !== undefined && ABBR.test(prev.trimEnd())) pieces[pieces.length - 1] = prev + segment
+    const tail = prev?.trimEnd() ?? ''
+    // The previous piece ended on an abbreviation, so the boundary between them is usually
+    // spurious — except for the few that really can end a sentence, where what follows decides.
+    // Measured over 2330 fixture blocks: restricted this way it adds exactly one cut, the
+    // `… Lie algebras, etc. We refer to …` that prompted it, and no wrong ones (Codex on #126).
+    const merge = prev !== undefined && ABBR.test(tail) && (!TERMINAL_ABBR.test(tail) || CONTINUES.test(segment))
+    if (merge) pieces[pieces.length - 1] = prev + segment
     else pieces.push(segment)
   }
   const cuts: number[] = []
