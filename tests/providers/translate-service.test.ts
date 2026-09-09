@@ -35,6 +35,64 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+describe('sentence alignment through the queue (#105)', () => {
+  const withAlignment = (aligned: Record<string, { source: number[]; target: number[] }>) =>
+    provider(async r => ({
+      segments: r.segments.map(s => (aligned[s.id] ? { id: s.id, text: `译:${s.text}`, alignment: aligned[s.id] } : { id: s.id, text: `译:${s.text}` })),
+      provider: 'mock',
+    }))
+
+  it('carries the alignment from the provider out to the caller', async () => {
+    // The queue was string-valued, so the alignment reached the type at the message boundary but
+    // the data was dropped on the way. This is the test that the value actually crosses.
+    const { port } = fakePort()
+    const service = createTranslateService({
+      getProvider: async () => withAlignment({ a: { source: [3, 4], target: [2, 3] } }),
+      cache: port,
+    })
+    const res = await service.translate(req(['a', 'b']))
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.result.segments.map(s => s.alignment)).toEqual([{ source: [3, 4], target: [2, 3] }, undefined])
+  })
+
+  it('keeps each segment’s own alignment when a batch mixes aligned and unaligned', async () => {
+    const { port } = fakePort()
+    const service = createTranslateService({
+      getProvider: async () => withAlignment({ a: { source: [1], target: [1] }, c: { source: [2], target: [2] } }),
+      cache: port,
+    })
+    const res = await service.translate(req(['a', 'b', 'c']))
+    expect(res.ok).toBe(true)
+    if (!res.ok) return
+    expect(res.result.segments.map(s => [s.id, s.alignment])).toEqual([
+      ['a', { source: [1], target: [1] }],
+      ['b', undefined],
+      ['c', { source: [2], target: [2] }],
+    ])
+  })
+
+  it('a cache hit has no alignment yet, and says so rather than inventing one', async () => {
+    // Persisting the alignment is a separate change; until then a hit yields text only, and the
+    // caller sees undefined instead of a stale or fabricated mapping.
+    const { port, store } = fakePort()
+    const service = createTranslateService({
+      getProvider: async () => withAlignment({ a: { source: [3], target: [3] } }),
+      cache: port,
+    })
+    const first = await service.translate(req(['a']))
+    expect(first.ok && first.result.segments[0]?.alignment).toEqual({ source: [3], target: [3] })
+    expect(store.size).toBe(1)
+
+    const second = await service.translate(req(['a']))
+    expect(second.ok).toBe(true)
+    if (!second.ok) return
+    expect(second.cached).toBe(1)
+    expect(second.result.segments[0]?.alignment).toBeUndefined()
+    expect(second.result.segments[0]?.text).toBe('译:text-a')
+  })
+})
+
 describe('createTranslateService', () => {
   it('缓存读写各一次批量调用，不是每段一次；同一次调用的段落攒成一批发给 provider', async () => {
     const { port, reads, writes } = fakePort()
