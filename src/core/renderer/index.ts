@@ -242,6 +242,7 @@ export function restore(doc: Document): { removedNodes: number; strippedAttrs: n
   return { removedNodes, strippedAttrs }
 }
 
+export * from './sentences'
 export * from './mirror'
 export * from './side-layout'
 export * from './table-fit'

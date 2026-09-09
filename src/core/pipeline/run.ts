@@ -3,10 +3,11 @@
 // 才攒批发请求，请求前先插带圆环的 pending 节点（§7.6）。没有"整篇翻完"的终点，滚到哪翻到哪。
 import { toBcp47 } from '@/config/languages'
 import { ID_ATTR, type Block, type TextBlock } from '@/core/extractor'
+import type { SentenceAlignment } from '@/providers/alignment'
 import type { TranslateContext } from '@/providers/types'
-import { joinRuns, rehydrate, splitRuns, validate } from '@/core/protector'
+import { joinRuns, rehydrate, splitRuns, validate, type WireSpan } from '@/core/protector'
 import {
-  clearAllPending, enable, markPartial, renderFailed, renderPending, renderTable, renderText, setState, type Mode,
+  clearAllPending, enable, markPartial, registerSentences, renderFailed, renderPending, renderTable, renderText, setState, type Mode,
   type StylePreset,
 } from '@/core/renderer'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
@@ -71,8 +72,14 @@ export interface TranslationRun {
 const FATAL_KINDS = new Set(['no-key', 'auth'])
 
 type Outcome = 'waiting' | 'requested' | 'done' | 'failed'
-/** 一段的结果：译文，或失败原因（给失败态小部件看，§7.6） */
-type SegmentResult = { fragment: DocumentFragment } | { error: string }
+/**
+ * 一段的结果：译文，或失败原因（给失败态小部件看，§7.6）。
+ *
+ * `alignment` 只有引擎报了句边界、且两边都能重建时才在（`alignment.ts`），用来登记悬停高亮。
+ * `fragment.offsets` 同理只有 `rehydrate` 那条路有：runs 兜底拼出来的 fragment 没有线上偏移，
+ * 那样的块登记不了，悬停无反应——比把高亮打在错的句子上好（issue #105）。
+ */
+type SegmentResult = { fragment: DocumentFragment & { offsets?: WireSpan[] }; alignment?: SentenceAlignment } | { error: string }
 type BatchResult = Map<Segment, SegmentResult>
 const CANCELLED: SegmentResult = { error: '已取消' }
 const MISMATCH: SegmentResult = { error: '译文的占位符与原文对不上' }
@@ -184,8 +191,8 @@ export function startTranslation(options: RunOptions): TranslationRun {
     const res = await send([{ id: segment.id, text: segment.text }], options.capabilities.renderPath, sectionTitle, { bypassCache: true })
     if (res.ok) {
       cached += res.cached
-      const text = res.result.segments[0]?.text
-      if (text !== undefined && validate(text, segment.protected).ok) return { fragment: rehydrate(text, segment.protected, doc) }
+      const hit = res.result.segments[0]
+      if (hit !== undefined && validate(hit.text, segment.protected).ok) return { fragment: rehydrate(hit.text, segment.protected, doc), alignment: hit.alignment }
     } else {
       noteFatal(res)
     }
@@ -213,10 +220,10 @@ export function startTranslation(options: RunOptions): TranslationRun {
       return
     }
     cached += res.cached
-    const byId = new Map(res.result.segments.map(s => [s.id, s.text]))
+    const byId = new Map(res.result.segments.map(s => [s.id, s]))
     for (const segment of segments) {
-      const text = byId.get(segment.id)
-      if (text !== undefined && validate(text, segment.protected).ok) out.set(segment, { fragment: rehydrate(text, segment.protected, doc) })
+      const hit = byId.get(segment.id)
+      if (hit !== undefined && validate(hit.text, segment.protected).ok) out.set(segment, { fragment: rehydrate(hit.text, segment.protected, doc), alignment: hit.alignment })
       else out.set(segment, await retrySingle(segment, sectionTitle))
     }
   }
@@ -258,7 +265,9 @@ export function startTranslation(options: RunOptions): TranslationRun {
       for (const segment of batch.segments) {
         const result = out.get(segment)
         if (result && 'fragment' in result) {
-          renderText(segment.block as TextBlock, result.fragment)
+          const spans = result.fragment.offsets
+          const node = renderText(segment.block as TextBlock, result.fragment)
+          registerSentences(segment.block.el, node, segment.protected.offsets, spans, result.alignment)
           outcome.set(segment.block, 'done')
         } else {
           // 删掉 pending 与上一轮的译文（换了引擎 / 目标语言后再翻失败，页面不能还挂着旧译文，Codex 在 #9 指出），
