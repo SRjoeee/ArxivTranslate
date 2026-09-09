@@ -8,7 +8,6 @@ import { wireFormatOf } from '@/cache/key'
 import type { CachedEntry } from '@/cache/store'
 import { cacheKeyFor, type RenderPath } from '@/cache/key'
 import { type SentenceAlignment, verifyAlignment } from './alignment'
-import { markSentences, stripMarkers, unmarkSentences } from './sentence-markers'
 // 深引 validate 而不是 protector 的桶：serialize / rehydrate 要碰 DOM，那两个不该进 background 的包
 import { expectationsFromText, validate } from '@/core/protector/validate'
 import { getRandomUUID } from '@/shared/uuid'
@@ -122,12 +121,6 @@ interface QueueItem {
   uid: string
   id: string
   text: string
-  /**
-   * 这一段的渲染路径，句子标记按它决定插不插（§8.6）。**只有 `tags` 插**：
-   * `markers` 那条线上没有活得下来的标记；`runs` 送的是切碎的纯文本段、拼回去不产出线上偏移，
-   * 对齐在那里没有用处。不带缓存的调用（连接测试）没有渲染路径，也不插
-   */
-  renderPath?: RenderPath
   batchKey: string
   dedupKey?: string
   scope?: string
@@ -216,34 +209,14 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       ? attachRequestErrorMeta(new BatchCountMismatchError(expected, 0, [e.message]), { kind: 'bad-request', isRetryable: false })
       : e
 
-  /**
-   * 一批的发送与接收。**句子标记在这一层进出**（§8.6）：引擎自己不汇报句边界时，把切好的边界
-   * 以 `<x id="N"/>` 插进线上文本，回来再摘掉、顺带读出译文侧的边界。
-   *
-   * 放在这里而不是各 provider 里，是因为它与引擎无关——凡是保得住 `tags` 的引擎都适用，
-   * 而每个 provider 各写一份就会各错一份。摘不干净的那些返回原样文本、不带对齐，
-   * 没有对齐只是没有高亮（`alignment.ts`）
-   */
   const translateItems = async (items: QueueItem[], ids: string[], signal: AbortSignal | undefined): Promise<TranslationOutcome[]> => {
     const first = items[0]!
-    const marks = first.provider.reportsSentences ? [] : items.map(item => (item.renderPath === 'tags' ? markSentences(item.text) : undefined))
     try {
-      const result = await first.provider.translate({
-        ...first.request,
-        segments: items.map((item, i) => ({ id: ids[i]!, text: marks[i]?.text ?? item.text })),
-        signal,
-      })
+      const result = await first.provider.translate({ ...first.request, segments: items.map((item, i) => ({ id: ids[i]!, text: item.text })), signal })
       const byId = new Map(result.segments.map(s => [s.id, s]))
-      return ids.map((id, i) => {
+      return ids.map(id => {
         const segment = byId.get(id)
-        if (!segment) return { text: '' }
-        const mark = marks[i]
-        if (!mark) return { text: segment.text, alignment: segment.alignment }
-        const back = unmarkSentences(segment.text, mark.ids)
-        // 摘不干净就退回「没有对齐」：坏的边界会把高亮打在错的句子上，比没有高亮更糟。
-        // 文本仍然要摘一遍——`unmarkSentences` 失败时它可能还带着标记，那绝不能进 DOM
-        if (!back) return { text: stripMarkers(segment.text, mark.ids) }
-        return { text: back.text, alignment: { source: mark.source, target: back.target } }
+        return segment ? { text: segment.text, alignment: segment.alignment } : { text: '' }
       })
     } catch (e) {
       throw asBatchError(e, items.length)
@@ -376,7 +349,6 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           uid: getRandomUUID(),
           id: segment.id,
           text: segment.text,
-          renderPath: cache?.renderPath,
           batchKey,
           dedupKey: cache && !cache.bypass ? keys.get(segment.id) : undefined,
           scope,

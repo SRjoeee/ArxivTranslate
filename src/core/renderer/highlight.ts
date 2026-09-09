@@ -142,15 +142,24 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     return range.getBoundingClientRect()
   }
 
-  const onTheText = (node: Node, offset: number): boolean => {
+  /**
+   * The DOM offset the pointer is really on, or undefined if it is not on text at all.
+   *
+   * **The answer feeds the sentence lookup, not just a yes/no.** When the hit comes from the
+   * character *before* the caret, the caret's own offset is one too far — and at a sentence
+   * boundary with no space between, which is every boundary in Chinese (`第一句。第二句。`),
+   * one too far is the next sentence. Hovering the right half of the full stop would highlight the
+   * sentence after it (Codex pointed this out on #136).
+   */
+  const offsetOn = (node: Node, offset: number): number | undefined => {
     if (node.nodeType === 1) {
       // A formula or other placeholder: its own box is the thing under the pointer
-      return inside((node as Element).getBoundingClientRect())
+      return inside((node as Element).getBoundingClientRect()) ? offset : undefined
     }
-    if (node.nodeType !== 3) return false
+    if (node.nodeType !== 3) return undefined
     const text = node as Text
-    // The character after the caret, then the one before it
-    return inside(charRect(text, offset)) || inside(charRect(text, offset - 1))
+    if (inside(charRect(text, offset))) return offset
+    return inside(charRect(text, offset - 1)) ? offset - 1 : undefined
   }
 
   const update = () => {
@@ -158,12 +167,13 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     const caret = doc.caretPositionFromPoint(x, y)
     const node = caret?.offsetNode
     const found = node ? sentenceMapAt(node) : undefined
-    if (!found || !node || !onTheText(node, caret.offset)) {
+    const at = found && node ? offsetOn(node, caret.offset) : undefined
+    if (!found || !node || at === undefined) {
       miss()
       return
     }
     const { map, side } = found
-    const wire = wireOffsetAt(map[side].index, node, caret.offset)
+    const wire = wireOffsetAt(map[side].index, node, at)
     const sentence = wire === undefined ? undefined : sentenceAt(map.pairs, side, wire)
     if (!sentence) {
       miss()

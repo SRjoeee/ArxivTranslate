@@ -39,6 +39,19 @@ function stubBrowser(doc: Document) {
   const view2 = doc.defaultView as unknown as { Range: { prototype: Range }; Element: { prototype: Element } }
   view2.Range.prototype.getBoundingClientRect = () => queued.shift() ?? line1
   view2.Element.prototype.getBoundingClientRect = () => line1
+  // Which text interval each painted range was built from. `startOffset` cannot be read back in
+  // happy-dom, so the calls that set it are recorded instead.
+  const starts: [number, number][] = []
+  const createRange = doc.createRange.bind(doc)
+  doc.createRange = () => {
+    const range = createRange()
+    const setStart = range.setStart.bind(range)
+    const setEnd = range.setEnd.bind(range)
+    let from = -1
+    range.setStart = (n: Node, o: number) => { from = o; setStart(n, o) }
+    range.setEnd = (n: Node, o: number) => { if (from >= 0) starts.push([from, o]); setEnd(n, o) }
+    return range
+  }
   view.requestAnimationFrame = (fn: () => void) => frames.push(fn)
   view.cancelAnimationFrame = () => {}
   view.setTimeout = (fn: () => void, delay: number) => { timers.push({ fn, delay }); return timers.length }
@@ -47,6 +60,8 @@ function stubBrowser(doc: Document) {
   return {
     highlights,
     caret,
+    /** The `[from, to]` of every range that was built, in order */
+    starts: () => starts.splice(0),
     /** Rects for the next `getBoundingClientRect` calls, in order. `line2` is one line down. */
     nextRects: (...which: ('line1' | 'line2')[]) => { queued.push(...which.map(n => (n === 'line2' ? line2 : line1))) },
     /** Runs whatever is scheduled, optionally only the timers of one delay */
@@ -240,6 +255,32 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.move(10, 10) // the same caret, now actually under the pointer
     expect(browser.highlights.size).toBe(2)
+    hl.stop()
+  })
+
+  it('resolves the sentence from the character that actually matched', () => {
+    // The hit can come from the character *before* the caret, and the caret's own offset is then
+    // one too far. At a boundary with no space between — every boundary in Chinese — one too far
+    // is the next sentence, so hovering the right half of a full stop would light up the sentence
+    // after it (Codex on #136).
+    const { doc, source, target } = page('<p class="ltx_p">One. Two.</p>')
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const text = source.firstChild as Text
+    const boundary = 'One. '.length // the caret between the two sentences
+
+    // The character at the boundary is elsewhere; the one before it is under the pointer
+    browser.nextRects('line2', 'line1')
+    browser.caret.mockReturnValue({ offsetNode: text, offset: boundary })
+    browser.move(150, 10)
+
+    // Read through the recorder, not off the Range: happy-dom's `startOffset` does not report what
+    // was set on it, which is why `tests/protector/offsets.test.ts` records the calls too.
+    // The first two are the hit test probing both characters; the third is the sentence it painted.
+    const built = browser.starts()
+    expect(built.slice(0, 2)).toEqual([[5, 6], [4, 5]])
+    expect(built[2]).toEqual([0, 5]) // the first sentence, not the second
+    expect(target.isConnected).toBe(true)
     hl.stop()
   })
 
