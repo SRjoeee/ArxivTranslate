@@ -12,6 +12,14 @@ export const MENU_ID = 'axt-toggle'
 export const MENU_TITLE = '翻译 / 恢复原文'
 /** 只在 arXiv 的 HTML 全文页上出现——别的页面上它什么也做不了 */
 export const MENU_PATTERNS = ['https://arxiv.org/html/*']
+/**
+ * 右键点在什么上都要有这一条。
+ *
+ * Chrome 是按**点中的目标**给 context 的：点在链接上给 `link`、点在图上给 `image`，`page` 只在
+ * 点空白处才给。论文页里到处是引用链接和插图，只注册 `page` 的话，最容易点到的地方反而没有菜单
+ *（Codex 在 #147 指出）。`documentUrlPatterns` 仍然把范围锁在 arXiv 全文页
+ */
+export const MENU_CONTEXTS = ['page', 'selection', 'link', 'image', 'video', 'audio', 'editable']
 
 export interface MenuDeps {
   create(options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }): void
@@ -41,7 +49,7 @@ export function actionFor(status: Pick<PageStatus, 'progress'> | undefined): 'ax
 /** 装上菜单项与它的点击处理。`removeAll` 在前：worker 每次唤醒都会再跑一遍，不删会撞 id */
 export function installContextMenu(deps: MenuDeps): void {
   void Promise.resolve(deps.removeAll()).then(() => {
-    deps.create({ id: MENU_ID, title: MENU_TITLE, contexts: ['page', 'selection'], documentUrlPatterns: MENU_PATTERNS })
+    deps.create({ id: MENU_ID, title: MENU_TITLE, contexts: MENU_CONTEXTS, documentUrlPatterns: MENU_PATTERNS })
   })
   deps.onClicked((info, tab) => {
     if (info.menuItemId !== MENU_ID || tab?.id === undefined) return
