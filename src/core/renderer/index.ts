@@ -4,10 +4,12 @@
 import type { Block, TableBlock, TextBlock } from '@/core/extractor'
 import { AXT_ATTR_PREFIX, INJECTED_SELECTOR, T_CLASS, isInjected, stripInjected } from '@/core/marks'
 import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
+import highlightCss from '@/styles/highlight.css?inline'
 import imageCss from '@/styles/image.css?inline'
 import modesCss from '@/styles/modes.css?inline'
 import presetsCss from '@/styles/presets.css?inline'
 import { STYLE_ATTR_NAME, customStyleRule, styleVarsRule, type StylePreset, type StyleVars } from './style-preset'
+import { clearSentenceHighlights } from './highlight'
 import { delocalizeNotes } from './notes'
 import { cancelSpinnersIn } from './spinner'
 
@@ -59,7 +61,7 @@ export interface StyleOptions extends StyleVars {
 function styleSheet(style?: StyleOptions): string {
   const vars = style ? styleVarsRule(style) : { base: '', overrides: '' }
   const custom = style ? customStyleRule(style.customCss ?? '') : ''
-  return `${modesCss}\n${vars.base}${presetsCss}\n${imageCss}\n${vars.overrides}${custom}`
+  return `${modesCss}\n${vars.base}${presetsCss}\n${imageCss}\n${highlightCss}\n${vars.overrides}${custom}`
 }
 
 /**
@@ -107,6 +109,9 @@ export function setStylePreset(doc: Document, style: { preset: StylePreset }): v
 
 /** 模式切换只改一个属性，不经过翻译流程（§4 第 9 步） */
 export function setMode(doc: Document, mode: Mode): void {
+  // `only` hides the source column outright and `side` re-lays it out, so whatever was tinted is
+  // about to be somewhere else or nowhere. The next pointer move repaints it in place.
+  clearSentenceHighlights(doc)
   doc.documentElement.setAttribute(MODE_ATTR, mode)
 }
 
@@ -222,6 +227,9 @@ export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragm
 
 /** 恢复原文：删所有注入节点（译文与图片叠加层，§7.1 第 4 条）、剥所有 data-axt-* 属性、移除注入的样式（含 #axt-debug 的） */
 export function restore(doc: Document): { removedNodes: number; strippedAttrs: number } {
+  // Nothing to undo in the DOM — the highlight only ever lived in `CSS.highlights` — but the
+  // painted ranges point at translation nodes about to be removed (§7.7)
+  clearSentenceHighlights(doc)
   let removedNodes = 0
   let strippedAttrs = 0
   for (const node of Array.from(doc.querySelectorAll(INJECTED_SELECTOR))) {
@@ -242,6 +250,8 @@ export function restore(doc: Document): { removedNodes: number; strippedAttrs: n
   return { removedNodes, strippedAttrs }
 }
 
+export * from './sentences'
+export * from './highlight'
 export * from './mirror'
 export * from './side-layout'
 export * from './table-fit'

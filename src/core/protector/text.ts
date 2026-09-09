@@ -32,8 +32,15 @@ export function escapeText(s: string, format: WireFormat = 'tags'): string {
 const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }
 
 /** 解实体。两种格式同一套规则——markers 的 `@@` 已经在 tokenize / unescapeText 里还原，这里不碰它 */
+/**
+ * The entities `decodeText` resolves, as a source string so the offsets scan can build an anchored
+ * copy of it (`src/core/protector/offsets.ts`). One definition, because a scan that recognised a
+ * different set would put its anchors in the wrong places without changing any decoded text.
+ */
+export const ENTITY_PATTERN = '&(#x[0-9a-f]+|#\\d+|[a-z]+);'
+
 export function decodeText(s: string): string {
-  return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, body: string) => {
+  return s.replace(new RegExp(ENTITY_PATTERN, 'gi'), (match, body: string) => {
     if (body.startsWith('#')) {
       const hex = body[1]?.toLowerCase() === 'x'
       const code = hex ? Number.parseInt(body.slice(2), 16) : Number.parseInt(body.slice(1), 10)

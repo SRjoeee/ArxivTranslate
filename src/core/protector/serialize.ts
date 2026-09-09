@@ -6,7 +6,6 @@
 import { isInjected } from '@/core/marks'
 import { FUNCTIONAL_INLINE, classify, isTableCell } from '@/core/rules/latexml'
 import type { WireSpan } from './offsets'
-import { escapeText } from './text'
 import { type WireFormat, writeVoid } from './tokens'
 
 export interface ProtectedBlock {
@@ -19,8 +18,14 @@ export interface ProtectedBlock {
   paired: Set<number>
   /** 超过 VOID_DENSE_THRESHOLD 的块视为公式密集，由 pipeline 单独成批 */
   voidCount: number
-  /** Wire offset to DOM mapping; only produced by `serialize(root, format, { offsets: true })` (§6.2, issue #105) */
-  offsets?: WireSpan[]
+  /**
+   * Wire offset to DOM position, one span per run of the text (§6.2, issue #105). Always produced:
+   * measured on the heaviest fixture the bookkeeping is not distinguishable from noise (676 blocks,
+   * 15.69 ms plain vs 15.71 ms tracked at min of four runs, with the tracked side faster in two of
+   * them), and an optional field that production never leaves empty only buys downstream a
+   * defensive branch that can never be exercised.
+   */
+  offsets: WireSpan[]
 }
 
 export const VOID_DENSE_THRESHOLD = 40
@@ -30,41 +35,16 @@ const TEXT_NODE = 3
 
 const hasText = (el: Element) => /\S/.test(el.textContent ?? '')
 
-/**
- * 连续空白折成一个空格、首尾去掉。**必须在这里做，不能只在 pipeline 里改送出去的那一份**：
- * runs 路径送的是 `splitRuns(protected)` 从这个字符串切出来的段，只归一化 `segment.text`
- * 修不到它（#119）。
- *
- * 为什么非做不可：LaTeXML 的 HTML 带硬换行，12 篇 fixture 的 3847 个正文块里 2373 个（62%）有，
- * 合计 7383 个。微软把每个换行当句号——同一段带换行时 `state explosion` 译成「州级爆炸性质」、
- * 切成 5 句，归一化后是「状态爆炸」、2 句；60 段实测里假句边界从 128/266 降到 5/140。
- * HTML 渲染本来就折叠这些空白，所以对 DOM 没有语义损失。
- *
- * 对占位符安全：`<x id="N"/>` / `<t id="N">` 里只有单个空格，`@abc#` 不含空白，
- * 折叠都不会碰到它们。缓存键那边 `normalizeText` 做的是同一件事，所以键不变、旧缓存继续命中，
- * 不需要升 `CACHE_KEY_VERSION`。
- *
- * 跳过的块（`<pre>` / 代码）不走这里：规则模块把它们判成 void，整块进槽位、原样保留。
- *
- * **不能用 `\s`**：JS 的 `\s` 含 U+00A0，而 `&nbsp;` 在 LaTeXML 输出里是有语义的排版
- * （`Section&nbsp;1.1`、`no.&nbsp;1`、`W.&nbsp;Arendt` 都靠它禁止折行），HTML 自己也不折叠它。
- * 只折叠 HTML 规范会折叠的那五个字符。
- *
- * **也不 trim**：块首尾的空白在行内块之间是有渲染意义的——`<span>A</span><span>B</span>` 渲染成
- * `AB`，`<span>A </span>` 才是 `A B`。作者名与联系方式标签就是这种相邻行内块（§5.2），
- * trim 掉会让相邻译文粘连。而要修的是**块内部的硬换行**，折叠就够了，trim 不在需求里。
- */
-const HTML_SPACE = /[\t\n\f\r ]+/g
-const collapseWhitespace = (text: string) => text.replace(HTML_SPACE, ' ')
 
 
 /**
- * Writes the wire text character by character while recording where wire offsets land in the DOM.
- * Only taken when offsets are requested: the default path still escapes the whole string at once
- * and collapses once at the end, touching not one extra character, so translation pays nothing.
+ * Writes the wire text character by character, escaping and collapsing whitespace as it goes, and
+ * records where each wire offset lands in the DOM.
  *
- * The two paths must emit byte-identical wire text; `tests/protector/offsets.test.ts` pins that
- * across all 12 fixtures in both wire formats.
+ * This used to be an opt-in second path beside a plain "escape the string, collapse once at the
+ * end" one. It is now the only path: on the heaviest fixture the bookkeeping is not distinguishable
+ * from noise (676 blocks, 15.69 ms plain vs 15.71 ms tracked at min of four runs, tracked faster in
+ * two of them), and two paths that must emit byte-identical wire text are two paths that can drift.
  */
 function makeTracker(format: WireFormat, parts: string[], spans: WireSpan[]) {
   let len = 0
@@ -87,6 +67,35 @@ function makeTracker(format: WireFormat, parts: string[], spans: WireSpan[]) {
       const from = len
       const anchors: [number, number][] = [[len, 0]]
       let out = ''
+      // Runs of whitespace collapse to a single space, and it has to happen here rather than on
+      // the string the pipeline sends: the runs path sends segments cut out of this very string
+      // by `splitRuns`, so normalising `segment.text` alone would never reach them (#119).
+      //
+      // Why it has to happen at all: LaTeXML's HTML carries hard line breaks — 2373 of the 3847
+      // body blocks across the 12 fixtures (62%) have them, 7383 in total — and Microsoft reads
+      // every break as a full stop. One paragraph with breaks turned `state explosion` into a
+      // province-level explosion across 5 sentences; collapsed, it is `状态爆炸` across 2. Over
+      // 60 measured segments false sentence boundaries fell from 128/266 to 5/140. HTML collapses
+      // this whitespace when rendering anyway, so the DOM loses no meaning.
+      //
+      // Safe for placeholders: `<x id="N"/>` and `<t id="N">` hold only single spaces and
+      // `@abc#` holds none, so collapsing cannot touch them. `normalizeText` does the same thing
+      // on the cache-key side, so keys are unchanged and old entries keep hitting —
+      // `CACHE_KEY_VERSION` does not move.
+      //
+      // Skipped blocks (`<pre>`, code) never reach here: the rules module classifies them void
+      // and the whole node goes into a slot untouched.
+      //
+      // **Not `\s`**: JavaScript's `\s` includes U+00A0, and `&nbsp;` is meaningful typography in
+      // LaTeXML output (`Section&nbsp;1.1`, `no.&nbsp;1`, `W.&nbsp;Arendt` all rely on it to
+      // forbid a break), which HTML itself does not collapse either. Only the five characters the
+      // HTML spec collapses.
+      //
+      // **And no trim**: whitespace at a block's edges renders meaningfully between inline blocks
+      // — `<span>A</span><span>B</span>` is `AB` while `<span>A </span>` is `A B`. Author names
+      // and contact labels are exactly such adjacent inline blocks (§5.2), and trimming glues
+      // their translations together. The bug to fix is hard breaks *inside* a block; collapsing
+      // is enough for that, and trimming was never part of it.
       for (let i = 0; i < data.length; i++) {
         const c = data[i]!
         let emitted: string
@@ -110,12 +119,12 @@ function makeTracker(format: WireFormat, parts: string[], spans: WireSpan[]) {
   }
 }
 
-export function serialize(root: Element, format: WireFormat = 'tags', options: { offsets?: boolean } = {}): ProtectedBlock {
+export function serialize(root: Element, format: WireFormat = 'tags'): ProtectedBlock {
   const slots = new Map<number, Node>()
   const paired = new Set<number>()
   const parts: string[] = []
   const spans: WireSpan[] = []
-  const tracker = options.offsets === true ? makeTracker(format, parts, spans) : undefined
+  const tracker = makeTracker(format, parts, spans)
   let voidCount = 0
   let next = 1
   const inCell = isTableCell(root)
@@ -123,8 +132,7 @@ export function serialize(root: Element, format: WireFormat = 'tags', options: {
   const walk = (node: Element) => {
     for (const child of Array.from(node.childNodes)) {
       if (child.nodeType === TEXT_NODE) {
-        if (tracker) tracker.text(child as Text)
-        else parts.push(escapeText((child as Text).data, format))
+        tracker.text(child as Text)
       } else if (child.nodeType === ELEMENT_NODE) {
         const el = child as Element
         // 我们自己插的译文 / 镜像不是原文：再次翻译时它们已经在原块内部（Codex 在 #8 指出）
@@ -143,22 +151,18 @@ export function serialize(root: Element, format: WireFormat = 'tags', options: {
         slots.set(id, el)
         if (isVoid || format === 'markers') {
           voidCount++
-          if (tracker) tracker.raw(writeVoid(id, format), el, 'void')
-          else parts.push(writeVoid(id, format))
+          tracker.raw(writeVoid(id, format), el, 'void')
         } else {
           paired.add(id)
-          if (tracker) tracker.raw(`<t id="${id}">`, el, 'open')
-          else parts.push(`<t id="${id}">`)
+          tracker.raw(`<t id="${id}">`, el, 'open')
           walk(el)
-          if (tracker) tracker.raw('</t>', el, 'close')
-          else parts.push('</t>')
+          tracker.raw('</t>', el, 'close')
         }
       }
       // 注释等其他节点忽略
     }
   }
   walk(root)
-  // The tracked path collapses as it writes, so it must not be collapsed again.
-  const text = tracker ? parts.join('') : collapseWhitespace(parts.join(''))
-  return tracker ? { format, text, slots, paired, voidCount, offsets: spans } : { format, text, slots, paired, voidCount }
+  // The tracker collapses whitespace as it writes, so the joined parts are already collapsed.
+  return { format, text: parts.join(''), slots, paired, voidCount, offsets: spans }
 }

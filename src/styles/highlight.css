@@ -1,0 +1,65 @@
+/* Hover sentence highlight (DESIGN §7.7, issue #105).
+
+   Painted with the CSS Custom Highlight API, so **not one byte of the document changes**: no
+   wrapper spans, no attributes on the text, nothing for `restore()` to undo. §7.1's DOM invariant
+   holds for free, and the source column keeps whatever markup arXiv shipped.
+
+   What `::highlight()` accepts was measured in Chrome before this was written, because the spec's
+   list and what actually paints are not the same:
+     - `background-color` ✓
+     - `border-radius`, `padding` — parsed, then ignored
+     - `background-image` — not painted at all, so no gradient highlighters here
+   The ignored `padding` is why this design cannot shift the text even by accident: the highlight
+   has no box of its own to grow. The user asked for exactly that — the background appears and
+   disappears, the letters never move.
+
+   **Fading needs the indirection below.** A `::highlight()` rule cannot carry a `transition` — the
+   pseudo-element is not an element and has no transitionable state. But it *can* read a custom
+   property, and a custom property registered through `@property` with a `<color>` syntax
+   interpolates. So the transition lives on `:root`, where an ordinary attribute toggle drives it,
+   and the highlight just reads the current value. Verified by screenshotting a 2s transition at
+   four moments and getting four different images.
+
+   Timing, and why it is not symmetric:
+     - Appearing waits 80ms before starting. Sweeping the pointer across a paragraph crosses three
+       or four sentences on the way to wherever it is going; without the delay each one flashes.
+     - Appearing then takes 140ms `ease-out`: quick to arrive, settling rather than snapping.
+     - Moving between sentences has no transition at all. The ranges swap and the tint is simply
+       somewhere else on the next frame. Fading here would smear two sentences together and make
+       the highlight feel like it is lagging the pointer.
+     - Leaving takes 220ms `ease-in`, a little longer than arriving, so the tint releases the page
+       instead of being cut off.
+   The asymmetry is the whole point: soft on the way in and out, exact while following. */
+
+@property --axt-hl {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+
+:root {
+  --axt-hl: transparent;
+  transition: --axt-hl 220ms ease-in;
+}
+
+/* The tint follows `--axt-green`, the same colour source as the highlighter presets, which
+   `styleVarsRule` rewrites from `config.style.accent`. One colour control, not two. 22% keeps it
+   readable over body text in both light and dark themes. */
+html[data-axt-hl='on'] {
+  --axt-hl: color-mix(in oklab, var(--axt-green, currentColor) 22%, transparent);
+  transition: --axt-hl 140ms ease-out 80ms;
+}
+
+::highlight(axt-sentence-source),
+::highlight(axt-sentence-target) {
+  background-color: var(--axt-hl);
+}
+
+/* Reduced motion means no transition, not no highlight: the tint still marks the sentence, it just
+   arrives and leaves at once. */
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  html[data-axt-hl='on'] {
+    transition: none;
+  }
+}

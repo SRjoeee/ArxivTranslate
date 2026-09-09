@@ -11,6 +11,8 @@
 // character; between anchors the mapping is addition.
 
 import { INJECTED_SELECTOR, isInjected } from '@/core/marks'
+import { decodeText, ENTITY_PATTERN } from './text'
+import { MARKER_RE, TAG_RE, fromAlpha, type WireFormat } from './tokens'
 
 /** One run of wire text and where it came from. Text and slot spans together tile the whole string. */
 export type WireSpan =
@@ -67,6 +69,66 @@ export function nodeOffsetAt(span: Extract<WireSpan, { kind: 'text' }>, wireOffs
   const [wire, node] = span.anchors[lo]!
   const ceiling = span.anchors[lo + 1]?.[1] ?? span.node.data.length
   return Math.min(node + (clamped - wire), ceiling)
+}
+
+/**
+ * Node → the span it belongs to. Built once per block, used on every pointer move.
+ *
+ * The lookup used to be a linear scan of the spans, with a `contains()` call per span when the
+ * position was inside a placeholder's subtree. That is a hit test running on every frame over a
+ * block that can hold hundreds of runs, so on a formula-dense paragraph it meant hundreds of DOM
+ * calls per frame. A map costs one pass at registration and turns the scan into a lookup.
+ *
+ * **The first span for a node wins, and that matters.** A paired element is recorded twice, as its
+ * `open` and `close` runs, and both name the same element. A pointer landing on the element itself
+ * is inside it, so it has to resolve to where it opens; keeping the closing run instead would put
+ * the hit in whatever sentence comes after it.
+ */
+export type SpanIndex = ReadonlyMap<Node, WireSpan>
+
+export function indexSpans(spans: readonly WireSpan[]): SpanIndex {
+  const index = new Map<Node, WireSpan>()
+  for (const span of spans) if (!index.has(span.node)) index.set(span.node, span)
+  return index
+}
+
+/**
+ * A DOM position back to a wire offset — the inverse of `nodeOffsetAt`, which #123 did not need
+ * because it only ever went from an interval to a `Range`. Hit testing goes the other way.
+ *
+ * **The answer is the last wire offset that maps back to this node offset, not the first.** A caret
+ * at node offset k sits after character k-1, so everything encoding characters 0..k-1 is behind it,
+ * including all five characters of an `&amp;`. With `A & B`, node 2 is before the ampersand at wire
+ * 2 and node 3 is after it at wire 7 — not wire 3, where the escape begins. Both choices satisfy
+ * "wireOffsetAt then nodeOffsetAt returns k", which is why that property alone does not pin this
+ * down and `tests/protector/scan.test.ts` asserts maximality instead.
+ *
+ * A position inside a placeholder resolves to where that placeholder's wire run starts: the caret
+ * is somewhere inside a formula, and the formula is one indivisible run. Positions deeper inside it
+ * are found by walking up to the node the slot was recorded for, which is bounded by the depth of
+ * the markup rather than by the number of runs in the block.
+ */
+export function wireOffsetAt(index: SpanIndex, node: Node, nodeOffset: number): number | undefined {
+  let span = index.get(node)
+  // Inside a placeholder's subtree — a caret landing within a formula
+  for (let up: Node | null = node.parentNode; !span && up; up = up.parentNode) span = index.get(up)
+  if (!span) return undefined
+  if (span.kind !== 'text') return span.from
+  const clamped = Math.max(0, Math.min(nodeOffset, span.node.data.length))
+  let lo = 0
+  let hi = span.anchors.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (span.anchors[mid]![1] <= clamped) lo = mid
+    else hi = mid - 1
+  }
+  const [wire, nodeAt] = span.anchors[lo]!
+  // No ceiling from the next anchor is needed here, unlike `nodeOffsetAt`. The search picked the
+  // last anchor at or before `clamped`, so `clamped` is strictly below the next anchor's node
+  // offset, and a wire run is never shorter than the node run it encodes — the sum therefore
+  // cannot reach the next anchor. Only the span's own end is a real bound, and only if the node's
+  // data has grown since rehydration.
+  return Math.min(wire + (clamped - nodeAt), span.to)
 }
 
 /** The span covering this wire offset. Spans tile the wire text, so this only misses past the end. */
@@ -258,5 +320,80 @@ export function rangesOf(spans: readonly WireSpan[], from: number, to: number): 
     previous = span
   }
   flush(to)
+  return out
+}
+
+/** Matches one HTML entity at the start of the string, the same shape `decodeText` decodes. */
+const ENTITY_AT_START = new RegExp(`^(?:${ENTITY_PATTERN})`, 'i')
+
+/**
+ * A token with the wire interval it came from, plus anchors for a text token.
+ *
+ * `tokenize` reports no positions and cannot cheaply: it is the hottest path in the protector
+ * (#107 measured an 11% regression from restructuring it), and its markers branch has already
+ * turned `@@` back into `@` by the time a caller sees a token. So this mirrors it instead of
+ * changing it, sharing its two regexes, and a test pins the two against each other over every
+ * fixture in both formats.
+ */
+export type PositionedToken =
+  | { kind: 'text'; text: string; from: number; to: number; anchors: readonly (readonly [number, number])[] }
+  | { kind: 'void'; id: number; from: number; to: number }
+  | { kind: 'open'; id: number; from: number; to: number }
+  | { kind: 'close'; from: number; to: number }
+
+/** Decodes a text run the way `tokenize` and `decodeText` do, recording where the two diverge. */
+function decodeRun(wire: string, wireStart: number, format: WireFormat): { text: string; anchors: [number, number][] } {
+  const anchors: [number, number][] = [[wireStart, 0]]
+  let text = ''
+  let i = 0
+  while (i < wire.length) {
+    // `@@` first, as MARKER_RE has it: that is how a literal `@` is escaped
+    if (format === 'markers' && wire.startsWith('@@', i)) {
+      text += '@'
+      i += 2
+      anchors.push([wireStart + i, text.length])
+      continue
+    }
+    const entity = ENTITY_AT_START.exec(wire.slice(i))
+    if (entity) {
+      text += decodeText(entity[0])
+      i += entity[0].length
+      anchors.push([wireStart + i, text.length])
+      continue
+    }
+    text += wire[i]
+    i += 1
+  }
+  return { text, anchors }
+}
+
+/**
+ * The token sequence `tokenize` produces, with wire positions.
+ *
+ * An escaped `@` is skipped without closing the text run, so a literal `@` never splits one token
+ * into two the way it would if `@@` were treated as a placeholder — which is what makes the two
+ * sequences correspond one to one.
+ */
+export function scanTokens(s: string, format: WireFormat): PositionedToken[] {
+  const out: PositionedToken[] = []
+  const pushText = (from: number, to: number) => {
+    if (to <= from) return
+    const { text, anchors } = decodeRun(s.slice(from, to), from, format)
+    out.push({ kind: 'text', text, from, to, anchors })
+  }
+  let last = 0
+  for (const m of s.matchAll(format === 'markers' ? MARKER_RE : TAG_RE)) {
+    const index = m.index ?? 0
+    const end = index + m[0].length
+    // An escaped `@` is text, not a placeholder; decodeRun turns it back into one character
+    if (m[0] === '@@') continue
+    pushText(last, index)
+    if (format === 'markers') out.push({ kind: 'void', id: fromAlpha(m[1]!), from: index, to: end })
+    else if (m[0].startsWith('</')) out.push({ kind: 'close', from: index, to: end })
+    else if (m[0].startsWith('<x')) out.push({ kind: 'void', id: Number(m[1] ?? m[2] ?? m[3]), from: index, to: end })
+    else out.push({ kind: 'open', id: Number(m[4] ?? m[5] ?? m[6]), from: index, to: end })
+    last = end
+  }
+  pushText(last, s.length)
   return out
 }

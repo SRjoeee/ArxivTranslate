@@ -16,10 +16,10 @@ export type Token =
   | { kind: 'close' }
 
 // 容忍模型常见写法：<x id="1"/>、<x id="1" />、单引号 / 无引号、<x id="1"></x>；其余一律当文本
-const TAG_RE = /<x\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*(?:\/>|>\s*<\/x\s*>)|<t\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*>|<\/t\s*>/g
+export const TAG_RE = /<x\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*(?:\/>|>\s*<\/x\s*>)|<t\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*>|<\/t\s*>/g
 
 // `@@` 是字面 `@` 的转义（见 text.ts 的 escapeText），必须排在记号之前匹配，否则 `@@a#` 会被读成记号
-const MARKER_RE = /@@|@([a-z]+)#/g
+export const MARKER_RE = /@@|@([a-z]+)#/g
 
 /** id → 双射二十六进制字母（1→a、26→z、27→aa）。用字母而不是数字：MT 引擎会把数字重排、合并、加千分位 */
 export function toAlpha(id: number): string {
