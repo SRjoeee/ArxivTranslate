@@ -147,7 +147,7 @@ describe('source peek (#141)', () => {
     const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(panel.getAttribute(AT_ATTR)).toBe('margin')
     // 1440 − 1136 = 304 free, minus the gap on each side → 288 = 18rem exactly
-    expect(panel.getAttribute('style')).toBe('left:1144px;top:400px;width:288px;max-height:492px' + TYPED)
+    expect(panel.getAttribute('style')).toBe(`left:1144px;top:400px;width:288px;max-height:492px${TYPED}`)
   })
 
   it('in the margin, hangs from the sentence when little room is left below it', () => {
@@ -160,7 +160,7 @@ describe('source peek (#141)', () => {
     t.fire()
     const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(panel.getAttribute(AT_ATTR)).toBe('margin')
-    expect(panel.getAttribute('style')).toBe('left:1144px;bottom:25px;width:288px;max-height:867px' + TYPED)
+    expect(panel.getAttribute('style')).toBe(`left:1144px;bottom:25px;width:288px;max-height:867px${TYPED}`)
   })
 
   it('floats below the sentence when the margin is too narrow, as wide as the block', () => {
@@ -173,7 +173,7 @@ describe('source peek (#141)', () => {
     t.fire()
     const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(panel.getAttribute(AT_ATTR)).toBe('below')
-    expect(panel.getAttribute('style')).toBe('left:150px;top:433px;width:800px;max-height:459px' + TYPED)
+    expect(panel.getAttribute('style')).toBe(`left:150px;top:433px;width:800px;max-height:459px${TYPED}`)
   })
 
   it('floats above the sentence when there is no room below, anchored by its bottom edge', () => {
@@ -187,7 +187,7 @@ describe('source peek (#141)', () => {
     const panel = d.querySelector<HTMLElement>('.axt-peek')!
     expect(panel.getAttribute(AT_ATTR)).toBe('above')
     // Never measured: `bottom` puts its lower edge 8px over the sentence whatever its height
-    expect(panel.getAttribute('style')).toBe('left:150px;bottom:58px;width:800px;max-height:834px' + TYPED)
+    expect(panel.getAttribute('style')).toBe(`left:150px;bottom:58px;width:800px;max-height:834px${TYPED}`)
   })
 
   it('leaves the stylesheet fallbacks alone when the page reports no type', () => {
