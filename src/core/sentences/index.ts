@@ -39,38 +39,49 @@ const ABBR =
 /**
  * Placeholder syntax as it appears in wire text. `tags` wraps inline markup in `<t id="N">` … `</t>`
  * pairs and formulas in `<x id="N"/>`; `markers` uses `@abc#`.
+ *
+ * `@@` comes first, as in the protector's own tokenizer: that is how serialisation escapes a literal
+ * `@`, and matching markers first reads the second `@` of `@@a#` as a placeholder and cuts a
+ * sentence in the middle of ordinary text (Codex on #126).
  */
-const PLACEHOLDER = /<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>|@[a-z]+#/g
+const PLACEHOLDER = /@@|<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>|@[a-z]+#/g
 
 /** A `<t>` or `</t>` run: structural wrapping around inline markup, standing for no content itself */
 const STRUCTURAL = /^<\/?t(?:\s+id="\d+")?>$/
+const OPENING = /^<t(?:\s+id="\d+")?>$/
 
 /**
- * What a void placeholder projects to. It stands for real content — a formula, a link — so it has to
- * read as a word, not as space: a sentence opening on a formula and continuing in lowercase, as in
- * "@a# is continuous", loses its boundary entirely when the formula becomes whitespace, because
- * Intl.Segmenter takes the lowercase word for a continuation. Measured: that cut disappeared.
+ * A void placeholder projects to a word only where it opens a sentence: preceded by terminal
+ * punctuation and followed by a lowercase word, as in "… complete. @a# is continuous." There it is
+ * the subject, and projecting it to whitespace hides the boundary because Intl.Segmenter reads the
+ * lowercase word as a continuation.
  *
- * Two characters, not one capital: `X.` would match the single-initial rule in ABBR and merge the
- * sentence into the next one instead.
+ * The same shape with a capitalised word after it — "… method@a#. @b# We require …" — is a footnote
+ * annotating the sentence that just ended, and has to stay with it rather than open the next one
+ * (Codex on #126). Capitalisation is what separates the two.
+ *
+ * Two characters, not one capital: `X.` matches the single-initial rule in ABBR and would merge the
+ * sentence into the next one.
  */
-const VOID_TOKEN = 'Xx' 
+const OPENS_SENTENCE = /[.!?][)"'\]]?\s*$/
+const LOWERCASE_NEXT = /^\s*[a-z]/
+const VOID_TOKEN = 'Xx'
 
 /**
  * Segmenting the wire text directly hides sentence ends that sit against a placeholder. A run-in
- * heading serialises as `<t id="1">Motivation.</t> Concurrent programs …`, and `Intl.Segmenter`
- * sees `.` followed by `<` rather than by whitespace, so it reports no boundary at all — measured,
- * and `tests/fixtures/arxiv/2312.17527.html` alone has 18 run-in headings. The earlier comparison
- * against Microsoft ran on `markers`, which flattens pairs away, so it never exercised this.
+ * heading serialises as `<t id="1">Motivation.</t> Concurrent programs …`, and `Intl.Segmenter` sees
+ * `.` followed by `<` rather than by whitespace, so it reports no boundary at all — measured, and
+ * `tests/fixtures/arxiv/2312.17527.html` alone has 18 run-in headings.
  *
- * So segment a projection where every placeholder becomes a single space, then map the cuts back.
- * A space is the right substitute: it cannot create a sentence end that the text does not have, and
- * it lets a real one next to a placeholder be seen.
+ * So segment a projection where each placeholder becomes whitespace, except a void that opens a
+ * sentence, which becomes a word so the boundary stays visible.
  */
-function project(text: string): { visible: string; toWire: number[] } {
+function project(text: string): { visible: string; toWire: number[]; openEnds: Map<number, number> } {
   let visible = ''
   // toWire[i] is the wire offset that visible offset i starts at
   const toWire: number[] = []
+  // wire offset just past an opening tag -> where that tag starts
+  const openEnds = new Map<number, number>()
   let at = 0
   PLACEHOLDER.lastIndex = 0
   for (const m of text.matchAll(PLACEHOLDER)) {
@@ -79,19 +90,28 @@ function project(text: string): { visible: string; toWire: number[] } {
       toWire.push(i)
       visible += text[i]
     }
-    // Structural tags carry no content, so a space is right for them; a void placeholder stands for
-    // content and has to read as a word. Every projected character maps back to where the run began.
-    const token = STRUCTURAL.test(m[0]) ? ' ' : VOID_TOKEN
+    const run = m[0]
+    const after = index + run.length
+    let token: string
+    if (run === '@@') {
+      // An escaped literal `@`: ordinary text, not a placeholder, so it projects as itself
+      token = '@'
+    } else if (STRUCTURAL.test(run)) {
+      token = ' '
+      if (OPENING.test(run)) openEnds.set(after, index)
+    } else {
+      token = OPENS_SENTENCE.test(visible) && LOWERCASE_NEXT.test(text.slice(after)) ? VOID_TOKEN : ' '
+    }
     for (let i = 0; i < token.length; i++) toWire.push(index)
     visible += token
-    at = index + m[0].length
+    at = after
   }
   for (let i = at; i < text.length; i++) {
     toWire.push(i)
     visible += text[i]
   }
   toWire.push(text.length)
-  return { visible, toWire }
+  return { visible, toWire, openEnds }
 }
 
 /**
@@ -117,7 +137,7 @@ export function splitSentences(text: string): number[] {
 /** Cut points inside the text, i.e. the boundaries between sentences, excluding 0 and `length`. */
 export function sentenceCuts(text: string): number[] {
   if (text.length === 0) return []
-  const { visible, toWire } = project(text)
+  const { visible, toWire, openEnds } = project(text)
   const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' })
   const pieces: string[] = []
   for (const { segment } of segmenter.segment(visible)) {
@@ -130,7 +150,11 @@ export function sentenceCuts(text: string): number[] {
   let at = 0
   for (let i = 0; i < pieces.length - 1; i++) {
     at += pieces[i]!.length
-    const wire = toWire[at] ?? text.length
+    let wire = toWire[at] ?? text.length
+    // A cut can land just past an opening tag, which leaves `<t id="N">` at the end of one sentence
+    // and its content plus `</t>` in the next — the pair split across two. Walk back over any
+    // opening tags ending here so the whole pair stays with the sentence it wraps (Codex on #126).
+    while (openEnds.has(wire)) wire = openEnds.get(wire)!
     // A cut landing where a placeholder starts is fine; one that would not advance is dropped
     if (wire > (cuts[cuts.length - 1] ?? 0) && wire < text.length) cuts.push(wire)
   }

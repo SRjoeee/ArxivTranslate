@@ -81,6 +81,29 @@ describe('sentence splitting (#105)', () => {
       .toEqual(['It follows from <x id="1"/>. ', 'Then we conclude.'])
   })
 
+  it('treats an escaped @@ as the literal it is, not as a placeholder', () => {
+    // Serialisation escapes a literal `@a#` as `@@a#`. Matching markers first reads the second `@`
+    // as a placeholder and cuts ordinary text in half (Codex on #126).
+    expect(parts('Done. @@a# is a literal.')).toEqual(['Done. @@a# is a literal.'])
+  })
+
+  it('keeps a trailing footnote with the sentence it annotates', () => {
+    // Same shape as a formula-led sentence — terminal punctuation, placeholder, word — but the word
+    // is capitalised, so the placeholder is a footnote on the sentence that just ended rather than
+    // the subject of the next one (Codex on #126).
+    expect(parts('the method<x id="1"/>. <x id="2"/> We require more.'))
+      .toEqual(['the method<x id="1"/>. <x id="2"/> ', 'We require more.'])
+    // The lowercase counterpart still opens a sentence
+    expect(parts('The proof is complete. <x id="1"/> is continuous.'))
+      .toEqual(['The proof is complete. ', '<x id="1"/> is continuous.'])
+  })
+
+  it('keeps an opening tag with the sentence it wraps', () => {
+    // A cut landing just past `<t id="N">` leaves the opening tag on the previous sentence and its
+    // content plus `</t>` on the next, splitting the pair across two (Codex on #126).
+    expect(parts('One. <t id="1">Next</t> sentence.')).toEqual(['One. ', '<t id="1">Next</t> sentence.'])
+  })
+
   it('never cuts inside a placeholder, which would break the wire syntax', () => {
     const wire = '<t id="1">Motivation.</t> Concurrent work. See <x id="2"/>. Done here.'
     expect(sentenceCuts(wire).length).toBeGreaterThan(1)
