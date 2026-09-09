@@ -54,8 +54,13 @@ export interface CacheIdentity {
  * 带硬换行的请求让微软逐行翻译（`state explosion` → 「州级爆炸性质」），而 `normalizeText`
  * 让带换行和折叠后的两种文本算出同一个键，于是那些坏译文会在 30 天 TTL 内继续被原样返回、
  * 修复根本到不了已经翻过的块。递增版本号把它们一次作废（Codex 在 #122 指出）。
+ *
+ * 6：句子对齐开始给不汇报句边界的引擎插标记（§8.6，#105）。**送出去的请求变了**——同一段文本
+ * 现在带着 `<x id="N"/>` 边界标记发出——所以旧条目描述的不再是同一次请求。不递增的话，
+ * 30 天 TTL 内已经翻过的论文全都命中不带对齐的旧条目，高亮在那些页面上一直是黑的
+ *（Codex 在 #137 指出）。
  */
-export const CACHE_KEY_VERSION = 5
+export const CACHE_KEY_VERSION = 6
 
 /** NFC + 连续空白折成一个空格 + 首尾 trim。只用于算键，不改动送翻译的文本 */
 export function normalizeText(text: string): string {

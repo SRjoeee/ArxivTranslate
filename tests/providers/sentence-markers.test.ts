@@ -4,13 +4,16 @@ import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { serialize } from '@/core/protector'
 import { verifyAlignment } from '@/providers/alignment'
-import { markSentences, unmarkSentences } from '@/providers/sentence-markers'
+import { sentenceCuts } from '@/core/sentences'
+import { markSentences, stripMarkers, unmarkSentences } from '@/providers/sentence-markers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 
+const TEXT = 'One sentence here. Two sentences here. Three.'
+
 describe('sentence markers for engines that report nothing (#105)', () => {
   it('marks every interior boundary and nothing else', () => {
-    const marked = markSentences('One sentence here. Two sentences here. Three.')!
+    const marked = markSentences(TEXT, sentenceCuts(TEXT, 'tags'))!
     expect(marked.ids).toHaveLength(2)
     expect(marked.text).toBe('One sentence here. <x id="1"/>Two sentences here. <x id="2"/>Three.')
     expect(marked.source.reduce((a, b) => a + b, 0)).toBe('One sentence here. Two sentences here. Three.'.length)
@@ -19,23 +22,32 @@ describe('sentence markers for engines that report nothing (#105)', () => {
   it('allocates ids above every id the block already uses', () => {
     // A marker sharing an id with one of the block's own placeholders would be indistinguishable
     // from it, and `unmarkSentences` would cut the text at a formula
-    const marked = markSentences('A <x id="7"/> b. And <t id="3">c</t> d. End.')!
+    const withSlots = 'A <x id="7"/> b. And <t id="3">c</t> d. End.'
+    const marked = markSentences(withSlots, sentenceCuts(withSlots, 'tags'))!
     expect(marked.ids).toEqual([8, 9])
     expect(marked.text).toContain('<x id="8"/>')
   })
 
   it('says nothing to do for a single sentence, or a format with no usable marker', () => {
-    expect(markSentences('Only one sentence here.')).toBeUndefined()
+    expect(markSentences('Only one sentence here.', [])).toBeUndefined()
     
   })
 
   it('reads the boundaries back out and hands back a clean translation', () => {
-    const marked = markSentences('One sentence here. Two sentences here. Three.')!
+    const marked = markSentences(TEXT, sentenceCuts(TEXT, 'tags'))!
     // What Google actually returns: the markers survive, in place, around translated text
     const back = unmarkSentences('一句话。<x id="1"/>两句话。<x id="2"/>三。', marked.ids)!
     expect(back.text).toBe('一句话。两句话。三。')
     expect(back.target).toEqual([4, 4, 2])
-    expect(verifyAlignment({ source: marked.source, target: back.target }, 'One sentence here. Two sentences here. Three.', back.text)).toBeDefined()
+    expect(verifyAlignment({ source: marked.source, target: back.target }, TEXT, back.text)).toBeDefined()
+  })
+
+  it('recognises a marker however the engine respelled it', () => {
+    // An LLM can hand back `<x id="1" />` or `<x id='1'/>`, which `TAG_RE` — and therefore
+    // `validate` — reads as the same placeholder. A variant missed here reaches validation as a
+    // placeholder the block has no slot for and fails the whole block (Codex on #137).
+    expect(unmarkSentences("一。<x id='1' />二。<x  id = \"2\" />三。", [1, 2])?.text).toBe('一。二。三。')
+    expect(stripMarkers('一。<x id="1" />二。', [1, 2])).toBe('一。二。')
   })
 
   it('refuses anything it cannot trust', () => {
@@ -63,7 +75,7 @@ describe('sentence markers for engines that report nothing (#105)', () => {
       for (const b of extract(d)) {
         if (b.kind !== 'text') continue
         const block = serialize(b.el, 'tags')
-        const m = markSentences(block.text)
+        const m = markSentences(block.text, sentenceCuts(block.text, 'tags'))
         if (!m) continue
         marked++
         const back = unmarkSentences(m.text, m.ids)

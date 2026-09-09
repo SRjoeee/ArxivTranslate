@@ -241,6 +241,9 @@ export const FUNCTIONAL_INLINE = 'a[href]'
 export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics' } as const
 
 /** 脚注（§7.2 两栏归位用）：容器、正文、正文的 class 名、自带的标号 */
+/** 注解性占位符：脚注与引用标记。切句时它们跟在前一句之后，不开新句（§8.6） */
+export const ANNOTATION_SELECTOR = '.ltx_note, .ltx_note_mark, .ltx_note_type, .ltx_cite'
+
 export const NOTE = {
   root: '.ltx_note',
   content: '.ltx_note_content',

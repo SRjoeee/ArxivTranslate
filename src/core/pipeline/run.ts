@@ -15,6 +15,7 @@ import { createWorkPacer, pauseIfBudgetSpent } from '@/core/scheduler/pacer'
 import type { RenderPath } from '@/cache/key'
 import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
 import { planBatches, sectionTitles, type Batch, type Segment } from './batches'
+import { cutsOf } from './sentences'
 
 export interface Progress {
   /** on：会话开着，滚动会继续触发；stopped：用户恢复原文或致命错误后停下 */
@@ -144,13 +145,22 @@ export function startTranslation(options: RunOptions): TranslationRun {
     scheduler = createLazyScheduler(blocks, { ...options.preload, onEnter: entered => { void translate(entered) } })
   })()
 
-  const send = (items: { id: string; text: string }[], renderPath: RenderPath, sectionTitle?: string, opts: { bypassCache?: boolean } = {}) => {
+  const send = (items: { id: string; text: string; cuts?: number[] }[], renderPath: RenderPath, sectionTitle?: string, opts: { bypassCache?: boolean } = {}) => {
     const context: TranslateContext = { ...options.context, ...(sectionTitle ? { sectionTitle } : {}) }
     return transport({
       request: { segments: items, source: 'en', target: options.target, context: Object.keys(context).length ? context : undefined },
       cache: { paper: options.paper, renderPath, ...(opts.bypassCache ? { bypass: true } : {}) },
       ...(options.scope ? { scope: options.scope } : {}),
     })
+  }
+
+  /**
+   * 句子边界随请求一起送下去（§8.6）。选切点要看块本身——占位符是注解还是公式、这一块是不是
+   * 参考文献——而服务层只有线上文本，所以决定在这里做，服务层只按位置插标记
+   */
+  const cutsFor = (segment: Segment): { cuts?: number[] } => {
+    const cuts = cutsOf(segment, options.capabilities.renderPath)
+    return cuts ? { cuts } : {}
   }
 
   const noteFatal = (res: Extract<TranslateMessageResponse, { ok: false }>) => {
@@ -188,7 +198,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
    */
   async function retrySingle(segment: Segment, sectionTitle?: string): Promise<SegmentResult> {
     if (halted()) return CANCELLED
-    const res = await send([{ id: segment.id, text: segment.text }], options.capabilities.renderPath, sectionTitle, { bypassCache: true })
+    const res = await send([{ id: segment.id, text: segment.text, ...cutsFor(segment) }], options.capabilities.renderPath, sectionTitle, { bypassCache: true })
     if (res.ok) {
       cached += res.cached
       const hit = res.result.segments[0]
@@ -205,7 +215,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
       for (const segment of segments) out.set(segment, await viaRuns(segment, sectionTitle))
       return
     }
-    const res = await send(segments.map(s => ({ id: s.id, text: s.text })), options.capabilities.renderPath, sectionTitle)
+    const res = await send(segments.map(s => ({ id: s.id, text: s.text, ...cutsFor(s) })), options.capabilities.renderPath, sectionTitle)
     if (stopped) return
     if (!res.ok) {
       noteFatal(res)

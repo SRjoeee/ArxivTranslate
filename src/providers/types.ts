@@ -7,6 +7,14 @@ import { attachRequestErrorMeta, type RequestErrorMeta } from './request/retry-p
 export interface TranslateSegment {
   id: string
   text: string
+  /**
+   * 句子边界在 `text` 里的位置（§8.6）。**由调用方给，服务层不自己切**：选切点要看块本身——
+   * `sentenceCuts` 需要一个从占位符槽位建出来的 `SplitContext` 才分得清注解与公式，
+   * 而它实测的精度明确不含参考文献块、调用方不得在那里运行它。这些从线上文本看不出来。
+   *
+   * 不带就不插标记。引擎自己汇报句边界时（微软）也不插
+   */
+  cuts?: number[]
 }
 
 export interface TranslateContext {

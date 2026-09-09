@@ -629,8 +629,9 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
   const echoing = (transform: (text: string) => string, extra: Partial<TranslationProvider> = {}) =>
     provider(async ({ segments }) => ({ segments: segments.map(s => ({ id: s.id, text: transform(s.text) })), provider: 'mock' }), 'mock', extra)
 
+  // 切点由调用方给：选哪里切要看块本身（§8.6），服务层只按给的位置插
   const twoSentences = (ids: string[]) => ({
-    request: { segments: ids.map(id => ({ id, text: 'One sentence here. Two sentences here.' })), source: 'en' as const, target: 'zh-CN' },
+    request: { segments: ids.map(id => ({ id, text: 'One sentence here. Two sentences here.', cuts: [19] })), source: 'en' as const, target: 'zh-CN' },
     cache: { paper: 'p', renderPath: 'tags' as RenderPath },
   })
 
@@ -648,6 +649,16 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
     // 回来的译文一个标记都不剩
     expect(seg.text).toBe('第一句。第二句。')
     expect(seg.alignment).toEqual({ source: [19, 19], target: [4, 4] })
+  })
+
+  it('调用方没给切点就不插——选哪里切要看块本身（§8.6）', async () => {
+    let sent = ''
+    const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
+    await service.translate({
+      request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.' }], source: 'en', target: 'zh-CN' },
+      cache: { paper: 'p', renderPath: 'tags' as RenderPath },
+    })
+    expect(sent).toBe('One sentence here. Two sentences here.')
   })
 
   it('引擎自己汇报的就不插', async () => {
@@ -688,7 +699,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
       let sent = ''
       const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
       await service.translate({
-        request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.' }], source: 'en', target: 'zh-CN' },
+        request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.', cuts: [19] }], source: 'en', target: 'zh-CN' },
         cache: { paper: 'p', renderPath },
       })
       expect([renderPath, sent]).toEqual([renderPath, 'One sentence here. Two sentences here.'])
@@ -698,7 +709,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
   it('不带缓存的调用（连接测试）也不插', async () => {
     let sent = ''
     const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
-    await service.translate({ request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.' }], source: 'en', target: 'zh-CN' } })
+    await service.translate({ request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.', cuts: [19] }], source: 'en', target: 'zh-CN' } })
     expect(sent).toBe('One sentence here. Two sentences here.')
   })
 })

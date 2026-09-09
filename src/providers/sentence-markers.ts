@@ -28,17 +28,44 @@
 // Anything that does not come back exactly right produces no alignment, and no alignment costs only
 // the highlight (`alignment.ts`).
 
-import { sentenceCuts } from '@/core/sentences'
+import { TAG_RE } from '@/core/protector'
 
 /** `<x id="N"/>`, the same void placeholder `serialize` writes. */
 const MARKER = (id: number) => `<x id="${id}"/>`
-const ID_IN_TEXT = /<[xt]\s+id="(\d+)"/g
+
+/** The id of a `<x id="N"/>` this occurrence of `TAG_RE` matched, or undefined for anything else. */
+function voidIdOf(m: RegExpMatchArray): number | undefined {
+  const raw = m[1] ?? m[2] ?? m[3]
+  return raw === undefined ? undefined : Number(raw)
+}
 
 /** One id above everything the block uses, so a marker is never confused with the block's own. */
 function firstFreeId(text: string): number {
   let max = 0
-  for (const m of text.matchAll(ID_IN_TEXT)) max = Math.max(max, Number(m[1]))
+  TAG_RE.lastIndex = 0
+  for (const m of text.matchAll(TAG_RE)) {
+    for (const raw of [m[1], m[2], m[3], m[4], m[5], m[6]]) if (raw !== undefined) max = Math.max(max, Number(raw))
+  }
   return max + 1
+}
+
+/**
+ * Every occurrence of one of our marker ids, however it is spelled.
+ *
+ * Matching the exact string we generated is not enough. An LLM can hand back `<x id="1" />` or
+ * `<x id='1'/>`, which `TAG_RE` — and therefore `validate` — recognises as the same placeholder,
+ * so a variant that slips past here reaches validation as a placeholder the block has no slot for
+ * and fails the whole block (Codex pointed this out on #137). What counts as a marker is decided
+ * by the same regex the protector uses, not by our own spelling of it.
+ */
+function occurrences(text: string, ids: ReadonlySet<number>): { at: number; length: number; id: number }[] {
+  const out: { at: number; length: number; id: number }[] = []
+  TAG_RE.lastIndex = 0
+  for (const m of text.matchAll(TAG_RE)) {
+    const id = voidIdOf(m)
+    if (id !== undefined && ids.has(id)) out.push({ at: m.index ?? 0, length: m[0].length, id })
+  }
+  return out
 }
 
 export interface MarkedText {
@@ -51,15 +78,20 @@ export interface MarkedText {
 }
 
 /**
- * Splits `text` into sentences and returns it with a marker at each interior boundary.
+ * Puts a marker at each of the given cuts.
+ *
+ * **The cuts come from the caller**, not from calling the splitter here. Choosing them needs the
+ * block: `sentenceCuts` takes a `SplitContext` built from its placeholder slots to tell an
+ * annotation from a formula, and its measured precision explicitly excludes bibliography blocks,
+ * which callers must not run it on. None of that is knowable from wire text alone (Codex pointed
+ * both out on #137), so the decision belongs in the pipeline and only the mechanism lives here.
  *
  * Only ever called for the `tags` render path: `markers` has no marker that survives translation,
  * and `runs` sends fragments of a block that `joinRuns` reassembles without wire offsets, so an
  * alignment there would have nothing to attach to. Returns undefined for a single sentence, and the
  * caller then sends the text unchanged.
  */
-export function markSentences(text: string): MarkedText | undefined {
-  const cuts = sentenceCuts(text, 'tags')
+export function markSentences(text: string, cuts: readonly number[]): MarkedText | undefined {
   if (cuts.length === 0) return undefined
 
   const first = firstFreeId(text)
@@ -85,27 +117,20 @@ export function markSentences(text: string): MarkedText | undefined {
  * highlight on the wrong sentence — worse than no highlight at all.
  */
 export function unmarkSentences(translated: string, ids: readonly number[]): { text: string; target: number[] } | undefined {
-  // Every marker must occur exactly once **in the whole string**, not merely once after where the
-  // last one was found. `[1, 2]` coming back as `2, 1, 2` would otherwise pass: the search for 2
-  // starts after 1, finds the second copy, and sees nothing duplicated beyond it — leaving the
-  // stray `<x id="2"/>` in the text, which then reaches `validate` as a placeholder the block has
-  // no slot for (Codex pointed this out on #136).
-  for (const id of ids) {
-    const marker = MARKER(id)
-    const first = translated.indexOf(marker)
-    if (first < 0 || translated.indexOf(marker, first + marker.length) >= 0) return undefined
-  }
+  const wanted = new Set(ids)
+  const found = occurrences(translated, wanted)
+  // Exactly one of each, in the order they were sent. Anything else and the boundaries cannot be
+  // trusted, and a wrong boundary puts the highlight on the wrong sentence — worse than none.
+  if (found.length !== ids.length) return undefined
+  if (found.some((f, i) => f.id !== ids[i])) return undefined
+
   const target: number[] = []
   let text = ''
   let at = 0
-  for (const id of ids) {
-    const marker = MARKER(id)
-    const found = translated.indexOf(marker, at)
-    // Out of order: the only occurrence lies before where the previous marker ended
-    if (found < 0) return undefined
-    text += translated.slice(at, found)
-    target.push(found - at)
-    at = found + marker.length
+  for (const f of found) {
+    text += translated.slice(at, f.at)
+    target.push(f.at - at)
+    at = f.at + f.length
   }
   text += translated.slice(at)
   target.push(translated.length - at)
@@ -123,7 +148,13 @@ export function unmarkSentences(translated: string, ids: readonly number[]): { t
  * highlight for a missing translation.
  */
 export function stripMarkers(translated: string, ids: readonly number[]): string {
-  let text = translated
-  for (const id of ids) text = text.split(MARKER(id)).join('')
-  return text
+  const found = occurrences(translated, new Set(ids))
+  if (found.length === 0) return translated
+  let text = ''
+  let at = 0
+  for (const f of found) {
+    text += translated.slice(at, f.at)
+    at = f.at + f.length
+  }
+  return text + translated.slice(at)
 }
