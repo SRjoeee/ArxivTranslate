@@ -33,8 +33,13 @@ const GAP_PX = 8
 /** The margin is used when at least this much of it is free; the panel never grows past the max. */
 const MIN_MARGIN_REM = 18
 const MAX_MARGIN_REM = 24
-/** Anchored below the sentence unless fewer than this many pixels remain under it — about four lines. */
-const MIN_ROOM_PX = 100
+/**
+ * Below the sentence — or top-aligned to it in the margin — unless fewer than this many pixels
+ * remain there *and* the other side has more: about ten lines. The panel is never measured, so
+ * putting it on the roomier side when the default one is cramped is all that can be done for a
+ * long sentence; one taller than both sides still clips (Codex on #149).
+ */
+const COMFORT_PX = 240
 
 /** Which tier the panel was placed in; read by tests and available to the stylesheet. */
 export const AT_ATTR = 'data-axt-peek-at'
@@ -101,17 +106,18 @@ export function createPeek(doc: Document): Peek {
   const place = (el: HTMLElement, a: PeekAnchor) => {
     const margin = a.articleRight === undefined ? 0 : a.viewport.width - a.articleRight - 2 * GAP_PX
     const roomBelow = a.viewport.height - a.bottom
+    const below = roomBelow >= COMFORT_PX || roomBelow >= a.top
     let at: 'margin' | 'below' | 'above'
     let css: string
     if (margin >= MIN_MARGIN_REM * rem) {
       at = 'margin'
       const left = (a.articleRight ?? 0) + GAP_PX
       const width = Math.min(margin, MAX_MARGIN_REM * rem)
-      // Top-aligned to the sentence's first line; bottom-aligned to its last when little room is left below
-      css = roomBelow >= MIN_ROOM_PX
+      // Top-aligned to the sentence's first line; hanging from its last line when that is roomier
+      css = below
         ? `left:${left}px;top:${a.top}px;width:${width}px;max-height:${a.viewport.height - a.top - GAP_PX}px`
         : `left:${left}px;bottom:${a.viewport.height - a.bottom}px;width:${width}px;max-height:${a.bottom - GAP_PX}px`
-    } else if (roomBelow >= MIN_ROOM_PX) {
+    } else if (below) {
       at = 'below'
       const top = a.bottom + GAP_PX
       css = `left:${a.block.left}px;top:${top}px;width:${a.block.width}px;max-height:${a.viewport.height - top - GAP_PX}px`
@@ -131,6 +137,10 @@ export function createPeek(doc: Document): Peek {
     if (!panel) {
       panel = doc.createElement('div')
       panel.className = PEEK_CLASS
+      // `inert`, not just `aria-hidden` and `pointer-events: none`: those leave a cloned `<a href>`
+      // reachable by Tab and activatable by Enter (Codex on #149). Inert takes it out of focus,
+      // clicks and the accessibility tree at once
+      panel.setAttribute('inert', '')
       panel.setAttribute('aria-hidden', 'true')
       doc.body.append(panel)
     }

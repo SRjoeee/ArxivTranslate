@@ -852,6 +852,49 @@ describe('source peek through the pointer (#141)', () => {
     hl.stop()
   })
 
+  it('asks checkVisibility about visibility and opacity, which keep their boxes', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const asked = vi.fn(() => false)
+    Object.assign(source, { checkVisibility: asked })
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    expect(asked).toHaveBeenCalledWith({ visibilityProperty: true, opacityProperty: true })
+    hl.stop()
+  })
+
+  it('sets the panel in the hidden side\'s type, reaching past a transparent colour', () => {
+    // The panel shows the hidden side's text, so it is set as the page sets *that* side — not as a
+    // preset dresses the visible translation: `gradient` makes its colour transparent and paints
+    // the text through a clipped background the panel does not have
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const view = doc.defaultView!
+    const real = view.getComputedStyle
+    const base = { font: '', color: '', backgroundColor: '', overflowX: '', overflowY: '', fontSize: '16px' }
+    view.getComputedStyle = ((el: Element) => ({
+      ...base,
+      ...(el === source ? { font: '15px serif', color: 'rgba(0, 0, 0, 0)' } : {}),
+      ...(el === doc.body ? { color: 'rgb(1, 2, 3)', backgroundColor: 'rgb(9, 9, 9)' } : {}),
+      ...(el === target ? { font: '15px fantasy', color: 'rgb(200, 200, 200)' } : {}),
+    })) as typeof real
+    try {
+      const hl = startSentenceHighlight(doc)!
+      hide(source)
+      browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+      browser.move()
+      browser.flushTimers(PEEK_DWELL_MS)
+      const style = panel(doc)!.getAttribute('style') ?? ''
+      expect(style).toContain('font:15px serif') // the original's, not the translation's
+      expect(style).toContain('color:rgb(1, 2, 3)') // past the transparent one
+      expect(style).toContain('background-color:rgb(9, 9, 9)')
+      hl.stop()
+    } finally {
+      view.getComputedStyle = real
+    }
+  })
+
   it('is taken away by clearSentenceHighlights and restore, and comes back cold', () => {
     const { doc, source, target } = live()
     const browser = stubBrowser(doc)

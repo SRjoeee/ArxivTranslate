@@ -59,6 +59,7 @@ describe('source peek (#141)', () => {
     expect(panel).not.toBeNull()
     expect(panel.parentElement).toBe(d.body)
     expect(panel.getAttribute('aria-hidden')).toBe('true')
+    expect(panel.hasAttribute('inert')).toBe(true) // a cloned link must not be reachable by Tab
     expect(panel.textContent).toBe('Hidden original sentence.')
     expect(panel.querySelector('em')).not.toBeNull() // the DOM, not its text
     expect(built).toBe(1)
@@ -199,6 +200,25 @@ describe('source peek (#141)', () => {
     peek.show(KEY(a), () => [rangeOver(a)], { ...wide, type: { font: '', color: '', background: '' } })
     t.fire()
     expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute('style')).toBe('left:1144px;top:400px;width:288px;max-height:492px')
+  })
+
+  it('takes the roomier side when the default one is cramped', () => {
+    const d = doc()
+    const t = timers(d)
+    d.body.innerHTML = '<p id="a">One.</p>'
+    const a = d.getElementById('a')!
+    const peek = createPeek(d)
+    // 175px left below — fewer than ten lines — and 700 above: above
+    peek.show(KEY(a), () => [rangeOver(a)], { ...narrow, top: 700, bottom: 725 })
+    t.fire()
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute(AT_ATTR)).toBe('above')
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute('style')).toBe(`left:150px;bottom:208px;width:800px;max-height:684px${TYPED}`)
+    // Cramped on both sides, more below: below
+    peek.show(KEY(a, 1), () => [rangeOver(a)], { ...narrow, top: 100, bottom: 125, viewport: { width: 1100, height: 300 } })
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute(AT_ATTR)).toBe('below')
+    // In the margin the same choice is between top-aligned and hanging
+    peek.show(KEY(a, 2), () => [rangeOver(a)], { ...wide, top: 700, bottom: 725 })
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute('style')).toBe(`left:1144px;bottom:175px;width:288px;max-height:717px${TYPED}`)
   })
 
   it('has no margin tier without an article root', () => {

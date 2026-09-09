@@ -133,8 +133,8 @@ function bandsOf(origin: { left: number; top: number }, ranges: readonly Range[]
 /** Viewport-space bounds a side's bands may paint in. */
 interface Clip { left: number; top: number; right: number; bottom: number }
 
-/** A computed background that paints nothing. */
-const NO_BACKGROUND = /^(?:transparent|rgba\(0, 0, 0, 0\)|)$/
+/** A computed colour that paints nothing. */
+const NO_PAINT = /^(?:transparent|rgba\(0, 0, 0, 0\)|)$/
 
 /**
  * The colour the page actually paints behind its text: the body's background, the root's when
@@ -143,9 +143,24 @@ const NO_BACKGROUND = /^(?:transparent|rgba\(0, 0, 0, 0\)|)$/
 function pageBackground(doc: Document, view: Window): string {
   for (const el of [doc.body, doc.documentElement]) {
     const background = el ? view.getComputedStyle(el).backgroundColor : ''
-    if (!NO_BACKGROUND.test(background)) return background
+    if (!NO_PAINT.test(background)) return background
   }
   return 'Canvas'
+}
+
+/**
+ * The colour this element's text is set in, taken from the nearest ancestor that paints one.
+ *
+ * A computed colour can be `transparent` on purpose: the `gradient` preset sets the translation's
+ * colour to transparent and shows the text through a clipped background, which the panel does not
+ * carry — copying that colour gives a blank panel (Codex on #149).
+ */
+function textColour(el: Element, view: Window): string {
+  for (let node: Element | null = el; node; node = node.parentElement) {
+    const colour = view.getComputedStyle(node).color
+    if (!NO_PAINT.test(colour)) return colour
+  }
+  return ''
 }
 
 /** The `overflow` values that clip. Anything else — `visible`, or nothing at all — does not. */
@@ -384,14 +399,17 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
       const last = own[own.length - 1]
       if (first && last) {
         const block = map[side].root.getBoundingClientRect()
-        const type = view.getComputedStyle(map[side].root)
+        // Set as the page sets the *hidden* side — it is that side's text the panel shows — and not
+        // as a style preset dresses the visible translation. Computed style resolves for a
+        // `display: none` element as for any other; only layout values are missing
+        const counterpart = map[other].root
         anchor = {
           top: first.top + origin.top,
           bottom: last.top + last.height + origin.top,
           block: { left: block.left, width: block.width },
           articleRight: article?.getBoundingClientRect().right,
           viewport: { width: view.innerWidth, height: view.innerHeight },
-          type: { font: type.font, color: type.color, background: pageBackground(doc, view) },
+          type: { font: view.getComputedStyle(counterpart).font, color: textColour(counterpart, view), background: pageBackground(doc, view) },
         }
       }
     }
