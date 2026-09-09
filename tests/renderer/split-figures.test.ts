@@ -1,7 +1,8 @@
 // 插图整块拆两份（DESIGN §7.2）。图与公式没有译文，按块配对右栏就空着；
 // 整张图跨两栏又等于放弃对照，所以整块复制一份、副本里只留译文。
 import { describe, expect, it } from 'vitest'
-import { MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS, T_CLASS, dropStaleSplits, renderImage, restore, splitFigures } from '@/core/renderer'
+import { FOR_ATTR, MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS, T_CLASS, dropStaleSplits, renderImage, restore, splitFigures } from '@/core/renderer'
+import { SPLIT_FOR_ATTR } from '@/core/renderer/split-figures'
 import { IMG_CLASS } from '@/core/marks'
 import { ID_ATTR } from '@/core/extractor'
 import { docOf } from './helpers'
@@ -170,7 +171,7 @@ describe('镜像不是译文（issue #46 实测 2312.17141）', () => {
       return renderImage({ id: el.id, el, kind: 'raster' as const }, [{ x: 0.1, y: 0.1, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text }])
     }
 
-    it('只有叠加层、没有文字译文的插图也拆：副本里图与叠加层都在，叠加层不带 data-axt-*', () => {
+    it('只有叠加层、没有文字译文的插图也拆：副本里图与叠加层都在，叠加层不带配对标记', () => {
       const doc = docOf(IMG_FIGURE)
       overlayOn(doc)
       expect(splitFigures(doc)).toBe(1)
@@ -179,7 +180,12 @@ describe('镜像不是译文（issue #46 实测 2312.17141）', () => {
       expect(img).not.toBeNull()
       // 叠加层紧跟在副本的图后面，锚点定位靠这个相邻关系
       expect(img.nextElementSibling?.classList.contains(IMG_CLASS)).toBe(true)
-      expect(clone.querySelector(`.${IMG_CLASS}`)!.getAttributeNames().some(n => n.startsWith('data-axt-'))).toBe(false)
+      // 配对标记必须没有（有的话副本里那份会被当成第二份译文），但 `data-axt-split-for` 要留着：
+      // 「不再翻这张图」时 `clearImageEverywhere` 只能靠它找到副本里的这一份（Codex 在 #134 指出）
+      const overlay = clone.querySelector(`.${IMG_CLASS}`)!
+      expect(overlay.getAttribute(FOR_ATTR)).toBeNull()
+      expect(overlay.getAttribute(SPLIT_FOR_ATTR)).toBe('F1.g1')
+      expect(overlay.getAttributeNames().filter(n => n.startsWith('data-axt-'))).toEqual([SPLIT_FOR_ATTR])
       expect(clone.querySelector(`.${IMG_CLASS}`)!.textContent).toBe('静态电荷')
     })
 
