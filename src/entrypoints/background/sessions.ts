@@ -84,8 +84,14 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
     let cancelled = 0
     for (const scope of scopes) {
       const bound = sessions.get(scope)
-      sessions.delete(scope)
-      if (remember) dropped.add(scope)
+      // 猜出来的终结**不解绑**：解绑之后这个 scope 再来请求就成了「没绑过的新会话」，`forCall` 会把它
+      // 挂到**当前**那条链上——期间用户要是改过引擎 / 提示词 / 目标语言，同一轮译文就会中途换链，
+      // 正好是 §8.0 那条「一次会话认准它开始时的那条链」要防的（Codex 在 #143 指出）。
+      // 排空照做，绑定留着：真跳走的话这条记录跟着标签页关闭或下一轮新 scope 一起清掉
+      if (remember) {
+        sessions.delete(scope)
+        dropped.add(scope)
+      }
       // 别的按 scope 排队的东西（图片 OCR）先撤，不等建链：建链可能挂在 Translator.availability() 上（Codex 在 #87 指出）
       cancelled += options.onDrop?.(scope, { remember }) ?? 0
       // 只经 bind 绑过、从没翻过字的会话（bound 有值、没 transport）：这个 worker 里没有它的翻译请求，不用为撤它建一条链。

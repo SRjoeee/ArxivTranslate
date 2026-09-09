@@ -56,6 +56,24 @@ describe('createSessionRouter', () => {
     expect(soft).toEqual([false, true])
   })
 
+  it('猜错之后回来的会话仍走它开始时的那条链', async () => {
+    // 猜出来的终结要是把绑定也删了，回来的请求就成了「新会话」，会被挂到**当前**那条链上——
+    // 期间用户改过引擎 / 提示词 / 目标语言的话，同一轮译文中途换链（Codex 在 #143 指出）
+    vi.useFakeTimers()
+    const first = fakeTransport('旧链')
+    const second = fakeTransport('新链')
+    let current = first
+    const router = createSessionRouter(async () => current)
+    expect(nameOf(await router.forCall('session-1', 7))).toBe('旧链')
+
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(10_000)
+    // 撤销期间用户在设置页换了引擎
+    current = second
+
+    expect(nameOf(await router.forCall('session-1', 7))).toBe('旧链')
+  })
+
   it('真的跳走：宽限到点撤掉，但不把 scope 判死', async () => {
     // 判死是给「确定的终结」用的（用户按停止、关标签页）。猜出来的不能判死：猜错时页面还活着，
     // 它后半篇的每一次请求都会被直接 aborted，而且永远好不了
@@ -68,7 +86,6 @@ describe('createSessionRouter', () => {
     await vi.advanceTimersByTimeAsync(10_000)
 
     expect(transport.cancelled).toEqual(['链:session-1:soft'])
-    expect(router.bound()).toEqual([])
     // 猜错了也能回来：同一个 scope 再来请求，不会再被撤一次
     transport.cancelled.length = 0
     await router.forCall('session-1', 7)
