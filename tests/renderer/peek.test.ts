@@ -232,23 +232,28 @@ describe('source peek (#141)', () => {
     expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute(AT_ATTR)).toBe('below')
   })
 
-  it('marginOccupied: something of the page\'s own in the gutter rows below the sentence', () => {
+  it('marginOccupied: probes the gutter along the panel\'s own footprint', () => {
     const d = doc()
     d.body.innerHTML = '<span class="ltx_note"><span class="ltx_note_content" id="n">note</span></span><p id="a">One.</p>'
     const note = d.getElementById('n')!
     const hits: Record<number, Element | null> = {}
-    Object.assign(d, { elementFromPoint: (_x: number, y: number) => hits[y] ?? null })
-    // Nothing there
-    expect(marginOccupied(d, 1136, 400, 900)).toBe(false)
-    // A footnote 120px down the gutter
-    hits[520] = note
-    expect(marginOccupied(d, 1136, 400, 900)).toBe(true)
+    const asked: number[] = []
+    Object.assign(d, { elementFromPoint: (_x: number, y: number) => { asked.push(y); return hits[y] ?? null } })
+    // Nothing there; a top-aligned panel is probed downward from the sentence to the viewport's end
+    expect(marginOccupied(d, 1136, 400, 425, 900)).toBe(false)
+    expect(asked.splice(0)).toEqual([408, 528, 648, 768, 888])
+    // A footnote well past 240px, still under the panel
+    hits[768] = note
+    expect(marginOccupied(d, 1136, 400, 425, 900)).toBe(true)
     // Something that is not gutter content
-    hits[520] = d.body
-    expect(marginOccupied(d, 1136, 400, 900)).toBe(false)
-    // Rows past the viewport are not asked
-    hits[520] = note
-    expect(marginOccupied(d, 1136, 400, 500)).toBe(false)
+    hits[768] = d.body
+    expect(marginOccupied(d, 1136, 400, 425, 900)).toBe(false)
+    // A sentence near the bottom hangs its panel upward: the probes go up, not down
+    asked.splice(0)
+    expect(marginOccupied(d, 1136, 850, 875, 900)).toBe(false)
+    expect(asked.splice(0)).toEqual([867, 747, 627, 507, 387, 267, 147, 27])
+    hits[627] = note
+    expect(marginOccupied(d, 1136, 850, 875, 900)).toBe(true)
   })
 
   it('a dwell whose sentence is no longer current renders nothing', () => {

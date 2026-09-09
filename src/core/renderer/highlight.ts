@@ -387,8 +387,10 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     // instead, built only once the panel actually renders (issue #141)
     const other = side === 'source' ? 'target' : 'source'
     const hidden = !rendered(map[other].root)
+    // The visible side's clip is read once: its bands are cut to it, and so is the panel's width
+    const ownClip = view ? clipOf(map[side].root, view) : undefined
     const bandsFor = (which: 'source' | 'target') =>
-      view ? bandsOf(origin, rangesOf(map[which].spans, sentence[which].from, sentence[which].to), clipOf(map[which].root, view)) : []
+      view ? bandsOf(origin, rangesOf(map[which].spans, sentence[which].from, sentence[which].to), which === side && ownClip ? ownClip : clipOf(map[which].root, view)) : []
     // Every side is measured before anything is written: reads and writes never interleave
     const sides = [{ side, bands: bandsFor(side) }, ...(hidden ? [] : [{ side: other, bands: bandsFor(other) }])]
     // What the panel needs is read in the same pass — the sentence's own lines, the block they sit
@@ -416,12 +418,16 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
         const onScreen = own.filter(b => lineTop(b) >= 0 && lineBottom(b) <= vh)
         const clamp = (n: number) => Math.min(Math.max(n, 0), vh)
         const top = clamp(lineTop(onScreen[0] ?? first))
+        const bottom = clamp(lineBottom(onScreen[onScreen.length - 1] ?? last))
+        // The block cut to what is on screen: its clipping ancestors and the viewport
+        const left = Math.max(block.left, ownClip?.left ?? -Infinity, 0)
+        const right = Math.min(block.right, ownClip?.right ?? Infinity, view.innerWidth)
         anchor = {
           top,
-          bottom: clamp(lineBottom(onScreen[onScreen.length - 1] ?? last)),
-          block: { left: block.left, width: block.width },
+          bottom,
+          block: { left, width: Math.max(0, right - left) },
           articleRight,
-          marginFree: articleRight !== undefined && !marginOccupied(doc, articleRight, top, view.innerHeight),
+          marginFree: articleRight !== undefined && !marginOccupied(doc, articleRight, top, bottom, view.innerHeight),
           viewport: { width: view.innerWidth, height: view.innerHeight },
           type: { font: view.getComputedStyle(counterpart).font, color: textColour(counterpart, view), background: pageBackground(doc, view) },
         }

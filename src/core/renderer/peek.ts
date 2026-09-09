@@ -58,7 +58,11 @@ export interface PeekAnchor {
   /** Top of the sentence's first line and bottom of its last */
   top: number
   bottom: number
-  /** The block the visible side sits in: a floating panel spans its width */
+  /**
+   * The block the visible side sits in, cut to what is on screen: a floating panel spans it. A wide
+   * table in a horizontal scroller has a block wider than the viewport, or one starting left of
+   * it, and a panel copying that would begin off screen (Codex on #149)
+   */
   block: { left: number; width: number }
   /** The article's right edge, where the margin begins; undefined when there is no article root */
   articleRight: number | undefined
@@ -96,24 +100,38 @@ export interface Peek {
 
 const same = (a: PeekKey, b: PeekKey) => a.root === b.root && a.index === b.index && a.shown === b.shown
 
-/** Rows sampled down the gutter, in CSS pixels from the sentence's top. */
-const GUTTER_PROBES = [8, 120, 240]
+/** How far apart the gutter is sampled, and how many samples at most — a viewport's worth. */
+const PROBE_STEP_PX = 120
+const PROBE_LIMIT = 8
+
+/**
+ * Which way the panel grows from the sentence: down from its first line, or up from its last.
+ *
+ * Down unless fewer than `COMFORT_PX` remain below *and* there is more room above. Shared by the
+ * placement and by the gutter probe, which has to look where the panel will actually be.
+ */
+const growsDown = (top: number, bottom: number, viewportHeight: number): boolean => {
+  const roomBelow = viewportHeight - bottom
+  return roomBelow >= COMFORT_PX || roomBelow >= top
+}
 
 /**
  * Whether the page already shows something in the margin where the panel would go.
  *
  * From 96rem up ar5iv keeps footnotes and publication notes at the page's right edge, and
  * `localizeNotes` leaves the translated ones there (§7.2). A panel over them would hide exactly
- * what the margin tier promises not to (Codex on #149). Three hit tests down the gutter, made in
- * the frame's read phase; the panel itself is inert and never answers one.
+ * what the margin tier promises not to (Codex on #149). Hit tests down — or up — the gutter along
+ * the panel's whole possible footprint, made in the frame's read phase; the panel itself is inert
+ * and never answers one.
  */
-export function marginOccupied(doc: Document, articleRight: number, top: number, viewportHeight: number): boolean {
+export function marginOccupied(doc: Document, articleRight: number, top: number, bottom: number, viewportHeight: number): boolean {
   if (typeof doc.elementFromPoint !== 'function') return false
   const x = articleRight + 2 * GAP_PX
-  return GUTTER_PROBES.some(dy => {
-    const y = top + dy
-    return y < viewportHeight && !!doc.elementFromPoint(x, y)?.closest(MARGIN_ASIDE)
-  })
+  const down = growsDown(top, bottom, viewportHeight)
+  for (let i = 0, y = down ? top + GAP_PX : bottom - GAP_PX; i < PROBE_LIMIT && y > 0 && y < viewportHeight; i++, y += down ? PROBE_STEP_PX : -PROBE_STEP_PX) {
+    if (doc.elementFromPoint(x, y)?.closest(MARGIN_ASIDE)) return true
+  }
+  return false
 }
 
 /**
@@ -147,8 +165,7 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
    */
   const place = (el: HTMLElement, a: PeekAnchor) => {
     const margin = a.articleRight === undefined ? 0 : a.viewport.width - a.articleRight - 2 * GAP_PX
-    const roomBelow = a.viewport.height - a.bottom
-    const below = roomBelow >= COMFORT_PX || roomBelow >= a.top
+    const below = growsDown(a.top, a.bottom, a.viewport.height)
     let at: 'margin' | 'below' | 'above'
     let css: string
     if (margin >= MIN_MARGIN_REM * rem && a.marginFree) {

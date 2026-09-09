@@ -853,6 +853,23 @@ describe('source peek through the pointer (#141)', () => {
     hl.stop()
   })
 
+  it('spans only the part of a wide block that is on screen', () => {
+    // A wide table in a horizontal scroller: the block starts left of the viewport and runs past it
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const view = doc.defaultView!
+    Object.defineProperty(view, 'innerWidth', { configurable: true, value: 1024 })
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    Object.assign(target, { getBoundingClientRect: () => ({ left: -300, right: 1700, top: 0, bottom: 20, width: 2000, height: 20, x: -300, y: 0, toJSON: () => ({}) }) as DOMRect })
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.getAttribute('style')).toContain('left:0px')
+    expect(panel(doc)?.getAttribute('style')).toContain('width:1024px')
+    hl.stop()
+  })
+
   it('anchors to the part of a sentence that is on screen', () => {
     // The pointer is on a later line of a sentence whose first line is above the viewport
     const { doc, source, target } = live()
