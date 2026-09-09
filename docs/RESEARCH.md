@@ -468,6 +468,270 @@ DESIGN §15 只记了用上的两个（`macos-vision-ocr`、`ImageTrans_chrome_e
 
 **浏览器内 PaddleOCR 的体积实测**（`reference/ImageTrans_chrome_extension/ImageTrans/paddleocr/`）：`rec.onnx` 20 M、`ort-wasm-simd-threaded.jsep.wasm` 25 M、`PP-OCRv6_det_small.onnx` 与 `opencv.js` 各 9.5 M、`model.onnx` 10 M；加载与推理胶水 `page-ocr.js` 779 行。
 
+## 6.11 SVG figures drawn with `<use>` glyphs need no OCR; the rest still do (2026-09-09, survey before starting issue #121)
+
+**Population.** This section is about **externally referenced figures**, `<object type="image/svg+xml">`. That
+is a different population from the inline `svg.ltx_picture` (TikZ) elements measured in §2.9, and the two do
+not generalise to each other — §2.9's conclusion that inline SVG carries no translatable DOM text still
+stands for inline SVG.
+
+**Sample.** Recent papers from eight arXiv categories: 178 with an HTML version. **99 of them (55.6%) carry
+at least one SVG figure**, and counting figures rather than papers, **880 of 1792 (49.1%) are SVG** against
+912 bitmaps. Of those 880 the crawl fetched the first four `<object>`s of each paper — 48 of the 99 papers
+carry more — which resolve to **316 distinct assets, and all 316 were measured**, over two channels: **276
+fetched and parsed over HTTP**, cached locally one directory per paper, and the 40 that answer 406 to curl
+(see below) read in a real browser through their `<object>`'s `contentDocument`, which is what the extension
+will actually see. **The coverage and encoding counts** — how many `<use>` elements there are, how many carry
+`data-text`, what other text-bearing elements exist, and the angle distribution — **are the sum of the two, so
+their denominator is the whole sampled set** rather than the part curl could reach (Codex asked on #133 for
+the 406 group to be counted, not set aside). Everything else in this section names the population it was
+measured on, because several were narrower: the ancestor-transform check is the 276 fetchable files only, the
+dropped-space analysis 71 figures, the reachability pass 44, and the viewBox-to-element-box mapping three.
+
+**276 fetchable files, not 281.** The crawl logged 281 non-error asset references but only 276 distinct
+paths: five files are referenced twice within the same paper and were counted twice, and the earlier totals
+counted them twice as well. Every per-file and per-glyph count in this section is over the 276 distinct
+files, which is also what re-scanning the local corpus reproduces. The 281 is corrected rather than kept
+alongside, so there is one denominator and not two.
+
+**The headline holds only where glyphs are drawn as `<use>`.** That is every figure that draws them at all,
+but 10.1% draw letter outlines straight into `<path>` instead, and nearly a third of those carry real words
+that no amount of `data-text` reading will reach — see point 4. OCR is what would serve them.
+
+### 1. `data-text` is reliable — coverage of real glyphs is 100%
+
+| | over HTTP | 406 group, in browser | all |
+|---|---|---|---|
+| files measured | 276 | 40 | **316** |
+| `<use>` elements | 54361 | 3684 | 58045 |
+| carrying `data-text` | 54344 | 3684 (**100%**) | 58028 (**99.97%**) |
+| — of those files, drawing glyphs as `<use>` at all | 249 | 35 | 284 |
+| files where every `<use>` carries it | 244 | 35 | **279 / 284 (98.2%)** |
+| files where some do | 5 | 0 | 5 |
+| **files where none do** | 0 | 0 | **0** |
+| files with no `<use>` — see point 4 | 27 | 5 | 32 |
+
+The file rows are counted against the 284 that draw glyphs as `<use>`, not against all 316. The other 32
+draw their outlines directly and have nothing for those rows to be true or false about; folding them into the
+denominator would report 88.3% and read as though 12% of files were partially covered (Codex on #133).
+
+All seventeen exceptions are `<use xlink:href="#pattern_tile_N">` — hatch-fill tiles, not glyphs, and all
+seventeen are in the HTTP group; the 40 read in the browser contain no non-glyph `<use>` at all. **Coverage of
+actual glyphs is 100%, on every asset the survey sampled.**
+
+**No text lives outside the glyphs — checked on every asset, not on a sample.** Not one file has a `<text>`
+element or a `<tspan>`, and **not one has a `<foreignObject>`**: 0 of 316, across both channels. Each half was
+measured through its own channel — the 276 fetchable files parsed off the local corpus, the 40 curl cannot
+reach read in the browser through `contentDocument` — and the two together are the whole set. An earlier
+revision rested the `<foreignObject>` claim on an in-browser pass over 84 figures plus those 40, at most 124
+of the set, while stating it as though it held everywhere; Codex asked on #133 for the rest, and the rest
+agrees. So the "HTML labels inside SVG" representation §2.9 records for inline TikZ does not occur here, and
+`data-text` really is the only channel — that check is what makes the claim sound, not the absence of
+`<text>` alone.
+
+**The id suffix is not a usable fallback.** A suffix like `font_2_99` equals the codepoint in only 21.83% of
+cases (12283/56257 over both channels), and bimodally by file: 67 files where it always does, 209 where it
+never does (there it is a font-internal glyph index), 8 mixed — 284 files, the ones that draw glyphs as
+`<use>`. Issue #121's observation on three files holds on the larger sample.
+
+### 2. Spaces are mostly explicit glyphs, so word segmentation is not the main problem
+
+Space characters are drawn like any other: **788 of 10820 glyphs (7.28%) across 71 figures** carry
+`data-text=" "`. What that establishes is that a space is **emitted as a glyph rather than left implicit in
+the layout** — it is a share of glyphs, not a share of word boundaries, so on its own it cannot say that no
+boundary is missing one (Codex on #133). Read directly off a run, the concatenation does come back whole:
+`"Number of terms N"`, character for character. How often a boundary is missing its space is the paragraph
+below, measured on the gaps themselves rather than inferred from this ratio.
+
+**Not always, though, and the exception is measured below rather than assumed.** Runs whose internal gaps
+include one about two advances wide — the shape a dropped space leaves — occur in **48.4% of code runs
+(30/62)** and **11.5% of prose runs (42/365)**. The two populations are not alike: every prose hit inspected
+is kerning around a symbol rather than two words run together (`T=0.2MeV`, `4-point-term`, `") (GeV"`), and
+that detector cannot tell the two apart, so 11.5% is an upper bound on suspicion and not a rate of damage.
+Every *observed* word-level failure — `iflog_counting`, `staticint` — is in code.
+
+So: word boundaries do not have to be derived for the common case, and for the case where they do, see (b)
+below (Codex asked for this to be measured across the sample rather than generalised from one figure, on #133).
+
+### 3. The hard part is segmentation, and it comes in two kinds
+
+**(a) Line and label boundaries.** The converter emits no *semantic* grouping: ticks, axis titles and legends
+arrive in document order with nothing marking where one label ends, so they run together as
+`"110100Number of terms N1015..."`.
+
+A prototype confirmed geometric grouping works. Decompose `transform="matrix(a,b,c,d,e,f)"` into an angle
+`atan2(b,a)` and a size `hypot(a,b)`, project along the baseline, and cut on gaps. It separated the labels on
+the first attempt:
+
+```
+   0°  25px ×17  "Number of terms N"      ← axis title
+   0°  20px × 3  "100"                    ← tick
+ -90°  17.5px× 1  "R"                     ← rotated y-axis label
+   0°  16px ×16  "Ei-series, xa=50"       ← legend
+```
+
+Superscripts separate onto their own baselines, which is right for `10^15`. **Rotation must come out of that
+decomposition** rather than from reading `a` as the size.
+
+**That decomposition reads one matrix, so it is only right if nothing above the glyph is transformed — and
+nothing is.** Over all 276 fetchable files and 54344 glyphs, **not one glyph sits under an ancestor carrying
+a `transform`**, and no root `<svg>` carries one either. A glyph's own `matrix(...)` is therefore the whole
+transform from its coordinates to the figure's. Were a `<use>` ever nested under a transformed `<g>`, reading
+its matrix alone would compute the wrong baseline, angle and size and put the label somewhere arbitrary.
+That last check is the fetchable channel only — 276 of the 316 files, 54344 of 58028 glyphs; the 40 read in
+the browser were measured for glyph coverage, `<foreignObject>` and angles, but not for nesting.
+
+**The reason is not that the tree is flat, because it is not.** An earlier revision of this section said the
+converter does no grouping at all, on the strength of a single 159-glyph figure that happened to be flat;
+Codex questioned that sample on #133, and over the same 276 files **21.1% of glyphs (11467) are not direct
+children of the root `<svg>`**, nested up to four deep:
+
+| depth below root | 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|
+| glyphs | 42877 | 6766 | 3036 | 1599 | 66 |
+
+Grouping happens; what does not happen is a transform on any of those containers. The implementation now
+enforces that rather than assuming it: `src/core/svg/glyphs.ts` (commit `fb877e1`, merged with #134)
+skips any glyph with a transformed ancestor, so a figure that ever did nest one would go untranslated instead
+of being drawn from half a transform. (Forward reference — that is the implementation; this PR is the survey
+and carries no code.)
+
+Angles over the **whole sampled set** — all 284 glyph-bearing files, 58028 glyphs:
+
+| | | |
+|---|---|---|
+| 0° | 52387 | 90.279% |
+| -90° | 4906 | 8.455% |
+| +90° | 62 | 0.107% |
+| **42 other values** | **673** | **1.160%**, commonest -30° |
+
+(The first version of this table omitted the +90° row and totalled 99.89%, leaving 62 glyphs unexplained —
+Codex noticed the arithmetic on #133. Both quarter turns are handled; it is the last row that is dropped.
+The counts came down from 58731 when the five duplicated files went out of the denominator, see **Sample**;
+the shape did not move.)
+
+A seven-paper sample of 10465 glyphs contained only the first two, and this section previously concluded
+there were only two. There are not (Codex caught this on #133).
+
+**Recommendation for v1: place the quarter turns, drop the rest — a scope decision with a measured cost, not
+a claim that other angles are impossible to place.** An arbitrary angle is representable: a run already
+carries its four corners, rotated with the text, so the placement information is there. What is missing is an
+overlay layout that consumes it. The overlay describes a label as the axis-aligned bounding box of those
+corners plus an angle, and `labelStyle` renders the angle by swapping width for height and `cqw` for `cqh`.
+That swap is exact at a quarter turn and only there: off one, the bounding box is larger than the text — at
+30° much larger — and `cqw`/`cqh` stop corresponding to the label's own axes, so the label would be drawn at
+the wrong size across the plot. Supporting other angles means a layout that positions and sizes a label along
+its own axes instead. That is a piece of work, not a barrier; v1 does not need it and this survey does not
+promise it.
+
+**What the decision costs is the last row of the table above: 673 glyphs, 1.160% of 58028, commonest -30°.**
+(Forward reference — `quarterTurn` in `src/core/svg/glyphs.ts` is where the decision now lives, merged with
+#134; this PR is the survey and carries no code, and Codex asked twice for forward references to be marked
+as such.)
+
+**(b) Spaces that were dropped.** In a syntax-highlighted code listing, `if` and `log_counting` belong to
+differently coloured spans and the space between them has no glyph, so the run reads `"iflog_counting == 8:"`,
+`"staticint"`.
+
+**This cannot be decided from gap size.** Gaps between two non-space characters have a median of 0.553 of the
+font size; gaps involving an explicit space glyph have a median of 0.550 — the same, because a monospace
+advance does not depend on what it is advancing past. The usable signal is a **double-width** gap (non-space
+gaps run to p95 = 0.818 and max = 1.12, about two advances), which needs a per-run advance estimate rather
+than a global constant.
+
+**The §5 skip rules do not reach it.** They select `.ltx_listing`, `code` and friends in the HTML; a listing
+inside an externally referenced SVG is a bare sequence of `<use>` glyphs and matches none of them (Codex
+pointed this out on #133). So the SVG path has to recognise code itself — from the shape of the runs, since
+there is no markup left to go on — or it will send code for translation with its spaces missing. That is a
+requirement on the #121 implementation, not something the existing rules give for free.
+
+### 4. One figure in ten carries no readable glyphs, and nearly a third of those still carry words
+
+32 of 316 files (10.1% — 27 from the HTTP group, 5 from the 406 group) have neither `<use>` nor `<text>`.
+**They are not pure graphics.** An exporter can put letter outlines straight into `<path>`, and rendering
+**all 32** shows that most of them do:
+
+| | |
+|---|---|
+| no text at all — polyhedra, line diagrams, random walks | 11 |
+| mathematics only — Feynman momentum labels, `Φ`, `x₁` | 10 |
+| logos — a `K`, an `AI` wordmark | 2 |
+| **word labels — legends (`revival`, `extinction`), block-diagram boxes, axis titles, `cw: clockwise`** | **9** |
+
+The first three groups lose nothing by being skipped: `isTranslatable` rejects single-letter mathematics
+anyway and a logo should not be translated. **The last nine are a real gap** — v1 leaves them untranslated
+and cannot tell the reader why. They are the population an OCR fallback would serve, and they are the reason
+that fallback is worth keeping rather than a hypothetical.
+
+An earlier revision of this section called every file in this group pure graphics, then called them
+mathematics and logos after inspecting four. Both were generalisations from a part of the set; Codex asked
+twice for the whole set, and the whole set says something different from either.
+
+### 5. `contentDocument` is reachable, and does not even need a scroll
+
+Measured across four papers and 44 figures with explicit waits and `load` listeners: **44/44 reachable, all of
+them already reachable before scrolling anything into view**. The 406-group pass adds **40/40 reachable**
+across 23 further papers under the same explicit `load` wait. An earlier probe in this survey reported 19/27
+for one paper; that probe raced its own measurement and the number is withdrawn.
+
+This matters because it settles the fourth of issue #121's "what is actually hard" list. Combined with the
+next point, nothing needs to be written into the embedded document.
+
+### 6. viewBox coordinates map linearly onto the `<object>` element box
+
+Comparing a glyph's position computed from the `viewBox` against where it actually renders, on three figures:
+
+| predicted | actual |
+|---|---|
+| nx 0.1310, ny 0.9346 | nx 0.1339, ny 0.9346 |
+| nx 0.1009, ny 0.9266 | nx 0.1037, ny 0.9264 |
+| nx 0.1176, ny 0.9275 | nx 0.1203, ny 0.9275 |
+
+`ny` agrees to four decimal places. The constant 0.0028 offset in `nx` is the glyph's left side bearing —
+`e` is the origin, `rect.left` is the inked box — not an error in the mapping. arXiv sets `aspect-ratio` on
+the `<object>` to match the viewBox, so nothing is letterboxed in practice.
+
+**So an overlay can live entirely in the main document, reading the embedded one and never writing to it.**
+That removes issue #121's fourth difficulty outright: §7.1's DOM invariant is untouched, `restore()` needs no
+new semantics for embedded documents, and the nested browsing context problem shared with #109 reduces to
+"can we read it", which point 5 answers.
+
+### The 40 files curl could not fetch encode their text no differently
+
+`https://arxiv.org/html/<id>/<file>.svg` answers **406** for some papers regardless of `Accept` or user agent,
+and their `.png` assets do too — while the same figures render and read fine in the page. All 40, across 23
+papers, were therefore read in a browser through `contentDocument`: **40/40 reachable, 3684 `<use>` elements,
+3684 carrying `data-text` (100%), zero `<text>`, zero `<tspan>`, zero `<foreignObject>`**, and 5 files drawing
+outlines directly with no `<use>` at all (12.5%, against 9.8% in the HTTP group). Rendering those 5 puts four
+in "mathematics only" and one — `cw: clockwise` / `ccw: counterclockwise` — in "word labels".
+
+So the 406 is a property of arXiv's asset serving and not of a different encoding; it affects crawling
+surveys, not the product. This is why the tables above are totals over 316 distinct files rather than the 276
+curl could fetch (Codex on #133).
+
+### Revisions to issue #121
+
+- "Grouping glyphs into semantic runs is the bulk of the work" — **not so**. Spaces are mostly explicit and
+  document order is exact. The work is geometric line segmentation (verified feasible) and, only for code,
+  restoring dropped spaces from a per-run advance estimate.
+- "The id suffix is a usable fallback" — **not so**, 21.83%.
+- "Survey coverage before building anything" — **`data-text` can be relied on** wherever glyphs are drawn as
+  `<use>`, which is every figure that uses them — measured over all 316 distinct assets the survey sampled,
+  not only the 276 curl could fetch. The 10.1% that draw outlines directly are the population a fallback
+  would serve, and 9 of those 32 carry real word labels, so that fallback has a job rather than a
+  theoretical one.
+
+### Revision to DESIGN.md §15.1
+
+§15.1 and §15 currently say v1 translates bitmaps only and skips SVG, on the strength of the §2.9 audit —
+which counted **inline** `svg.ltx_picture` (TikZ) and did not look at externally referenced
+`<object type="image/svg+xml">` figures at all. Those are 49.1% of the figures in the sample (880 of 1792)
+and their text is exactly recoverable wherever it is drawn as `<use>` glyphs. **§15.1's "skip SVG" has to be narrowed to inline SVG**, and the external path
+described as its own recogniser feeding the same overlay (Codex pointed out on #133 that leaving the DESIGN
+table stale would let later work follow the obsolete requirement, since DESIGN is the source of truth).
+
+---
+
 ## 7. DESIGN.md 修订清单
 
 按章节排列。每条只提建议，是否采纳由设计文档决定。
@@ -496,7 +760,8 @@ DESIGN §15 只记了用上的两个（`macos-vision-ocr`、`ImageTrans_chrome_e
 | 19 | §14 arXiv 自身 JS 冲突 | 实测无冲突面（无 MutationObserver / MathJax / 脚注 JS，脚注弹出纯 CSS），风险可降为低 | §3.3 |
 | 22 | ~~§8 / §10 provider 请求跑在 background~~ | ~~建议把 provider 的 fetch 移到 content script~~ **已废止（2026-09-06）**：依据的 §6.5 三条结论全部推翻（§6.7 / §6.8），且「Read Frog 在 content 发请求」是误读。**与第 24 行方向相反，以第 24 行为准**；实际实现是移到 background（issue #42，已合并） | ~~§6.5~~ → §6.7 / §6.8 |
 | 23 | §8 `google-gtx` 用 `translate_a/single`、`preservesMarkup: false` | 改用 Read Frog 的 `translate-pa.googleapis.com/v1/translateHtml`：实测保留占位符，`preservesMarkup: true`，批量 150 条 556 ms | §6.6 |
-| 20 | §15.1 SVG 图文字按普通块翻译 | 实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics` | §2.9 |
+| 20 | ~~§15.1 SVG 图文字按普通块翻译~~ **superseded by 27** | ~~实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics`~~ That entry looked at **inline** SVG only — see 27 | §2.9 |
 | 24 | §8.0 请求跑在 content script | 实测 content 侧 fetch 受 CORS 与**本地网络门禁**约束（§6.7）：不带 CORS 头的端点、本机端点（Ollama；http 与 https 一样被拦）从 content 不可达，从 background 可达；连接测试走 background、正式翻译走 content，两条路径行为不一致。且 §8.0 引用的「Read Frog 在 content 发请求」核对为误读。建议：抽离 transport，默认在 background 执行请求（无 CORS 预检、不受本地网络门禁、key 不进页面世界），content 只保留调度；~~先按 issue #42 要求重测冷启动延迟，再定~~ **重测已完成**（§6.7 真实 Chrome 三轮 77–81 ms、§6.8 长请求 45 / 90 s 均存活），**已按本条实现并合并**（issue #42） | §6.7 / §6.8 |
 | 25 | §2「非目标 [延后]」把「微软免费通道」列为 v1 不做；§8.1 正文写「gtx 与微软 edge 通道不接（后者 auth 端点已 404）」 | **依据已失效**：那条 auth 流程确实没了，但它的**无鉴权后继**今天可用（§5.1）。#104 已经把 `markers` 线上格式与能力协商做进 main，微软正是它存在的理由。建议：把这两处改成「可接入，`wireFormats: ['markers']`」，并在 §8.1 的 provider 表里加一行 | §5.1 |
 | 26 | §8.1 provider 表没有「支持语言范围」这一列 | 免费引擎不是每种目标语言都支持：微软实测 179 个目标里 71 个 400。建议 provider 接口增加一个「这个目标语言能不能翻」的判定，`buildChain` 与设置页据此过滤，而不是等运行时报错 | §5.1 |
+| 27 | Narrow §15.1's "skip SVG" to "skip **inline** SVG" | Externally referenced `<object type="image/svg+xml">` figures are a separate population, 49.1% of the 1792 figures in the sample. Their text is drawn as `<use>` glyphs carrying `data-text`, so it is read exactly rather than recognised, and needs no OCR. The 10.1% that draw outlines straight into `<path>` still need an OCR fallback | §6.11 |
