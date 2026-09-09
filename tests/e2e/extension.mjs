@@ -512,16 +512,16 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     return {
       source: textOf('axt-sentence-source'),
       target: textOf('axt-sentence-target'),
-      flag: document.documentElement.getAttribute('data-axt-hl'),
+      registries: CSS.highlights.size,
       // 高亮一个 DOM 节点都不许碰（§7.1）
-      domUnchanged: before === document.documentElement.outerHTML.replace(/ data-axt-hl="on"/, ''),
+      domUnchanged: before === document.documentElement.outerHTML,
       inSource: src.textContent?.includes(textOf('axt-sentence-source')) ?? false,
       inTarget: at.textContent?.includes(textOf('axt-sentence-target')) ?? false,
     }
   })
   check('悬停对照高亮：原文与译文两侧同时亮起（§7.7 / #105）',
-    hover.flag === 'on' && (hover.source?.length ?? 0) > 0 && (hover.target?.length ?? 0) > 0,
-    `flag=${hover.flag} 原文 ${hover.source?.length ?? 0} 字、译文 ${hover.target?.length ?? 0} 字${hover.reason ? ` (${hover.reason})` : ''}`)
+    hover.registries === 2 && (hover.source?.length ?? 0) > 0 && (hover.target?.length ?? 0) > 0,
+    `注册表 ${hover.registries} 个，原文 ${hover.source?.length ?? 0} 字、译文 ${hover.target?.length ?? 0} 字${hover.reason ? ` (${hover.reason})` : ''}`)
   check('悬停对照高亮：两侧选中的都是各自块里的文字，没有跨块',
     hover.inSource === true && hover.inTarget === true, `原文命中 ${hover.inSource}、译文命中 ${hover.inTarget}`)
   check('悬停对照高亮：一个 DOM 节点都没动（§7.1）',
