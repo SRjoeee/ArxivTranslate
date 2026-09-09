@@ -48,6 +48,34 @@ describe('sentence splitting (#105)', () => {
     expect(parts('Let @a# denote the loss. Then @b# converges.')).toEqual(['Let @a# denote the loss. ', 'Then @b# converges.'])
   })
 
+  it('sees a sentence end that sits against a paired placeholder', () => {
+    // Google's preferred `tags` format wraps run-in headings as `<t id="1">Motivation.</t> …`.
+    // Segmenting that markup directly, Intl.Segmenter sees `.` followed by `<` and reports no
+    // boundary at all — and 2312.17527.html alone has 18 run-in headings (Codex on #126).
+    const wire = '<t id="1">Motivation.</t> Concurrent programs are difficult.'
+    // The cut lands after `</t> `, so the pair stays inside the sentence it wraps — cutting at the
+    // period itself would leave the opening tag in one sentence and the closing tag in the next.
+    expect(parts(wire)).toEqual(['<t id="1">Motivation.</t> ', 'Concurrent programs are difficult.'])
+  })
+
+  it('treats void placeholders and markers the same way', () => {
+    // The trailing space goes with the sentence it ends, the same convention Microsoft's sentLen uses
+    expect(parts('See <x id="1"/>. Next sentence here.')).toEqual(['See <x id="1"/>. ', 'Next sentence here.'])
+    expect(parts('Let @a# denote it. Then @b# converges.')).toEqual(['Let @a# denote it. ', 'Then @b# converges.'])
+  })
+
+  it('never cuts inside a placeholder, which would break the wire syntax', () => {
+    const wire = '<t id="1">Motivation.</t> Concurrent work. See <x id="2"/>. Done here.'
+    expect(sentenceCuts(wire).length).toBeGreaterThan(1)
+    for (const cut of sentenceCuts(wire)) {
+      // A cut must not land strictly inside any placeholder run
+      for (const m of wire.matchAll(/<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>|@[a-z]+#/g)) {
+        const start = m.index ?? 0
+        expect([cut, cut > start && cut < start + m[0].length]).toEqual([cut, false])
+      }
+    }
+  })
+
   it('returns one length when there is no interior boundary', () => {
     expect(splitSentences('A single clause with no end')).toEqual([27])
     expect(sentenceCuts('A single clause with no end')).toEqual([])

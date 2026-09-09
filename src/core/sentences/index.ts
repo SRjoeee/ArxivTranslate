@@ -36,27 +36,87 @@ const ABBR =
  * the text it describes, so a splitter that lost or duplicated a character would simply produce no
  * highlight. Returns a single length for text with no interior boundary.
  */
+/**
+ * Placeholder syntax as it appears in wire text. `tags` wraps inline markup in `<t id="N">` … `</t>`
+ * pairs and formulas in `<x id="N"/>`; `markers` uses `@abc#`.
+ */
+const PLACEHOLDER = /<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>|@[a-z]+#/g
+
+/**
+ * Segmenting the wire text directly hides sentence ends that sit against a placeholder. A run-in
+ * heading serialises as `<t id="1">Motivation.</t> Concurrent programs …`, and `Intl.Segmenter`
+ * sees `.` followed by `<` rather than by whitespace, so it reports no boundary at all — measured,
+ * and `tests/fixtures/arxiv/2312.17527.html` alone has 18 run-in headings. The earlier comparison
+ * against Microsoft ran on `markers`, which flattens pairs away, so it never exercised this.
+ *
+ * So segment a projection where every placeholder becomes a single space, then map the cuts back.
+ * A space is the right substitute: it cannot create a sentence end that the text does not have, and
+ * it lets a real one next to a placeholder be seen.
+ */
+function project(text: string): { visible: string; toWire: number[] } {
+  let visible = ''
+  // toWire[i] is the wire offset that visible offset i starts at
+  const toWire: number[] = []
+  let at = 0
+  PLACEHOLDER.lastIndex = 0
+  for (const m of text.matchAll(PLACEHOLDER)) {
+    const index = m.index ?? 0
+    for (let i = at; i < index; i++) {
+      toWire.push(i)
+      visible += text[i]
+    }
+    // The whole placeholder collapses to one space, which maps back to where it started
+    toWire.push(index)
+    visible += ' '
+    at = index + m[0].length
+  }
+  for (let i = at; i < text.length; i++) {
+    toWire.push(i)
+    visible += text[i]
+  }
+  toWire.push(text.length)
+  return { visible, toWire }
+}
+
+/**
+ * Sentence lengths, in order, summing exactly to `text.length`.
+ *
+ * The exact partition is the contract: `verifyAlignment` rejects anything that does not reconstruct
+ * the text it describes, so a splitter that lost or duplicated a character would simply produce no
+ * highlight. Returns a single length for text with no interior boundary.
+ */
 export function splitSentences(text: string): number[] {
   if (text.length === 0) return []
+  const cuts = sentenceCuts(text)
+  const lengths: number[] = []
+  let prev = 0
+  for (const cut of cuts) {
+    lengths.push(cut - prev)
+    prev = cut
+  }
+  lengths.push(text.length - prev)
+  return lengths
+}
+
+/** Cut points inside the text, i.e. the boundaries between sentences, excluding 0 and `length`. */
+export function sentenceCuts(text: string): number[] {
+  if (text.length === 0) return []
+  const { visible, toWire } = project(text)
   const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' })
   const pieces: string[] = []
-  for (const { segment } of segmenter.segment(text)) {
+  for (const { segment } of segmenter.segment(visible)) {
     const prev = pieces[pieces.length - 1]
     // The previous piece ended on an abbreviation, so the boundary between them is spurious.
     if (prev !== undefined && ABBR.test(prev.trimEnd())) pieces[pieces.length - 1] = prev + segment
     else pieces.push(segment)
   }
-  return pieces.map(piece => piece.length)
-}
-
-/** Cut points inside the text, i.e. the boundaries between sentences, excluding 0 and `length`. */
-export function sentenceCuts(text: string): number[] {
-  const lengths = splitSentences(text)
   const cuts: number[] = []
   let at = 0
-  for (let i = 0; i < lengths.length - 1; i++) {
-    at += lengths[i]!
-    cuts.push(at)
+  for (let i = 0; i < pieces.length - 1; i++) {
+    at += pieces[i]!.length
+    const wire = toWire[at] ?? text.length
+    // A cut landing where a placeholder starts is fine; one that would not advance is dropped
+    if (wire > (cuts[cuts.length - 1] ?? 0) && wire < text.length) cuts.push(wire)
   }
   return cuts
 }
