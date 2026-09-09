@@ -7,6 +7,14 @@ import { attachRequestErrorMeta, type RequestErrorMeta } from './request/retry-p
 export interface TranslateSegment {
   id: string
   text: string
+  /**
+   * 句子边界在 `text` 里的位置（§8.6）。**由调用方给，服务层不自己切**：选切点要看块本身——
+   * `sentenceCuts` 需要一个从占位符槽位建出来的 `SplitContext` 才分得清注解与公式，
+   * 而它实测的精度明确不含参考文献块、调用方不得在那里运行它。这些从线上文本看不出来。
+   *
+   * 不带就不插标记。引擎自己汇报句边界时（微软）也不插
+   */
+  cuts?: number[]
 }
 
 export interface TranslateContext {
@@ -70,6 +78,12 @@ export interface TranslationProvider {
   /** 健康检查：key 是否配置、端点是否可达、内置模型是否可用 */
   isAvailable(): Promise<boolean>
   translate(request: TranslateRequest): Promise<TranslateResult>
+  /**
+   * 自己汇报句边界（§8.6）。声明了的引擎，服务层就不给它插句子标记——微软的 `sentLen` 是原生的，
+   * 插标记只会白改请求。没声明的（Google、LLM）由服务层在 `tags` 格式下插 `<x id="N"/>` 边界标记，
+   * 回来再摘掉（`sentence-markers.ts`）
+   */
+  reportsSentences?: boolean
   /** 提示词指纹，进缓存键（只有 LLM provider 有）：换了提示词不能再命中旧译文 */
   promptKey?: string
   /**

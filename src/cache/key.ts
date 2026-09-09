@@ -45,6 +45,13 @@ export interface CacheIdentity {
   renderPath: RenderPath
   /** 发给模型的文本（含占位符），归一化在这里做 */
   text: string
+  /**
+   * 句子边界（§8.6）。**必须进键**：两个块可以序列化成同一份线上文本，而槽位语义不同、
+   * `cutsOf` 因此给出不同的切点——键里不带它，第二个块就会命中第一个块的条目，
+   * 连同它那份对不上的对齐一起（`verifyAlignment` 只查条数与总长，挡不住这种）
+   *（Codex 在 #137 指出）。不切句的调用不带这个字段，键与从前一致
+   */
+  cuts?: readonly number[]
 }
 
 /**
@@ -54,8 +61,13 @@ export interface CacheIdentity {
  * 带硬换行的请求让微软逐行翻译（`state explosion` → 「州级爆炸性质」），而 `normalizeText`
  * 让带换行和折叠后的两种文本算出同一个键，于是那些坏译文会在 30 天 TTL 内继续被原样返回、
  * 修复根本到不了已经翻过的块。递增版本号把它们一次作废（Codex 在 #122 指出）。
+ *
+ * 6：句子对齐开始给不汇报句边界的引擎插标记（§8.6，#105）。**送出去的请求变了**——同一段文本
+ * 现在带着 `<x id="N"/>` 边界标记发出——所以旧条目描述的不再是同一次请求。不递增的话，
+ * 30 天 TTL 内已经翻过的论文全都命中不带对齐的旧条目，高亮在那些页面上一直是黑的
+ *（Codex 在 #137 指出）。
  */
-export const CACHE_KEY_VERSION = 5
+export const CACHE_KEY_VERSION = 6
 
 /** NFC + 连续空白折成一个空格 + 首尾 trim。只用于算键，不改动送翻译的文本 */
 export function normalizeText(text: string): string {
@@ -74,6 +86,7 @@ export async function buildCacheKey(identity: CacheIdentity): Promise<string> {
     identity.target,
     identity.renderPath,
     normalizeText(identity.text),
+    identity.cuts ?? null,
   ])
   return sha256Hex(payload)
 }

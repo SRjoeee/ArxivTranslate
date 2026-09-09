@@ -8,6 +8,7 @@ import { wireFormatOf } from '@/cache/key'
 import type { CachedEntry } from '@/cache/store'
 import { cacheKeyFor, type RenderPath } from '@/cache/key'
 import { type SentenceAlignment, verifyAlignment } from './alignment'
+import { markSentences, stripMarkers, unmarkSentences, type MarkedText } from './sentence-markers'
 // 深引 validate 而不是 protector 的桶：serialize / rehydrate 要碰 DOM，那两个不该进 background 的包
 import { expectationsFromText, validate } from '@/core/protector/validate'
 import { getRandomUUID } from '@/shared/uuid'
@@ -15,7 +16,7 @@ import { BatchCountMismatchError, BatchQueue, type BatchExecutionMeta, type Batc
 import { CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
 import { REQUEST_TIMEOUT_ERROR_NAME, RequestQueue, type QueueOptions } from './request/request-queue'
 import { attachRequestErrorMeta } from './request/retry-policy'
-import { ProviderError, type ProviderErrorKind, type TranslatedSegment, type TranslateRequest, type TranslationProvider } from './types'
+import { ProviderError, type ProviderErrorKind, type TranslatedSegment, type TranslateRequest, type TranslationProvider, type TranslateSegment } from './types'
 
 /**
  * What one segment's translation carries through the queue. `alignment` is present only when the
@@ -121,6 +122,13 @@ interface QueueItem {
   uid: string
   id: string
   text: string
+  /**
+   * 原始的线上文本。`text` 可能带着句子标记（§8.6），而校验对齐、判定占位符完整性
+   * 都要拿没插标记的那份比
+   */
+  source: string
+  /** 这一段插了哪些标记（§8.6）；不插就没有 */
+  marks?: MarkedText
   batchKey: string
   dedupKey?: string
   scope?: string
@@ -209,14 +217,53 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       ? attachRequestErrorMeta(new BatchCountMismatchError(expected, 0, [e.message]), { kind: 'bad-request', isRetryable: false })
       : e
 
+  /**
+   * 一批的发送与接收。**句子标记在这一层进出**（§8.6）：引擎自己不汇报句边界时，把切好的边界
+   * 以 `<x id="N"/>` 插进线上文本，回来再摘掉、顺带读出译文侧的边界。
+   *
+   * 放在这里而不是各 provider 里，是因为它与引擎无关——凡是保得住 `tags` 的引擎都适用，
+   * 而每个 provider 各写一份就会各错一份。摘不干净的那些返回原样文本、不带对齐，
+   * 没有对齐只是没有高亮（`alignment.ts`）
+   */
+  /**
+   * 一段进队列时的形态：要送的文本、原始文本、插了哪些标记（§8.6）。
+   *
+   * 只有 `tags` 这条路插：`markers` 那条线上没有活得下来的标记；`runs` 送的是切碎的纯文本段、
+   * 拼回去不产出线上偏移，对齐在那里没有东西可挂。引擎自己汇报的（微软）也不插
+   */
+  const markedItem = (provider: TranslationProvider, renderPath: RenderPath | undefined, segment: TranslateSegment): { text: string; source: string; marks?: MarkedText } => {
+    const plain = { text: segment.text, source: segment.text }
+    const cuts = segment.cuts
+    if (provider.reportsSentences || renderPath !== 'tags' || !cuts) return plain
+    // 一句话的块：整段对整段就是安全的对齐，不必插任何标记（§8.6）
+    if (cuts.length === 0) return { ...plain, marks: { text: segment.text, source: [segment.text.length], ids: [] } }
+    const marks = markSentences(segment.text, cuts)
+    if (!marks) return plain
+    // **单条也可能超限**：`BatchQueue` 的字符上限只拦「合批」，一条任务超了也照发不误
+    //（Codex 在 #137 指出）。插完超了就不插——没有对齐只是没有高亮，而超限是整批失败
+    if (marks.text.length > provider.maxBatchChars) return plain
+    return { text: marks.text, source: segment.text, marks }
+  }
+
   const translateItems = async (items: QueueItem[], ids: string[], signal: AbortSignal | undefined): Promise<TranslationOutcome[]> => {
     const first = items[0]!
     try {
-      const result = await first.provider.translate({ ...first.request, segments: items.map((item, i) => ({ id: ids[i]!, text: item.text })), signal })
+      const result = await first.provider.translate({
+        ...first.request,
+        segments: items.map((item, i) => ({ id: ids[i]!, text: item.text })),
+        signal,
+      })
       const byId = new Map(result.segments.map(s => [s.id, s]))
-      return ids.map(id => {
+      return ids.map((id, i) => {
         const segment = byId.get(id)
-        return segment ? { text: segment.text, alignment: segment.alignment } : { text: '' }
+        if (!segment) return { text: '' }
+        const mark = items[i]?.marks
+        if (!mark) return { text: segment.text, alignment: segment.alignment }
+        const back = unmarkSentences(segment.text, mark.ids)
+        // 摘不干净就退回「没有对齐」：坏的边界会把高亮打在错的句子上，比没有高亮更糟。
+        // 文本仍然要摘一遍——`unmarkSentences` 失败时它可能还带着标记，那绝不能进 DOM
+        if (!back) return { text: stripMarkers(segment.text, mark.ids) }
+        return { text: back.text, alignment: { source: mark.source, target: back.target } }
       })
     } catch (e) {
       throw asBatchError(e, items.length)
@@ -314,7 +361,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       const translated = new Map<string, TranslationOutcome>()
       if (store && cache) {
         const computed = await Promise.all(request.segments.map(segment =>
-          cacheKeyFor({ providerId: provider.cacheId ?? provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text }),
+          cacheKeyFor({ providerId: provider.cacheId ?? provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text, ...(segment.cuts ? { cuts: segment.cuts } : {}) }),
         ))
         request.segments.forEach((segment, i) => {
           keys.set(segment.id, computed[i]!)
@@ -348,7 +395,9 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         const items: QueueItem[] = misses.map(segment => ({
           uid: getRandomUUID(),
           id: segment.id,
-          text: segment.text,
+          // **在这里插，不在派发时插**：攒批按 `item.text.length` 算大小，派发时才插的话
+          // 一个贴着上限的批次会在插完之后超限（Codex 在 #137 指出）
+          ...markedItem(provider, cache?.renderPath, segment),
           batchKey,
           dedupKey: cache && !cache.bypass ? keys.get(segment.id) : undefined,
           scope,
@@ -383,10 +432,11 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           }
           // 无论对齐来自哪个引擎，都在这一层校验一次：provider 各自校验会漏掉没实现的那些，
           // 而缓存命中那条路也要校验，两边用同一个闸才对称
-          const value: TranslationOutcome = { text: outcome.value.text, alignment: verifyAlignment(outcome.value.alignment, item.text, outcome.value.text) }
+          // 用没插标记的那份比：`item.text` 可能带着句子标记，长度对不上（§8.6）
+          const value: TranslationOutcome = { text: outcome.value.text, alignment: verifyAlignment(outcome.value.alignment, item.source, outcome.value.text) }
           translated.set(item.id, value)
           const key = keys.get(item.id)
-          if (store && cache && key && admits(item.text, value.text, wireFormatOf(cache.renderPath))) {
+          if (store && cache && key && admits(item.source, value.text, wireFormatOf(cache.renderPath))) {
             writes.push(value.alignment
               ? { key, translation: value.text, paper: cache.paper, alignment: value.alignment }
               : { key, translation: value.text, paper: cache.paper })

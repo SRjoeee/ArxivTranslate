@@ -241,6 +241,16 @@ export const FUNCTIONAL_INLINE = 'a[href]'
 export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics' } as const
 
 /** 脚注（§7.2 两栏归位用）：容器、正文、正文的 class 名、自带的标号 */
+/**
+ * 注解性占位符（§8.6）：切句时把它们当成空格，藏掉它们说了什么。
+ *
+ * **只有脚注。** 引用不在里面：`\citet` 生成的 `.ltx_cite` 可以是句子的主语（「Smith et al. 证明了…」），
+ * 当成注解会把它抹成空格、连带把它前面那个句子边界一起藏掉，两句并成一句
+ *（Codex 在 #137 指出）。类名区分不了 `\citet` 与 `\citep`，而让引用走 `textOf` 交出自己的文字
+ * 两种情形都对：作主语时读起来就是主语，作句尾括注时它以 `)` 结尾、不会造出假边界
+ */
+export const ANNOTATION_SELECTOR = '.ltx_note, .ltx_note_mark, .ltx_note_type'
+
 export const NOTE = {
   root: '.ltx_note',
   content: '.ltx_note_content',

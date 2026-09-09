@@ -623,3 +623,134 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
     expect(calls).toBe(1)
   })
 })
+
+describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）', () => {
+  /** 只在收到的文本里保留标记、把英文换成中文的假引擎——正是 Google 的行为 */
+  const echoing = (transform: (text: string) => string, extra: Partial<TranslationProvider> = {}) =>
+    provider(async ({ segments }) => ({ segments: segments.map(s => ({ id: s.id, text: transform(s.text) })), provider: 'mock' }), 'mock', extra)
+
+  // 切点由调用方给：选哪里切要看块本身（§8.6），服务层只按给的位置插
+  const twoSentences = (ids: string[]) => ({
+    request: { segments: ids.map(id => ({ id, text: 'One sentence here. Two sentences here.', cuts: [19] })), source: 'en' as const, target: 'zh-CN' },
+    cache: { paper: 'p', renderPath: 'tags' as RenderPath },
+  })
+
+  it('插标记、摘标记，并把两侧边界作为对齐带出来', async () => {
+    let sent = ''
+    const service = createTranslateService({
+      getProvider: async () => echoing(t => { sent = t; return t.replace('One sentence here. ', '第一句。').replace('Two sentences here.', '第二句。') }),
+    })
+    const res = await service.translate(twoSentences(['a']))
+    expect(res.ok).toBe(true)
+    // 送出去的那份带标记
+    expect(sent).toMatch(/<x id="\d+"\/>/)
+    if (!res.ok) return
+    const seg = res.result.segments[0]!
+    // 回来的译文一个标记都不剩
+    expect(seg.text).toBe('第一句。第二句。')
+    expect(seg.alignment).toEqual({ source: [19, 19], target: [4, 4] })
+  })
+
+  it('调用方没给切点就不插——选哪里切要看块本身（§8.6）', async () => {
+    let sent = ''
+    const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
+    await service.translate({
+      request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.' }], source: 'en', target: 'zh-CN' },
+      cache: { paper: 'p', renderPath: 'tags' as RenderPath },
+    })
+    expect(sent).toBe('One sentence here. Two sentences here.')
+  })
+
+  it('引擎自己汇报的就不插', async () => {
+    let sent = ''
+    const service = createTranslateService({
+      getProvider: async () => echoing(t => { sent = t; return '译文' }, { reportsSentences: true }),
+    })
+    await service.translate(twoSentences(['a']))
+    expect(sent).toBe('One sentence here. Two sentences here.')
+  })
+
+  it('标记被引擎丢了：不给对齐，但文本照样干净', async () => {
+    // 没有对齐只是没有高亮；而残留的标记会让 validate 判定占位符对不上、整块翻译作废
+    const service = createTranslateService({
+      getProvider: async () => echoing(() => '第一句。第二句。'),
+    })
+    const res = await service.translate(twoSentences(['a']))
+    if (!res.ok) return
+    expect(res.result.segments[0]!.text).toBe('第一句。第二句。')
+    expect(res.result.segments[0]!.alignment).toBeUndefined()
+  })
+
+  it('标记乱序：不给对齐，且把残留的标记摘干净', async () => {
+    const service = createTranslateService({
+      getProvider: async () => echoing(t => {
+        const ids = [...t.matchAll(/<x id="(\d+)"\/>/g)].map(m => m[1])
+        return `第二句。<x id="${ids[0]}"/>第一句。<x id="${ids[0]}"/>`
+      }),
+    })
+    const res = await service.translate(twoSentences(['a']))
+    if (!res.ok) return
+    expect(res.result.segments[0]!.text).toBe('第二句。第一句。')
+    expect(res.result.segments[0]!.alignment).toBeUndefined()
+  })
+
+  it('单句块不插标记，但照样给出整段对整段的对齐', async () => {
+    // 空切点数组说的是「这一块只有一句」。整段对整段是安全的对齐，不需要任何标记，
+    // 而单句块占正文一大半——把它和「不该对齐」混为一谈等于把它们全排除在高亮之外
+    let sent = ''
+    const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '一句译文。' }) })
+    const res = await service.translate({
+      request: { segments: [{ id: 'a', text: 'Only one sentence here.', cuts: [] }], source: 'en', target: 'zh-CN' },
+      cache: { paper: 'p', renderPath: 'tags' as RenderPath },
+    })
+    expect(sent).toBe('Only one sentence here.')
+    if (!res.ok) return
+    expect(res.result.segments[0]!.alignment).toEqual({ source: ['Only one sentence here.'.length], target: ['一句译文。'.length] })
+  })
+
+  it('插完会超出引擎单次上限就不插', async () => {
+    // `BatchQueue` 的字符上限只拦「合批」，一条任务超了也照发不误（Codex 在 #137 指出）。
+    // 没有对齐只是没有高亮，而超限是整批失败
+    let sent = ''
+    const text = `${'x'.repeat(40)}. ${'y'.repeat(40)}.`
+    const service = createTranslateService({
+      getProvider: async () => echoing(t => { sent = t; return '译文' }, { maxBatchChars: text.length + 5 }),
+    })
+    await service.translate({
+      request: { segments: [{ id: 'a', text, cuts: [42] }], source: 'en', target: 'zh-CN' },
+      cache: { paper: 'p', renderPath: 'tags' as RenderPath },
+    })
+    expect(sent).toBe(text)
+  })
+
+  it('切点进缓存键：同样的线上文本、不同的切点不能互相命中', async () => {
+    // 两个块可以序列化成同一份线上文本而槽位语义不同，`cutsOf` 因此给出不同切点。
+    // 键里不带它，第二个块会命中第一个的条目，连同对不上的那份对齐（Codex 在 #137 指出）
+    const { port, writes } = fakePort()
+    const service = createTranslateService({ getProvider: async () => echoing(() => '译文一。译文二。'), cache: port })
+    const text = 'One sentence here. Two sentences here.'
+    await service.translate({ request: { segments: [{ id: 'a', text, cuts: [19] }], source: 'en', target: 'zh-CN' }, cache: { paper: 'p', renderPath: 'tags' as RenderPath } })
+    await service.translate({ request: { segments: [{ id: 'b', text, cuts: [] }], source: 'en', target: 'zh-CN' }, cache: { paper: 'p', renderPath: 'tags' as RenderPath } })
+    const keys = writes.flat().map(w => w.key)
+    expect(new Set(keys).size).toBe(2)
+  })
+
+  it('只有 tags 这条路插：markers 没有活得下来的标记，runs 的段拼回去没有线上偏移', async () => {
+    for (const renderPath of ['markers', 'runs'] as RenderPath[]) {
+      let sent = ''
+      const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
+      await service.translate({
+        request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.', cuts: [19] }], source: 'en', target: 'zh-CN' },
+        cache: { paper: 'p', renderPath },
+      })
+      expect([renderPath, sent]).toEqual([renderPath, 'One sentence here. Two sentences here.'])
+    }
+  })
+
+  it('不带缓存的调用（连接测试）也不插', async () => {
+    let sent = ''
+    const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
+    await service.translate({ request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.', cuts: [19] }], source: 'en', target: 'zh-CN' } })
+    expect(sent).toBe('One sentence here. Two sentences here.')
+  })
+})
