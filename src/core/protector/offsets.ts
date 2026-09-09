@@ -119,15 +119,23 @@ function oneRange(spans: readonly WireSpan[], from: number, to: number): Range |
  * Returns an empty array when there is nothing to select: no spans, an empty interval, or an
  * interval past the end of the wire text.
  */
-/** The next node in document order, not descending into `skip`'s subtree. */
-function nextInOrder(node: Node, stop: Node): Node | undefined {
+/** The next node in document order, never leaving `scope`'s subtree. */
+function nextInOrder(node: Node, scope: Node): Node | undefined {
   if (node.firstChild) return node.firstChild
   let current: Node | null = node
-  while (current && current !== stop) {
+  while (current && current !== scope) {
     if (current.nextSibling) return current.nextSibling
     current = current.parentNode
   }
   return undefined
+}
+
+/** Nearest node containing both, so a walk between them cannot escape into the rest of the page. */
+function commonAncestor(a: Node, b: Node): Node {
+  const chain = new Set<Node>()
+  for (let node: Node | null = a; node; node = node.parentNode) chain.add(node)
+  for (let node: Node | null = b; node; node = node.parentNode) if (chain.has(node)) return node
+  return a.ownerDocument?.documentElement ?? a
 }
 
 /**
@@ -136,16 +144,21 @@ function nextInOrder(node: Node, stop: Node): Node | undefined {
  * **Asked at range time, not recorded at serialize time.** `planBatches` serialises every selected
  * block before `processBatch` inserts the pending node and later the translation, so a flag written
  * during serialisation cannot know about a nested block that finished afterwards — and that is
- * exactly the flow this guards (Codex pointed this out on #123). Adjacent runs are a few nodes
- * apart, and ranges are built on hover, so walking the gap costs nothing.
+ * exactly the flow this guards (Codex pointed this out on #123).
+ *
+ * The walk is bounded by the common ancestor. `b` is frequently an *ancestor* of `a` — the last text
+ * inside a paired element and that element's own closing slot — and a preorder walk never returns to
+ * an ancestor, so an unbounded one runs off the end of the block, meets the block's own translation
+ * sibling, and reports a discontinuity at every ordinary closing tag. Scanning the rest of the page
+ * once per closing tag also makes building a highlight quadratic in the document (Codex on #123).
  */
 function injectedBetween(a: Node, b: Node): boolean {
-  const root = a.ownerDocument?.documentElement
-  if (!root) return false
+  if (a === b) return false
+  const scope = commonAncestor(a, b)
   let node: Node | undefined = a
-  while (node && node !== b) {
-    node = nextInOrder(node, root)
-    if (!node || node === b) break
+  while (node) {
+    node = nextInOrder(node, scope)
+    if (!node || node === b) return false
     if (node.nodeType === 1 && isInjected(node as Element)) return true
   }
   return false

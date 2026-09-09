@@ -227,6 +227,34 @@ describe('wire offsets to DOM (#105)', () => {
     ])
   })
 
+  it('does not split at an ordinary closing tag, even once the block has a translation', () => {
+    // The closing slot's node is the element itself, which is an *ancestor* of the text run before
+    // it. A preorder walk never returns to an ancestor, so an unbounded one ran off the end of the
+    // block, met the block's own .axt-t sibling and reported a discontinuity at every closing tag
+    // (Codex on #123). Bounding the walk by the common ancestor is what stops that.
+    const doc = new DOMParser().parseFromString('<!doctype html><html><body><div></div></body></html>', 'text/html')
+    const host = doc.querySelector('div')!
+    host.innerHTML = '<p class="ltx_p">start <em>inner</em> tail</p><p class="axt-t" data-axt-for="x">translated</p>'
+    const root = host.querySelector('p.ltx_p')!
+    const block = serialize(root, 'tags', { offsets: true })
+    const close = block.offsets!.find(s => s.kind === 'slot' && s.role === 'close')!
+    const before = block.offsets![block.offsets!.indexOf(close) - 1]!
+    // The pair really is ancestor/descendant, which is the shape that broke the walk
+    expect(close.node.contains(before.node)).toBe(true)
+    // One range across the whole block: the sibling translation is outside it, not a reason to cut
+    const calls = boundaryCalls(root, block.offsets!, 0, block.text.length)
+    expect(calls).toHaveLength(2)
+    expect(calls[0]).toBe('start@text("start "):0')
+  })
+
+  it('still splits when an injected node really does sit inside a paired element', () => {
+    // Bounding the walk must not blind it: an inner translation inside the <em> is a real gap.
+    const root = el('<p class="ltx_p">a <em>one <span class="axt-t" data-axt-for="y">t</span> two</em> b</p>')
+    const block = serialize(root, 'tags', { offsets: true })
+    const calls = boundaryCalls(root, block.offsets!, 0, block.text.length)
+    expect(calls.length).toBeGreaterThan(2)
+  })
+
   it('returns nothing for an interval reaching past the tiled wire text', () => {
     // The loop used to push the earlier segments before the final oneRange failed, so a malformed
     // request came back as a truncated prefix instead of nothing (Codex on #123).
