@@ -44,6 +44,9 @@ export interface SessionRouter {
  * @param current 取「此刻的」链；配置变更后它返回新的一条，已绑定的会话不受影响
  * @param options.onDrop 每撤掉一个 scope 调一次：翻译队列之外还有别的按 scope 排队的东西（图片 OCR，§15.2），
  *   撤会话时一起撤；返回它撤掉的条数。`remember` 一并传下去——猜出来的终结在那条队列上同样不能判死
+ * @param options.stillThere 宽限到点时问一句「这个标签页还是刚才那个页面吗」。页面自己分得清同文档
+ *   换 hash 与真的跳走：它还在就还答得出同一个会话 id。没有这个的话，跳到一个不需要新翻译的位置
+ *   （目的地已经翻过了）就没有任何请求来取消撤销，正在翻的那一批会被白白排空（Codex 在 #143 指出）
  */
 /**
  * 「可能跳走了」按住多久再撤。
@@ -54,7 +57,7 @@ export interface SessionRouter {
  */
 const NAVIGATION_GRACE_MS = 3000
 
-export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string, options: { remember: boolean }) => number } = {}): SessionRouter {
+export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string, options: { remember: boolean }) => number; stillThere?: (tabId: number, scope: string) => Promise<boolean> } = {}): SessionRouter {
   /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
   const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number }>()
   /**
@@ -156,7 +159,12 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
       if (scopes.length === 0) return
       leaving.set(tabId, setTimeout(() => {
         leaving.delete(tabId)
-        void drop(scopes, { remember: false })
+        void (async () => {
+          // 没人问得到就按原来的判断走：这时的证据仍然只有「这段时间没有请求」
+          const alive = options.stillThere ? await Promise.all(scopes.map(s => options.stillThere!(tabId, s))) : scopes.map(() => false)
+          const gone = scopes.filter((_, i) => !alive[i])
+          if (gone.length > 0) await drop(gone, { remember: false })
+        })()
       }, NAVIGATION_GRACE_MS))
     },
     rebindAll(transport) {

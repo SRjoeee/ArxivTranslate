@@ -57,7 +57,23 @@ export default defineBackground(() => {
     keepAlive: () => void browser.runtime.getPlatformInfo(),
   })
   const ocr = createOcrService({ helper, cache })
-  const router = createSessionRouter(transportOf, { onDrop: (scope, options) => ocr.cancel(scope, options) })
+  const router = createSessionRouter(transportOf, {
+    onDrop: (scope, options) => ocr.cancel(scope, options),
+    /**
+     * 那个标签页还是不是刚才那个页面：问它自己。
+     *
+     * 页面还在就答得出同一个会话 id；真跳走了 content script 已经没了，`sendMessage` 直接抛。
+     * 只在宽限到点时问一次，而且只在这个标签页那段时间一个请求都没有的情况下才走到这里
+     */
+    stillThere: async (tabId, scope) => {
+      try {
+        const status = await browser.tabs.sendMessage(tabId, { type: 'axt:page-status' })
+        return (status as { session?: string | null } | undefined)?.session === scope
+      } catch {
+        return false
+      }
+    },
+  })
 
   // 两个生命周期钩子都只给 tabId / status，不需要 "tabs" 权限
   const dropTab = (tabId: number, why: string) => {

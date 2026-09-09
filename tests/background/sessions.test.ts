@@ -37,6 +37,37 @@ describe('createSessionRouter', () => {
     expect(router.bound()).toEqual(['session-1'])
   })
 
+  it('页面自己说还在：宽限到点也不撤，哪怕这段时间一个请求都没有', async () => {
+    // 跳到一个已经翻好的位置就不会有新请求，靠「有没有请求」判断不出来。页面自己分得清：
+    // 它还在就还答得出同一个会话 id（Codex 在 #143 指出）
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    const asked: [number, string][] = []
+    const router = createSessionRouter(async () => transport, {
+      stillThere: async (tabId, scope) => { asked.push([tabId, scope]); return true },
+    })
+    await router.forCall('session-1', 7)
+
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(asked).toEqual([[7, 'session-1']])
+    expect(transport.cancelled).toEqual([])
+    expect(router.bound()).toEqual(['session-1'])
+  })
+
+  it('页面答不上来（真跳走了）：照撤', async () => {
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    const router = createSessionRouter(async () => transport, { stillThere: async () => false })
+    await router.forCall('session-1', 7)
+
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(transport.cancelled).toEqual(['链:session-1:soft'])
+  })
+
   it('猜出来的终结在 OCR 那条队列上同样不判死', async () => {
     // 撤会话时图片 OCR 的排队一起撤（onDrop）。但那条队列自己也记「撤过的 scope」，
     // 猜错时页面还活着，它后面滚到的每一张图都会直接 aborted（Codex 在 #143 指出）
