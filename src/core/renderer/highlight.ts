@@ -453,7 +453,18 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
         }
       })
     : undefined
-  if (doc.body) mutations?.observe(doc.body, { childList: true, subtree: true })
+  // `attributes` as well as `childList`: a class or inline style toggled on an ancestor re-lays out
+  // its subtree without inserting anything, and `characterData` because the text of a translation
+  // node is set in place after its node is inserted (Codex on #138)
+  if (doc.body) mutations?.observe(doc.body, { childList: true, subtree: true, attributes: true, characterData: true })
+  /**
+   * A font swapping under the text.
+   *
+   * It re-lays out every line and produces no mutation at all; the size observer only sees it if the
+   * document's height happens to change with it. `loadingdone` is the event for exactly this.
+   */
+  const onFonts = () => invalidate()
+  doc.fonts?.addEventListener('loadingdone', onFonts)
 
   return {
     stop() {
@@ -463,6 +474,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
       doc.removeEventListener('scroll', onScroll, { capture: true })
       observer?.disconnect()
       mutations?.disconnect()
+      doc.fonts?.removeEventListener('loadingdone', onFonts)
       clearTimer(settleTimer)
       settleTimer = 0
       if (frame !== 0) view?.cancelAnimationFrame(frame)

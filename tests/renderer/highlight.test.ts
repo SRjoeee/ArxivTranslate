@@ -67,12 +67,19 @@ function stubBrowser(doc: Document) {
   }
   // Same shape for MutationObserver: registered on observe, and the test hands it records
   const mutators: ((records: { target: Node }[]) => void)[] = []
+  const watching: MutationObserverInit[] = []
   view.MutationObserver = class {
     fn: (records: { target: Node }[]) => void
     constructor(fn: (records: { target: Node }[]) => void) { this.fn = fn }
-    observe() { mutators.push(this.fn) }
+    observe(_target: Node, init: MutationObserverInit) { watching.push(init); mutators.push(this.fn) }
     disconnect() { const at = mutators.indexOf(this.fn); if (at >= 0) mutators.splice(at, 1) }
   }
+  // happy-dom has no FontFaceSet; the stub keeps the listener so a test can fire the swap
+  const fonts: (() => void)[] = []
+  Object.defineProperty(doc, 'fonts', {
+    configurable: true,
+    value: { addEventListener: (_e: string, fn: () => void) => fonts.push(fn), removeEventListener: () => {} },
+  })
   view.requestAnimationFrame = (fn: () => void) => frames.push(fn)
   view.cancelAnimationFrame = () => {}
   view.setTimeout = (fn: () => void, delay: number) => { timers.push({ fn, delay }); return timers.length }
@@ -109,6 +116,13 @@ function stubBrowser(doc: Document) {
     /** A scroll dispatched from `el` (capture phase) plus the frame it schedules */
     scrollOn: (el: EventTarget) => {
       el.dispatchEvent(new Event('scroll'))
+      for (const fn of frames.splice(0)) fn()
+    },
+    /** What the MutationObserver was asked to watch */
+    watching: () => watching,
+    /** A web font finishing its swap, plus the frame it schedules */
+    fontSwap: () => {
+      for (const fn of fonts) fn()
       for (const fn of frames.splice(0)) fn()
     },
     /** DOM records reported by the MutationObserver, plus the frame they schedule */
@@ -367,6 +381,12 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.nextLines(r(300))
     browser.mutate(source.parentElement!)
     expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
+    // …and a CSS-only reflow has to be visible too: a class toggled on an ancestor re-lays out its
+    // subtree without inserting anything, and a font swap does it without any mutation at all
+    expect(browser.watching()[0]).toMatchObject({ childList: true, subtree: true, attributes: true, characterData: true })
+    browser.nextLines(r(500))
+    browser.fontSwap()
+    expect(browser.bands().every(b => (b.getAttribute('style') ?? '').includes('top:500.0px'))).toBe(true)
     hl.stop()
   })
 
