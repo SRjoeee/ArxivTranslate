@@ -813,14 +813,14 @@ fixtures 存在 `tests/fixtures/arxiv/<arxiv-id>.html`（10 篇，Phase 0 抓取
 
 ## 15. 图片翻译 [决定，2026-09-07 进入范围]
 
-目标与 Safari 自带的图片翻译一致：图里的文字识别出来、译文以标签叠在原位，不加别的功能。**范围**：只翻位图 `img.ltx_graphics`（SVG 见 §15.1，v1 仍跳过）；只做 Mac（Vision OCR），非 Mac 退化路径延后；**不做单张图的入口**——用户点整页翻译后，位图与文字块走同一套懒加载调度（看到哪翻到哪，§10），随会话取消；设置页一项「在哪些模式下翻图片」（side / stack / only 多选，默认三种都开），按当前生效模式作闸——切到没开的模式只是隐藏叠加层，切回来再显示，切到开了但还没翻的补调度，与「切模式不重新请求」一致。helper 没检测到（`ping` 失败）时设置项灰掉、整条路径静默不跑，页面翻译不受影响。
+目标与 Safari 自带的图片翻译一致：图里的文字识别出来、译文以标签叠在原位，不加别的功能。**范围**：位图 `img.ltx_graphics` 与外部引用的 SVG 图 `object.ltx_graphics[type="image/svg+xml"]`（§15.5），**内联 `svg.ltx_picture`（TikZ）仍跳过**；位图的识别只做 Mac（Vision OCR），非 Mac 退化路径延后，**SVG 图不需要 helper**；**不做单张图的入口**——用户点整页翻译后，位图与文字块走同一套懒加载调度（看到哪翻到哪，§10），随会话取消；设置页一项「在哪些模式下翻图片」（side / stack / only 多选，默认三种都开），按当前生效模式作闸——切到没开的模式只是隐藏叠加层，切回来再显示，切到开了但还没翻的补调度，与「切模式不重新请求」一致。helper 没检测到（`ping` 失败）时只有**位图**不翻，SVG 图照常——设置项不再整节灰掉（§15.5）。
 
 ### 15.1 判断
 
 - Safari 的图片翻译 = Live Text（Vision 框架 OCR）+ Translation 框架，第三方都能调用
 - **helper 只做 OCR，翻译和叠加层留在扩展里**。理由：Apple Translation 框架在 macOS 15 上只能通过 SwiftUI `.translationTask` 拿到 session，macOS 26 才有无 UI 的 `TranslationSession(installedSource:target:)`，且要求语言包已安装；而扩展已有完整翻译管线，LLM 还能拿图注做上下文。helper 越薄，平台相关的面越小
 - 非 Mac 平台退化为多模态 LLM 直接读图给文字与坐标（坐标精度较低，可接受）
-- arXiv 的 SVG 图全是 TikZ 输出的 `svg.ltx_picture`（10 篇 fixture 共 164 个，多为画出来的公式），实测没有 `<text>`，文字只以 `foreignObject` 出现且极少（全部 fixture 仅 1 个文本节点），v1 整体跳过（§5.2）；OCR 路线只针对位图 `img.ltx_graphics`（fixture 中 13 个，RESEARCH.md §2.9）
+- **SVG 有两个群体，只有一个该跳过。** 内联的 `svg.ltx_picture` 是 TikZ 输出（10 篇 fixture 共 164 个，多为画出来的公式），实测没有 `<text>`、文字只以 `foreignObject` 出现且极少，跳过（§5.2、RESEARCH.md §2.9）。**外部引用的 `<object type="image/svg+xml">` 是另一回事**：样本里 1792 张图中占 880 张（49.1%），文字以带 `data-text` 的 `<use>` 字形画出，可以精确读出来、不需要 OCR，走 §15.5
 - **翻译走现有管线，不走 Safari 那种逐行无上下文的翻法**。用户给的对照样本（Safari 翻同一张物理示意图）里 "Dressed sites" 成了「打扮的网站」、"Even sites" 成了「甚至网站」、"String Extension" 成了「特林扩展名」，图里孤零零一个 **B** 也被框成「字母b」——每行单独送、没有图注与章节，就是这个结果。我们每张图的行连同图注、所属章节作为 context 一批送给现有 provider；单个字母、纯数字、标识符按 §6 既有的保留规则跳过不翻
 - **叠加层照 Safari 的样子**：白色圆角半透明框盖住原文字、译文字号随框高、竖直相邻且左缘对齐的行合成一个框（"Pair / Production" 两行一框）；hover 显示原文。底色先用固定的半透明白，实测遇到深色底的图再加采样（ImageTrans 的 `detectBackgroundColor` 思路）
 - **现成的拿来用**：helper 核心移植 `bytefer/macos-vision-ocr`（MIT，单文件 Swift，Vision revision 3，输出每行文字 + 归一化四角 + 置信度，已经是 §15.3 要的形状），只需套上 Native Messaging 的 stdio 帧；叠加层移植 `xulihang/ImageTrans_chrome_extension`（GPL-3.0）`getImage.js` 里的 DOM 渲染段（字号适配 `fitBoxFontSize`、底色采样 `detectBackgroundColor`、换行、圆角框）与视口调度思路。**不移植**它替换 `<img>` src 的做法——违反 §7.1
@@ -899,7 +899,19 @@ content script                       background (service worker)          axt-he
 - 恢复原文后叠加层、注入节点、`data-axt-*` 属性全部为零；关掉图片翻译的 `e2e:layout` 20/20、`e2e` 27/27 与 main 一致
 - e2e 抓到的一处脚本问题：逐屏滚动要每步重读页面高度，译文插进来页面会变长，按初始高度滚会漏掉最后一张图
 
-### 15.5 参考
+### 15.5 SVG 图：文字读出来，不识别 [决定，2026-09-09 实现，issue #121]
+
+外部引用的图（`<object type="image/svg+xml">`，样本 1792 张图里占 880 张、49.1%；178 篇论文里 99 篇至少有一张）里没有 `<text>`：每个字符都是轮廓，由一个指向 `<defs>` 的 `<use>` 画出来。但**每个 `<use>` 都带 `data-text`，写着它画的是哪个字符**，所以文字是**读**出来的而不是认出来的，误差为零。实测 281 个文件、55064 个 `<use>`，凡是字形的覆盖率 100%（RESEARCH.md §6.11）。
+
+- **只读，不写。** 叠加层建在**主文档**里，`contentDocument` 只读不改。成立的前提是实测的：图的 `viewBox` 线性映射到 `<object>` 元素框（归一化坐标四位小数吻合）。所以 §7.1 的 DOM 不变量与 `restore()` 一个字都不用改，也不存在「第二个文档的恢复语义」这个问题
+- **与位图共用一条管线**：`src/core/svg/glyphs.ts` 产出的是 `OcrLine[]`——OCR helper 返回的同一个形状——之后的 `linesToBoxes`、翻译请求、缓存键、视口调度、进度上报全部共享，`process()` 只在最前面按 `ImageTarget.kind` 分叉
+- **分段靠几何**：转换器不做任何分组，一张图的字形平铺在 `<svg>` 直接子节点下。把 `transform="matrix(a,b,c,d,e,f)"` 分解出角度 `atan2(b,a)` 与字号 `hypot(a,b)`（**不能把 `a` 当字号**），沿基线投影，间隙超过 1.5 倍字号就切段。空格本身是字形，所以段内文字按文档顺序就是准确原文
+- **只画轴对齐的段**：全语料 55047 个字形里 90.61% 横排、8.01% 是 -90°，另有 **1.27% 分布在 38 种其它角度**。叠加层用「外接框 + 角度」描述旋转标签，那个框只在 90° 倍数上等于标签自己的框，所以其余角度的段**丢掉**而不是近似
+- **竖排标签的尺寸不能用百分比**：绕中心转 90° 之后框的 width 是屏幕上的竖向长度，而 `width: X%` 是容器**宽**的百分比。用 `cqh` / `cqw` 分别对应文字真正延伸的那根轴
+- **代码不翻**：§5 跳过 `<pre>` 与代码块，图里的代码清单是同一种内容。但 §5 的选择器是 HTML 的，够不着 SVG 里一串平铺的 `<use>`，所以这条路自己认（`src/core/svg/runs.ts`），判据从真实图里的段落定
+- **已知缺口**：10% 的图不用 `<use>` 画字、直接把轮廓写进 `<path>`，读不到——**「不需要 OCR」只对用 `<use>` 画字的图成立**。全部 27 张渲染分类后：11 张真没文字、6 张只有数学符号、2 张是 logo，**8 张带真正的词汇标签**（图例、方框图模块名、小多图轴标题）。这 8 张 v1 翻不了，也正是位图 OCR 路径将来有价值的地方
+
+### 15.5b 参考
 
 - Native Messaging 范本：KeePassXC-Browser + keepassxc-proxy
 - Vision OCR 现成代码：macOCR、TRex、ocrmac

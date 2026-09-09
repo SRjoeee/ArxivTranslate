@@ -15,6 +15,11 @@ export interface OcrLine {
   quad: Quad
   /** Vision 的置信度 0–1 */
   conf: number
+  /**
+   * Text direction in radians, absent when upright. Only the SVG path (§15.5) sets it, from the
+   * glyph transform; Vision's quads are axis-aligned in practice and the helper leaves it off.
+   */
+  angle?: number
 }
 
 export interface OcrResult {

@@ -375,13 +375,16 @@ export function App() {
         </label>
       )}
 
-      <h2 style={{ fontSize: 15, marginTop: 24, opacity: helper?.available ? 1 : 0.5 }}>图片翻译（Mac）</h2>
+      {/* 一节管两种图（§15.5）。**不再按 helper 灰掉**：helper 只决定位图，SVG 图的文字是读出来的、
+          不需要本机识别，而 SVG 图占样本的 49.1%（880/1792）——整节灰掉等于把能用的功能也关了 */}
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>图内文字翻译</h2>
       <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>
-        {helper === null ? '正在检测本机 OCR helper…'
-          : helper.available ? `已检测到 helper ${helper.version ?? ''}。位图里的文字由本机 Vision 识别，译文叠在图上；SVG 不翻`
-          : `未检测到 helper${helper.reason ? `（${helper.reason}）` : ''}。安装方法见仓库 helper/README.md；没装时整页翻译照常，只是不翻图`}
+        译文叠在图上，鼠标悬停看原文。
+        {helper === null ? ' 正在检测本机 OCR helper…'
+          : helper.available ? ` 已检测到 helper ${helper.version ?? ''}，位图与 SVG 图都能翻。`
+          : ` 未检测到 helper${helper.reason ? `（${helper.reason}）` : ''}：SVG 图照常翻，位图需要本机 helper，安装方法见仓库 helper/README.md。`}
       </small>
-      <fieldset style={{ border: 0, padding: 0, margin: '0 0 14px' }} disabled={!helper?.available}>
+      <fieldset style={{ border: 0, padding: 0, margin: '0 0 14px' }}>
         <legend style={{ padding: 0 }}>在哪些模式下翻译图片</legend>
         {IMAGE_MODES.map(([mode, name]) => (
           <label key={mode} style={{ marginRight: 16 }}>

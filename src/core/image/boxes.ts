@@ -17,6 +17,14 @@ export interface Box {
   text: string
   /** 合并进来的行数，字号按它均摊 */
   lines: number
+  /**
+   * 文字方向，弧度；不在表示横排（§15.5）。
+   *
+   * 只有 SVG 路径会设，语料里只有 0 与 -π/2 两种。**旋转的行不参与合并**：下面的相邻 / 对齐判定
+   * 是按「行往下叠」写的，而竖排的行是往旁边叠，套上去只会把两条无关的轴标签粘在一起。
+   * 竖排标签本来就极少多行。
+   */
+  angle?: number
 }
 
 export interface BoxOptions {
@@ -59,11 +67,11 @@ export function linesToBoxes(lines: readonly OcrLine[], options: BoxOptions = {}
   const minConf = options.minConf ?? 0.3
   const kept = lines
     .filter(line => line.conf >= minConf && isTranslatable(line.text))
-    .map(line => ({ ...quadBounds(line.quad), text: line.text.trim() }))
+    .map(line => ({ ...quadBounds(line.quad), text: line.text.trim(), angle: line.angle }))
     .sort((a, b) => a.y - b.y || a.x - b.x)
   const boxes: Box[] = []
   for (const line of kept) {
-    const host = boxes.find(box => adjacent(box, line) && aligned(box, line))
+    const host = line.angle ? undefined : boxes.find(box => !box.angle && adjacent(box, line) && aligned(box, line))
     if (host) {
       const right = Math.max(host.x + host.w, line.x + line.w)
       const bottom = Math.max(host.y + host.h, line.y + line.h)
