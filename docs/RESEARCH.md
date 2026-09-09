@@ -586,10 +586,10 @@ children of the root `<svg>`**, nested up to four deep:
 | glyphs | 42877 | 6766 | 3036 | 1599 | 66 |
 
 Grouping happens; what does not happen is a transform on any of those containers. The implementation now
-enforces that rather than assuming it: `src/core/svg/glyphs.ts` on `feat/svg-figures` (commit `fb877e1`)
+enforces that rather than assuming it: `src/core/svg/glyphs.ts` (commit `fb877e1`, merged with #134)
 skips any glyph with a transformed ancestor, so a figure that ever did nest one would go untranslated instead
-of being drawn from half a transform. (Forward reference — that lives on the implementation branch; this PR
-is the survey and carries no code.)
+of being drawn from half a transform. (Forward reference — that is the implementation; this PR is the survey
+and carries no code.)
 
 Angles over the **whole sampled set** — all 284 glyph-bearing files, 58028 glyphs:
 
@@ -620,9 +620,9 @@ its own axes instead. That is a piece of work, not a barrier; v1 does not need i
 promise it.
 
 **What the decision costs is the last row of the table above: 673 glyphs, 1.160% of 58028, commonest -30°.**
-(Forward reference — `quarterTurn` in `src/core/svg/glyphs.ts` on `feat/svg-figures` is where the decision
-now lives; this PR is the survey and carries no code, and Codex asked twice for forward references to be
-marked as such.)
+(Forward reference — `quarterTurn` in `src/core/svg/glyphs.ts` is where the decision now lives, merged with
+#134; this PR is the survey and carries no code, and Codex asked twice for forward references to be marked
+as such.)
 
 **(b) Spaces that were dropped.** In a syntax-highlighted code listing, `if` and `log_counting` belong to
 differently coloured spans and the space between them has no glyph, so the run reads `"iflog_counting == 8:"`,
