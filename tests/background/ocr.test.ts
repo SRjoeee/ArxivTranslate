@@ -87,6 +87,17 @@ describe('createOcrService', () => {
     expect(cache.store.size).toBe(0)
   })
 
+  it('猜出来的终结（remember: false）只排空，不把 scope 判死', async () => {
+    // `tabs.onUpdated` 分不出同文档换 hash 与真的跳走，所以会话可能被猜着撤掉。猜错时页面还活着，
+    // 判死等于让它后面滚到的每一张图都直接 aborted（Codex 在 #143 指出翻译那条改了、这条没改）
+    const { helper, ocr } = fakeHelper()
+    const cache = memoryCache()
+    const service = createOcrService({ helper, cache: cache.port })
+    service.cancel('s1', { remember: false })
+    expect(await service.ocr(call)).toEqual({ ok: true, result: RESULT, cached: false })
+    expect(ocr).toHaveBeenCalledTimes(1)
+  })
+
   it('撤过的 scope 之后的调用直接回 aborted，不叫 helper；读缓存期间被撤也不叫（真机实测的空窗）', async () => {
     const { helper, ocr } = fakeHelper()
     const cache = memoryCache()
