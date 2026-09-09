@@ -6,6 +6,7 @@
 import type { WireFormat } from '@/core/protector'
 import { wireFormatOf } from '@/cache/key'
 import { cacheKeyFor, type RenderPath } from '@/cache/key'
+import type { SentenceAlignment } from './alignment'
 // 深引 validate 而不是 protector 的桶：serialize / rehydrate 要碰 DOM，那两个不该进 background 的包
 import { expectationsFromText, validate } from '@/core/protector/validate'
 import { getRandomUUID } from '@/shared/uuid'
@@ -13,7 +14,19 @@ import { BatchCountMismatchError, BatchQueue, type BatchExecutionMeta, type Batc
 import { CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
 import { REQUEST_TIMEOUT_ERROR_NAME, RequestQueue, type QueueOptions } from './request/request-queue'
 import { attachRequestErrorMeta } from './request/retry-policy'
-import { ProviderError, type ProviderErrorKind, type TranslateRequest, type TranslationProvider } from './types'
+import { ProviderError, type ProviderErrorKind, type TranslatedSegment, type TranslateRequest, type TranslationProvider } from './types'
+
+/**
+ * What one segment's translation carries through the queue. `alignment` is present only when the
+ * engine reported sentence boundaries and they reconstructed both texts (`alignment.ts`).
+ *
+ * The queue used to be string-valued, which silently dropped the alignment between the provider and
+ * the caller — the type reached the message boundary but the data never did (issue #105).
+ */
+export interface TranslationOutcome {
+  text: string
+  alignment?: SentenceAlignment
+}
 
 export interface CacheEntry {
   key: string
@@ -45,7 +58,8 @@ export type TranslateCall = TranslateMessageRequest & {
 }
 
 export type TranslateMessageResponse =
-  | { ok: true; result: { segments: { id: string; text: string }[]; provider: string; model?: string }; cached: number }
+  // `alignment` is plain number arrays, so it survives the structured clone across the message boundary
+  | { ok: true; result: { segments: TranslatedSegment[]; provider: string; model?: string }; cached: number }
   | { ok: false; error: { kind: ProviderErrorKind; message: string } }
 
 export interface TranslateServiceDeps {
@@ -57,7 +71,7 @@ export interface TranslateServiceDeps {
   /** 读缓存的等待上限（测试用）；默认 CACHE_READ_BUDGET_MS */
   cacheReadBudgetMs?: number
   /** 攒批参数覆盖（测试用） */
-  batch?: Partial<Pick<BatchOptions<QueueItem, string>, 'batchDelay' | 'maxRetries' | 'enableFallbackToIndividual'>>
+  batch?: Partial<Pick<BatchOptions<QueueItem, TranslationOutcome>, 'batchDelay' | 'maxRetries' | 'enableFallbackToIndividual'>>
 }
 
 export interface TranslateService {
@@ -137,7 +151,7 @@ interface ProviderQueues {
    * 等于把免费引擎最大的优势扔掉：实测 216 块发了 61 个请求、中位每个只装 2 条（上限 100 条 / 8000 字，§8.3）。
    * `maxItemsPerBatch` 为 1 的 provider 由 BatchQueue 自然退化成一条一个请求，不需要另一条路径
    */
-  batchQueue: BatchQueue<QueueItem, string>
+  batchQueue: BatchQueue<QueueItem, TranslationOutcome>
 }
 
 /** provider 看到的 id 必须唯一：不同调用的段可能同 id（同一段落重发、连接测试连发三次）混进一批 */
@@ -192,12 +206,15 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       ? attachRequestErrorMeta(new BatchCountMismatchError(expected, 0, [e.message]), { kind: 'bad-request', isRetryable: false })
       : e
 
-  const translateItems = async (items: QueueItem[], ids: string[], signal: AbortSignal | undefined): Promise<string[]> => {
+  const translateItems = async (items: QueueItem[], ids: string[], signal: AbortSignal | undefined): Promise<TranslationOutcome[]> => {
     const first = items[0]!
     try {
       const result = await first.provider.translate({ ...first.request, segments: items.map((item, i) => ({ id: ids[i]!, text: item.text })), signal })
-      const byId = new Map(result.segments.map(s => [s.id, s.text]))
-      return ids.map(id => byId.get(id) ?? '')
+      const byId = new Map(result.segments.map(s => [s.id, s]))
+      return ids.map(id => {
+        const segment = byId.get(id)
+        return segment ? { text: segment.text, alignment: segment.alignment } : { text: '' }
+      })
     } catch (e) {
       throw asBatchError(e, items.length)
     }
@@ -237,7 +254,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       return error
     }
     const requestQueue = new RequestQueue(queueOptions)
-    const batchQueue = new BatchQueue<QueueItem, string>({
+    const batchQueue = new BatchQueue<QueueItem, TranslationOutcome>({
       maxCharactersPerBatch: provider.maxBatchChars,
       maxItemsPerBatch: provider.maxBatchItems,
       batchDelay: deps.batch?.batchDelay ?? BATCH_DELAY_MS,
@@ -291,7 +308,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
 
       // 1. 查缓存：一次算完所有键，一次批量读
       const keys = new Map<string, string>()
-      const translated = new Map<string, string>()
+      const translated = new Map<string, TranslationOutcome>()
       if (store && cache) {
         const computed = await Promise.all(request.segments.map(segment =>
           cacheKeyFor({ providerId: provider.cacheId ?? provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text }),
@@ -304,7 +321,8 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           const hits = await readWithBudget(store, computed, deps.cacheReadBudgetMs ?? CACHE_READ_BUDGET_MS)
           request.segments.forEach((segment, i) => {
             const hit = hits[i]
-            if (hit !== null && hit !== undefined) translated.set(segment.id, hit)
+            // 缓存里目前只有译文；对齐的持久化是下一个 PR（issue #105）
+            if (hit !== null && hit !== undefined) translated.set(segment.id, { text: hit })
           })
         }
       }
@@ -360,7 +378,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           }
           translated.set(item.id, outcome.value)
           const key = keys.get(item.id)
-          if (store && cache && key && admits(item.text, outcome.value, wireFormatOf(cache.renderPath))) writes.push({ key, translation: outcome.value, paper: cache.paper })
+          if (store && cache && key && admits(item.text, outcome.value.text, wireFormatOf(cache.renderPath))) writes.push({ key, translation: outcome.value.text, paper: cache.paper })
         })
         // 写之前再查一次取消（Codex 在 #33 指出）：一次调用会被拆到多个批次，先完成的那些
         // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，
@@ -380,7 +398,10 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       }
 
       // 4. 按原顺序合并
-      const segments = request.segments.map(s => ({ id: s.id, text: translated.get(s.id) ?? '' }))
+      const segments = request.segments.map(s => {
+        const outcome = translated.get(s.id)
+        return outcome?.alignment ? { id: s.id, text: outcome.text, alignment: outcome.alignment } : { id: s.id, text: outcome?.text ?? '' }
+      })
       return { ok: true, result: { segments, provider: provider.id, model: model || undefined }, cached }
     } catch (e) {
       return { ok: false, error: toErrorInfo(e) }
