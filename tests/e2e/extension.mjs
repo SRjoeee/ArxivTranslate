@@ -889,6 +889,9 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const logs = []
   page.on('console', m => { const t = m.text(); if (t.includes('[axt]')) logs.push({ t: Date.now(), text: t }) })
   await page.goto(`https://arxiv.org/abs/${PAPER}`, { waitUntil: 'domcontentloaded' })
+  // content script 是 `document_idle`，`domcontentloaded` 之后它未必已经跑过：立刻读 DOM 会读到空的，
+  // 而下一步的 click 因为自动等待反而会过——一条假失败加一条假通过
+  await page.waitForSelector('.axt-abs-link', { timeout: 20_000 }).catch(() => {})
   const link = await page.evaluate(() => {
     const ours = document.querySelector('.axt-abs-link')
     const html = document.querySelector('#latexml-download-link')
