@@ -63,8 +63,14 @@ const targetsOf = new WeakMap<Element, WeakRef<Element>[]>()
  * `checkVisibility` can, and is Chrome 105+ against a floor of 131. Where it does not exist, being
  * in the document is the best available answer.
  */
-const rendered = (el: Element): boolean =>
-  typeof el.checkVisibility === 'function' ? el.checkVisibility() : el.isConnected
+/**
+ * `visibility: hidden` and `opacity: 0` count as hidden too. Both keep their layout boxes, so
+ * without these options the bands would be painted over invisible text and the peek would never
+ * open for it (Codex on #149). Opt-in checks: the no-argument call only sees `display: none`.
+ */
+const VISIBILITY: CheckVisibilityOptions = { visibilityProperty: true, opacityProperty: true }
+export const rendered = (el: Element): boolean =>
+  typeof el.checkVisibility === 'function' ? el.checkVisibility(VISIBILITY) : el.isConnected
 
 /** The record reachable from either side of a block, or undefined once the translation is gone. */
 function recordOf(el: Element): SentenceMap | undefined {

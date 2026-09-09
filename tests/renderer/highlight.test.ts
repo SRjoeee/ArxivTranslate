@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { rehydrate, serialize } from '@/core/protector'
 import { clearSentenceHighlights, registerSentences, restore, setMode, startSentenceHighlight } from '@/core/renderer'
+import { PEEK_DWELL_MS } from '@/core/renderer/peek'
 import { splitSentences } from '@/core/sentences'
 
 /**
@@ -66,11 +67,12 @@ function stubBrowser(doc: Document) {
     disconnect() { const at = resizes.indexOf(this.fn); if (at >= 0) resizes.splice(at, 1) }
   }
   // Same shape for MutationObserver: registered on observe, and the test hands it records
-  const mutators: ((records: { target: Node }[]) => void)[] = []
+  type StubRecord = { target: Node; type?: MutationRecordType }
+  const mutators: ((records: StubRecord[]) => void)[] = []
   const watching: MutationObserverInit[] = []
   view.MutationObserver = class {
-    fn: (records: { target: Node }[]) => void
-    constructor(fn: (records: { target: Node }[]) => void) { this.fn = fn }
+    fn: (records: StubRecord[]) => void
+    constructor(fn: (records: StubRecord[]) => void) { this.fn = fn }
     observe(_target: Node, init: MutationObserverInit) { watching.push(init); mutators.push(this.fn) }
     disconnect() { const at = mutators.indexOf(this.fn); if (at >= 0) mutators.splice(at, 1) }
   }
@@ -126,8 +128,8 @@ function stubBrowser(doc: Document) {
       for (const fn of frames.splice(0)) fn()
     },
     /** DOM records reported by the MutationObserver, plus the frame they schedule */
-    mutate: (target: Node) => {
-      for (const fn of mutators) fn([{ target }])
+    mutate: (target: Node, type: MutationRecordType = 'childList') => {
+      for (const fn of mutators) fn([{ target, type }])
       for (const fn of frames.splice(0)) fn()
     },
     /** A reflow reported by the ResizeObserver, plus the frame it schedules */
@@ -145,9 +147,15 @@ function stubBrowser(doc: Document) {
   }
 }
 
-/** A block with its translation beside it, registered with a real alignment. */
-function page(html: string) {
-  const doc = new DOMParser().parseFromString('<html><body></body></html>', 'text/html')
+/**
+ * A block with its translation beside it, registered with a real alignment.
+ *
+ * On a parsed document by default. The peek tests pass the window's own `document`: on a
+ * `DOMParser` document happy-dom moves a range's start to its end (`setStart(text, 0)` then
+ * `setEnd(text, 20)` reports 20/20), so `cloneContents()` comes back empty there — the same
+ * limitation the `starts` recorder in the stub works around for the bands.
+ */
+function page(html: string, doc = new DOMParser().parseFromString('<html><body></body></html>', 'text/html')) {
   doc.body.innerHTML = html
   const source = doc.body.firstElementChild!
   const block = serialize(source, 'tags')
@@ -704,6 +712,333 @@ describe('hover sentence highlight (§7.7)', () => {
 
     restore(doc)
     expect(browser.bands().length).toBe(0)
+    hl.stop()
+  })
+})
+
+describe('source peek through the pointer (#141)', () => {
+  /** The window's own document: see `page()`. Shared across tests, so a failing one leaves its
+   * controller attached and the tests after it see two — read the first failure, not the rest */
+  const live = () => page(TWO, document)
+  /** Only mode: the original is `display: none`, so it reports itself as not rendered */
+  const hide = (el: Element) => Object.assign(el, { checkVisibility: () => false })
+  const panel = (doc: Document) => doc.querySelector<HTMLElement>('.axt-peek')
+
+  it('shows the hidden side\'s sentence after the dwell, and tints only the visible side', () => {
+    const { doc, source } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    // The pointer is on the translation; the original has no boxes
+    const text = doc.querySelector('p:not([class]) , p + p')!.firstChild as Text
+    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
+    browser.move()
+
+    // One side painted: the hidden one is not even measured
+    expect(browser.bands().map(b => b.getAttribute('data-axt-hl-side'))).toEqual(['target'])
+    expect(panel(doc)).toBeNull()
+    expect(browser.delays()).toContain(PEEK_DWELL_MS)
+    browser.flushTimers(PEEK_DWELL_MS)
+
+    expect(panel(doc)?.textContent?.trim()).toBe('First sentence here.')
+    expect(panel(doc)?.parentElement).toBe(doc.body)
+    expect(panel(doc)?.getAttribute('data-axt-peek-at')).toBe('below')
+    hl.stop()
+    expect(panel(doc)).toBeNull()
+  })
+
+  it('shows nothing while both sides are rendered', () => {
+    const { doc, source } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    expect(browser.delays()).not.toContain(PEEK_DWELL_MS)
+    browser.flushTimers()
+    expect(panel(doc)).toBeNull()
+    hl.stop()
+  })
+
+  it('works the other way round too: a hidden translation is shown when the original is pointed at', () => {
+    // The trigger is "the counterpart is not rendered", whichever side that is
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(target)
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(browser.bands().map(b => b.getAttribute('data-axt-hl-side'))).toEqual(['source'])
+    expect(panel(doc)?.textContent?.trim()).toBe('First sentence here.')
+    hl.stop()
+  })
+
+  it('switches at once to the next sentence while open, and closes with the tint on a miss', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    const text = target.firstChild as Text
+    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.textContent?.trim()).toBe('First sentence here.')
+
+    browser.caret.mockReturnValue({ offsetNode: text, offset: text.data.length - 3 })
+    browser.move()
+    expect(panel(doc)?.textContent?.trim()).toBe('Second sentence here.') // no second wait
+
+    browser.caret.mockReturnValue(null)
+    browser.move()
+    expect(panel(doc)?.hidden).toBe(false) // the 120ms grace holds the panel with the bands
+    browser.flushTimers(120)
+    expect(panel(doc)?.hidden).toBe(true)
+    expect(browser.bands().length).toBe(0)
+    hl.stop()
+  })
+
+  it('closes at once when the page scrolls, and waits the full dwell again once it settles', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.hidden).toBe(false)
+
+    browser.scrollOn(doc)
+    expect(panel(doc)?.hidden).toBe(true)
+    // The page settles, the pointer is found on the same sentence: a fresh dwell, not an instant panel
+    browser.flushTimers(120)
+    for (const fn of browser.frames.splice(0)) fn()
+    expect(panel(doc)?.hidden).toBe(true)
+    expect(browser.delays()).toContain(PEEK_DWELL_MS)
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.hidden).toBe(false)
+    hl.stop()
+  })
+
+  it('closes when a container scrolls its own text too, and dwells again once it stops', () => {
+    // Sentences crossing a stationary pointer while a table scrolls must not each get a warm switch
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.hidden).toBe(false)
+
+    browser.scrollOn(target)
+    expect(panel(doc)?.hidden).toBe(true)
+    expect(browser.delays()).toContain(PEEK_DWELL_MS) // the re-test found the same sentence: a fresh dwell
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.hidden).toBe(false)
+    hl.stop()
+  })
+
+  it('closes when the hidden side changes under an open panel, until the block is registered again', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.textContent?.trim()).toBe('First sentence here.')
+
+    // The registered offsets no longer describe this text; recloning would cross into the next sentence
+    ;(source.firstChild as Text).data = 'Changed text here. Second sentence here.'
+    browser.mutate(source.firstChild!, 'characterData')
+    expect(panel(doc)?.hidden).toBe(true)
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.hidden).toBe(true)
+
+    // Registered again — as the pipeline does after a re-render — the block may be shown
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, doc)
+    target.replaceChildren(fragment)
+    const lengths = splitSentences(block.text, 'tags')
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+    browser.mutate(doc.body)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 1 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.textContent?.trim()).toBe('Changed text here.')
+    hl.stop()
+  })
+
+  it('expires a registration changed while no panel is open, so the next dwell shows nothing', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    // Changed before any hover — during a dwell, or after a scroll closed the panel, it is the same
+    ;(source.firstChild as Text).data = 'Changed text here. Second sentence here.'
+    browser.mutate(source.firstChild!, 'characterData')
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)).toBeNull()
+    hl.stop()
+  })
+
+  it('re-reads the page\'s colours when the root\'s attributes change, as a theme switch does', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const view = doc.defaultView!
+    const real = view.getComputedStyle
+    let colour = 'rgb(0, 0, 0)'
+    view.getComputedStyle = ((el: Element) => ({ font: '', color: el === source ? colour : '', backgroundColor: '', overflowX: '', overflowY: '', fontSize: '16px' })) as typeof real
+    try {
+      const hl = startSentenceHighlight(doc)!
+      hide(source)
+      browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+      browser.move()
+      browser.flushTimers(PEEK_DWELL_MS)
+      expect(panel(doc)?.getAttribute('style')).toContain('color:rgb(0, 0, 0)')
+      colour = 'rgb(249, 247, 247)'
+      browser.mutate(doc.documentElement, 'attributes')
+      expect(panel(doc)?.getAttribute('style')).toContain('color:rgb(249, 247, 247)')
+      hl.stop()
+    } finally {
+      view.getComputedStyle = real
+    }
+  })
+
+  it('spans only the part of a wide block that is on screen', () => {
+    // A wide table in a horizontal scroller: the block starts left of the viewport and runs past it
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const view = doc.defaultView!
+    Object.defineProperty(view, 'innerWidth', { configurable: true, value: 1024 })
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    Object.assign(target, { getBoundingClientRect: () => ({ left: -300, right: 1700, top: 0, bottom: 20, width: 2000, height: 20, x: -300, y: 0, toJSON: () => ({}) }) as DOMRect })
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.getAttribute('style')).toContain('left:0px')
+    expect(panel(doc)?.getAttribute('style')).toContain('width:1024px')
+    hl.stop()
+  })
+
+  it('anchors to the part of a sentence that is on screen', () => {
+    // The pointer is on a later line of a sentence whose first line is above the viewport
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    const r = (top: number) => ({ left: 0, top, right: 200, bottom: top + 20, width: 200, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+    browser.nextLines(r(-300), r(0))
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    // Below the visible line (0–20), not below the off-screen first line
+    expect(panel(doc)?.getAttribute('style')).toContain('top:28px')
+    hl.stop()
+  })
+
+  it('does not take its own content for a reflow', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    browser.starts()
+
+    // A record inside the panel: no repaint, so no range is built
+    browser.mutate(panel(doc)!.firstChild!)
+    expect(browser.starts()).toEqual([])
+    // A record anywhere else still is one
+    browser.mutate(doc.body)
+    expect(browser.starts().length).toBeGreaterThan(0)
+    hl.stop()
+  })
+
+  it('renders nothing for a dwell that ends after the highlight was cleared from outside', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    clearSentenceHighlights(doc) // setMode() during the dwell
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)).toBeNull()
+    // The next pointer move starts a fresh dwell, which does render
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)).not.toBeNull()
+    hl.stop()
+  })
+
+  it('asks checkVisibility about visibility and opacity, which keep their boxes', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const asked = vi.fn(() => false)
+    Object.assign(source, { checkVisibility: asked })
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    expect(asked).toHaveBeenCalledWith({ visibilityProperty: true, opacityProperty: true })
+    hl.stop()
+  })
+
+  it('sets the panel in the hidden side\'s type, reaching past a transparent colour', () => {
+    // The panel shows the hidden side's text, so it is set as the page sets *that* side — not as a
+    // preset dresses the visible translation: `gradient` makes its colour transparent and paints
+    // the text through a clipped background the panel does not have
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const view = doc.defaultView!
+    const real = view.getComputedStyle
+    const base = { font: '', color: '', backgroundColor: '', overflowX: '', overflowY: '', fontSize: '16px' }
+    view.getComputedStyle = ((el: Element) => ({
+      ...base,
+      ...(el === source ? { font: '15px serif', color: 'rgba(0, 0, 0, 0)' } : {}),
+      ...(el === doc.body ? { color: 'rgb(1, 2, 3)', backgroundColor: 'rgb(9, 9, 9)' } : {}),
+      ...(el === target ? { font: '15px fantasy', color: 'rgb(200, 200, 200)' } : {}),
+    })) as typeof real
+    try {
+      const hl = startSentenceHighlight(doc)!
+      hide(source)
+      browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+      browser.move()
+      browser.flushTimers(PEEK_DWELL_MS)
+      const style = panel(doc)!.getAttribute('style') ?? ''
+      expect(style).toContain('font:15px serif') // the original's, not the translation's
+      expect(style).toContain('color:rgb(1, 2, 3)') // past the transparent one
+      expect(style).toContain('background-color:rgb(9, 9, 9)')
+      hl.stop()
+    } finally {
+      view.getComputedStyle = real
+    }
+  })
+
+  it('is taken away by clearSentenceHighlights and restore, and comes back cold', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)).not.toBeNull()
+
+    clearSentenceHighlights(doc) // what setMode() and applyStyle() do
+    expect(panel(doc)).toBeNull()
+    browser.move()
+    expect(panel(doc)).toBeNull() // a dwell again, not an instant panel
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)).not.toBeNull()
+
+    restore(doc)
+    expect(panel(doc)).toBeNull()
     hl.stop()
   })
 })

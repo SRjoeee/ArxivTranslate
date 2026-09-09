@@ -13,12 +13,17 @@ export const IMG_CLASS = 'axt-img'
  * 放进正文树会被当成译文节点处理。恢复原文时随 INJECTED_SELECTOR 一起删掉
  */
 export const HL_CLASS = 'axt-hl'
+/**
+ * 只译文下悬浮出来的原文面板（DESIGN §7.7，issue #141）：第五种注入标记。与色带层一样挂在 `<body>` 上、
+ * 不在正文树里；里面是原文那一句的克隆（不带 id 与 data-axt-*）。恢复原文时随 INJECTED_SELECTOR 一起删掉
+ */
+export const PEEK_CLASS = 'axt-peek'
 /** 所有注入节点：提取、序列化、克隆清理、恢复原文都用这一个选择器 */
-export const INJECTED_SELECTOR = `.${T_CLASS}, .${IMG_CLASS}, .${HL_CLASS}`
+export const INJECTED_SELECTOR = `.${T_CLASS}, .${IMG_CLASS}, .${HL_CLASS}, .${PEEK_CLASS}`
 
-/** 是不是我们注入的节点（译文 / 镜像 / 拆分副本 / 图片叠加层）——提取与序列化都要跳过它们 */
+/** 是不是我们注入的节点（译文 / 镜像 / 拆分副本 / 图片叠加层 / 色带层 / 原文面板）——提取与序列化都要跳过它们 */
 export function isInjected(el: Element): boolean {
-  return el.classList.contains(T_CLASS) || el.classList.contains(IMG_CLASS) || el.classList.contains(HL_CLASS)
+  return el.classList.contains(T_CLASS) || el.classList.contains(IMG_CLASS) || el.classList.contains(HL_CLASS) || el.classList.contains(PEEK_CLASS)
 }
 
 /** 所有注入属性的前缀（CLAUDE.md 硬规则 5） */
