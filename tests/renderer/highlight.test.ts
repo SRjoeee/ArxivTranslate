@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { rehydrate, serialize } from '@/core/protector'
 import { clearSentenceHighlights, registerSentences, restore, setMode, startSentenceHighlight } from '@/core/renderer'
@@ -29,6 +27,13 @@ function stubBrowser(doc: Document) {
   vi.stubGlobal('CSS', { highlights })
   vi.stubGlobal('Highlight', class { ranges: Range[]; constructor(...ranges: Range[]) { this.ranges = ranges } })
   Object.assign(doc, { caretPositionFromPoint: caret })
+  // happy-dom measures nothing, so every character is declared to live in one 200×20 box at the
+  // origin. That is enough for the hit test to be real: a pointer inside it is on the text and one
+  // outside it is in the margin, which is the distinction being checked.
+  const box = { left: 0, top: 0, right: 200, bottom: 20, width: 200, height: 20, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+  const view2 = doc.defaultView as unknown as { Range: { prototype: Range }; Element: { prototype: Element } }
+  view2.Range.prototype.getBoundingClientRect = () => box
+  view2.Element.prototype.getBoundingClientRect = () => box
   view.requestAnimationFrame = (fn: () => void) => frames.push(fn)
   view.cancelAnimationFrame = () => {}
   view.setTimeout = (fn: () => void, delay: number) => { timers.push({ fn, delay }); return timers.length }
@@ -45,9 +50,9 @@ function stubBrowser(doc: Document) {
     },
     delays: () => timers.map(t => t.delay),
     frames,
-    /** One pointer move plus the frame it schedules */
-    move: () => {
-      doc.dispatchEvent(Object.assign(new Event('pointermove'), { clientX: 10, clientY: 10 }))
+    /** One pointer move plus the frame it schedules. Defaults to a point on the text. */
+    move: (clientX = 10, clientY = 10) => {
+      doc.dispatchEvent(Object.assign(new Event('pointermove'), { clientX, clientY }))
       for (const fn of frames.splice(0)) fn()
     },
     /** A pointer move with no frame after it, for testing coalescing */
@@ -91,7 +96,6 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.move()
 
     expect([...browser.highlights.keys()].sort()).toEqual(['axt-sentence-source', 'axt-sentence-target'])
-    expect(doc.documentElement.getAttribute('data-axt-hl')).toBe('on')
     // Both sides light up from one hit, which is the whole point
     expect(browser.highlights.get('axt-sentence-source')!.ranges.length).toBeGreaterThan(0)
     expect(browser.highlights.get('axt-sentence-target')!.ranges.length).toBeGreaterThan(0)
@@ -115,7 +119,6 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.move()
 
     expect(browser.highlights.get('axt-sentence-source')).not.toBe(first)
-    expect(doc.documentElement.getAttribute('data-axt-hl')).toBe('on')
     hl.stop()
   })
 
@@ -150,85 +153,6 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.move()
 
     expect(browser.highlights.get('axt-sentence-source')).toBe(first)
-    hl.stop()
-  })
-
-  it('keeps the ranges registered for the whole fade-out', () => {
-    // `::highlight()` paints from the registered ranges, so dropping them is what makes the tint
-    // disappear — instantly, however long the CSS transition is. The attribute goes first, which is
-    // what the transition runs on, and the ranges only after it has finished.
-    const { doc, source } = page(TWO)
-    const browser = stubBrowser(doc)
-    const hl = startSentenceHighlight(doc)!
-
-    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
-    browser.move()
-    browser.caret.mockReturnValue(null)
-    browser.move()
-
-    browser.flushTimers(120) // the miss grace period expires, so the fade begins
-    expect(doc.documentElement.getAttribute('data-axt-hl')).toBeNull()
-    expect(browser.highlights.size).toBe(2)
-
-    browser.flushTimers(220) // the fade finishes
-    expect(browser.highlights.size).toBe(0)
-    hl.stop()
-  })
-
-  it('the fade-out it waits for is the one the stylesheet actually runs', () => {
-    // The duration lives in two places by necessity — CSS runs the transition, JS decides when the
-    // ranges may go — so they are pinned to each other rather than left to drift.
-    const css = readFileSync(join(import.meta.dirname, '../../src/styles/highlight.css'), 'utf8')
-    const root = /:root\s*\{[^}]*transition:\s*--axt-hl\s+(\d+)ms/.exec(css)
-    expect(root?.[1]).toBe('220')
-  })
-
-  it('coming back before the fade finishes keeps the ranges', () => {
-    const { doc, source } = page(TWO)
-    const browser = stubBrowser(doc)
-    const hl = startSentenceHighlight(doc)!
-    const text = source.firstChild as Text
-
-    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
-    browser.move()
-    browser.caret.mockReturnValue(null)
-    browser.move()
-    browser.flushTimers(120)
-
-    // Back on a different sentence while the fade is still running
-    browser.caret.mockReturnValue({ offsetNode: text, offset: text.data.length - 3 })
-    browser.move()
-    expect(doc.documentElement.getAttribute('data-axt-hl')).toBe('on')
-    // The fade's deletion must not fire now and take the new ranges with it
-    browser.flushTimers()
-    expect(browser.highlights.size).toBe(2)
-    hl.stop()
-  })
-
-  it('a pending fade never deletes ranges painted after an external clear', () => {
-    // Codex reported this against #131 as a defect. It is not one — every path that paints cancels
-    // the pending fade first — but the invariant is worth holding onto, since it rests on that
-    // cancellation rather than on anything the fade itself checks. Removing the cancellation from
-    // `update()` fails this test.
-    const { doc, source } = page(TWO)
-    const browser = stubBrowser(doc)
-    const hl = startSentenceHighlight(doc)!
-    const text = source.firstChild as Text
-
-    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
-    browser.move()
-    browser.caret.mockReturnValue(null)
-    browser.move()
-    browser.flushTimers(120) // the fade begins; its deletion is pending
-
-    setMode(doc, 'side') // an external clear lands in the middle of it
-
-    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
-    browser.move()
-    expect(browser.highlights.size).toBe(2)
-
-    browser.flushTimers() // the older deletion fires, if it survived
-    expect(browser.highlights.size).toBe(2)
     hl.stop()
   })
 
@@ -272,11 +196,10 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.move() // same sentence, same position
     expect(browser.highlights.size).toBe(2)
-    expect(doc.documentElement.getAttribute('data-axt-hl')).toBe('on')
     hl.stop()
   })
 
-  it('holds through a miss, then fades out', () => {
+  it('holds through a brief miss, then clears', () => {
     // Crossing the gap between two paragraphs is a miss the reader experiences as one continuous
     // movement; reacting to it instantly would blink.
     const { doc, source } = page(TWO)
@@ -287,12 +210,29 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.move()
     browser.caret.mockReturnValue(null)
     browser.move()
-    expect(doc.documentElement.getAttribute('data-axt-hl')).toBe('on')
 
     browser.flushTimers(120)
-    browser.flushTimers(220)
-    expect(doc.documentElement.getAttribute('data-axt-hl')).toBeNull()
     expect(browser.highlights.size).toBe(0)
+    hl.stop()
+  })
+
+  it('ignores a pointer that is beside the text rather than on it', () => {
+    // `caretPositionFromPoint` answers "which caret is nearest", not "is there text here", so a
+    // pointer out in the right-hand margin still resolves to the last character of a line. Without
+    // a hit test the whole gutter of a paper highlights the paragraph beside it — reported from
+    // real use, and the reason `onTheText` exists. The stub puts every character in one 200×20 box.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move(600, 10) // far to the right of the text
+    expect(browser.highlights.size).toBe(0)
+    browser.move(10, 400) // far below it
+    expect(browser.highlights.size).toBe(0)
+
+    browser.move(10, 10) // the same caret, now actually under the pointer
+    expect(browser.highlights.size).toBe(2)
     hl.stop()
   })
 
@@ -319,7 +259,6 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.move()
     hl.stop()
     expect(browser.highlights.size).toBe(0)
-    expect(doc.documentElement.getAttribute('data-axt-hl')).toBeNull()
 
     // And after stopping, a pointer move is not listened for any more
     browser.move()
@@ -329,7 +268,6 @@ describe('hover sentence highlight (§7.7)', () => {
     doc.documentElement.setAttribute('data-axt-hl', 'on')
     clearSentenceHighlights(doc)
     expect(browser.highlights.size).toBe(0)
-    expect(doc.documentElement.getAttribute('data-axt-hl')).toBeNull()
   })
 
   it('restore() drops the tint along with the translation nodes', () => {
@@ -343,7 +281,6 @@ describe('hover sentence highlight (§7.7)', () => {
 
     restore(doc)
     expect(browser.highlights.size).toBe(0)
-    expect(doc.documentElement.getAttribute('data-axt-hl')).toBeNull()
     hl.stop()
   })
 })

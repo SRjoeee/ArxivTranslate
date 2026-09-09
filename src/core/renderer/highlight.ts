@@ -15,9 +15,6 @@ import { sentenceAt, sentenceMapAt } from './sentences'
 /** Highlight registry names. Namespaced like everything else we put on the page (§ hard rule 5). */
 const SOURCE_HIGHLIGHT = 'axt-sentence-source'
 const TARGET_HIGHLIGHT = 'axt-sentence-target'
-/** Drives the fade in `highlight.css`; on `<html>`, like the other global flags */
-const HL_ATTR = 'data-axt-hl'
-
 /**
  * How long a miss is tolerated before the tint fades out.
  *
@@ -30,12 +27,16 @@ const HL_ATTR = 'data-axt-hl'
 const MISS_GRACE_MS = 120
 
 /**
- * How long the fade-out in `highlight.css` takes. The ranges have to stay registered for the whole
- * of it: deleting them first leaves `::highlight()` with nothing to paint, so the tint vanishes on
- * the spot and the transition it was supposed to run happens to nothing (Codex pointed this out on
- * #130). `tests/renderer/highlight.test.ts` reads the stylesheet and asserts these agree.
+ * How far outside a character's own box the pointer may still count as being on it, in CSS pixels.
+ *
+ * `caretPositionFromPoint` answers "which caret position is nearest", not "is there text here", so
+ * it happily returns the last character of a line for a pointer in the margin metres away — the
+ * whole right-hand gutter of a paper would highlight the paragraph beside it (reported from real
+ * use). Checking the pointer against the character's own rectangle is what turns the answer back
+ * into a hit test. A few pixels of slack keeps the edges of a line from feeling dead.
  */
-const FADE_OUT_MS = 220
+const HIT_SLACK_PX = 4
+
 
 /**
  * Bumped whenever the highlights are cleared from outside this controller — `setMode()` and
@@ -59,12 +60,11 @@ function supported(doc: Document): boolean {
  * Drops whatever is painted right now. Safe to call at any time and on a document that never
  * started a highlight: `restore()` and `setMode()` use it without knowing whether one is running.
  */
-export function clearSentenceHighlights(doc: Document): void {
+export function clearSentenceHighlights(_doc: Document): void {
   epoch++
   if (typeof CSS === 'undefined' || !('highlights' in CSS)) return
   CSS.highlights.delete(SOURCE_HIGHLIGHT)
   CSS.highlights.delete(TARGET_HIGHLIGHT)
-  doc.documentElement.removeAttribute(HL_ATTR)
 }
 
 export interface SentenceHighlight {
@@ -88,7 +88,6 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   let y = 0
   let frame = 0
   let missTimer = 0
-  let fadeTimer = 0
   /**
    * The sentence currently painted, with the `epoch` it was painted at. The epoch is what makes
    * this cache safe: anything that clears the highlights from outside bumps it, and a stale entry
@@ -99,35 +98,17 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   const view = doc.defaultView
   const clearTimer = (id: number) => { if (id !== 0) view?.clearTimeout(id) }
 
-  /** Drops everything at once. For stopping, not for the pointer leaving a sentence. */
+  /** Drops everything at once. */
   const clearNow = () => {
-    clearTimer(fadeTimer)
-    fadeTimer = 0
     shown = null
     clearSentenceHighlights(doc)
-  }
-
-  /**
-   * Starts the fade-out: the attribute goes away now, which is what the transition runs on, and the
-   * ranges are dropped only once it has finished. Until then they are still registered, painting
-   * whatever the transitioning colour currently is.
-   */
-  const fadeOut = () => {
-    if (!shown || fadeTimer !== 0) return
-    shown = null
-    doc.documentElement.removeAttribute(HL_ATTR)
-    fadeTimer = view?.setTimeout(() => {
-      fadeTimer = 0
-      CSS.highlights.delete(SOURCE_HIGHLIGHT)
-      CSS.highlights.delete(TARGET_HIGHLIGHT)
-    }, FADE_OUT_MS) ?? 0
   }
 
   const miss = () => {
     if (!shown || missTimer !== 0) return
     missTimer = view?.setTimeout(() => {
       missTimer = 0
-      fadeOut()
+      clearNow()
     }, MISS_GRACE_MS) ?? 0
   }
   const hit = () => {
@@ -135,12 +116,36 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     missTimer = 0
   }
 
+  /**
+   * Whether the pointer is actually over the character the caret landed on.
+   *
+   * One `getBoundingClientRect` on a one-character range, and only once a candidate exists. Nothing
+   * has been written to the DOM at this point in the frame, so it does not force a reflow.
+   */
+  const onTheText = (node: Node, offset: number): boolean => {
+    let rect: DOMRect | undefined
+    if (node.nodeType === 3) {
+      const text = node as Text
+      const from = Math.max(0, Math.min(offset, text.data.length - 1))
+      if (text.data.length === 0) return false
+      const range = doc.createRange()
+      range.setStart(text, from)
+      range.setEnd(text, from + 1)
+      rect = range.getBoundingClientRect()
+    } else if (node.nodeType === 1) {
+      // A formula or other placeholder: its own box is the thing under the pointer
+      rect = (node as Element).getBoundingClientRect()
+    }
+    if (!rect || (rect.width === 0 && rect.height === 0)) return false
+    return x >= rect.left - HIT_SLACK_PX && x <= rect.right + HIT_SLACK_PX && y >= rect.top - HIT_SLACK_PX && y <= rect.bottom + HIT_SLACK_PX
+  }
+
   const update = () => {
     frame = 0
     const caret = doc.caretPositionFromPoint(x, y)
     const node = caret?.offsetNode
     const found = node ? sentenceMapAt(node) : undefined
-    if (!found || !node) {
+    if (!found || !node || !onTheText(node, caret.offset)) {
       miss()
       return
     }
@@ -155,15 +160,9 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     // The same sentence as last frame: the ranges have not changed and rebuilding them would be
     // pure work. This is the common case — a pointer resting on a line of text hits it every frame.
     if (shown && shown.at === epoch && shown.root === map.source.root && shown.index === sentence.index) return
-    // A fade-out in flight is overtaken rather than left to delete the ranges we are about to set
-    clearTimer(fadeTimer)
-    fadeTimer = 0
     shown = { root: map.source.root, index: sentence.index, at: epoch }
     CSS.highlights.set(SOURCE_HIGHLIGHT, new Highlight(...rangesOf(map.source.spans, sentence.source.from, sentence.source.to)))
     CSS.highlights.set(TARGET_HIGHLIGHT, new Highlight(...rangesOf(map.target.spans, sentence.target.from, sentence.target.to)))
-    // Set after the ranges so the first paint of a new highlight is already the faded-in one rather
-    // than a frame at full strength
-    doc.documentElement.setAttribute(HL_ATTR, 'on')
   }
 
   const onMove = (event: PointerEvent) => {
@@ -171,10 +170,9 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     y = event.clientY
     if (frame === 0) frame = view?.requestAnimationFrame(update) ?? 0
   }
-  // Leaving the window fades out like any other departure, rather than cutting the tint off
   const onLeave = () => {
     hit()
-    fadeOut()
+    clearNow()
   }
 
   doc.addEventListener('pointermove', onMove, { passive: true })
