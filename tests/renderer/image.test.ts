@@ -13,7 +13,7 @@ const label = (text: string, source = text, extra: Partial<ImageLabel> = {}): Im
 function setup(html = FIGURE) {
   const doc = docOf(html)
   const el = doc.querySelector('img') as HTMLImageElement
-  return { doc, target: { id: el.id, el } }
+  return { doc, target: { id: el.id, el, kind: 'raster' as const } }
 }
 
 describe('renderImage', () => {

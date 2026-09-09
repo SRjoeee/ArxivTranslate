@@ -147,7 +147,7 @@ describe('createMirrors', () => {
     const FIG = '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1"><figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption></figure>'
     const overlayOn = (doc: Document) => {
       const el = doc.querySelector('img') as HTMLImageElement
-      renderImage({ id: el.id, el }, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text: '静态电荷' }])
+      renderImage({ id: el.id, el, kind: 'raster' as const }, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text: '静态电荷' }])
     }
 
     it('图后面紧跟叠加层：已配对，不再镜像；叠加层自己也不镜像', () => {

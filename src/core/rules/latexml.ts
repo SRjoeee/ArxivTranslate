@@ -238,7 +238,11 @@ export function classify(el: Element): Classification | null {
 export const FUNCTIONAL_INLINE = 'a[href]'
 
 /** 插图与图形（Phase 0 统计脚本用） */
-export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics' } as const
+/**
+ * 图目标（§15）。`graphics` 两种都收：位图走 OCR，SVG 直接读字形（§15.5）。
+ * 实测这些 `<object>` 与位图一样带 `.ltx_graphics`
+ */
+export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics, object.ltx_graphics[type="image/svg+xml"]' } as const
 
 /** 脚注（§7.2 两栏归位用）：容器、正文、正文的 class 名、自带的标号 */
 export const NOTE = {

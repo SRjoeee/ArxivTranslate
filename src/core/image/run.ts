@@ -12,10 +12,11 @@ import { type ImageLabel, type ImageTarget, clearImage, renderImage } from '@/co
 import { DOCUMENT_ROOT, FIGURE_SELECTORS } from '@/core/rules/latexml'
 import { INJECTED_SELECTOR } from '@/core/marks'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
+import { linesOf, looksLikeCode } from '@/core/svg'
 import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
 import type { TranslateContext } from '@/providers/types'
 import { sha256Hex } from '@/shared/digest'
-import type { ImageProgress, OcrCall, OcrMessageResponse } from '@/shared/ocr'
+import type { ImageProgress, OcrCall, OcrLine, OcrMessageResponse } from '@/shared/ocr'
 import { linesToBoxes } from './boxes'
 
 export type { ImageTarget } from '@/core/renderer/image'
@@ -85,12 +86,12 @@ export function collectImageTargets(doc: Document): ImageTarget[] {
   const used = new Set<string>()
   let n = 0
   const targets: ImageTarget[] = []
-  for (const el of Array.from(root.querySelectorAll<HTMLImageElement>(FIGURE_SELECTORS.graphics))) {
+  for (const el of Array.from(root.querySelectorAll(FIGURE_SELECTORS.graphics))) {
     if (el.closest(`[${ID_ATTR}]`) || el.closest(INJECTED_SELECTOR)) continue
     let id = el.id || `axt-img-${++n}`
     while (used.has(id)) id = `${id}-${++n}`
     used.add(id)
-    targets.push({ id, el })
+    targets.push({ id, el, kind: el.tagName.toLowerCase() === 'object' ? 'svg' : 'raster' })
   }
   return targets
 }
@@ -203,17 +204,44 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
     reasons.set(target, reason)
   }
 
+  /**
+   * SVG 图的「识别」：直接读 `contentDocument` 里的字形（§15.5）。
+   *
+   * 不取字节、不算 hash、不发 OCR —— 文字是**读**出来的，`data-text` 把每个字形对应的字符写在
+   * 属性里，误差为零。代码清单在这里剔掉：§5 的跳过规则是 HTML 选择器，够不着 SVG 里一串平铺的
+   * `<use>`（Codex 在 #133 指出），所以这条路要自己认。
+   */
+  const svgLines = (target: ImageTarget): OcrLine[] | string => {
+    const doc = (target.el as HTMLObjectElement).contentDocument
+    const svg = doc?.documentElement
+    // 拿不到就跳过这张图。实测 4 篇论文 44 张图全部可达、连滚动前都是（RESEARCH §6.11），
+    // 所以这是优雅降级而不是常规路径
+    if (svg?.tagName.toLowerCase() !== 'svg') return '图还没加载出来'
+    return linesOf(svg).filter(line => !looksLikeCode(line.text))
+  }
+
   const process = async (target: ImageTarget): Promise<void> => {
     try {
-      const { bytes, mime } = await fetchBytes(target.el.currentSrc || target.el.src)
-      if (!alive()) return
-      if (!IMAGE_TYPES.test(mime)) return fail(target, `不是位图（${mime || '未知类型'}）`)
-      if (bytes.byteLength > MAX_IMAGE_BYTES) return fail(target, `图片超过 ${MAX_IMAGE_BYTES / 1024 / 1024} MB`)
-      const imageHash = await sha256Hex(bytes)
-      if (!alive()) return
-      const ocr = await options.ocr({ imageHash, image: toBase64(bytes), mime, paper: options.paper, scope: options.scope })
-      if (!alive()) return
-      if (!ocr.ok) return fail(target, `识别失败：${ocr.error.message}`)
+      let lines: readonly OcrLine[]
+      let frames = 1
+      if (target.kind === 'svg') {
+        const read = svgLines(target)
+        if (typeof read === 'string') return fail(target, read)
+        lines = read
+      } else {
+        const el = target.el as HTMLImageElement
+        const { bytes, mime } = await fetchBytes(el.currentSrc || el.src)
+        if (!alive()) return
+        if (!IMAGE_TYPES.test(mime)) return fail(target, `不是位图（${mime || '未知类型'}）`)
+        if (bytes.byteLength > MAX_IMAGE_BYTES) return fail(target, `图片超过 ${MAX_IMAGE_BYTES / 1024 / 1024} MB`)
+        const imageHash = await sha256Hex(bytes)
+        if (!alive()) return
+        const ocr = await options.ocr({ imageHash, image: toBase64(bytes), mime, paper: options.paper, scope: options.scope })
+        if (!alive()) return
+        if (!ocr.ok) return fail(target, `识别失败：${ocr.error.message}`)
+        lines = ocr.result.lines
+        frames = ocr.result.frames ?? 1
+      }
       // 没有标签就算完成，但上一轮留下的叠加层要清掉（换了目标语言后旧译文不该一直挂着，Codex 在 #89 指出）
       const finishEmpty = () => {
         // 真的摘掉了旧叠加层就要通知整理层：side 的拆图副本里还留着它，签名不重算副本就不重建（Codex 在 #89 指出）
@@ -222,8 +250,8 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
         if (removed) options.onRendered?.([target])
       }
       // 动图：helper 只识别了第 0 帧，浏览器在放后面的帧，框对不上——不叠
-      if ((ocr.result.frames ?? 1) > 1) return finishEmpty()
-      const boxes = linesToBoxes(ocr.result.lines)
+      if (frames > 1) return finishEmpty()
+      const boxes = linesToBoxes(lines)
       if (boxes.length === 0) return finishEmpty() // 图里没有可翻的文字
       const caption = captionOf(target.el)
       const context: TranslateContext = { ...options.context, ...(caption ? { sectionTitle: caption } : {}) }
@@ -261,7 +289,9 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
         const text = translated.get(`${target.id}#L${i}`)?.trim()
         // 译文与原文相同（单位、变量名、引擎原样返回的）不画：白框盖住原图只会把排版好的下标变成 OCR 读歪的字
         if (!text || sameText(text, box.text)) continue
-        labels.push({ x: box.x, y: box.y, w: box.w, h: box.h, lines: box.lines, source: box.text, text })
+        const label: ImageLabel = { x: box.x, y: box.y, w: box.w, h: box.h, lines: box.lines, source: box.text, text }
+        if (box.angle) label.angle = box.angle
+        labels.push(label)
       }
       if (labels.length === 0) return finishEmpty()
       renderImage(target, labels)

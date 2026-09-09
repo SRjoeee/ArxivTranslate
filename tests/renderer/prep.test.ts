@@ -189,7 +189,7 @@ describe('createPrep × 图片叠加层（DESIGN §15.2）', () => {
   const IMG_FIGURE = '<section class="ltx_section"><figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1"><figcaption class="ltx_caption" id="c1">Figure 1.</figcaption></figure></section>'
   const overlayOn = (doc: Document) => {
     const el = doc.querySelector('img') as HTMLImageElement
-    const target = { id: el.id, el }
+    const target = { id: el.id, el, kind: 'raster' as const }
     renderImage(target, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text: '静态电荷' }])
     return target
   }

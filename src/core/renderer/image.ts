@@ -11,7 +11,12 @@ export const IMG_MODES_ATTR = 'data-axt-img-modes'
 
 export interface ImageTarget {
   id: string
-  el: HTMLImageElement
+  el: Element
+  /**
+   * 位图走「取字节 → OCR」，SVG 图直接读 `contentDocument` 里的字形（§15.5）。
+   * 两条路在 `linesToBoxes` 汇合，之后的叠加层、缓存、调度完全一样
+   */
+  kind: 'raster' | 'svg'
 }
 
 /** 一个译文标签：位置与尺寸是图的归一化坐标（0–1，左上原点），lines 是 OCR 合并进来的行数 */

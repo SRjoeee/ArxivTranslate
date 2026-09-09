@@ -186,9 +186,11 @@ export default defineContentScript({
       if (config.image.modes.length === 0) return
       // 参数叫 helper，不叫 status：外层的 status 是引擎状态，图片这段要用它的 renderPath，遮住就取不到了
       sendMessage({ type: 'axt:helper-status' }).then(helper => {
-        if (!helper.available || getSessionId() !== session || !paper) return
+        if (getSessionId() !== session || !paper) return
         setImageModes(document, config.image.modes)
-        const targets = collectImageTargets(document)
+        // helper 只决定**位图**：SVG 图的文字是从 contentDocument 里读出来的，不经过本机识别（§15.5）。
+        // 没装 helper 时把位图目标摘掉，剩下的照常翻——这是 arXiv 上一多半的图
+        const targets = collectImageTargets(document).filter(t => helper.available || t.kind === 'svg')
         if (targets.length === 0) return
         const t1 = performance.now()
         let wasBusy = false

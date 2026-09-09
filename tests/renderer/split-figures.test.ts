@@ -167,7 +167,7 @@ describe('镜像不是译文（issue #46 实测 2312.17141）', () => {
     const IMG_FIGURE = '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1"><figcaption class="ltx_caption">Figure 1.</figcaption></figure>'
     const overlayOn = (doc: Document, text = '静态电荷') => {
       const el = doc.querySelector('img') as HTMLImageElement
-      return renderImage({ id: el.id, el }, [{ x: 0.1, y: 0.1, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text }])
+      return renderImage({ id: el.id, el, kind: 'raster' as const }, [{ x: 0.1, y: 0.1, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text }])
     }
 
     it('只有叠加层、没有文字译文的插图也拆：副本里图与叠加层都在，叠加层不带 data-axt-*', () => {

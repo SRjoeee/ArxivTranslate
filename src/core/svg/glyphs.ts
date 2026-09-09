@@ -187,7 +187,8 @@ export function linesOf(svg: Element): OcrLine[] {
   const out: OcrLine[] = []
   for (const run of runsOf(svg)) {
     const quad = cornersOf(run).map(([x, y]) => [(x - box.x) / box.w, (y - box.y) / box.h] as [number, number])
-    out.push({ text: run.text, quad: quad as Quad, conf: 1 })
+    // 横排的不带 angle，与 OCR 后端产出的行形状完全一致
+    out.push(run.angle === 0 ? { text: run.text, quad: quad as Quad, conf: 1 } : { text: run.text, quad: quad as Quad, conf: 1, angle: run.angle })
   }
   return out
 }
