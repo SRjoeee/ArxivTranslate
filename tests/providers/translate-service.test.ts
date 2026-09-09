@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RenderPath } from '@/cache/key'
 import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
+import type { CachedEntry } from '@/cache/store'
 import { createTranslateService, type CacheEntry, type CachePort } from '@/providers/translate-service'
 import { ProviderError, type TranslationProvider } from '@/providers/types'
 
@@ -13,12 +14,15 @@ const provider = (translate: TranslationProvider['translate'], id = 'mock', extr
 
 /** 记录调用的假缓存端口 */
 function fakePort(seed: Record<string, string> = {}) {
-  const store = new Map(Object.entries(seed))
+  const store = new Map<string, CachedEntry>(Object.entries(seed).map(([k, v]) => [k, { translation: v }]))
   const reads: string[][] = []
   const writes: CacheEntry[][] = []
   const port: CachePort = {
     async getMany(keys) { reads.push(keys); return keys.map(k => store.get(k) ?? null) },
-    async putMany(entries) { writes.push(entries); for (const e of entries) store.set(e.key, e.translation) },
+    async putMany(entries) {
+      writes.push(entries)
+      for (const e of entries) store.set(e.key, e.alignment ? { translation: e.translation, alignment: e.alignment } : { translation: e.translation })
+    },
   }
   return { port, reads, writes, store }
 }
@@ -47,49 +51,63 @@ describe('sentence alignment through the queue (#105)', () => {
     // the data was dropped on the way. This is the test that the value actually crosses.
     const { port } = fakePort()
     const service = createTranslateService({
-      getProvider: async () => withAlignment({ a: { source: [3, 4], target: [2, 3] } }),
+      getProvider: async () => withAlignment({ a: { source: [3, 3], target: [4, 4] } }),
       cache: port,
     })
     const res = await service.translate(req(['a', 'b']))
     expect(res.ok).toBe(true)
     if (!res.ok) return
-    expect(res.result.segments.map(s => s.alignment)).toEqual([{ source: [3, 4], target: [2, 3] }, undefined])
+    expect(res.result.segments.map(s => s.alignment)).toEqual([{ source: [3, 3], target: [4, 4] }, undefined])
   })
 
   it('keeps each segment’s own alignment when a batch mixes aligned and unaligned', async () => {
     const { port } = fakePort()
     const service = createTranslateService({
-      getProvider: async () => withAlignment({ a: { source: [1], target: [1] }, c: { source: [2], target: [2] } }),
+      getProvider: async () => withAlignment({ a: { source: [6], target: [8] }, c: { source: [6], target: [8] } }),
       cache: port,
     })
     const res = await service.translate(req(['a', 'b', 'c']))
     expect(res.ok).toBe(true)
     if (!res.ok) return
     expect(res.result.segments.map(s => [s.id, s.alignment])).toEqual([
-      ['a', { source: [1], target: [1] }],
+      ['a', { source: [6], target: [8] }],
       ['b', undefined],
-      ['c', { source: [2], target: [2] }],
+      ['c', { source: [6], target: [8] }],
     ])
   })
 
-  it('a cache hit has no alignment yet, and says so rather than inventing one', async () => {
-    // Persisting the alignment is a separate change; until then a hit yields text only, and the
-    // caller sees undefined instead of a stale or fabricated mapping.
+  it('a cache hit brings its alignment back', async () => {
     const { port, store } = fakePort()
     const service = createTranslateService({
-      getProvider: async () => withAlignment({ a: { source: [3], target: [3] } }),
+      getProvider: async () => withAlignment({ a: { source: [6], target: [8] } }),
       cache: port,
     })
     const first = await service.translate(req(['a']))
-    expect(first.ok && first.result.segments[0]?.alignment).toEqual({ source: [3], target: [3] })
+    expect(first.ok && first.result.segments[0]?.alignment).toEqual({ source: [6], target: [8] })
     expect(store.size).toBe(1)
 
     const second = await service.translate(req(['a']))
     expect(second.ok).toBe(true)
     if (!second.ok) return
     expect(second.cached).toBe(1)
-    expect(second.result.segments[0]?.alignment).toBeUndefined()
     expect(second.result.segments[0]?.text).toBe('译:text-a')
+    expect(second.result.segments[0]?.alignment).toEqual({ source: [6], target: [8] })
+  })
+
+  it('drops a cached alignment that no longer reconstructs the texts', async () => {
+    // The source text only exists at this point, so a key collision or a changed source is caught
+    // here rather than putting the highlight on the wrong sentence.
+    const { port, store } = fakePort()
+    const service = createTranslateService({ getProvider: async () => withAlignment({}), cache: port })
+    const first = await service.translate(req(['a']))
+    expect(first.ok).toBe(true)
+    const [key] = [...store.keys()]
+    // 伪造一条切分对不上的记录
+    store.set(key!, { translation: '译:text-a', alignment: { source: [999], target: [1] } })
+    const second = await service.translate(req(['a']))
+    expect(second.ok && second.cached).toBe(1)
+    expect(second.ok && second.result.segments[0]?.alignment).toBeUndefined()
+    expect(second.ok && second.result.segments[0]?.text).toBe('译:text-a')
   })
 })
 

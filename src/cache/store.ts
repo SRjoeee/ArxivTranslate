@@ -5,17 +5,29 @@
 // 一篇论文几百次 set，库到几千条后每次写入都要反序列化整库，MV3 的 service worker 是单线程，
 // 其他消息（provider-status）会排在后面等几十秒。这里改为：字节数与条数增量维护，只有真的超限才按最旧批量淘汰。
 import Dexie, { type DexieOptions, type Table } from 'dexie'
+import type { SentenceAlignment } from '@/providers/alignment'
+
+/** 一条缓存记录里可被消费的部分：译文，以及产生它的引擎报回的句子对齐（issue #105） */
+export interface CachedEntry {
+  translation: string
+  alignment?: SentenceAlignment
+}
 
 export interface CacheRecord {
   key: string
   /** arXiv id，便于按论文清理与导出 */
   paper: string
   translation: string
+  /** 句子对齐；旧记录没有这个字段，读回来就是没有高亮，不需要作废缓存 */
+  alignment?: SentenceAlignment
   createdAt: number
   lastAccessedAt: number
   expiresAt: number
   byteSize: number
 }
+
+/** 记录 → 可消费的部分。`alignment` 缺席时不带这个键，调用方按「没有对齐」处理 */
+const entryOf = (record: CacheRecord): CachedEntry => (record.alignment ? { translation: record.translation, alignment: record.alignment } : { translation: record.translation })
 
 export interface CacheLimits {
   ttlMs: number
@@ -191,7 +203,7 @@ export class TranslationCache {
     }
   }
 
-  async get(key: string, now = Date.now()): Promise<string | null> {
+  async get(key: string, now = Date.now()): Promise<CachedEntry | null> {
     const hot = this.memory.get(key)
     if (hot) {
       if (this.isExpired(hot, now)) {
@@ -203,7 +215,7 @@ export class TranslationCache {
       this.remember(hot)
       // 与原实现不同：热层命中也回写持久层的访问时间，否则持久层 LRU 会按过时的时间淘汰错误条目
       await this.db.entries.update(key, { lastAccessedAt: now }).catch(() => undefined)
-      return hot.translation
+      return entryOf(hot)
     }
     try {
       const record = await this.db.entries.get(key)
@@ -215,18 +227,26 @@ export class TranslationCache {
       record.lastAccessedAt = now
       await this.db.entries.put(record)
       this.remember(record)
-      return record.translation
+      return entryOf(record)
     } catch (error) {
       console.warn('[axt] 缓存读取失败，按未命中处理', error)
       return null
     }
   }
 
-  /** 空译文与过大单项不入库；写入后在同一事务里按条数与总字节数做持久层 LRU 淘汰 */
-  async set(key: string, translation: string, paper: string, now = Date.now()): Promise<boolean> {
-    const byteSize = byteSizeOf(key) + byteSizeOf(translation)
+  /**
+   * 空译文与过大单项不入库；写入后在同一事务里按条数与总字节数做持久层 LRU 淘汰。
+   *
+   * 值可以只是译文，也可以带上句子对齐——两种形态而不是加一个尾参数，是因为 `now` 已经占了第四位，
+   * 在它前面插参数会打断所有传 `now` 的调用点。
+   */
+  async set(key: string, value: string | CachedEntry, paper: string, now = Date.now()): Promise<boolean> {
+    const { translation, alignment } = typeof value === 'string' ? { translation: value, alignment: undefined } : value
+    // 对齐一起计入字节数：它随记录持久化，不算进来的话总量会低估
+    const byteSize = byteSizeOf(key) + byteSizeOf(translation) + (alignment ? byteSizeOf(JSON.stringify(alignment)) : 0)
     if (!translation || byteSize > this.limits.maxEntryBytes) return false
     const record: CacheRecord = { key, paper, translation, createdAt: now, lastAccessedAt: now, expiresAt: now + this.limits.ttlMs, byteSize }
+    if (alignment) record.alignment = alignment
     try {
       const totals = await this.ensureTotals()
       await this.db.transaction('rw', this.db.entries, async () => {

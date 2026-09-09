@@ -51,7 +51,8 @@ export function createOcrService(deps: OcrServiceDeps): OcrService {
       const [hit] = await readWithBudget(deps.cache, [key], deps.cacheReadBudgetMs ?? CACHE_READ_BUDGET_MS)
       // 查状态 / 读缓存期间被撤：命中也不回结果、更不把活交给 helper（Codex 在 #87 指出）
       if (call.scope && cancelled.has(call.scope)) return aborted()
-      const cached = parseCached(hit)
+      // OCR 走的是同一个缓存端口，但它存的是自己的 JSON，与句子对齐无关：只取译文那一栏
+      const cached = parseCached(hit?.translation)
       if (cached) return { ok: true, result: cached, cached: true }
       try {
         const { result, version } = await deps.helper.ocr({ image: call.image }, call.scope)

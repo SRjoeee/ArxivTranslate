@@ -5,8 +5,9 @@
 // 与运行上下文无关：缓存通过 CachePort 注入，background 用本地 Dexie，content 用消息代理。
 import type { WireFormat } from '@/core/protector'
 import { wireFormatOf } from '@/cache/key'
+import type { CachedEntry } from '@/cache/store'
 import { cacheKeyFor, type RenderPath } from '@/cache/key'
-import type { SentenceAlignment } from './alignment'
+import { type SentenceAlignment, verifyAlignment } from './alignment'
 // 深引 validate 而不是 protector 的桶：serialize / rehydrate 要碰 DOM，那两个不该进 background 的包
 import { expectationsFromText, validate } from '@/core/protector/validate'
 import { getRandomUUID } from '@/shared/uuid'
@@ -29,6 +30,8 @@ export interface TranslationOutcome {
 }
 
 export interface CacheEntry {
+  /** 引擎报回并已通过校验的句子对齐；没有就不写 */
+  alignment?: SentenceAlignment
   key: string
   translation: string
   paper: string
@@ -36,7 +39,7 @@ export interface CacheEntry {
 
 /** 缓存的最小接口；批量读写，避免每段一次往返 */
 export interface CachePort {
-  getMany(keys: string[]): Promise<(string | null)[]>
+  getMany(keys: string[]): Promise<(CachedEntry | null)[]>
   putMany(entries: CacheEntry[]): Promise<void>
 }
 
@@ -175,7 +178,7 @@ const admits = (source: string, translated: string, format: WireFormat): boolean
   validate(translated, expectationsFromText(source, format)).ok
 
 /** 超预算就当全部未命中：多花一次请求，好过整页停在这里。OCR 服务读缓存也用它（Codex 在 #87 指出） */
-export async function readWithBudget(store: CachePort, keys: string[], budgetMs: number): Promise<(string | null)[]> {
+export async function readWithBudget(store: CachePort, keys: string[], budgetMs: number): Promise<(CachedEntry | null)[]> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const hits = await Promise.race([
     store.getMany(keys),
@@ -321,8 +324,10 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           const hits = await readWithBudget(store, computed, deps.cacheReadBudgetMs ?? CACHE_READ_BUDGET_MS)
           request.segments.forEach((segment, i) => {
             const hit = hits[i]
-            // 缓存里目前只有译文；对齐的持久化是下一个 PR（issue #105）
-            if (hit !== null && hit !== undefined) translated.set(segment.id, { text: hit })
+            if (hit === null || hit === undefined) return
+            // 命中时**重新校验一次**对齐：源文本到这一步才有，键碰撞或源文变动都会在这里被挡下，
+            // 宁可没有高亮也不要把高亮打在错的句子上（alignment.ts 的那条原则）
+            translated.set(segment.id, { text: hit.translation, alignment: verifyAlignment(hit.alignment, segment.text, hit.translation) })
           })
         }
       }
@@ -376,9 +381,16 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
             failures.push(outcome.reason)
             return
           }
-          translated.set(item.id, outcome.value)
+          // 无论对齐来自哪个引擎，都在这一层校验一次：provider 各自校验会漏掉没实现的那些，
+          // 而缓存命中那条路也要校验，两边用同一个闸才对称
+          const value: TranslationOutcome = { text: outcome.value.text, alignment: verifyAlignment(outcome.value.alignment, item.text, outcome.value.text) }
+          translated.set(item.id, value)
           const key = keys.get(item.id)
-          if (store && cache && key && admits(item.text, outcome.value.text, wireFormatOf(cache.renderPath))) writes.push({ key, translation: outcome.value.text, paper: cache.paper })
+          if (store && cache && key && admits(item.text, value.text, wireFormatOf(cache.renderPath))) {
+            writes.push(value.alignment
+              ? { key, translation: value.text, paper: cache.paper, alignment: value.alignment }
+              : { key, translation: value.text, paper: cache.paper })
+          }
         })
         // 写之前再查一次取消（Codex 在 #33 指出）：一次调用会被拆到多个批次，先完成的那些
         // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，

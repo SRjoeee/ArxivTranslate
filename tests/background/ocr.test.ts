@@ -24,7 +24,7 @@ function memoryCache() {
   return {
     store,
     port: {
-      getMany: async (keys: string[]) => keys.map(k => store.get(k) ?? null),
+      getMany: async (keys: string[]) => keys.map(k => { const v = store.get(k); return v === undefined ? null : { translation: v } }),
       putMany: async (entries: { key: string; translation: string; paper: string }[]) => { for (const e of entries) store.set(e.key, e.translation) },
     },
   }

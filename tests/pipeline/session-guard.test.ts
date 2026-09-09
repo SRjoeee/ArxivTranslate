@@ -62,7 +62,7 @@ describe('缓存读取的等待预算：换任何 CachePort 都不会被拖死�
   const call = { request: { segments: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], source: 'en' as const, target: 'cmn' }, cache: { paper: '0000.00000', renderPath: 'tags' as const } }
 
   it('正常返回时不受预算影响，命中的段落不再发给 provider', async () => {
-    const { service, calls } = await serviceWith({ getMany: async keys => keys.map((_, i) => (i === 0 ? '甲' : null)), putMany: async () => undefined })
+    const { service, calls } = await serviceWith({ getMany: async keys => keys.map((_, i) => (i === 0 ? { translation: '甲' } : null)), putMany: async () => undefined })
     const res = await service.translate(call)
     expect(res.ok && res.cached).toBe(1)
     expect(calls).toEqual([['b']])
@@ -70,7 +70,7 @@ describe('缓存读取的等待预算：换任何 CachePort 都不会被拖死�
 
   it('条数对不上按全未命中处理：按索引取会张冠李戴', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const { service, calls } = await serviceWith({ getMany: async () => ['甲'], putMany: async () => undefined })
+    const { service, calls } = await serviceWith({ getMany: async () => [{ translation: '甲' }], putMany: async () => undefined })
     const res = await service.translate(call)
     expect(res.ok && res.cached).toBe(0)
     expect(calls).toEqual([['a', 'b']])
