@@ -5,6 +5,7 @@
 // 序列化时要当普通 paired 走进去，否则整格只剩一个占位符、文字全丢（实测 2410.00260 表 1；Codex 在 #5 指出）。
 import { isInjected } from '@/core/marks'
 import { FUNCTIONAL_INLINE, classify, isTableCell } from '@/core/rules/latexml'
+import type { WireSpan } from './offsets'
 import { escapeText } from './text'
 import { type WireFormat, writeVoid } from './tokens'
 
@@ -18,6 +19,8 @@ export interface ProtectedBlock {
   paired: Set<number>
   /** 超过 VOID_DENSE_THRESHOLD 的块视为公式密集，由 pipeline 单独成批 */
   voidCount: number
+  /** Wire offset to DOM mapping; only produced by `serialize(root, format, { offsets: true })` (§6.2, issue #105) */
+  offsets?: WireSpan[]
 }
 
 export const VOID_DENSE_THRESHOLD = 40
@@ -55,10 +58,64 @@ const HTML_SPACE = /[\t\n\f\r ]+/g
 const collapseWhitespace = (text: string) => text.replace(HTML_SPACE, ' ')
 
 
-export function serialize(root: Element, format: WireFormat = 'tags'): ProtectedBlock {
+/**
+ * Writes the wire text character by character while recording where wire offsets land in the DOM.
+ * Only taken when offsets are requested: the default path still escapes the whole string at once
+ * and collapses once at the end, touching not one extra character, so translation pays nothing.
+ *
+ * The two paths must emit byte-identical wire text; `tests/protector/offsets.test.ts` pins that
+ * across all 12 fixtures in both wire formats.
+ */
+function makeTracker(format: WireFormat, parts: string[], spans: WireSpan[]) {
+  let len = 0
+  let afterSpace = false
+  return {
+    /**
+     * A placeholder run. It holds no collapsible whitespace and neither starts nor ends with any,
+     * so it goes out verbatim. Recording it as a span matters for ranges: a boundary landing inside
+     * a placeholder has to resolve to that node's own boundary, otherwise a sentence opening or
+     * closing on a formula would drop it (Codex pointed this out on #123).
+     */
+    raw(s: string, node: Node, role: 'void' | 'open' | 'close') {
+      parts.push(s)
+      spans.push({ kind: 'slot', node, from: len, to: len + s.length, role })
+      len += s.length
+      afterSpace = false
+    },
+    text(node: Text) {
+      const data = node.data
+      const from = len
+      const anchors: [number, number][] = [[len, 0]]
+      let out = ''
+      for (let i = 0; i < data.length; i++) {
+        const c = data[i]!
+        let emitted: string
+        if (c === ' ' || c === '\t' || c === '\n' || c === '\f' || c === '\r') {
+          emitted = afterSpace ? '' : ' '
+          afterSpace = true
+        } else {
+          emitted = c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : format === 'markers' && c === '@' ? '@@' : c
+          afterSpace = false
+        }
+        out += emitted
+        // One input character did not produce exactly one output character, so the 1:1 run
+        // restarts here and needs an anchor.
+        if (emitted.length !== 1) anchors.push([len + out.length, i + 1])
+      }
+      if (out.length === 0) return
+      parts.push(out)
+      len += out.length
+      spans.push({ kind: 'text', node, from, to: len, anchors })
+    },
+  }
+}
+
+export function serialize(root: Element, format: WireFormat = 'tags', options: { offsets?: boolean } = {}): ProtectedBlock {
   const slots = new Map<number, Node>()
   const paired = new Set<number>()
   const parts: string[] = []
+  const spans: WireSpan[] = []
+  const tracker = options.offsets === true ? makeTracker(format, parts, spans) : undefined
   let voidCount = 0
   let next = 1
   const inCell = isTableCell(root)
@@ -66,7 +123,8 @@ export function serialize(root: Element, format: WireFormat = 'tags'): Protected
   const walk = (node: Element) => {
     for (const child of Array.from(node.childNodes)) {
       if (child.nodeType === TEXT_NODE) {
-        parts.push(escapeText((child as Text).data, format))
+        if (tracker) tracker.text(child as Text)
+        else parts.push(escapeText((child as Text).data, format))
       } else if (child.nodeType === ELEMENT_NODE) {
         const el = child as Element
         // 我们自己插的译文 / 镜像不是原文：再次翻译时它们已经在原块内部（Codex 在 #8 指出）
@@ -85,17 +143,22 @@ export function serialize(root: Element, format: WireFormat = 'tags'): Protected
         slots.set(id, el)
         if (isVoid || format === 'markers') {
           voidCount++
-          parts.push(writeVoid(id, format))
+          if (tracker) tracker.raw(writeVoid(id, format), el, 'void')
+          else parts.push(writeVoid(id, format))
         } else {
           paired.add(id)
-          parts.push(`<t id="${id}">`)
+          if (tracker) tracker.raw(`<t id="${id}">`, el, 'open')
+          else parts.push(`<t id="${id}">`)
           walk(el)
-          parts.push('</t>')
+          if (tracker) tracker.raw('</t>', el, 'close')
+          else parts.push('</t>')
         }
       }
       // 注释等其他节点忽略
     }
   }
   walk(root)
-  return { format, text: collapseWhitespace(parts.join('')), slots, paired, voidCount }
+  // The tracked path collapses as it writes, so it must not be collapsed again.
+  const text = tracker ? parts.join('') : collapseWhitespace(parts.join(''))
+  return tracker ? { format, text, slots, paired, voidCount, offsets: spans } : { format, text, slots, paired, voidCount }
 }
