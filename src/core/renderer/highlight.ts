@@ -184,6 +184,8 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
 
   let x = 0
   let y = 0
+  /** Whether the pointer is in the document at all. False until the first move, false again after leaving. */
+  let over = false
   let frame = 0
   let missTimer = 0
   /**
@@ -204,6 +206,12 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
    */
   const STALE = -1
   const invalidate = () => {
+    // Nothing to re-measure while the pointer is elsewhere. `x`/`y` keep the last position they were
+    // given, so a resize or a scroll arriving after the pointer left the document would hit-test at
+    // coordinates the pointer no longer occupies and paint a sentence nobody is pointing at — and
+    // before the first `pointermove` those coordinates are (0, 0), which a startup resize would test
+    // (Codex on #138).
+    if (!over) return
     if (shown) shown = { ...shown, at: STALE }
     if (frame === 0) frame = view?.requestAnimationFrame(update) ?? 0
   }
@@ -337,11 +345,13 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   }
 
   const onMove = (event: PointerEvent) => {
+    over = true
     x = event.clientX
     y = event.clientY
     if (frame === 0) frame = view?.requestAnimationFrame(update) ?? 0
   }
   const onLeave = () => {
+    over = false
     hit()
     clearNow()
   }

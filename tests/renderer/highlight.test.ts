@@ -270,6 +270,30 @@ describe('hover sentence highlight (§7.7)', () => {
     proto.getBoundingClientRect = previous
   })
 
+  it('does not repaint at coordinates the pointer has left', () => {
+    // `x`/`y` keep the last position they were given, so a resize or a scroll arriving after the
+    // pointer left the document would hit-test where the pointer no longer is — and before the
+    // first move those coordinates are (0, 0), which a startup resize would test (Codex on #138).
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+
+    // A resize before the pointer has ever been over the document paints nothing
+    browser.resize()
+    expect(browser.bands()).toEqual([])
+
+    browser.move()
+    expect(browser.bands().length).toBe(2)
+
+    // …and once it leaves, a resize must not bring the tint back
+    doc.dispatchEvent(new Event('pointerleave'))
+    expect(browser.bands()).toEqual([])
+    browser.resize()
+    expect(browser.bands()).toEqual([])
+    hl.stop()
+  })
+
   it('keeps a band inside the container that clips its text', () => {
     // The layer hangs off `<body>`, outside whatever clipped the text — and `getClientRects()`
     // reports the whole layout box, including the part scrolled out of sight. A wide table in side
