@@ -72,14 +72,22 @@ const OPENING = /^<t(?:\s+id="\d+")?>$/
 /** Abbreviations that genuinely end sentences, so the text after them decides whether to merge */
 const TERMINAL_ABBR = /\b(?:etc|al)\.$/
 /**
- * A continuation rather than a new sentence. Only lowercase or a number: an abbreviation after
- * `etc.` or `al.` opens the next sentence rather than proving the first was internal — "by Smith
- * et al. Fig. 2 shows …" is two sentences (Codex on #126). Narrowing it costs nothing: the
- * measurement over 2330 fixture blocks is unchanged at one added cut and none wrong.
+ * A continuation rather than a new sentence. Lowercase, a number, or an opening bracket: an
+ * abbreviation after `etc.` or `al.` opens the next sentence rather than proving the first was
+ * internal — "by Smith et al. Fig. 2 shows …" is two sentences (Codex on #126) — but a bracket is
+ * how a citation is written, and `by Gopalan et al. [GHSY12], which reduces …` is one sentence
+ * (`tests/fixtures/arxiv/2401.00418.html`, Codex on #137). Measured over the whole fixture corpus:
+ * the bracket removes that one cut and adds none.
  */
-const CONTINUES = /^\s*[a-z0-9]/
+const CONTINUES = /^\s*[a-z0-9([]/
 
 const VOID_TOKEN = 'Xx'
+
+/**
+ * What a placeholder projects to, in visible coordinates. A boundary the segmenter finds strictly
+ * inside one of these is not a boundary of the block — see `sentenceCuts`.
+ */
+interface Token { from: number; to: number }
 
 /**
  * Whether the placeholder with this id annotates the text before it — a footnote or a citation —
@@ -151,12 +159,13 @@ export interface SplitContext {
  * So segment a projection where each placeholder becomes whitespace, except a void that opens a
  * sentence, which becomes a word so the boundary stays visible.
  */
-function project(text: string, format: WireFormat, context: SplitContext): { visible: string; toWire: number[]; openEnds: Map<number, number> } {
+function project(text: string, format: WireFormat, context: SplitContext): { visible: string; toWire: number[]; openEnds: Map<number, number>; tokens: Token[] } {
   let visible = ''
   // toWire[i] is the wire offset that visible offset i starts at
   const toWire: number[] = []
   // wire offset just past an opening tag -> where that tag starts
   const openEnds = new Map<number, number>()
+  const tokens: Token[] = []
   let at = 0
   const re = placeholderRe(format)
   re.lastIndex = 0
@@ -196,6 +205,7 @@ function project(text: string, format: WireFormat, context: SplitContext): { vis
       }
     }
     for (let i = 0; i < token.length; i++) toWire.push(index)
+    if (token.length > 0) tokens.push({ from: visible.length, to: visible.length + token.length })
     visible += token
     at = after
   }
@@ -204,7 +214,7 @@ function project(text: string, format: WireFormat, context: SplitContext): { vis
     visible += text[i]
   }
   toWire.push(text.length)
-  return { visible, toWire, openEnds }
+  return { visible, toWire, openEnds, tokens }
 }
 
 /**
@@ -230,7 +240,7 @@ export function splitSentences(text: string, format: WireFormat = 'tags', contex
 /** Cut points inside the text, i.e. the boundaries between sentences, excluding 0 and `length`. */
 export function sentenceCuts(text: string, format: WireFormat = 'tags', context: SplitContext = {}): number[] {
   if (text.length === 0) return []
-  const { visible, toWire, openEnds } = project(text, format, context)
+  const { visible, toWire, openEnds, tokens } = project(text, format, context)
   const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' })
   const pieces: string[] = []
   for (const { segment } of segmenter.segment(visible)) {
@@ -248,6 +258,17 @@ export function sentenceCuts(text: string, format: WireFormat = 'tags', context:
   let at = 0
   for (let i = 0; i < pieces.length - 1; i++) {
     at += pieces[i]!.length
+    // **A boundary inside a placeholder's own text is not a boundary of the block.** A citation
+    // carries periods that end nothing — `[11, Ex. 2.6 & §8.1]`, `(Fol95, Section 7.B)` — and the
+    // segmenter cuts at them. Every character of a token maps back to the same wire offset, so such
+    // a break surfaces as a cut in *front* of the whole placeholder and splits a sentence in half
+    // (Codex on #137 reported the symptom on citations). Measured over the fixture corpus: dropping
+    // them removes 38 cuts, adds none, and every one of the 38 is mid-sentence.
+    //
+    // A sentence that genuinely ends inside a slot — a period living in a math node, which
+    // `tests/fixtures/arxiv/2609.00246.html` has — is not this case: its boundary falls at the end
+    // of the token, not inside it, and already maps to the offset past the placeholder.
+    if (tokens.some(t => at > t.from && at < t.to)) continue
     let wire = toWire[at] ?? text.length
     // A cut can land just past an opening tag, which leaves `<t id="N">` at the end of one sentence
     // and its content plus `</t>` in the next — the pair split across two. Walk back over any

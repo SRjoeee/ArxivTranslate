@@ -46,15 +46,26 @@ describe('哪些块该切句（§8.6）', () => {
     expect(cutsOf(bib.segment, 'tags')).toBeUndefined()
   })
 
-  it('引用不算注解——它可能是句子的主语', () => {
-    // 把 `.ltx_cite` 当注解会把它抹成空格，连带藏掉它前面那个边界。实测 1176 个正文块：
-    // 当注解会丢 3 个真实边界、一个都不多切（Codex 在 #137 指出）
-    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="x">We prove it. <cite class="ltx_cite">Smith et al.</cite> extend the result.</p></div>')
-    const blocks = extract(doc)
-    markBlocks(blocks)
-    const block = blocks.find(b => b.kind === 'text' && b.el.id === 'x') as TextBlock
-    const p = serialize(block.el, 'tags')
-    expect(cutsOf({ id: block.id, text: p.text, block, protected: p }, 'tags')).toHaveLength(1)
+  it('a citation is content, not an annotation — it can be the subject of its sentence', () => {
+    // Treating `.ltx_cite` as an annotation blanks it out, and the boundary in front of it goes with
+    // it. Measured over 3430 fixture blocks: doing that loses 14 real boundaries and removes no
+    // wrong ones. Both citation styles are represented — `\citet` writes the authors into the
+    // sentence ("Schwarz and Erhard [25] show that …", 7 of the 14) and a plain `\cite` can open one
+    // just as well ("Liao et al. (2023) proposed …", `[Str25a, Theorem 1.2] shows …`, 3 more) — which
+    // is why the classification cannot be narrowed to `.ltx_citemacro_citet` either (Codex on #137
+    // asked for both directions in turn).
+    const cuts = (html: string) => {
+      const doc = docOf(`<div class="ltx_para"><p class="ltx_p" id="x">${html}</p></div>`)
+      const blocks = extract(doc)
+      markBlocks(blocks)
+      const block = blocks.find(b => b.kind === 'text' && b.el.id === 'x') as TextBlock
+      const p = serialize(block.el, 'tags')
+      return cutsOf({ id: block.id, text: p.text, block, protected: p }, 'tags')
+    }
+    expect(cuts('We prove it. <cite class="ltx_cite ltx_citemacro_citet">Smith et al.</cite> extend the result.')).toHaveLength(1)
+    expect(cuts('They are unbound. <cite class="ltx_cite ltx_citemacro_cite">Liao et al. (2023)</cite> proposed a close encounter.')).toHaveLength(1)
+    // …while a citation inside a sentence must not cut it in half
+    expect(cuts('shown by Gopalan et\u00a0al. <cite class="ltx_cite ltx_citemacro_cite">[GHSY12]</cite>, which reduces to the bound.')).toHaveLength(0)
   })
 
   it('只有 tags 这条路切', () => {

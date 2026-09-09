@@ -218,6 +218,25 @@ describe('sentence splitting (#105)', () => {
     }
   })
 
+  it('ignores a boundary the segmenter finds inside a citation, which ends nothing', () => {
+    // `[11, Ex. 2.6 & §8.1]` carries a period the segmenter cuts at, and every character of a
+    // projected token maps back to the same wire offset — so the cut surfaced in front of the
+    // citation and split the sentence in half. Measured over the fixture corpus: 38 such cuts, all
+    // of them mid-sentence (Codex on #137).
+    const context: SplitContext = { textOf: id => (id === 1 ? '[11, Ex. 2.6 & §8.1]' : undefined) }
+    expect(sentenceCuts('Definition 3.11 (e.g. <x id="1"/>).', 'tags', context)).toEqual([])
+  })
+
+  it('reads a citation after et al. as part of the same sentence', () => {
+    // `by Gopalan et al. [GHSY12], which reduces …` is one sentence, but the citation opens with a
+    // bracket, which the continuation test used to reject — so `al.` was taken as a real sentence
+    // end (`tests/fixtures/arxiv/2401.00418.html`, Codex on #137).
+    const context: SplitContext = { textOf: id => (id === 1 ? '[GHSY12]' : undefined) }
+    expect(sentenceCuts('by Gopalan et al. <x id="1"/>, which reduces to the bound.', 'tags', context)).toEqual([])
+    // and an abbreviation that really does open the next sentence still cuts
+    expect(sentenceCuts('shown by Smith et al. Fig. 2 explains it.')).toHaveLength(1)
+  })
+
   it('returns one length when there is no interior boundary', () => {
     expect(splitSentences('A single clause with no end')).toEqual([27])
     expect(sentenceCuts('A single clause with no end')).toEqual([])
