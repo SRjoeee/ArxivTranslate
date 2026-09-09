@@ -10,7 +10,7 @@
 // a text span records an anchor only where one input character did not produce exactly one output
 // character; between anchors the mapping is addition.
 
-import { isInjected } from '@/core/marks'
+import { INJECTED_SELECTOR, isInjected } from '@/core/marks'
 
 /** One run of wire text and where it came from. Text and slot spans together tile the whole string. */
 export type WireSpan =
@@ -104,6 +104,37 @@ function oneRange(spans: readonly WireSpan[], from: number, to: number): Range |
 }
 
 /**
+ * The node, minus the injected subtrees inside it, as one range per surviving stretch. Keeps the
+ * parts a reader should see — a footnote marker, the original note text — while leaving our own
+ * translation of it outside the highlight.
+ */
+function carveInjected(node: Element): Range[] {
+  const doc = node.ownerDocument
+  const injected = Array.from(node.querySelectorAll(INJECTED_SELECTOR))
+  if (!doc || injected.length === 0) return []
+  const out: Range[] = []
+  let anchorNode: Node = node
+  let anchorAfter = false
+  for (const stale of injected) {
+    // Skip one nested inside another we have already stepped over
+    if (out.length > 0 && anchorAfter && (anchorNode as Element).contains(stale)) continue
+    const range = doc.createRange()
+    if (anchorAfter) range.setStartAfter(anchorNode)
+    else range.setStartBefore(anchorNode)
+    range.setEndBefore(stale)
+    out.push(range)
+    anchorNode = stale
+    anchorAfter = true
+  }
+  const tail = doc.createRange()
+  if (anchorAfter) tail.setStartAfter(anchorNode)
+  else tail.setStartBefore(anchorNode)
+  tail.setEndAfter(node)
+  out.push(tail)
+  return out
+}
+
+/**
  * Wire interval `[from, to)` as ranges.
  *
  * **Usually one range, but not always.** `serialize` skips nodes we injected ourselves, so when an
@@ -189,16 +220,29 @@ export function rangesOf(spans: readonly WireSpan[], from: number, to: number): 
   const out: Range[] = []
   let segmentStart = from
   let previous = spanAt(spans, from)
+  const flush = (end: number) => {
+    if (end <= segmentStart) return
+    const range = oneRange(spans, segmentStart, end)
+    if (range) out.push(range)
+  }
   for (const span of spans) {
-    if (span.from <= from || span.from >= to) continue
-    if (previous && injectedBetween(previous.node, span.node)) {
-      const range = oneRange(spans, segmentStart, span.from)
-      if (range) out.push(range)
+    if (span.to <= from || span.from >= to) continue
+    // A slot holding our own translation — a footnote whose content was translated in place — is
+    // covered by carved pieces instead of one range enclosing the whole node (Codex on #123).
+    const holds = span.kind === 'slot' && span.node.nodeType === 1 && (span.node as Element).querySelector(INJECTED_SELECTOR)
+    if (holds) {
+      flush(span.from)
+      out.push(...carveInjected(span.node as Element))
+      segmentStart = span.to
+      previous = span
+      continue
+    }
+    if (span.from > from && previous && injectedBetween(previous.node, span.node)) {
+      flush(span.from)
       segmentStart = span.from
     }
     previous = span
   }
-  const tail = oneRange(spans, segmentStart, to)
-  if (tail) out.push(tail)
+  flush(to)
   return out
 }

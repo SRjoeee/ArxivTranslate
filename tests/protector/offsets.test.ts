@@ -255,6 +255,35 @@ describe('wire offsets to DOM (#105)', () => {
     expect(calls.length).toBeGreaterThan(2)
   })
 
+  it('carves our own translation out of a slot that holds one', () => {
+    // A footnote is a single void slot and its translation renders *inside* it — renderText puts
+    // the .axt-t next to .ltx_note_content, a descendant of the protected note. Ending after that
+    // slot encloses the translation, and injectedBetween cannot see it because it only looks
+    // between spans (Codex on #123).
+    const root = el('<p class="ltx_p">The claim holds<span class="ltx_note"><span class="ltx_note_content">note</span><span class="axt-t" data-axt-for="n">translated</span></span></p>')
+    const block = serialize(root, 'tags', { offsets: true })
+    const slot = block.offsets!.find(s => s.kind === 'slot')!
+    expect((slot.node as Element).querySelectorAll('.axt-t')).toHaveLength(1)
+    // Text up to the note, then the note carved around its translation: never one range over the note
+    expect(boundaryCalls(root, block.offsets!, 0, block.text.length)).toEqual([
+      'start@text("The cl"):0',
+      'end@text("The cl"):15',
+      'startBefore:span',
+      'endBefore:span',
+      'startAfter:span',
+      'endAfter:span',
+    ])
+  })
+
+  it('leaves a slot without injected content as a single range', () => {
+    const root = el('<p class="ltx_p">The claim holds<span class="ltx_note"><span class="ltx_note_content">note</span></span></p>')
+    const block = serialize(root, 'tags', { offsets: true })
+    expect(boundaryCalls(root, block.offsets!, 0, block.text.length)).toEqual([
+      'start@text("The cl"):0',
+      'endAfter:span',
+    ])
+  })
+
   it('returns nothing for an interval reaching past the tiled wire text', () => {
     // The loop used to push the earlier segments before the final oneRange failed, so a malformed
     // request came back as a truncated prefix instead of nothing (Codex on #123).
