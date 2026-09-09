@@ -481,10 +481,12 @@ at least one SVG figure**, and counting figures rather than papers, **880 of 179
 carry more — which resolve to **316 distinct assets, and all 316 were measured**, over two channels: **276
 fetched and parsed over HTTP**, cached locally one directory per paper, and the 40 that answer 406 to curl
 (see below) read in a real browser through their `<object>`'s `contentDocument`, which is what the extension
-will actually see. Every count below is the sum of the two, so the denominator is the whole sampled set
-rather than the part curl could reach (Codex asked on #133 for the 406 group to be counted, not set aside).
-A reachability pass over 44 further figures answers a narrower question and is labelled as the sub-sample it
-is where it is used.
+will actually see. **The coverage and encoding counts** — how many `<use>` elements there are, how many carry
+`data-text`, what other text-bearing elements exist, and the angle distribution — **are the sum of the two, so
+their denominator is the whole sampled set** rather than the part curl could reach (Codex asked on #133 for
+the 406 group to be counted, not set aside). Everything else in this section names the population it was
+measured on, because several were narrower: the ancestor-transform check is the 276 fetchable files only, the
+dropped-space analysis 71 figures, the reachability pass 44, and the viewBox-to-element-box mapping three.
 
 **276 fetchable files, not 281.** The crawl logged 281 non-error asset references but only 276 distinct
 paths: five files are referenced twice within the same paper and were counted twice, and the earlier totals
@@ -755,8 +757,8 @@ table stale would let later work follow the obsolete requirement, since DESIGN i
 | 19 | §14 arXiv 自身 JS 冲突 | 实测无冲突面（无 MutationObserver / MathJax / 脚注 JS，脚注弹出纯 CSS），风险可降为低 | §3.3 |
 | 22 | ~~§8 / §10 provider 请求跑在 background~~ | ~~建议把 provider 的 fetch 移到 content script~~ **已废止（2026-09-06）**：依据的 §6.5 三条结论全部推翻（§6.7 / §6.8），且「Read Frog 在 content 发请求」是误读。**与第 24 行方向相反，以第 24 行为准**；实际实现是移到 background（issue #42，已合并） | ~~§6.5~~ → §6.7 / §6.8 |
 | 23 | §8 `google-gtx` 用 `translate_a/single`、`preservesMarkup: false` | 改用 Read Frog 的 `translate-pa.googleapis.com/v1/translateHtml`：实测保留占位符，`preservesMarkup: true`，批量 150 条 556 ms | §6.6 |
-| 20 | ~~§15.1 SVG 图文字按普通块翻译~~ **已被 27 取代** | ~~实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics`~~ 这条只看了**内联** SVG，见 27 | §2.9 |
+| 20 | ~~§15.1 SVG 图文字按普通块翻译~~ **superseded by 27** | ~~实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics`~~ That entry looked at **inline** SVG only — see 27 | §2.9 |
 | 24 | §8.0 请求跑在 content script | 实测 content 侧 fetch 受 CORS 与**本地网络门禁**约束（§6.7）：不带 CORS 头的端点、本机端点（Ollama；http 与 https 一样被拦）从 content 不可达，从 background 可达；连接测试走 background、正式翻译走 content，两条路径行为不一致。且 §8.0 引用的「Read Frog 在 content 发请求」核对为误读。建议：抽离 transport，默认在 background 执行请求（无 CORS 预检、不受本地网络门禁、key 不进页面世界），content 只保留调度；~~先按 issue #42 要求重测冷启动延迟，再定~~ **重测已完成**（§6.7 真实 Chrome 三轮 77–81 ms、§6.8 长请求 45 / 90 s 均存活），**已按本条实现并合并**（issue #42） | §6.7 / §6.8 |
 | 25 | §2「非目标 [延后]」把「微软免费通道」列为 v1 不做；§8.1 正文写「gtx 与微软 edge 通道不接（后者 auth 端点已 404）」 | **依据已失效**：那条 auth 流程确实没了，但它的**无鉴权后继**今天可用（§5.1）。#104 已经把 `markers` 线上格式与能力协商做进 main，微软正是它存在的理由。建议：把这两处改成「可接入，`wireFormats: ['markers']`」，并在 §8.1 的 provider 表里加一行 | §5.1 |
 | 26 | §8.1 provider 表没有「支持语言范围」这一列 | 免费引擎不是每种目标语言都支持：微软实测 179 个目标里 71 个 400。建议 provider 接口增加一个「这个目标语言能不能翻」的判定，`buildChain` 与设置页据此过滤，而不是等运行时报错 | §5.1 |
-| 27 | §15.1「跳过 SVG」收窄成「跳过**内联** SVG」 | 外部引用的 `<object type="image/svg+xml">` 是另一个群体，占样本里 1792 张图的 49.1%；文字以带 `data-text` 的 `<use>` 字形画出，可精确读出、不需要 OCR。用 `<path>` 直接画轮廓的那 10% 仍然需要 OCR 回退 | §6.11 |
+| 27 | Narrow §15.1's "skip SVG" to "skip **inline** SVG" | Externally referenced `<object type="image/svg+xml">` figures are a separate population, 49.1% of the 1792 figures in the sample. Their text is drawn as `<use>` glyphs carrying `data-text`, so it is read exactly rather than recognised, and needs no OCR. The 10.1% that draw outlines straight into `<path>` still need an OCR fallback | §6.11 |
