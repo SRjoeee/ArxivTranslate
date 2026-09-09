@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { rehydrate, serialize } from '@/core/protector'
-import { clearSentenceHighlights, registerSentences, restore, startSentenceHighlight } from '@/core/renderer'
+import { clearSentenceHighlights, registerSentences, restore, setMode, startSentenceHighlight } from '@/core/renderer'
 import { splitSentences } from '@/core/sentences'
 
 /**
@@ -35,8 +37,13 @@ function stubBrowser(doc: Document) {
   return {
     highlights,
     caret,
-    /** Runs whatever the grace timer scheduled */
-    flushTimers: () => { for (const t of timers.splice(0)) t.fn() },
+    /** Runs whatever is scheduled, optionally only the timers of one delay */
+    flushTimers: (delay?: number) => {
+      const due = delay === undefined ? timers.splice(0) : timers.filter(t => t.delay === delay)
+      if (delay !== undefined) for (const t of due) timers.splice(timers.indexOf(t), 1)
+      for (const t of due) t.fn()
+    },
+    delays: () => timers.map(t => t.delay),
     frames,
     /** One pointer move plus the frame it schedules */
     move: () => {
@@ -146,6 +153,78 @@ describe('hover sentence highlight (§7.7)', () => {
     hl.stop()
   })
 
+  it('keeps the ranges registered for the whole fade-out', () => {
+    // `::highlight()` paints from the registered ranges, so dropping them is what makes the tint
+    // disappear — instantly, however long the CSS transition is. The attribute goes first, which is
+    // what the transition runs on, and the ranges only after it has finished.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    browser.caret.mockReturnValue(null)
+    browser.move()
+
+    browser.flushTimers(120) // the miss grace period expires, so the fade begins
+    expect(doc.documentElement.getAttribute('data-axt-hl')).toBeNull()
+    expect(browser.highlights.size).toBe(2)
+
+    browser.flushTimers(220) // the fade finishes
+    expect(browser.highlights.size).toBe(0)
+    hl.stop()
+  })
+
+  it('the fade-out it waits for is the one the stylesheet actually runs', () => {
+    // The duration lives in two places by necessity — CSS runs the transition, JS decides when the
+    // ranges may go — so they are pinned to each other rather than left to drift.
+    const css = readFileSync(join(import.meta.dirname, '../../src/styles/highlight.css'), 'utf8')
+    const root = /:root\s*\{[^}]*transition:\s*--axt-hl\s+(\d+)ms/.exec(css)
+    expect(root?.[1]).toBe('220')
+  })
+
+  it('coming back before the fade finishes keeps the ranges', () => {
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const text = source.firstChild as Text
+
+    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
+    browser.move()
+    browser.caret.mockReturnValue(null)
+    browser.move()
+    browser.flushTimers(120)
+
+    // Back on a different sentence while the fade is still running
+    browser.caret.mockReturnValue({ offsetNode: text, offset: text.data.length - 3 })
+    browser.move()
+    expect(doc.documentElement.getAttribute('data-axt-hl')).toBe('on')
+    // The fade's deletion must not fire now and take the new ranges with it
+    browser.flushTimers()
+    expect(browser.highlights.size).toBe(2)
+    hl.stop()
+  })
+
+  it('repaints after setMode cleared the highlights under it', () => {
+    // `setMode()` empties the registries but cannot reach into this controller. Without the epoch,
+    // a pointer still resting on the same sentence takes the "nothing changed" path forever.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    expect(browser.highlights.size).toBe(2)
+
+    setMode(doc, 'side')
+    expect(browser.highlights.size).toBe(0)
+
+    browser.move() // same sentence, same position
+    expect(browser.highlights.size).toBe(2)
+    expect(doc.documentElement.getAttribute('data-axt-hl')).toBe('on')
+    hl.stop()
+  })
+
   it('holds through a miss, then fades out', () => {
     // Crossing the gap between two paragraphs is a miss the reader experiences as one continuous
     // movement; reacting to it instantly would blink.
@@ -159,7 +238,8 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.move()
     expect(doc.documentElement.getAttribute('data-axt-hl')).toBe('on')
 
-    browser.flushTimers()
+    browser.flushTimers(120)
+    browser.flushTimers(220)
     expect(doc.documentElement.getAttribute('data-axt-hl')).toBeNull()
     expect(browser.highlights.size).toBe(0)
     hl.stop()

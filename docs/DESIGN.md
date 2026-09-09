@@ -483,7 +483,11 @@ interface ProtectedBlock {
 - **命中判定**用 `caretPositionFromPoint`，不用 `highlightsFromPoint`——后者能直接回答，但它是 Chrome 140 的接口，而 `minimum_chrome_version` 是 131。每次指针移动只做一次 `caretPositionFromPoint` + 一次向上找块 + 两次二分；合帧到 `requestAnimationFrame`，句子没变就不重建 `Range`
 - **句边界从引擎来，不猜。** 只有引擎报了句边界、且两侧长度都能精确重建原串时才登记（§8.6 / `providers/alignment.ts`）。目前只有微软报。没有对齐的块（Google、LLM）不登记，悬停无反应——**猜出来的配对会把高亮打在错的句子上，那比没有高亮更糟**
 - 三样东西（原文侧线上偏移、译文侧线上偏移、句边界）只在渲染那一瞬同时存在，所以在 `renderText` 之后登记进 `src/core/renderer/sentences.ts` 的模块级 `WeakMap`。**不写 `data-axt-*` 属性**：§7.1 允许追加，但这是每块几百个数字，写进去会撑大读者正在读的文档、跟着页面被序列化出去、每次指针移动还要再解析一遍。WeakMap 还会随节点一起消失，`restore()` 不需要为它多跑一趟清理；`restore()` 之后原块仍在、译文节点已删，用 `target.root.isConnected` 当场识别失效条目
-- 颜色跟随 `--axt-green`，与荧光笔族同一个色源，`styleVarsRule` 从 `config.style.accent` 改写它——一个颜色控件，不是两个。开关是 `config.reading.sentenceHighlight`，默认开
+- **淡出期间 `Range` 必须留着**：`::highlight()` 是照着已注册的 `Range` 画的，先删 `Range` 再撤属性的话没有东西可画，过渡跑给空气看、底色瞬断。所以撤属性在前，`Range` 等 220 ms 过渡走完再删；期间指针回来则取消这次删除（Codex 在 #130 指出）
+- **外部清空要让缓存失效**：`setMode()` / `restore()` 会清掉两个注册表，但够不到控制器里「当前画的是哪一句」那个缓存。用一个模块级 epoch，外部清空时自增，缓存记下自己画在哪一代——否则指针停在原处永远走短路、再也不重画（Codex 在 #130 指出）
+- **表格单元格也登记**：`renderTable` 建出克隆表之后回报「原格 → 克隆格」，pipeline 按这张表逐格登记。屏幕上的是克隆格，而它只在那里被建出来
+- 颜色跟随 `--axt-green`，与荧光笔族同一个色源，`styleVarsRule` 从 `config.style.accent` 改写它——一个颜色控件，不是两个。开关是 `config.reading.sentenceHighlight`（设置页「阅读」一节），默认开
+- **[已知缺口]** side 模式下 `splitFigures` 会把整张图连图注一起克隆到右栏，屏幕上可见的是克隆件，而注册表记的是被隐藏的那份原件——图注的对照高亮在 side 模式下不生效。修法要把 span 里的文本节点按树同构重映射到克隆上，另开 issue
 
 ---
 

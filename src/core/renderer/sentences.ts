@@ -32,11 +32,28 @@ export interface SentenceMap {
 }
 
 /**
- * Both elements of a block point at the same record, so a hit on either side finds the other.
- * Keyed by element, so a block re-translated into a new node simply registers again and the old
- * entry becomes unreachable along with the node it described.
+ * Two maps, and the split is what keeps this from leaking.
+ *
+ * The record is heavy — every text node of the translation and a span for every run — and it is
+ * keyed by the **translation** node, which `restore()` removes, so it dies with what it describes.
+ * The original element only holds a `WeakRef` to that node. Keying the record by the original
+ * instead would retain it forever: `restore()` leaves the originals in the document, so the key
+ * stays reachable, and a WeakMap entry whose key is reachable keeps its value alive — one detached
+ * translation subtree per block, for the rest of the page's life (Codex pointed this out on #130).
+ *
+ * Not `nextElementSibling` in place of the WeakRef, though §7.1 does put the translation there:
+ * that is where it is *inserted*, and split-figure copies and mirrors are inserted after it later.
  */
-const registry = new WeakMap<Element, SentenceMap>()
+const maps = new WeakMap<Element, SentenceMap>()
+const targetOf = new WeakMap<Element, WeakRef<Element>>()
+
+/** The record reachable from either side of a block, or undefined once the translation is gone. */
+function recordOf(el: Element): SentenceMap | undefined {
+  const own = maps.get(el)
+  if (own) return own
+  const target = targetOf.get(el)?.deref()
+  return target ? maps.get(target) : undefined
+}
 
 /**
  * Registers a translated block, if it has everything the highlight needs.
@@ -53,13 +70,13 @@ export function registerSentences(source: Element, target: Element, sourceSpans:
     source: { root: source, spans: sourceSpans, index: indexSpans(sourceSpans) },
     target: { root: target, spans: targetSpans, index: indexSpans(targetSpans) },
   }
-  registry.set(source, map)
-  registry.set(target, map)
+  maps.set(target, map)
+  targetOf.set(source, new WeakRef(target))
 }
 
 /** The record for an element, or undefined if this block has no usable alignment. */
 export function sentenceMapOf(el: Element): SentenceMap | undefined {
-  return registry.get(el)
+  return recordOf(el)
 }
 
 /**
@@ -76,15 +93,18 @@ const live = (map: SentenceMap) => map.target.root.isConnected
 /**
  * The block a node sits in, walking up until a registered element is found.
  *
- * Bounded by `limit` ancestors rather than by the document root: the walk runs on every pointer
- * move, and a miss deep inside a table should cost a handful of map lookups, not one per level up
- * to `<html>`. Blocks are shallow — a `.ltx_p` is a few levels below its section — so a bound this
- * loose still finds every real hit.
+ * Walks all the way to the root rather than stopping after a fixed number of levels. It used to
+ * stop at twelve, on the theory that a miss should cost a handful of lookups rather than one per
+ * level — but a lookup is a `WeakMap.get`, and the cost of going all the way up is a dozen or so of
+ * them once per frame, which is nothing. The bound was not free: text nodes in the fixtures sit as
+ * deep as **sixteen** element levels below their block (a `msqrt/msub/mi` in `2401.00596.html`),
+ * and twelve reaches only 99.824% of them — 371 of 86409. Deep MathML nests without limit, so no
+ * constant is the right answer (Codex pointed this out on #130).
  */
-export function sentenceMapAt(node: Node, limit = 12): { map: SentenceMap; side: 'source' | 'target' } | undefined {
+export function sentenceMapAt(node: Node): { map: SentenceMap; side: 'source' | 'target' } | undefined {
   let el: Element | null = node.nodeType === 1 ? (node as Element) : node.parentElement
-  for (let i = 0; el && i < limit; i++, el = el.parentElement) {
-    const map = registry.get(el)
+  for (; el; el = el.parentElement) {
+    const map = recordOf(el)
     if (map && live(map)) return { map, side: map.source.root === el ? 'source' : 'target' }
   }
   return undefined

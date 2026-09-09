@@ -37,7 +37,9 @@ mkdirSync(SHOTS, { recursive: true })
 const context = await chromium.launchPersistentContext(PROFILE, {
   channel: 'chromium',
   headless: !process.env.AXT_HEADED,
-  args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
+  // --expose-gc lets the page force a collection: the sentence-highlight registry has to let a
+  // restored page drop its translations, and that is only checkable where GC actually runs
+  args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--js-flags=--expose-gc'],
   viewport: { width: 1440, height: 900 },
 })
 let [worker] = context.serviceWorkers()
@@ -255,6 +257,22 @@ await options.reload({ waitUntil: 'domcontentloaded' })
 await options.waitForFunction(() => document.querySelector('input[type="number"]')?.value === '300', null, { timeout: 5_000 }).catch(() => undefined)
 const marginBack = await options.inputValue(marginInput)
 check('设置页：预翻译距离保存后重载仍是 300', marginBack === '300', `读回 ${marginBack}`)
+
+// ── 设置页：悬停对照高亮的开关真的能改（#130：加了配置字段却没有 UI，用户关不掉） ────────
+{
+  const box = options.getByRole('checkbox', { name: /悬停时高亮对应的句子/ })
+  const wasOn = await box.isChecked()
+  await box.uncheck()
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  await options.reload({ waitUntil: 'domcontentloaded' })
+  const back = await options.getByRole('checkbox', { name: /悬停时高亮对应的句子/ }).isChecked()
+  check('设置页：悬停对照高亮开关默认开、关掉后重载仍是关（§7.7）', wasOn === true && back === false, `默认 ${wasOn}，关掉重载读回 ${back}`)
+  // 后面的检查要它开着
+  await options.getByRole('checkbox', { name: /悬停时高亮对应的句子/ }).check()
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+}
 await options.fill(marginInput, '1000')
 await options.getByRole('button', { name: '保存', exact: true }).click()
 await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
@@ -508,6 +526,30 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     hover.inSource === true && hover.inTarget === true, `原文命中 ${hover.inSource}、译文命中 ${hover.inTarget}`)
   check('悬停对照高亮：一个 DOM 节点都没动（§7.1）',
     hover.domUnchanged === true, `DOM ${hover.domUnchanged ? '未变' : '变了'}`)
+
+  // 悬停高亮的注册表不能因为原块还在文档里就把摘掉的译文永远留住（Codex 在 #130 指出）。
+  // happy-dom 不释放任何已摘除的节点——对照实验里连什么都不引用的 <p> 都收不掉——所以这条只有
+  // 在真浏览器里才测得了。
+  //
+  // 判据是「残留数不随译文数增长」，不是「一个都不剩」：实测有 1 个块（S1.p2.1）被页面里别的
+  // 东西吊着，从头到尾不悬停也一样，与注册表无关。用旧写法量过对照——**14 个全部留住**，
+  // 所以这条阈值分得开修好与没修。
+  const retained = await page.evaluate(async () => {
+    if (typeof gc !== 'function') return { skipped: true }
+    const nodes = [...document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')]
+    if (nodes.length < 8) return { reason: `只有 ${nodes.length} 个译文，样本太小` }
+    const watch = nodes.map(n => new WeakRef(n))
+    const before = watch.length
+    nodes.length = 0
+    // 译文节点全部摘掉、原块留在文档里，正是会把注册表条目吊住的那种情形
+    for (const n of [...document.querySelectorAll('[data-axt-for]')]) n.remove()
+    CSS.highlights.clear()
+    for (let i = 0; i < 8; i++) { gc(); await new Promise(r => setTimeout(r, 30)) }
+    return { before, alive: watch.filter(w => w.deref() !== undefined).length }
+  })
+  check('悬停对照高亮：摘掉译文后注册表不再吊住它们（#130 的内存回归）',
+    retained.skipped === true || (retained.alive !== undefined && retained.alive <= 2),
+    retained.skipped ? '跳过（没有 gc）' : retained.reason ?? `摘掉 ${retained.before} 个译文节点后仍存活 ${retained.alive} 个（旧写法是 ${retained.before} 个全留）`)
 
   await page.screenshot({ path: `${SHOTS}/microsoft.png` })
   await page.close()

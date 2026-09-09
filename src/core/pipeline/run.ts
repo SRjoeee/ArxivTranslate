@@ -243,18 +243,32 @@ export function startTranslation(options: RunOptions): TranslationRun {
     if (stopped) return // stop() 已经把 pending 清掉、不再上报
     if (batch.kind === 'table' && batch.block) {
       const cells = new Map<Element, DocumentFragment>()
+      // 一格的原文侧偏移与对齐，等 renderTable 建出克隆格之后才登记得了（§7.7）
+      const pairs = new Map<Element, { spans: readonly WireSpan[]; offsets?: WireSpan[]; alignment?: SentenceAlignment }>()
       let reason = '未知错误'
       for (const [segment, result] of out) {
-        if ('fragment' in result) { if (segment.cell) cells.set(segment.cell.el, result.fragment) }
-        else reason = result.error
+        if ('fragment' in result) {
+          if (!segment.cell) continue
+          cells.set(segment.cell.el, result.fragment)
+          pairs.set(segment.cell.el, { spans: segment.protected.offsets, offsets: result.fragment.offsets, alignment: result.alignment })
+        } else reason = result.error
+      }
+      const renderedCells = new Map<Element, Element>()
+      const registerCells = () => {
+        for (const [cell, node] of renderedCells) {
+          const p = pairs.get(cell)
+          if (p) registerSentences(cell, node, p.spans, p.offsets, p.alignment)
+        }
       }
       // 有一格没翻出来就算失败（Codex 在 #9 指出）；半份克隆照常显示，原表保持 translated 另加 partial 标记（Codex 在 #30 指出）
       if (cells.size === batch.segments.length) {
-        renderTable(batch.block, cells)
+        renderTable(batch.block, cells, renderedCells)
+        registerCells()
         outcome.set(batch.block, 'done')
       } else {
         if (cells.size > 0) {
-          renderTable(batch.block, cells)
+          renderTable(batch.block, cells, renderedCells)
+          registerCells()
           markPartial(batch.block)
         } else {
           renderFailed(batch.block, reason, () => { void translate([batch.block!]) })

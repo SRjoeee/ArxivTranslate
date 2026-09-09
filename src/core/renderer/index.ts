@@ -203,7 +203,12 @@ function ownText(el: Element): string {
  * 表格块（§5.3）：整表克隆置于原表之后，克隆保留原有类名以沿用页面的表格样式；
  * 有译文的单元格替换内容，数值格与公式格保持克隆内容。cells 的键是原表里的单元格元素。
  */
-export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragment>): Element {
+/**
+ * @param rendered filled in with original cell → the clone's cell that now holds its translation,
+ *   so the caller can pair the two sides for the hover highlight (§7.7). Only the clone's cells are
+ *   on screen, and they are built here, so nowhere else can make that pairing.
+ */
+export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragment>, rendered?: Map<Element, Element>): Element {
   clearTranslation(block)
   const clone = block.el.cloneNode(true) as Element
   stripInjected(clone)
@@ -217,6 +222,7 @@ export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragm
     if (!target) return
     target.textContent = ''
     target.append(content)
+    rendered?.set(cell.el, target)
   })
   clone.classList.add(T_CLASS)
   clone.setAttribute(FOR_ATTR, block.id)
