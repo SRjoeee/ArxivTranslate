@@ -66,7 +66,7 @@ export interface PeekAnchor {
   block: { left: number; width: number }
   /** The article's right edge, where the margin begins; undefined when there is no article root */
   articleRight: number | undefined
-  /** Whether the margin beside the sentence is empty; `marginOccupied` answers it in the read phase */
+  /** Whether the margin tier can be used; `Peek.marginFree` answers it in the read phase */
   marginFree: boolean
   viewport: { width: number; height: number }
   /**
@@ -96,42 +96,31 @@ export interface Peek {
    * it instead of only moving the panel (Codex on #149). Anywhere else it is nothing to the panel.
    */
   touched(node: Node): void
+  /**
+   * Whether the margin tier can be used for a sentence at these lines: the margin is wide enough,
+   * and nothing the page itself shows there meets the panel's footprint.
+   *
+   * From 96rem up ar5iv keeps footnotes and publication notes at the page's right edge, and
+   * `localizeNotes` leaves the translated ones there (§7.2). A panel over them would hide exactly
+   * what the margin tier promises not to (Codex on #149). The footprint — the panel's column, from
+   * the sentence to the viewport's edge in the direction the panel grows — is intersected with
+   * every margin aside's box: one rectangle read per aside, in the frame's read phase, and no
+   * sampling that a short note could fall between (Codex on #149, twice).
+   */
+  marginFree(articleRight: number, top: number, bottom: number, viewport: { width: number; height: number }): boolean
 }
 
 const same = (a: PeekKey, b: PeekKey) => a.root === b.root && a.index === b.index && a.shown === b.shown
-
-/** How far apart the gutter is sampled, and how many samples at most — a viewport's worth. */
-const PROBE_STEP_PX = 120
-const PROBE_LIMIT = 8
 
 /**
  * Which way the panel grows from the sentence: down from its first line, or up from its last.
  *
  * Down unless fewer than `COMFORT_PX` remain below *and* there is more room above. Shared by the
- * placement and by the gutter probe, which has to look where the panel will actually be.
+ * placement and by the margin check, which has to look where the panel will actually be.
  */
 const growsDown = (top: number, bottom: number, viewportHeight: number): boolean => {
   const roomBelow = viewportHeight - bottom
   return roomBelow >= COMFORT_PX || roomBelow >= top
-}
-
-/**
- * Whether the page already shows something in the margin where the panel would go.
- *
- * From 96rem up ar5iv keeps footnotes and publication notes at the page's right edge, and
- * `localizeNotes` leaves the translated ones there (§7.2). A panel over them would hide exactly
- * what the margin tier promises not to (Codex on #149). Hit tests down — or up — the gutter along
- * the panel's whole possible footprint, made in the frame's read phase; the panel itself is inert
- * and never answers one.
- */
-export function marginOccupied(doc: Document, articleRight: number, top: number, bottom: number, viewportHeight: number): boolean {
-  if (typeof doc.elementFromPoint !== 'function') return false
-  const x = articleRight + 2 * GAP_PX
-  const down = growsDown(top, bottom, viewportHeight)
-  for (let i = 0, y = down ? top + GAP_PX : bottom - GAP_PX; i < PROBE_LIMIT && y > 0 && y < viewportHeight; i++, y += down ? PROBE_STEP_PX : -PROBE_STEP_PX) {
-    if (doc.elementFromPoint(x, y)?.closest(MARGIN_ASIDE)) return true
-  }
-  return false
 }
 
 /**
@@ -274,6 +263,21 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
     },
     touched(node) {
       if (open && !stale && open.shown.contains(node)) stale = true
+    },
+    marginFree(articleRight, top, bottom, viewport) {
+      const margin = viewport.width - articleRight - 2 * GAP_PX
+      if (margin < MIN_MARGIN_REM * rem) return false
+      const left = articleRight + GAP_PX
+      const right = left + Math.min(margin, MAX_MARGIN_REM * rem)
+      const down = growsDown(top, bottom, viewport.height)
+      const box = down ? { left, right, top, bottom: viewport.height - GAP_PX } : { left, right, top: GAP_PX, bottom }
+      for (const aside of Array.from(doc.querySelectorAll(MARGIN_ASIDE))) {
+        const r = aside.getBoundingClientRect()
+        // Collapsed or in the article's own flow: no box, or one that never reaches the gutter
+        if (r.width === 0 || r.height === 0) continue
+        if (r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top) return false
+      }
+      return true
     },
   }
 }

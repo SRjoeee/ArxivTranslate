@@ -24,7 +24,7 @@
 import { HL_CLASS, PEEK_CLASS } from '@/core/marks'
 import { rangesOf, wireOffsetAt } from '@/core/protector'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { createPeek, marginOccupied, type PeekAnchor } from './peek'
+import { createPeek, type PeekAnchor } from './peek'
 import { rendered, sentenceAt, sentenceMapAt } from './sentences'
 
 /** Which side a band belongs to, so the stylesheet can tell them apart if it ever needs to. */
@@ -427,8 +427,8 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
           bottom,
           block: { left, width: Math.max(0, right - left) },
           articleRight,
-          marginFree: articleRight !== undefined && !marginOccupied(doc, articleRight, top, bottom, view.innerHeight),
-          viewport: { width: view.innerWidth, height: view.innerHeight },
+          marginFree: articleRight !== undefined && peek.marginFree(articleRight, top, bottom, { width: view.innerWidth, height: vh }),
+          viewport: { width: view.innerWidth, height: vh },
           type: { font: view.getComputedStyle(counterpart).font, color: textColour(counterpart, view), background: pageBackground(doc, view) },
         }
       }

@@ -2,7 +2,7 @@
 // from the pointer is covered with the rest of the controller in `highlight.test.ts`.
 import { describe, expect, it } from 'vitest'
 import { INJECTED_SELECTOR, isInjected } from '@/core/marks'
-import { AT_ATTR, PEEK_DWELL_MS, createPeek, marginOccupied, type PeekAnchor } from '@/core/renderer/peek'
+import { AT_ATTR, PEEK_DWELL_MS, createPeek, type PeekAnchor } from '@/core/renderer/peek'
 
 const doc = () => new DOMParser().parseFromString('<html><body></body></html>', 'text/html')
 
@@ -232,28 +232,35 @@ describe('source peek (#141)', () => {
     expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute(AT_ATTR)).toBe('below')
   })
 
-  it('marginOccupied: probes the gutter along the panel\'s own footprint', () => {
+  it('marginFree: the panel\'s footprint against every margin aside\'s box', () => {
     const d = doc()
-    d.body.innerHTML = '<span class="ltx_note"><span class="ltx_note_content" id="n">note</span></span><p id="a">One.</p>'
-    const note = d.getElementById('n')!
-    const hits: Record<number, Element | null> = {}
-    const asked: number[] = []
-    Object.assign(d, { elementFromPoint: (_x: number, y: number) => { asked.push(y); return hits[y] ?? null } })
-    // Nothing there; a top-aligned panel is probed downward from the sentence to the viewport's end
-    expect(marginOccupied(d, 1136, 400, 425, 900)).toBe(false)
-    expect(asked.splice(0)).toEqual([408, 528, 648, 768, 888])
-    // A footnote well past 240px, still under the panel
-    hits[768] = note
-    expect(marginOccupied(d, 1136, 400, 425, 900)).toBe(true)
-    // Something that is not gutter content
-    hits[768] = d.body
-    expect(marginOccupied(d, 1136, 400, 425, 900)).toBe(false)
-    // A sentence near the bottom hangs its panel upward: the probes go up, not down
-    asked.splice(0)
-    expect(marginOccupied(d, 1136, 850, 875, 900)).toBe(false)
-    expect(asked.splice(0)).toEqual([867, 747, 627, 507, 387, 267, 147, 27])
-    hits[627] = note
-    expect(marginOccupied(d, 1136, 850, 875, 900)).toBe(true)
+    d.body.innerHTML = '<span class="ltx_note" id="n1">1</span><span class="ltx_note" id="n2">2</span><span class="ltx_pubnotes" id="pub">p</span><p id="a">One.</p>'
+    const rect = (el: Element, left: number, top: number, width: number, height: number) =>
+      Object.assign(el, { getBoundingClientRect: () => ({ left, top, right: left + width, bottom: top + height, width, height, x: left, y: top, toJSON: () => ({}) }) as DOMRect })
+    const peek = createPeek(d)
+    const vp = { width: 1440, height: 900 }
+    // Nothing in the gutter: 304px free beside the article, 288 for the panel
+    expect(peek.marginFree(1136, 400, 425, vp)).toBe(true)
+    // Too narrow a margin is never free
+    expect(peek.marginFree(966, 400, 425, { width: 1100, height: 900 })).toBe(false)
+    // A one-line note 500–530 in the gutter, well inside a top-aligned panel's column: taken
+    rect(d.getElementById('n1')!, 1150, 500, 200, 30)
+    expect(peek.marginFree(1136, 400, 425, vp)).toBe(false)
+    // The same note is above a panel hanging from a sentence near the bottom? No — that panel
+    // grows upward from 875 and reaches it
+    expect(peek.marginFree(1136, 850, 875, vp)).toBe(false)
+    // Below the sentence, though, a hanging panel never reaches it
+    rect(d.getElementById('n1')!, 1150, 880, 200, 15)
+    expect(peek.marginFree(1136, 850, 875, vp)).toBe(true)
+    // In the article's own flow, not the gutter: no box in the column
+    rect(d.getElementById('n1')!, 400, 500, 200, 30)
+    expect(peek.marginFree(1136, 400, 425, vp)).toBe(true)
+    // Collapsed (narrow window folds the notes away): no box at all
+    rect(d.getElementById('n2')!, 1150, 500, 0, 0)
+    expect(peek.marginFree(1136, 400, 425, vp)).toBe(true)
+    // Publication notes count too
+    rect(d.getElementById('pub')!, 1150, 420, 200, 60)
+    expect(peek.marginFree(1136, 400, 425, vp)).toBe(false)
   })
 
   it('a dwell whose sentence is no longer current renders nothing', () => {
