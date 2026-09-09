@@ -67,12 +67,12 @@ function stubBrowser(doc: Document) {
     disconnect() { const at = resizes.indexOf(this.fn); if (at >= 0) resizes.splice(at, 1) }
   }
   // Same shape for MutationObserver: registered on observe, and the test hands it records
-  type Record = { target: Node; type?: MutationRecordType }
-  const mutators: ((records: Record[]) => void)[] = []
+  type StubRecord = { target: Node; type?: MutationRecordType }
+  const mutators: ((records: StubRecord[]) => void)[] = []
   const watching: MutationObserverInit[] = []
   view.MutationObserver = class {
-    fn: (records: Record[]) => void
-    constructor(fn: (records: Record[]) => void) { this.fn = fn }
+    fn: (records: StubRecord[]) => void
+    constructor(fn: (records: StubRecord[]) => void) { this.fn = fn }
     observe(_target: Node, init: MutationObserverInit) { watching.push(init); mutators.push(this.fn) }
     disconnect() { const at = mutators.indexOf(this.fn); if (at >= 0) mutators.splice(at, 1) }
   }
