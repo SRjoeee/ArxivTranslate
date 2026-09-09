@@ -172,7 +172,9 @@ export function createMicrosoftProvider(targetLanguage: string, deps: MicrosoftD
     id: 'microsoft',
     displayName: '微软翻译（免费）',
     kind: 'mt',
-    wireFormats: WIRE_FORMATS.microsoft,
+    // 原生就有 `sentLen`，服务层不给它插句子标记（§8.6）
+  reportsSentences: true,
+  wireFormats: WIRE_FORMATS.microsoft,
     /**
      * 批量与并发按**微软自己的**响应特征定，不照抄 google-web（那组值是按 Google 63 ms 的响应调出来的，
      * 抄过来会犯 google-web.ts 注释里记着的同一个错）。2026-09-08 实测，每个请求内容唯一以排除服务端缓存：
