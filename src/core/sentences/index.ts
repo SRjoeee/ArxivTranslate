@@ -21,6 +21,8 @@
 // larger list removes 5 cuts and adds none, and all 5 are journal abbreviations in bibliographies
 // (`Theor. Comput. Sci.`, `J. Fac. Sci. Univ. Tokyo`, `Sci. Rep. 14`).
 
+import type { WireFormat } from '@/core/protector'
+
 /**
  * A period after one of these does not end a sentence. Single capitals cover initials (`A. Turing`)
  * and the journal-volume style that produced the only failures measured; the rest are the
@@ -44,7 +46,16 @@ const ABBR =
  * `@`, and matching markers first reads the second `@` of `@@a#` as a placeholder and cuts a
  * sentence in the middle of ordinary text (Codex on #126).
  */
-const PLACEHOLDER = /@@|<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>|@[a-z]+#/g
+const TAGS_PLACEHOLDER = /<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>/g
+const MARKERS_PLACEHOLDER = /@@|@[a-z]+#/g
+
+/**
+ * The two formats use disjoint syntax, and reading one as the other invents boundaries in ordinary
+ * text: `escapeText` leaves a literal `@` alone on the `tags` path, so `Done. @a# is a literal.`
+ * would be projected as a placeholder there (Codex on #126). The caller knows which format it
+ * serialised with, so it says.
+ */
+const placeholderRe = (format: WireFormat) => (format === 'markers' ? MARKERS_PLACEHOLDER : TAGS_PLACEHOLDER)
 
 /** A `<t>` or `</t>` run: structural wrapping around inline markup, standing for no content itself */
 const STRUCTURAL = /^<\/?t(?:\s+id="\d+")?>$/
@@ -64,7 +75,9 @@ const OPENING = /^<t(?:\s+id="\d+")?>$/
  * sentence into the next one.
  */
 const OPENS_SENTENCE = /[.!?][)"'\]]?\s*$/
-const LOWERCASE_NEXT = /^\s*[a-z]/
+// Punctuation and structural tags can sit between the placeholder and the word that reveals the
+// case: "… complete. @a#, however, is continuous." (Codex on #126)
+const LOWERCASE_NEXT = /^(?:\s|[,;:.)\]"']|<\/?t(?:\s+id="\d+")?>)*[a-z]/
 const VOID_TOKEN = 'Xx'
 
 /**
@@ -76,15 +89,16 @@ const VOID_TOKEN = 'Xx'
  * So segment a projection where each placeholder becomes whitespace, except a void that opens a
  * sentence, which becomes a word so the boundary stays visible.
  */
-function project(text: string): { visible: string; toWire: number[]; openEnds: Map<number, number> } {
+function project(text: string, format: WireFormat): { visible: string; toWire: number[]; openEnds: Map<number, number> } {
   let visible = ''
   // toWire[i] is the wire offset that visible offset i starts at
   const toWire: number[] = []
   // wire offset just past an opening tag -> where that tag starts
   const openEnds = new Map<number, number>()
   let at = 0
-  PLACEHOLDER.lastIndex = 0
-  for (const m of text.matchAll(PLACEHOLDER)) {
+  const re = placeholderRe(format)
+  re.lastIndex = 0
+  for (const m of text.matchAll(re)) {
     const index = m.index ?? 0
     for (let i = at; i < index; i++) {
       toWire.push(i)
@@ -121,9 +135,9 @@ function project(text: string): { visible: string; toWire: number[]; openEnds: M
  * the text it describes, so a splitter that lost or duplicated a character would simply produce no
  * highlight. Returns a single length for text with no interior boundary.
  */
-export function splitSentences(text: string): number[] {
+export function splitSentences(text: string, format: WireFormat = 'tags'): number[] {
   if (text.length === 0) return []
-  const cuts = sentenceCuts(text)
+  const cuts = sentenceCuts(text, format)
   const lengths: number[] = []
   let prev = 0
   for (const cut of cuts) {
@@ -135,9 +149,9 @@ export function splitSentences(text: string): number[] {
 }
 
 /** Cut points inside the text, i.e. the boundaries between sentences, excluding 0 and `length`. */
-export function sentenceCuts(text: string): number[] {
+export function sentenceCuts(text: string, format: WireFormat = 'tags'): number[] {
   if (text.length === 0) return []
-  const { visible, toWire, openEnds } = project(text)
+  const { visible, toWire, openEnds } = project(text, format)
   const segmenter = new Intl.Segmenter('en', { granularity: 'sentence' })
   const pieces: string[] = []
   for (const { segment } of segmenter.segment(visible)) {
@@ -153,8 +167,20 @@ export function sentenceCuts(text: string): number[] {
     let wire = toWire[at] ?? text.length
     // A cut can land just past an opening tag, which leaves `<t id="N">` at the end of one sentence
     // and its content plus `</t>` in the next — the pair split across two. Walk back over any
-    // opening tags ending here so the whole pair stays with the sentence it wraps (Codex on #126).
-    while (openEnds.has(wire)) wire = openEnds.get(wire)!
+    // opening tag ending here, and over whitespace that the segmenter took as the tag's trailing
+    // space when the wrapped content itself starts with a space (Codex on #126).
+    for (;;) {
+      if (openEnds.has(wire)) {
+        wire = openEnds.get(wire)!
+        continue
+      }
+      const back = wire - 1
+      if (back > 0 && /[\t\n\f\r ]/.test(text[back] ?? '') && openEnds.has(back)) {
+        wire = back
+        continue
+      }
+      break
+    }
     // A cut landing where a placeholder starts is fine; one that would not advance is dropped
     if (wire > (cuts[cuts.length - 1] ?? 0) && wire < text.length) cuts.push(wire)
   }

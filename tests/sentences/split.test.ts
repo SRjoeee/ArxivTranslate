@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { sentenceCuts, splitSentences } from '@/core/sentences'
 
-const parts = (text: string) => {
+const parts = (text: string, format?: 'tags' | 'markers') => {
   const out: string[] = []
   let at = 0
-  for (const len of splitSentences(text)) {
+  for (const len of splitSentences(text, format)) {
     out.push(text.slice(at, at + len))
     at += len
   }
@@ -41,11 +41,11 @@ describe('sentence splitting (#105)', () => {
     // Running on wire text is what makes this safe: `f(x) = 0.5` has already become `@a# = 0.5`,
     // and even the bare decimal is not a boundary.
     expect(sentenceCuts('The error is 0.5 percent overall.')).toEqual([])
-    expect(sentenceCuts('Let @a# denote the loss. Then @b# converges.')).toEqual(['Let @a# denote the loss. '.length])
+    expect(sentenceCuts('Let @a# denote the loss. Then @b# converges.', 'markers')).toEqual(['Let @a# denote the loss. '.length])
   })
 
   it('keeps placeholders inside the sentence they belong to', () => {
-    expect(parts('Let @a# denote the loss. Then @b# converges.')).toEqual(['Let @a# denote the loss. ', 'Then @b# converges.'])
+    expect(parts('Let @a# denote the loss. Then @b# converges.', 'markers')).toEqual(['Let @a# denote the loss. ', 'Then @b# converges.'])
   })
 
   it('sees a sentence end that sits against a paired placeholder', () => {
@@ -61,7 +61,7 @@ describe('sentence splitting (#105)', () => {
   it('treats void placeholders and markers the same way', () => {
     // The trailing space goes with the sentence it ends, the same convention Microsoft's sentLen uses
     expect(parts('See <x id="1"/>. Next sentence here.')).toEqual(['See <x id="1"/>. ', 'Next sentence here.'])
-    expect(parts('Let @a# denote it. Then @b# converges.')).toEqual(['Let @a# denote it. ', 'Then @b# converges.'])
+    expect(parts('Let @a# denote it. Then @b# converges.', 'markers')).toEqual(['Let @a# denote it. ', 'Then @b# converges.'])
   })
 
   it('sees a sentence that opens on a formula and continues in lowercase', () => {
@@ -71,7 +71,7 @@ describe('sentence splitting (#105)', () => {
     // word; `<t>` tags stand for nothing and stay whitespace.
     expect(parts('The proof is complete. <x id="1"/> is continuous.'))
       .toEqual(['The proof is complete. ', '<x id="1"/> is continuous.'])
-    expect(parts('The proof is complete. @a# is continuous.'))
+    expect(parts('The proof is complete. @a# is continuous.', 'markers'))
       .toEqual(['The proof is complete. ', '@a# is continuous.'])
   })
 
@@ -84,7 +84,7 @@ describe('sentence splitting (#105)', () => {
   it('treats an escaped @@ as the literal it is, not as a placeholder', () => {
     // Serialisation escapes a literal `@a#` as `@@a#`. Matching markers first reads the second `@`
     // as a placeholder and cuts ordinary text in half (Codex on #126).
-    expect(parts('Done. @@a# is a literal.')).toEqual(['Done. @@a# is a literal.'])
+    expect(parts('Done. @@a# is a literal.', 'markers')).toEqual(['Done. @@a# is a literal.'])
   })
 
   it('keeps a trailing footnote with the sentence it annotates', () => {
@@ -102,6 +102,29 @@ describe('sentence splitting (#105)', () => {
     // A cut landing just past `<t id="N">` leaves the opening tag on the previous sentence and its
     // content plus `</t>` on the next, splitting the pair across two (Codex on #126).
     expect(parts('One. <t id="1">Next</t> sentence.')).toEqual(['One. ', '<t id="1">Next</t> sentence.'])
+  })
+
+  it('reads placeholders according to the wire format', () => {
+    // `escapeText` leaves a literal `@` alone on the tags path, so text shaped like `@a#` there is
+    // ordinary content — reading it as a marker invents a boundary (Codex on #126).
+    expect(parts('Done. @a# is a literal.', 'tags')).toEqual(['Done. @a# is a literal.'])
+    expect(parts('Done. @@a# is a literal.', 'markers')).toEqual(['Done. @@a# is a literal.'])
+    // A real marker on the markers path still opens a sentence
+    expect(parts('The proof is complete. @a# is continuous.', 'markers'))
+      .toEqual(['The proof is complete. ', '@a# is continuous.'])
+  })
+
+  it('keeps leading whitespace inside the pair it belongs to', () => {
+    // The segmenter takes both the projected tag space and the content's own leading space as
+    // trailing whitespace, landing the cut past the opening tag (Codex on #126).
+    expect(parts('One. <t id="1"> Next</t> sentence.')).toEqual(['One. ', '<t id="1"> Next</t> sentence.'])
+  })
+
+  it('looks past punctuation when deciding whether a placeholder opens a sentence', () => {
+    // "… complete. @a#, however, is continuous." — the comma sits between the placeholder and the
+    // word whose case decides it (Codex on #126).
+    expect(parts('The proof is complete. <x id="1"/>, however, is continuous.'))
+      .toEqual(['The proof is complete. ', '<x id="1"/>, however, is continuous.'])
   })
 
   it('never cuts inside a placeholder, which would break the wire syntax', () => {
