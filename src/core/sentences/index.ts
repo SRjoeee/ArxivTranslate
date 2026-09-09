@@ -42,6 +42,20 @@ const ABBR =
  */
 const PLACEHOLDER = /<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>|@[a-z]+#/g
 
+/** A `<t>` or `</t>` run: structural wrapping around inline markup, standing for no content itself */
+const STRUCTURAL = /^<\/?t(?:\s+id="\d+")?>$/
+
+/**
+ * What a void placeholder projects to. It stands for real content — a formula, a link — so it has to
+ * read as a word, not as space: a sentence opening on a formula and continuing in lowercase, as in
+ * "@a# is continuous", loses its boundary entirely when the formula becomes whitespace, because
+ * Intl.Segmenter takes the lowercase word for a continuation. Measured: that cut disappeared.
+ *
+ * Two characters, not one capital: `X.` would match the single-initial rule in ABBR and merge the
+ * sentence into the next one instead.
+ */
+const VOID_TOKEN = 'Xx' 
+
 /**
  * Segmenting the wire text directly hides sentence ends that sit against a placeholder. A run-in
  * heading serialises as `<t id="1">Motivation.</t> Concurrent programs …`, and `Intl.Segmenter`
@@ -65,9 +79,11 @@ function project(text: string): { visible: string; toWire: number[] } {
       toWire.push(i)
       visible += text[i]
     }
-    // The whole placeholder collapses to one space, which maps back to where it started
-    toWire.push(index)
-    visible += ' '
+    // Structural tags carry no content, so a space is right for them; a void placeholder stands for
+    // content and has to read as a word. Every projected character maps back to where the run began.
+    const token = STRUCTURAL.test(m[0]) ? ' ' : VOID_TOKEN
+    for (let i = 0; i < token.length; i++) toWire.push(index)
+    visible += token
     at = index + m[0].length
   }
   for (let i = at; i < text.length; i++) {

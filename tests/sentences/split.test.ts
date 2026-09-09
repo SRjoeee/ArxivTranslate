@@ -64,6 +64,23 @@ describe('sentence splitting (#105)', () => {
     expect(parts('Let @a# denote it. Then @b# converges.')).toEqual(['Let @a# denote it. ', 'Then @b# converges.'])
   })
 
+  it('sees a sentence that opens on a formula and continues in lowercase', () => {
+    // Projecting a void placeholder to whitespace made `@a# is continuous` read as a continuation of
+    // the previous sentence, so the boundary vanished entirely — and formula-led sentences are
+    // everywhere in paper prose (Codex on #126). Void runs stand for content, so they project to a
+    // word; `<t>` tags stand for nothing and stay whitespace.
+    expect(parts('The proof is complete. <x id="1"/> is continuous.'))
+      .toEqual(['The proof is complete. ', '<x id="1"/> is continuous.'])
+    expect(parts('The proof is complete. @a# is continuous.'))
+      .toEqual(['The proof is complete. ', '@a# is continuous.'])
+  })
+
+  it('does not let the void token be read as an initial', () => {
+    // A single capital would match the initial rule in ABBR and merge the sentences instead
+    expect(parts('It follows from <x id="1"/>. Then we conclude.'))
+      .toEqual(['It follows from <x id="1"/>. ', 'Then we conclude.'])
+  })
+
   it('never cuts inside a placeholder, which would break the wire syntax', () => {
     const wire = '<t id="1">Motivation.</t> Concurrent work. See <x id="2"/>. Done here.'
     expect(sentenceCuts(wire).length).toBeGreaterThan(1)
