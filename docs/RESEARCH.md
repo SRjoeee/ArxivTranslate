@@ -537,8 +537,11 @@ never does (there it is a font-internal glyph index), 8 mixed — 284 files, the
 ### 2. Spaces are mostly explicit glyphs, so word segmentation is not the main problem
 
 Space characters are drawn like any other: **788 of 10820 glyphs (7.28%) across 71 figures** carry
-`data-text=" "`. Concatenating `data-text` in document order therefore reproduces a label exactly —
-`"Number of terms N"`, character for character.
+`data-text=" "`. What that establishes is that a space is **emitted as a glyph rather than left implicit in
+the layout** — it is a share of glyphs, not a share of word boundaries, so on its own it cannot say that no
+boundary is missing one (Codex on #133). Read directly off a run, the concatenation does come back whole:
+`"Number of terms N"`, character for character. How often a boundary is missing its space is the paragraph
+below, measured on the gaps themselves rather than inferred from this ratio.
 
 **Not always, though, and the exception is measured below rather than assumed.** Runs whose internal gaps
 include one about two advances wide — the shape a dropped space leaves — occur in **48.4% of code runs
