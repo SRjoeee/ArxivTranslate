@@ -535,9 +535,20 @@ the first attempt:
 ```
 
 Superscripts separate onto their own baselines, which is right for `10^15`. **Rotation must come out of that
-decomposition** rather than from reading `a` as the size: 9.44% of glyphs are rotated (5197/55064), and the
-angle takes exactly two values across 10465 measured glyphs — 0° (91.05%) and -90° (8.95%). No third value
-occurs, so the two can be handled exactly instead of approximated.
+decomposition** rather than from reading `a` as the size.
+
+Angles over the **whole corpus** — all 253 files, 55047 glyphs:
+
+| | |
+|---|---|
+| 0° | 90.61% |
+| -90° | 8.01% |
+| **38 other values** | **1.27%** (700 glyphs), commonest -30° |
+
+A seven-paper sample of 10465 glyphs contained only the first two, and this section previously concluded
+there were only two. There are not (Codex caught this on #133). The distinction is not cosmetic: an overlay
+describes a rotated label as an axis-aligned box plus an angle, which only *is* the label's box at multiples
+of 90°, so the other 1.27% cannot be placed that way and `src/core/svg/glyphs.ts` drops them.
 
 **(b) Spaces that were dropped.** In a syntax-highlighted code listing, `if` and `log_counting` belong to
 differently coloured spans and the space between them has no glyph, so the run reads `"iflog_counting == 8:"`,
@@ -550,25 +561,31 @@ gaps run to p95 = 0.818 and max = 1.12, about two advances), which needs a per-r
 than a global constant.
 
 **The §5 skip rules do not reach it.** They select `.ltx_listing`, `code` and friends in the HTML; a listing
-inside an externally referenced SVG is a flat run of `<use>` glyphs and matches none of them, so a figure's
-code has to be recognised by the SVG path itself or it will be translated with its spaces missing (Codex
-pointed this out on #133). `src/core/svg/runs.ts` does that recognition, from the runs these fixtures produce.
+inside an externally referenced SVG is a flat run of `<use>` glyphs and matches none of them (Codex pointed
+this out on #133). So the SVG path has to recognise code itself — from the shape of the runs, since there is
+no markup left to go on — or it will send code for translation with its spaces missing. That is a
+requirement on the #121 implementation, not something the existing rules give for free.
 
-### 4. One figure in ten carries no readable glyphs — which is not the same as no text
+### 4. One figure in ten carries no readable glyphs, and a third of those still carry words
 
-28 of 281 files (10%) have neither `<use>` nor `<text>`. **They are not all pure graphics.** An exporter can
-put letter outlines straight into `<path>`, and rendering four of them showed exactly that in two:
+28 of 281 files (10%, 27 distinct) have neither `<use>` nor `<text>`. **They are not pure graphics.** An
+exporter can put letter outlines straight into `<path>`, and rendering **all 27** shows that most of them do:
 
-- `2608.17161v1/gg-s.svg` — a Feynman diagram whose momentum labels (`g`, `p_a`, `p_b`, `p_1`, `p_2`) are
-  path outlines: 27 paths, no `<use>`, no `font_` definitions.
-- `2609.09113v1/anthropic.svg` — a wordmark, letterforms as two paths.
-- `2609.09109v1/177.svg` and `2608.22541v2/permutahedron_as_line_segment_sum.svg` — genuinely text-free.
+| | |
+|---|---|
+| no text at all — polyhedra, line diagrams, random walks | 11 |
+| mathematics only — Feynman momentum labels, `Φ`, `x₁` | 6 |
+| logos — a `K`, an `AI` wordmark | 2 |
+| **word labels — legends (`revival`, `extinction`), block-diagram boxes, axis titles on small multiples** | **8** |
 
-Skipping them is still right, but for a different reason than "there is nothing there": what text they do
-carry is single-letter mathematics, which `isTranslatable` rejects anyway, or a logo, which should not be
-translated. What follows from this is that these figures are where an OCR fallback would earn its keep, and
-that the extension leaves them alone rather than claiming they are empty (Codex asked for this check on
-#133; the original claim was an inference from the absence of `<use>`, and it was wrong).
+The first three groups lose nothing by being skipped: `isTranslatable` rejects single-letter mathematics
+anyway and a logo should not be translated. **The last eight are a real gap** — v1 leaves them untranslated
+and cannot tell the reader why. They are the population an OCR fallback would serve, and they are the reason
+that fallback is worth keeping rather than a hypothetical.
+
+An earlier revision of this section called all 28 pure graphics, then called them mathematics and logos after
+inspecting four. Both were generalisations from a part of the set; Codex asked twice for the whole set, and
+the whole set says something different from either.
 
 ### 5. `contentDocument` is reachable, and does not even need a scroll
 
@@ -613,7 +630,17 @@ affects crawling surveys, not the product.
 - "The id suffix is a usable fallback" — **not so**, 21.75%.
 - "Survey coverage before building anything" — **`data-text` can be relied on** wherever glyphs are drawn as
   `<use>`, which is every figure that uses them. The 10% that draw outlines directly are the population a
-  fallback would serve; v1 skips them, and what they were observed to carry is not translatable anyway.
+  fallback would serve, and 8 of those 27 carry real word labels, so that fallback has a job rather than a
+  theoretical one.
+
+### Revision to DESIGN.md §15.1
+
+§15.1 and §15 currently say v1 translates bitmaps only and skips SVG, on the strength of the §2.9 audit —
+which counted **inline** `svg.ltx_picture` (TikZ) and did not look at externally referenced
+`<object type="image/svg+xml">` figures at all. Those are 55.6% of the figures on arXiv and their text is
+exactly recoverable. **§15.1's "skip SVG" has to be narrowed to inline SVG**, and the external path
+described as its own recogniser feeding the same overlay (Codex pointed out on #133 that leaving the DESIGN
+table stale would let later work follow the obsolete requirement, since DESIGN is the source of truth).
 
 ---
 
