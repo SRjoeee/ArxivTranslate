@@ -19,17 +19,18 @@ const nameOf = (t: TranslationTransport) => (t as unknown as { name: string }).n
 afterEach(() => vi.useRealTimers())
 
 describe('createSessionRouter', () => {
-  it('同文档换 hash 不算跳走：宽限期内还有请求就不撤', async () => {
+  it('同文档换 hash 不算跳走：到点问页面，它说还在就不撤', async () => {
     // `tabs.onUpdated` 的 loading 分不出「换了个 hash」和「跳到别的网址」——实测两种情况 changeInfo
     // 都只有 {status:'loading'}。当场撤会把一个还活着的页面判死：用户点正文里的引用跳到参考文献，
     // 那一整块的译文全部 aborted（2026-09-09 实测 86 块全失败）
     vi.useFakeTimers()
     const transport = fakeTransport('链')
-    const router = createSessionRouter(async () => transport)
+    const router = createSessionRouter(async () => transport, { stillThere: async () => 'same' })
     await router.forCall('session-1', 7)
 
     router.mayHaveLeft(7)
-    // 跳到新位置之后，视口观察器立刻为新露出来的块发请求
+    // 跳到新位置之后，视口观察器立刻为新露出来的块发请求——但这**不**取消撤销：
+    // 真跳走时旧文档也能再发一两条（Codex 在 #143 指出）。判据是到点问页面自己
     await router.forCall('session-1', 7)
     await vi.advanceTimersByTimeAsync(10_000)
 
@@ -44,7 +45,7 @@ describe('createSessionRouter', () => {
     const transport = fakeTransport('链')
     const asked: [number, string][] = []
     const router = createSessionRouter(async () => transport, {
-      stillThere: async (tabId, scope) => { asked.push([tabId, scope]); return true },
+      stillThere: async (tabId, scope) => { asked.push([tabId, scope]); return 'same' },
     })
     await router.forCall('session-1', 7)
 
@@ -56,16 +57,47 @@ describe('createSessionRouter', () => {
     expect(router.bound()).toEqual(['session-1'])
   })
 
-  it('页面答不上来（真跳走了）：照撤', async () => {
+  it('旧文档在跳走途中又发了一条请求：撤销照常进行', async () => {
+    // 真跳走时旧文档往往还能再发一两条消息，那只证明新文档还没接管。要是让它取消掉按住的撤销，
+    // 新文档一提交 content script 就没了、也没人再武装一次，旧会话的队列会一直跑（Codex 在 #143 指出）
     vi.useFakeTimers()
     const transport = fakeTransport('链')
-    const router = createSessionRouter(async () => transport, { stillThere: async () => false })
+    const router = createSessionRouter(async () => transport, { stillThere: async () => 'other' })
+    await router.forCall('session-1', 7)
+
+    router.mayHaveLeft(7)
+    await router.forCall('session-1', 7) // 旧文档最后一条
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(transport.cancelled).toEqual(['链:session-1'])
+  })
+
+  it('页面答不上来：排空，但不判死', async () => {
+    // 消息没送到可能是真没了，也可能是新文档的 content script 还没装上——分不清就不能判死，
+    // 判错了那个还活着的页面后半篇会永久 aborted（Codex 在 #143 指出两种情况要分开）
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    const router = createSessionRouter(async () => transport, { stillThere: async () => 'unknown' })
     await router.forCall('session-1', 7)
 
     router.mayHaveLeft(7)
     await vi.advanceTimersByTimeAsync(10_000)
 
     expect(transport.cancelled).toEqual(['链:session-1:soft'])
+  })
+
+  it('页面答上来了但换了会话：确定走了，判死', async () => {
+    // 这时不是猜：页面自己说它已经不是刚才那个会话了。判死才拦得住那些挂在 helper 握手上、
+    // 还没进任何队列、醒来会照发不误的请求（Codex 在 #143 指出）
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    const router = createSessionRouter(async () => transport, { stillThere: async () => 'other' })
+    await router.forCall('session-1', 7)
+
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(transport.cancelled).toEqual(['链:session-1'])
   })
 
   it('猜出来的终结在 OCR 那条队列上同样不判死', async () => {

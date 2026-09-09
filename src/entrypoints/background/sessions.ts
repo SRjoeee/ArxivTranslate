@@ -46,7 +46,10 @@ export interface SessionRouter {
  *   撤会话时一起撤；返回它撤掉的条数。`remember` 一并传下去——猜出来的终结在那条队列上同样不能判死
  * @param options.stillThere 宽限到点时问一句「这个标签页还是刚才那个页面吗」。页面自己分得清同文档
  *   换 hash 与真的跳走：它还在就还答得出同一个会话 id。没有这个的话，跳到一个不需要新翻译的位置
- *   （目的地已经翻过了）就没有任何请求来取消撤销，正在翻的那一批会被白白排空（Codex 在 #143 指出）
+ *   （目的地已经翻过了）就没有任何请求来取消撤销，正在翻的那一批会被白白排空（Codex 在 #143 指出）。
+ *   三态而不是真假：`'same'` 页面还在；`'other'` 答上来了但不是刚才那个会话——**这是确定的终结**，
+ *   可以判死；`'unknown'` 连消息都没送到——可能真没了，也可能只是新文档的 content script 还没装上，
+ *   所以只排空、不判死（Codex 在 #143 指出这两种要分开）
  */
 /**
  * 「可能跳走了」按住多久再撤。
@@ -57,7 +60,7 @@ export interface SessionRouter {
  */
 const NAVIGATION_GRACE_MS = 3000
 
-export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string, options: { remember: boolean }) => number; stillThere?: (tabId: number, scope: string) => Promise<boolean> } = {}): SessionRouter {
+export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string, options: { remember: boolean }) => number; stillThere?: (tabId: number, scope: string) => Promise<'same' | 'other' | 'unknown'> } = {}): SessionRouter {
   /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
   const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number }>()
   /**
@@ -111,8 +114,9 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
 
   return {
     async forCall(scope, tabId) {
-      // 有请求就说明这个标签页的页面还活着：如果刚才 onUpdated 按住了一次撤销，取消它
-      stayed(tabId)
+      // **不因为「这个标签页又发请求了」就取消按住的撤销**：真跳走时旧文档常常还能再发一两条，
+      // 那只证明新文档还没接管，不证明页面还在。取消掉之后新文档一提交，content script 就没了，
+      // 也没人再武装一次，旧会话的队列会一直跑（Codex 在 #143 指出）。到点问页面自己才是判据
       if (scope === undefined) return current()
       const bound = sessions.get(scope)
       if (bound?.transport) return bound.transport
@@ -138,7 +142,6 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
       return transport
     },
     bind(scope, tabId) {
-      stayed(tabId)
       if (sessions.has(scope) || dropped.has(scope)) return
       if (tabId !== undefined) {
         const stale = scopesOfTab(tabId)
@@ -160,10 +163,16 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
       leaving.set(tabId, setTimeout(() => {
         leaving.delete(tabId)
         void (async () => {
-          // 没人问得到就按原来的判断走：这时的证据仍然只有「这段时间没有请求」
-          const alive = options.stillThere ? await Promise.all(scopes.map(s => options.stillThere!(tabId, s))) : scopes.map(() => false)
-          const gone = scopes.filter((_, i) => !alive[i])
-          if (gone.length > 0) await drop(gone, { remember: false })
+          // 没有探针时按原来的判断走：证据仍然只有「这段时间没有请求」，那只够软撤
+          const answers = options.stillThere
+            ? await Promise.all(scopes.map(s => options.stillThere!(tabId, s)))
+            : scopes.map(() => 'unknown' as const)
+          // 答上来了但换了会话：页面确实走了，这是确定的终结，判死——否则挂在 helper 握手上、
+          // 还没进任何队列的那些请求醒来之后照发不误（Codex 在 #143 指出）
+          const confirmed = scopes.filter((_, i) => answers[i] === 'other')
+          const unsure = scopes.filter((_, i) => answers[i] === 'unknown')
+          if (confirmed.length > 0) await drop(confirmed)
+          if (unsure.length > 0) await drop(unsure, { remember: false })
         })()
       }, NAVIGATION_GRACE_MS))
     },

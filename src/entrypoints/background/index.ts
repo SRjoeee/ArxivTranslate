@@ -68,9 +68,10 @@ export default defineBackground(() => {
     stillThere: async (tabId, scope) => {
       try {
         const status = await browser.tabs.sendMessage(tabId, { type: 'axt:page-status' })
-        return (status as { session?: string | null } | undefined)?.session === scope
+        return (status as { session?: string | null } | undefined)?.session === scope ? 'same' : 'other'
       } catch {
-        return false
+        // 消息没送到：可能真没了，也可能新文档的 content script 还没装上。分不清就不判死
+        return 'unknown'
       }
     },
   })
