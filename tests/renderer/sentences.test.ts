@@ -126,6 +126,40 @@ describe('sentence registry (#105)', () => {
     expect(sentenceMapAt(cell.firstChild!)?.map.target.root).toBe(copy)
   })
 
+  it('重新翻一遍之后，还挂着的副本用的是这一版的句边界（#148）', () => {
+    // 译文正文没变时 `translationKey` 不变，副本就不会被重建——它记的还是上一轮的句边界，
+    // 而 side 模式下屏幕上正是它。正文一样时 span 仍然对得上，换掉句边界即可（Codex 在 #148 指出）
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
+    const source = d.querySelector('figcaption')!
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('figcaption')
+    target.className = 'axt-t'
+    target.setAttribute('data-axt-for', 'F1.cap')
+    target.append(fragment)
+    source.after(target)
+    const lengths = splitSentences(block.text)
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+    splitFigures(d)
+    const copy = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
+    // side 模式的样子：原件那份译文被藏起来，屏幕上是副本
+    Object.assign(target, { checkVisibility: () => false })
+    Object.assign(copy, { checkVisibility: () => true })
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
+    expect(sentenceMapAt(source.firstChild!)?.map.pairs).toHaveLength(lengths.length)
+
+    // 同一段正文重翻一遍，这次只有一句
+    const one = [block.text.length]
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: one, target: one })
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
+    expect(sentenceMapAt(source.firstChild!)?.map.pairs).toHaveLength(1)
+
+    // 这一轮完全没有对齐：副本记的那份也不能再用
+    registerSentences(source, target, block.offsets, fragment.offsets, undefined)
+    expect(sentenceMapAt(source.firstChild!)).toBeUndefined()
+  })
+
   it('registers nothing without an alignment, so those blocks simply do not highlight', () => {
     // Every Google and LLM block today. A guessed pairing would light up the wrong sentence.
     const { source, target, block, spans } = render('<p class="ltx_p">One. Two.</p>')

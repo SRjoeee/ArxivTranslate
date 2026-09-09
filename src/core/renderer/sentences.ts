@@ -106,13 +106,29 @@ function remember(source: Element, target: Element): void {
  * highlight is better than a wrong one (`alignment.ts`).
  */
 export function registerSentences(source: Element, target: Element, sourceSpans: readonly WireSpan[], targetSpans: readonly WireSpan[] | undefined, alignment: SentenceAlignment | undefined): void {
-  if (!alignment || !targetSpans) return
+  if (!alignment || !targetSpans) {
+    // 这一轮没有对齐，之前登记过的（包括还挂在屏幕上的拆图副本）就都作废了：它们记的是上一轮的
+    // 句边界，留着会让悬停按上一轮的配对高亮（Codex 在 #148 指出）
+    targetsOf.delete(source)
+    return
+  }
   const map: SentenceMap = {
     pairs: sentencePairs(alignment),
     source: { root: source, spans: sourceSpans, index: indexSpans(sourceSpans) },
     target: { root: target, spans: targetSpans, index: indexSpans(targetSpans) },
   }
   maps.set(target, map)
+  // 同一个原文重新翻了一遍：之前那些译文——尤其是**还挂在屏幕上、签名没变所以没被重建**的拆图
+  // 副本——记的还是上一轮的句边界。译文正文一样时（副本能留下来正说明这一点）它们的 span 仍然
+  // 对得上，只把句边界换成这一版；对不上就忘掉，宁可不高亮也不按错的配对高亮（Codex 在 #148 指出）
+  const span = (side: SentenceSide) => side.spans[side.spans.length - 1]?.to ?? 0
+  for (const ref of targetsOf.get(source) ?? []) {
+    const previous = ref.deref()
+    const stale = previous && previous !== target ? maps.get(previous) : undefined
+    if (!stale) continue
+    if (span(stale.target) === span(map.target)) maps.set(previous!, { ...stale, pairs: map.pairs, source: map.source })
+    else maps.delete(previous!)
+  }
   remember(source, target)
 }
 

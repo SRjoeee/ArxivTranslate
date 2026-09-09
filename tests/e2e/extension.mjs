@@ -837,8 +837,11 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await popup.getByRole('button', { name: '左右', exact: true }).click()
   await sleep(500)
   await popup.close()
-  await page.evaluate(() => document.querySelector('figure .ltx_caption')?.scrollIntoView({ block: 'center' }))
+  await scrollThrough(page)
   await waitForLog(logs, IDLE, 120_000)
+  // **先选中要测的那个图注，再滚它**：翻译落地会把版面顶下去，先滚一个「第一个图注」等翻完，
+  // 它未必还在视口里，而 `getClientRects()` 与 `top > 0` 对视口下方的元素照样成立（Codex 在 #148 指出）
+  await page.evaluate(() => document.querySelector('[data-axt-split] .ltx_caption[data-axt-id]')?.scrollIntoView({ block: 'center' }))
   await sleep(1500)
   const caption = await page.evaluate(async () => {
     const mode = document.documentElement.getAttribute('data-axt-mode')
@@ -853,7 +856,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
         if (/\s/.test(t.data[i])) continue
         const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + 1)
         const b = r.getBoundingClientRect()
-        if (b.width > 0 && b.height > 0 && b.top > 0) point = { x: b.left + b.width / 2, y: b.top + b.height / 2 }
+        if (b.width > 0 && b.height > 0 && b.top > 0 && b.bottom < innerHeight) point = { x: b.left + b.width / 2, y: b.top + b.height / 2 }
       }
     }
     if (!point) return { mode, reason: '图注上找不到可瞄准的字' }
