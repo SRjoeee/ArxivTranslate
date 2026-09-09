@@ -45,6 +45,16 @@ const MISS_GRACE_MS = 120
  */
 const HIT_SLACK_PX = 4
 
+/**
+ * How long the page has to stop scrolling before the pointer is asked what it is on now.
+ *
+ * A scroll moves the text under a stationary pointer, so the sentence changes without a pointer
+ * event. Doing the hit test on every frame of the scroll is the per-frame cost this feature is not
+ * allowed to have; waiting for the scroll to settle costs one test per gesture, and matches when
+ * the reader actually looks at the page again.
+ */
+const SCROLL_SETTLE_MS = 120
+
 
 /**
  * Bumped whenever the highlights are cleared from outside this controller — `setMode()` and
@@ -186,8 +196,11 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   let y = 0
   /** Whether the pointer is in the document at all. False until the first move, false again after leaving. */
   let over = false
+  /** The band container, once it exists: mutations inside it are ours and must not feed back */
+  let layer: Element | undefined
   let frame = 0
   let missTimer = 0
+  let settleTimer = 0
   /**
    * The sentence currently painted, with the `epoch` it was painted at. The epoch is what makes
    * this cache safe: anything that clears the highlights from outside bumps it, and a stale entry
@@ -324,7 +337,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     // against, and it must be read in the same pass as the ranges. It is created at most once per
     // controller — the miss path empties it rather than removing it — so this is a read, not a
     // write followed by reads.
-    const layer = layerOf(doc)
+    layer = layerOf(doc)
     const origin = layer.getBoundingClientRect()
     // Both sides are measured before anything is written: reads and writes never interleave
     const sides = view
@@ -384,8 +397,19 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
    */
   const onScroll = (event: Event) => {
     const target = event.target
-    if (target === doc || target === doc.documentElement || target === doc.body) return
-    invalidate()
+    if (target !== doc && target !== doc.documentElement && target !== doc.body) {
+      invalidate()
+      return
+    }
+    // The page's own scroll carries the bands along, so the tint stays on its sentence — but that
+    // sentence is no longer the one under the pointer, and nothing else will notice until the
+    // pointer moves (Codex on #138). Re-testing every frame of a scroll is what this deliberately
+    // does not do; once it settles is enough, and that is also when the reader looks again.
+    clearTimer(settleTimer)
+    settleTimer = view?.setTimeout(() => {
+      settleTimer = 0
+      invalidate()
+    }, SCROLL_SETTLE_MS) ?? 0
   }
 
   doc.addEventListener('pointermove', onMove, { passive: true })
@@ -408,6 +432,28 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
    */
   const observer = view?.ResizeObserver ? new view.ResizeObserver(() => invalidate()) : undefined
   if (doc.body) observer?.observe(doc.body)
+  /**
+   * Reflows that never change the body's own box.
+   *
+   * A block landing between two others re-wraps everything below it without necessarily changing
+   * the document's height, and a column that changes width re-wraps its text at the same height
+   * (Codex on #138). Watching for the mutations themselves catches those, and it is the same signal
+   * the progressive-translation case really rests on.
+   *
+   * **Our own bands are written into the layer, which is inside `<body>`**, so a record whose
+   * target is the layer is skipped — reacting to it would repaint on every repaint.
+   */
+  const mutations = view?.MutationObserver
+    ? new view.MutationObserver(records => {
+        for (const record of records) {
+          if (record.target !== layer) {
+            invalidate()
+            return
+          }
+        }
+      })
+    : undefined
+  if (doc.body) mutations?.observe(doc.body, { childList: true, subtree: true })
 
   return {
     stop() {
@@ -416,6 +462,9 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
       view?.removeEventListener('resize', onResize)
       doc.removeEventListener('scroll', onScroll, { capture: true })
       observer?.disconnect()
+      mutations?.disconnect()
+      clearTimer(settleTimer)
+      settleTimer = 0
       if (frame !== 0) view?.cancelAnimationFrame(frame)
       hit()
       shown = null

@@ -65,6 +65,14 @@ function stubBrowser(doc: Document) {
     observe() { resizes.push(this.fn) }
     disconnect() { const at = resizes.indexOf(this.fn); if (at >= 0) resizes.splice(at, 1) }
   }
+  // Same shape for MutationObserver: registered on observe, and the test hands it records
+  const mutators: ((records: { target: Node }[]) => void)[] = []
+  view.MutationObserver = class {
+    fn: (records: { target: Node }[]) => void
+    constructor(fn: (records: { target: Node }[]) => void) { this.fn = fn }
+    observe() { mutators.push(this.fn) }
+    disconnect() { const at = mutators.indexOf(this.fn); if (at >= 0) mutators.splice(at, 1) }
+  }
   view.requestAnimationFrame = (fn: () => void) => frames.push(fn)
   view.cancelAnimationFrame = () => {}
   view.setTimeout = (fn: () => void, delay: number) => { timers.push({ fn, delay }); return timers.length }
@@ -101,6 +109,11 @@ function stubBrowser(doc: Document) {
     /** A scroll dispatched from `el` (capture phase) plus the frame it schedules */
     scrollOn: (el: EventTarget) => {
       el.dispatchEvent(new Event('scroll'))
+      for (const fn of frames.splice(0)) fn()
+    },
+    /** DOM records reported by the MutationObserver, plus the frame they schedule */
+    mutate: (target: Node) => {
+      for (const fn of mutators) fn([{ target }])
       for (const fn of frames.splice(0)) fn()
     },
     /** A reflow reported by the ResizeObserver, plus the frame it schedules */
@@ -328,6 +341,57 @@ describe('hover sentence highlight (§7.7)', () => {
 
     expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
     expect(browser.bands().every(b => (b.getAttribute('style') ?? '').includes('top:300.0px'))).toBe(true)
+    hl.stop()
+  })
+
+  it('repaints when content is inserted, and not when the bands themselves are written', () => {
+    // A block landing between two others re-wraps everything below it without necessarily changing
+    // the document's height, so the size observer alone can miss it (Codex on #138). The bands go
+    // into the layer, which is inside `<body>` too — reacting to those would repaint forever.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const r = (top: number) =>
+      ({ left: 0, top, right: 200, bottom: top + 20, width: 200, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    const before = browser.bands().map(b => b.getAttribute('style'))
+
+    // our own write into the layer changes nothing
+    browser.starts()
+    browser.mutate(doc.querySelector('.axt-hl')!)
+    expect(browser.starts()).toEqual([])
+
+    // a translation landing in the page does
+    browser.nextLines(r(300))
+    browser.mutate(source.parentElement!)
+    expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
+    hl.stop()
+  })
+
+  it('asks what the pointer is on once the page stops scrolling', () => {
+    // The bands travel with their sentence, so the tint stays where it belongs — but the pointer is
+    // now over a different sentence, and nothing else will notice until it moves (Codex on #138).
+    // Once per gesture, not once per frame: the per-frame hit test is the cost this must not have.
+    const { doc, source, target } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    browser.starts()
+
+    // scrolling itself rebuilds nothing…
+    browser.scrollOn(doc)
+    expect(browser.starts()).toEqual([])
+    expect(browser.delays()).toContain(120)
+
+    // …until it settles, and then the pointer is asked again
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.flushTimers(120)
+    for (const fn of browser.frames.splice(0)) fn()
+    expect(browser.starts().length).toBeGreaterThan(0)
     hl.stop()
   })
 
