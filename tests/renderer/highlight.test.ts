@@ -205,6 +205,57 @@ describe('hover sentence highlight (§7.7)', () => {
     hl.stop()
   })
 
+  it('a pending fade never deletes ranges painted after an external clear', () => {
+    // Codex reported this against #131 as a defect. It is not one — every path that paints cancels
+    // the pending fade first — but the invariant is worth holding onto, since it rests on that
+    // cancellation rather than on anything the fade itself checks. Removing the cancellation from
+    // `update()` fails this test.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const text = source.firstChild as Text
+
+    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
+    browser.move()
+    browser.caret.mockReturnValue(null)
+    browser.move()
+    browser.flushTimers(120) // the fade begins; its deletion is pending
+
+    setMode(doc, 'side') // an external clear lands in the middle of it
+
+    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
+    browser.move()
+    expect(browser.highlights.size).toBe(2)
+
+    browser.flushTimers() // the older deletion fires, if it survived
+    expect(browser.highlights.size).toBe(2)
+    hl.stop()
+  })
+
+  it('a second controller does not lose its highlight to the first one fading', () => {
+    // Out of contract — `content/index.ts` calls `endRun()`, which stops the running controller,
+    // before starting another — but cheap to hold: both are listening, so the older one repaints
+    // and cancels its own fade on the same pointer move.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const first = startSentenceHighlight(doc)!
+    const text = source.firstChild as Text
+
+    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
+    browser.move()
+    browser.caret.mockReturnValue(null)
+    browser.move()
+    browser.flushTimers(120)
+
+    const second = startSentenceHighlight(doc)!
+    browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
+    browser.move()
+    browser.flushTimers()
+    expect(browser.highlights.size).toBe(2)
+    first.stop()
+    second.stop()
+  })
+
   it('repaints after setMode cleared the highlights under it', () => {
     // `setMode()` empties the registries but cannot reach into this controller. Without the epoch,
     // a pointer still resting on the same sentence takes the "nothing changed" path forever.

@@ -76,7 +76,7 @@ export interface SentenceHighlight {
  * Starts following the pointer. Returns undefined when the browser cannot paint the highlight, so
  * the caller has nothing to clean up.
  *
- * Work per pointer move is one `caretPositionFromPoint`, a bounded walk up to the block, two binary
+ * Work per pointer move is one `caretPositionFromPoint`, a walk up to the block, two binary
  * searches, and — only when the sentence actually changed — building its ranges. Coalesced to one
  * frame: a pointer can produce far more `pointermove` events than frames, and every one of them
  * would otherwise cost a layout read.
