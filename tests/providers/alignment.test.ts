@@ -58,6 +58,45 @@ describe('alignment verification (#105)', () => {
     expect(verifyAlignment(given, source, target)).toEqual(given)
   })
 
+  it('counts every spelling of a placeholder as filler, not as visible text', () => {
+    // 引擎可能把占位符写成 `<x id='1' />` 或 `<x id=1></x>`，`validate` 认这些是同一个占位符。
+    // 用更窄的写法去认，这些变体就被当成「可见文字」，那道「不许留下空句」的守卫会被绕过
+    //（Codex 在 #145 指出）
+    const source = 'A. B.'
+    const target = "甲。<x id='1' />"
+    const given = { source: [3, 2], target: [1, target.length - 1] }
+    expect(verifyAlignment(given, source, target)).toEqual(given)
+  })
+
+  it('does not snap onto the period of an abbreviation or a decimal', () => {
+    // `Vol. 2` 与 `3.5` 都以句点结尾，吸过去就把卷号和数字劈开了（Codex 在 #145 指出）。
+    // 判据是句点后面跟的是不是小写字母或数字——是的话这个句点不属于句末
+    const source = 'Vol. 2 Publisher. Next.'
+    const target = '第一。第二。'
+    // 切点落在 `Vol. 2` 之后——它自己不在句末，所以**会**去找候选；唯一够得着的候选就是 `Vol.`
+    // 那个句点，必须被否掉。（切在 `Vol. ` 之后的话它自身就 settled，根本走不到这段判断）
+    const cut = source.indexOf('2') + 1
+    const given = { source: [cut, source.length - cut], target: [3, 3] }
+    expect(verifyAlignment(given, source, target)).toEqual(given)
+  })
+
+  it('snaps past the whole terminator, not just its first character', () => {
+    // `。”` 与 `...` 是一个结尾。停在里面，剩下的那半个标点就跑去开下一句了（Codex 在 #145 指出）
+    const source = 'He spoke. Then more.'
+    const target = '他说完了。”接着说。'
+    expect(verifyAlignment({ source: [10, 10], target: [4, 6] }, source, target))
+      .toEqual({ source: [10, 10], target: [6, 4] })
+  })
+
+  it('does not second-guess a boundary that already sits after punctuation', () => {
+    // `…（为什么？）|接着用它` 这种：标点上是settled 的，就不是我们该改的。把「能不能吸过去」的
+    // 严格判据也用在「它现在对不对」上，反而会把 `?)` 从中间劈开——实测语料上真出现过一次
+    const source = 'Ask (why?) using it. Next.'
+    const target = '第一。第二。'
+    const given = { source: [source.indexOf('using'), source.length - source.indexOf('using')], target: [3, 3] }
+    expect(verifyAlignment(given, source, target)).toEqual(given)
+  })
+
   it('rejects a source partition that does not add up to the text', () => {
     // The engine reporting boundaries for a string other than the one we sent is the failure this
     // catches — trusting it would put the highlight on the wrong characters.

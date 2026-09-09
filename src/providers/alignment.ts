@@ -41,6 +41,8 @@ export function boundariesOf(lengths: readonly number[]): number[] {
  * honest answer there is no highlight. Across 60 real blocks Microsoft's counts matched on every
  * one, so this rejects malformed data rather than a normal case.
  */
+import { MARKER_RE, TAG_RE } from '@/core/protector'
+
 /**
  * A placeholder in either wire format, plus whitespace: a boundary sitting against one of these is
  * where it belongs, and the character that decides the question is the one before it.
@@ -51,13 +53,44 @@ export function boundariesOf(lengths: readonly number[]): number[] {
  * look *more* settled than it is, so the snap below declines to move it. `@@` comes first, as in
  * the protector's own tokenizer.
  */
-const TRAILING_FILLER = /(?:@@|@[a-z]+#|<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>|\s)+$/
-const FILLER = /@@|@[a-z]+#|<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>/g
+const FILLER_SOURCE = `${TAG_RE.source}|${MARKER_RE.source}|\\s`
+const TRAILING_FILLER = new RegExp(`(?:${FILLER_SOURCE})+$`)
+const LEADING_FILLER = new RegExp(`^(?:${FILLER_SOURCE})+`)
+const FILLER = new RegExp(FILLER_SOURCE, 'g')
 /** Sentence-final punctuation in either language, with whatever closes the quotation after it. */
 const SENTENCE_END = /[.!?。！？…]["'\u201d\u300d\u300f）)\]]*$/
+/**
+ * What cannot start a sentence, and therefore proves the period before it was not one.
+ *
+ * `Vol. 2` and `3.5` end in a period like any sentence does, and a boundary snapped onto one splits
+ * a volume from its number (Codex on #145). A lowercase letter or a digit after the candidate says
+ * the run continues; anything else — a capital, a bracket, any CJK character — may open a sentence.
+ * An English sentence that really does open with a digit is left unsnapped, which costs a fix and
+ * never causes one.
+ */
+const CONTINUATION = /^[a-z0-9]/
 
-/** Whether this boundary sits right after a sentence end, ignoring placeholders and spaces. */
+/**
+ * Whether this boundary sits right after a sentence end.
+ *
+ * Placeholders and spaces on either side do not count against it, and the grammar for those is the
+ * **protector's own** — an engine may hand back `<x id='1' />` or `<x id=1></x>`, which `validate`
+ * accepts as the same placeholder, and a narrower pattern here would read one as visible text
+ * (Codex on #145).
+ */
 const settled = (text: string, at: number): boolean => SENTENCE_END.test(text.slice(0, at).replace(TRAILING_FILLER, ''))
+
+/**
+ * Whether a boundary may be moved *onto* this position.
+ *
+ * Stricter than `settled`, and only for candidates: a period with a lowercase letter or a digit
+ * after it belongs to `Vol. 2` or `3.5`, not to a sentence. **Asking this of the boundary the
+ * engine already reported would be wrong** — `…grafting?) |using` is punctuation-settled and not
+ * ours to second-guess, and treating it as unsettled invited a snap that split `?)` in two
+ * (measured, one regression before the two predicates were separated).
+ */
+const snappable = (text: string, at: number): boolean =>
+  settled(text, at) && !CONTINUATION.test(text.slice(at).replace(LEADING_FILLER, ''))
 
 /** Whether a sentence has anything a reader can see, rather than only placeholders and spaces. */
 const visible = (piece: string): boolean => piece.replace(FILLER, '').trim().length > 0
@@ -102,8 +135,14 @@ function snapAlignment(alignment: SentenceAlignment, sourceText: string, targetT
     const moved = cuts.map(cut => {
       if (settled(text, cut)) return cut
       for (let step = 1; step <= SNAP_WINDOW; step++) {
-        if (cut - step > 0 && settled(text, cut - step)) return cut - step
-        if (cut + step < text.length && settled(text, cut + step)) return cut + step
+        if (cut - step > 0 && snappable(text, cut - step)) return cut - step
+        if (cut + step < text.length && snappable(text, cut + step)) {
+          // Past the *whole* terminator, not its first character: `。”` and `...` are one ending, and
+          // stopping inside leaves the rest of it opening the next sentence (Codex on #145)
+          let end = cut + step
+          while (end + 1 < text.length && snappable(text, end + 1)) end++
+          return end
+        }
       }
       return cut
     })
