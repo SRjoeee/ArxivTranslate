@@ -501,11 +501,21 @@ records for inline TikZ does not occur here, and `data-text` really is the only 
 cases (11568/53196), and bimodally by file: 62 files where it always does, 185 where it never does (there it
 is a font-internal glyph index). Issue #121's observation on three files holds on the larger sample.
 
-### 2. Spaces are mostly explicit glyphs, so word segmentation is not the hard part
+### 2. Spaces are mostly explicit glyphs, so word segmentation is not the main problem
 
-One figure carries 84 `data-text=" "` glyphs among 2740. **Concatenating `data-text` in document order gives
-the text exactly**: `"Number of terms N"`, character for character. What issue #121 expected — deriving word
-boundaries from glyph advances — is not needed for the common case.
+Space characters are drawn like any other: **788 of 10820 glyphs (7.28%) across 71 figures** carry
+`data-text=" "`. Concatenating `data-text` in document order therefore reproduces a label exactly —
+`"Number of terms N"`, character for character.
+
+**Not always, though, and the exception is measured below rather than assumed.** Runs whose internal gaps
+include one about two advances wide — the shape a dropped space leaves — occur in **48.4% of code runs
+(30/62)** and **11.5% of prose runs (42/365)**. The two populations are not alike: every prose hit inspected
+is kerning around a symbol rather than two words run together (`T=0.2MeV`, `4-point-term`, `") (GeV"`), and
+that detector cannot tell the two apart, so 11.5% is an upper bound on suspicion and not a rate of damage.
+Every *observed* word-level failure — `iflog_counting`, `staticint` — is in code.
+
+So: word boundaries do not have to be derived for the common case, and for the case where they do, see (b)
+below (Codex asked for this to be measured across the sample rather than generalised from one figure, on #133).
 
 ### 3. The hard part is segmentation, and it comes in two kinds
 
@@ -537,13 +547,28 @@ differently coloured spans and the space between them has no glyph, so the run r
 font size; gaps involving an explicit space glyph have a median of 0.550 — the same, because a monospace
 advance does not depend on what it is advancing past. The usable signal is a **double-width** gap (non-space
 gaps run to p95 = 0.818 and max = 1.12, about two advances), which needs a per-run advance estimate rather
-than a global constant. The blast radius is small: this happens in code, and code is skipped by the rules
-(DESIGN §5) anyway.
+than a global constant.
 
-### 4. One figure in ten has no text at all
+**The §5 skip rules do not reach it.** They select `.ltx_listing`, `code` and friends in the HTML; a listing
+inside an externally referenced SVG is a flat run of `<use>` glyphs and matches none of them, so a figure's
+code has to be recognised by the SVG path itself or it will be translated with its spaces missing (Codex
+pointed this out on #133). `src/core/svg/runs.ts` does that recognition, from the runs these fixtures produce.
 
-28 of 281 files (10%) have neither `<use>` nor `<text>` — pure graphics. These should never reach a
-translator.
+### 4. One figure in ten carries no readable glyphs — which is not the same as no text
+
+28 of 281 files (10%) have neither `<use>` nor `<text>`. **They are not all pure graphics.** An exporter can
+put letter outlines straight into `<path>`, and rendering four of them showed exactly that in two:
+
+- `2608.17161v1/gg-s.svg` — a Feynman diagram whose momentum labels (`g`, `p_a`, `p_b`, `p_1`, `p_2`) are
+  path outlines: 27 paths, no `<use>`, no `font_` definitions.
+- `2609.09113v1/anthropic.svg` — a wordmark, letterforms as two paths.
+- `2609.09109v1/177.svg` and `2608.22541v2/permutahedron_as_line_segment_sum.svg` — genuinely text-free.
+
+Skipping them is still right, but for a different reason than "there is nothing there": what text they do
+carry is single-letter mathematics, which `isTranslatable` rejects anyway, or a logo, which should not be
+translated. What follows from this is that these figures are where an OCR fallback would earn its keep, and
+that the extension leaves them alone rather than claiming they are empty (Codex asked for this check on
+#133; the original claim was an inference from the absence of `<use>`, and it was wrong).
 
 ### 5. `contentDocument` is reachable, and does not even need a scroll
 
@@ -586,9 +611,9 @@ affects crawling surveys, not the product.
   document order is exact. The work is geometric line segmentation (verified feasible) and, only for code,
   restoring dropped spaces from a per-run advance estimate.
 - "The id suffix is a usable fallback" — **not so**, 21.75%.
-- "Survey coverage before building anything" — the answer is that **`data-text` can be relied on**, but a
-  fallback is still needed: not for figures without `data-text` (there are none) but for the 10% with no text
-  at all, which should simply be skipped.
+- "Survey coverage before building anything" — **`data-text` can be relied on** wherever glyphs are drawn as
+  `<use>`, which is every figure that uses them. The 10% that draw outlines directly are the population a
+  fallback would serve; v1 skips them, and what they were observed to carry is not translatable anyway.
 
 ---
 
