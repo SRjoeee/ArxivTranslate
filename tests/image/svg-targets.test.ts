@@ -85,6 +85,75 @@ describe('SVG figures in the image pipeline (§15.5)', () => {
     expect(run.fatal()).toBeUndefined()
   })
 
+  it('waits for a figure that has not loaded yet instead of failing it', async () => {
+    // The viewport scheduler is one-shot: a target failed here is never handed back when the
+    // object's `load` finally fires, so it stays untranslated until a manual retry (Codex on #134)
+    const doc = docOf(FIGURE)
+    markBlocks(extract(doc))
+    const targets = collectImageTargets(doc)
+    const el = targets[0]!.el
+    let markup: string | null = null
+    plant(el, null)
+    Object.defineProperty(el, 'contentDocument', {
+      configurable: true,
+      get: () => (markup === null ? null : new DOMParser().parseFromString(markup, 'image/svg+xml')),
+    })
+    const translate = vi.fn(async (call: { request: { segments: { id: string; text: string }[] } }) => ({
+      ok: true as const,
+      result: { segments: call.request.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' },
+      cached: 0,
+    }))
+    const run = startImageTranslation({
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
+      fetchBytes: async () => { throw new Error('不该取字节') },
+      ocr: vi.fn(async () => ({ ok: true as const, result: { width: 1, height: 1, lines: [] }, cached: false })),
+      translate, isEnabled: () => true, isCurrent: () => true,
+    })
+    const pending = run.translate(targets)
+    // 加载完成之后才有内容，然后派 load 事件
+    markup = PLOT
+    el.dispatchEvent(new Event('load'))
+    await pending
+
+    expect(run.failed()).toEqual([])
+    expect(translate.mock.calls[0]![0].request.segments.map(s => s.text)).toContain('closure')
+  })
+
+  it('parks and resumes per target, so SVG runs while bitmaps wait for the helper', async () => {
+    // The helper decides bitmaps only. Blocking the whole run on its handshake delays SVG figures
+    // behind something they do not need — up to the 30s timeout when an installed helper hangs —
+    // and a rejected handshake skipped them entirely (Codex on #134)
+    const doc = docOf(FIGURE + RASTER)
+    markBlocks(extract(doc))
+    const targets = collectImageTargets(doc)
+    for (const t of targets) if (t.kind === 'svg') plant(t.el, PLOT)
+    let helperReady = false
+    const ocr = vi.fn(async (_c: OcrCall) => ({ ok: true as const, result: { width: 1, height: 1, lines: [] }, cached: false }))
+    const translate = vi.fn(async (call: { request: { segments: { id: string; text: string }[] } }) => ({
+      ok: true as const,
+      result: { segments: call.request.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' },
+      cached: 0,
+    }))
+    const run = startImageTranslation({
+      doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
+      fetchBytes: async () => ({ bytes: new Uint8Array([1]).buffer, mime: 'image/png' }),
+      ocr, translate,
+      isEnabled: t => t.kind === 'svg' || helperReady,
+      isCurrent: () => true,
+    })
+
+    await run.translate(targets)
+    // The SVG figure went; the bitmap is parked, so the helper was never called
+    expect(translate).toHaveBeenCalledTimes(1)
+    expect(ocr).not.toHaveBeenCalled()
+
+    helperReady = true
+    run.resume()
+    // `resume` 交给 `translate` 是不等待的，满载时一个 tick 不够
+    for (let i = 0; i < 50 && ocr.mock.calls.length === 0; i++) await new Promise(r => setTimeout(r, 5))
+    expect(ocr).toHaveBeenCalledTimes(1)
+  })
+
   it('skips code drawn as a figure', async () => {
     const listing = readFileSync(join(import.meta.dirname, '../fixtures/svg/2608.29808-bounter-case.svg'), 'utf8')
     const { targets, run, translate } = setup(listing)

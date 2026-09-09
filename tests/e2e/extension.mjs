@@ -535,9 +535,23 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 
   const { page, logs } = await openPaper(SVG_PAPER, GOOGLE)
   await waitForLog(logs, IDLE, 120_000)
-  // 图是按视口调度的，滚一遍把它们都放出来
+  // 图是按视口调度的，滚一遍把它们都放出来，然后**等图片这一轮自己报完**——
+  // 上面那条 `session idle` 只说明正文翻完了，图是滚动之后才排进去的。
+  // 固定睡 3 秒在慢一点或被限流的端点上会让合法的叠加层晚于断言到达，测试就间歇性失败
+  //（Codex 在 #134 指出）
   await scrollThrough(page)
-  await sleep(3000)
+  const imagesIdle = await waitForLog(logs, /\[axt\] images idle: (\d+)\/(\d+) of (\d+), (\d+) failed/, 120_000)
+  // 图是分批放出来的，**第一条 idle 不是最后一条**（实测跑出过 `1/1 of 9`）。
+  // 等叠加层数量连着两次不变，才算这一轮真的落定
+  let stable = -1
+  for (let i = 0; i < 40; i++) {
+    const now = await page.evaluate(() => document.querySelectorAll('.axt-img').length)
+    if (now === stable && now > 0) break
+    stable = now
+    await sleep(500)
+  }
+  check('SVG 图：图片这一轮跑完了（下面的断言以它为前提）',
+    !!imagesIdle && stable > 0, `${imagesIdle?.text ?? '(没有等到 images idle)'}；叠加层稳定在 ${stable} 个`)
 
   const svg = await page.evaluate(() => {
     const objs = [...document.querySelectorAll('object[type="image/svg+xml"]')]

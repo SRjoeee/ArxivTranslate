@@ -8,7 +8,7 @@ import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } 
 import {
   applyStyle,
   clearPairMargins, createModeController, createPrep, installAnchorFallback,
-  restore, setImageModes, startSentenceHighlight,
+  clearImage, restore, setImageModes, startSentenceHighlight,
   type Mode, type ModeController, type SentenceHighlight,
 } from '@/core/renderer'
 import { escapeText, unescapeText } from '@/core/protector/text'
@@ -184,44 +184,63 @@ export default defineContentScript({
       // 目标语言换了，旧的都不该再显示；新一轮处理到那张图时会替换它（Codex 在 #89 指出）
       setImageModes(document, [])
       if (config.image.modes.length === 0) return
-      // 参数叫 helper，不叫 status：外层的 status 是引擎状态，图片这段要用它的 renderPath，遮住就取不到了
-      sendMessage({ type: 'axt:helper-status' }).then(helper => {
-        if (getSessionId() !== session || !paper) return
-        setImageModes(document, config.image.modes)
-        // helper 只决定**位图**：SVG 图的文字是从 contentDocument 里读出来的，不经过本机识别（§15.5）。
-        // 没装 helper 时把位图目标摘掉，剩下的照常翻——SVG 图占样本的 49.1%（880/1792）
-        const targets = collectImageTargets(document).filter(t => helper.available || t.kind === 'svg')
-        if (targets.length === 0) return
-        const t1 = performance.now()
-        let wasBusy = false
-        images = startImageTranslation({
-          renderPath,
-          doc: document,
-          targets,
-          paper,
-          target: config.targetLanguage,
-          scope: session,
-          preload: config.preload,
-          context,
-          ocr: call => sendMessage({ type: 'axt:ocr', ...call }),
-          translate: request => backend.translate(request),
-          isEnabled: () => config.image.modes.includes(modes?.effective() ?? config.mode),
-          isCurrent: () => getSessionId() === session,
-          onProgress: p => {
-            if (getSessionId() !== session) return
-            imageProgress = p
-            const busy = p.requested - p.done - p.failed > 0
-            if (wasBusy && !busy) console.debug(`[axt] images idle: ${p.done}/${p.requested} of ${p.total}, ${p.failed} failed, ${Math.round(performance.now() - t1)} ms`)
-            wasBusy = busy
-          },
-          // 叠加层插好了：side 模式下所在插图要拆两份（§7.2），交给整理层
-          onRendered: rendered => {
-            if (getSessionId() !== session) return
-            prep.touch(rendered)
-          },
-        })
-        console.debug(`[axt] images: ${targets.length} bitmaps, helper ${helper.version ?? ''}, modes ${config.image.modes.join('/')}`)
-      }).catch(e => console.debug('[axt] helper-status 失败', e))
+      if (!paper) return
+      const targets = collectImageTargets(document)
+      if (targets.length === 0) return
+      setImageModes(document, config.image.modes)
+
+      /**
+       * helper 只决定**位图**（§15.5）。所以这一轮**立刻开跑**，不等它的探测：
+       * SVG 图的文字是从 contentDocument 里读出来的，等一个与它无关的握手没有道理，
+       * 而那个握手在 helper 装了却挂住时要 30 秒才超时，探测本身失败还会把整段跳过
+       *（Codex 在 #134 指出）。位图目标先停在 parked 里，探测回来再放。
+       */
+      let helperReady = false
+      const t1 = performance.now()
+      let wasBusy = false
+      images = startImageTranslation({
+        renderPath,
+        doc: document,
+        targets,
+        paper,
+        target: config.targetLanguage,
+        scope: session,
+        preload: config.preload,
+        context,
+        ocr: call => sendMessage({ type: 'axt:ocr', ...call }),
+        translate: request => backend.translate(request),
+        // 模式闸对两种图一样；位图额外要等 helper（§15.5）
+      isEnabled: t => config.image.modes.includes(modes?.effective() ?? config.mode) && (t.kind === 'svg' || helperReady),
+        isCurrent: () => getSessionId() === session,
+        onProgress: p => {
+          if (getSessionId() !== session) return
+          imageProgress = p
+          const busy = p.requested - p.done - p.failed > 0
+          if (wasBusy && !busy) console.debug(`[axt] images idle: ${p.done}/${p.requested} of ${p.total}, ${p.failed} failed, ${Math.round(performance.now() - t1)} ms`)
+          wasBusy = busy
+        },
+        // 叠加层插好了：side 模式下所在插图要拆两份（§7.2），交给整理层
+        onRendered: rendered => {
+          if (getSessionId() !== session) return
+          prep.touch(rendered)
+        },
+      })
+            console.debug(`[axt] images: ${targets.filter(t => t.kind === 'svg').length} SVG + ${targets.filter(t => t.kind === 'raster').length} 位图，modes ${config.image.modes.join('/')}`)
+
+      /**
+       * 位图要等 helper。**探测失败或没装也要收尾**：上一轮成功画过的位图叠加层还挂在页面上，
+       * 而这一轮它们的目标停在 parked 里、永远不会走到 `clearImage`——旧译文（甚至旧的目标语言）
+       * 就那么留着（Codex 在 #134 指出）
+       */
+      const settleRaster = (available: boolean) => {
+        if (getSessionId() !== session) return
+        helperReady = available
+        if (available) images?.resume()
+        else for (const t of targets) if (t.kind === 'raster') clearImage(t)
+      }
+      sendMessage({ type: 'axt:helper-status' })
+        .then(helper => settleRaster(helper.available))
+        .catch(e => { console.debug('[axt] helper-status 失败', e); settleRaster(false) })
     }
 
     let fitObserver: ResizeObserver | null = null

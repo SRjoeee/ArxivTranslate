@@ -31,6 +31,8 @@ const CAPTION_MAX_CHARS = 300
 const FATAL_KINDS = new Set(['no-key', 'auth'])
 /** 同时在处理的图：取字节、base64、消息载荷都占内存，helper 又是顺序的，多开只是把 6 MB 一张的图囤在那里 */
 const MAX_CONCURRENT = 2
+/** `<object>` 还在加载时等它多久（§15.5）。等不到就跳过这一张，不拖住队列 */
+const SVG_LOAD_TIMEOUT_MS = 5000
 
 export interface ImageBytes {
   bytes: ArrayBuffer
@@ -51,7 +53,12 @@ export interface ImageRunOptions {
   ocr: (call: OcrCall) => Promise<OcrMessageResponse>
   translate: (call: TranslateCall) => Promise<TranslateMessageResponse>
   /** 当前生效的模式在用户勾选的集合里；不在时进入视口的图先停着，resume 时再翻 */
-  isEnabled: () => boolean
+  /**
+   * 这个目标现在能不能翻。**按目标问，不是一个全局开关**：显示模式对两种图一样，
+   * 但位图要等本机 helper、SVG 图不用（§15.5）。答 false 的目标停在 parked 里，
+   * 条件变了调 `resume()` 放出来
+   */
+  isEnabled: (target: ImageTarget) => boolean
   /** 会话还是当前这一个（恢复原文 / 重开之后为假） */
   isCurrent: () => boolean
   /** 测试注入：并发上限 */
@@ -210,13 +217,33 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
    * 不取字节、不算 hash、不发 OCR —— 文字是**读**出来的，`data-text` 把每个字形对应的字符写在
    * 属性里，误差为零。代码清单在这里剔掉：§5 的跳过规则是 HTML 选择器，够不着 SVG 里一串平铺的
    * `<use>`（Codex 在 #133 指出），所以这条路要自己认。
+   *
+   * **还没加载好就等它的 `load`**，不能当场判失败：视口调度是一次性的，判了失败之后
+   * `load` 事件不会把这张图重新交上来，它就一直不翻直到用户手动重试（Codex 在 #134 指出）。
+   * 实测 4 篇论文 44 张图在页面 load 之后全部可达、连滚动前都是（RESEARCH §6.11），
+   * 所以这条路平时根本走不到——但会话可以在页面还在加载时就开始。
    */
-  const svgLines = (target: ImageTarget): OcrLine[] | string => {
-    const doc = (target.el as HTMLObjectElement).contentDocument
-    const svg = doc?.documentElement
-    // 拿不到就跳过这张图。实测 4 篇论文 44 张图全部可达、连滚动前都是（RESEARCH §6.11），
-    // 所以这是优雅降级而不是常规路径
-    if (svg?.tagName.toLowerCase() !== 'svg') return '图还没加载出来'
+  const svgOf = (target: ImageTarget): Element | undefined => {
+    const svg = (target.el as HTMLObjectElement).contentDocument?.documentElement
+    return svg?.tagName.toLowerCase() === 'svg' ? svg : undefined
+  }
+
+  const svgLines = async (target: ImageTarget): Promise<OcrLine[] | string> => {
+    let svg = svgOf(target)
+    if (!svg) {
+      await new Promise<void>(resolve => {
+        const view = target.el.ownerDocument.defaultView
+        const done = () => {
+          if (timer !== undefined) view?.clearTimeout(timer)
+          target.el.removeEventListener('load', done)
+          resolve()
+        }
+        const timer = view?.setTimeout(done, SVG_LOAD_TIMEOUT_MS)
+        target.el.addEventListener('load', done, { once: true })
+      })
+      svg = svgOf(target)
+    }
+    if (!svg) return '图还没加载出来'
     return linesOf(svg).filter(line => !looksLikeCode(line.text))
   }
 
@@ -225,7 +252,8 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       let lines: readonly OcrLine[]
       let frames = 1
       if (target.kind === 'svg') {
-        const read = svgLines(target)
+        const read = await svgLines(target)
+        if (!alive()) return
         if (typeof read === 'string') return fail(target, read)
         lines = read
       } else {
@@ -307,18 +335,17 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
     if (!alive()) return
     const fresh = picked.filter(t => outcome.has(t) && outcome.get(t) !== 'requested')
     if (fresh.length === 0) return
-    if (!options.isEnabled()) {
-      for (const t of fresh) parked.add(t)
-      return
-    }
-    scheduler?.claim(fresh)
-    for (const t of fresh) {
+    const ready = fresh.filter(t => options.isEnabled(t))
+    for (const t of fresh) if (!ready.includes(t)) parked.add(t)
+    if (ready.length === 0) return
+    scheduler?.claim(ready)
+    for (const t of ready) {
       parked.delete(t)
       outcome.set(t, 'requested')
     }
     report()
     // 进 run 级队列，worker 池按上限取（fetch → hash → base64 → OCR 一条龙，别一次全开）
-    const settled = fresh.map(target => new Promise<void>(done => queue.push({ target, done })))
+    const settled = ready.map(target => new Promise<void>(done => queue.push({ target, done })))
     pump()
     await Promise.all(settled)
     report()
@@ -343,7 +370,9 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
   return {
     translate,
     resume() {
-      if (parked.size === 0 || !options.isEnabled()) return
+      // 不在这里筛：`translate` 自己按目标问一遍 `isEnabled`，不合格的原样退回 parked，
+      // 筛一遍只是省一次往返，却多一条测不出来的分支
+      if (parked.size === 0) return
       const picked = Array.from(parked)
       parked.clear()
       void translate(picked)
