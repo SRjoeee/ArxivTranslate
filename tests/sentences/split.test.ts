@@ -187,6 +187,25 @@ describe('sentence splitting (#105)', () => {
     expect(visibleTextOf(host.querySelector('#br')!)).toBe('a\nb')
   })
 
+  it('does not let styling change where a sentence ends', () => {
+    // `<em>Dr</em>.` serialises to `<t id="1">Dr</t>.`, and projecting the tags as spaces gave
+    // ` Dr . `, where the abbreviation guard sees `Dr .` and cannot suppress the cut. A tag wraps,
+    // it does not separate (Codex on #126).
+    expect(parts('<t id="1">Dr</t>. Smith arrived.')).toEqual(['<t id="1">Dr</t>. Smith arrived.'])
+    // The source's own spaces still separate what they separate
+    expect(parts('<t id="1">Motivation.</t> Concurrent programs are difficult.'))
+      .toEqual(['<t id="1">Motivation.</t> ', 'Concurrent programs are difficult.'])
+  })
+
+  it('treats a formatting newline in slot text as the space it renders as', () => {
+    // An indented cross-reference reads `let. ∗` but its markup says `let.\n ∗`. Keeping that
+    // newline made it look like a `<br>` and cut before the reference (Codex on #126).
+    const d = new DOMParser().parseFromString('<!doctype html><html><body><p id="x">let.\n  ∗</p></body></html>', 'text/html')
+    expect(visibleTextOf(d.querySelector('#x')!)).toBe('let. ∗')
+    expect(parts('we let. <x id="1"/> denote it.', 'tags', { textOf: () => 'let. ∗' }))
+      .toEqual(['we let. <x id="1"/> denote it.'])
+  })
+
   it('never cuts inside a placeholder, which would break the wire syntax', () => {
     const wire = '<t id="1">Motivation.</t> Concurrent work. See <x id="2"/>. Done here.'
     expect(sentenceCuts(wire).length).toBeGreaterThan(1)

@@ -120,7 +120,10 @@ export type TextOfSlot = (id: number) => string | undefined
  * Element names only, no `ltx_*` selectors, so this stays out of the rules module's territory.
  */
 export function visibleTextOf(node: Node): string {
-  if (node.nodeType === 3) return (node as Text).data
+  // HTML renders a formatting newline as a space, so keeping it would look like a `<br>` to the
+  // segmenter: an indented cross-reference reads `let. ∗` but its markup says `let.\n ∗`, and the
+  // cut landed before the reference (Codex on #126). Same five characters `serialize` collapses.
+  if (node.nodeType === 3) return (node as Text).data.replace(/[\t\n\f\r ]+/g, ' ')
   if (node.nodeType !== 1) return ''
   const el = node as Element
   const name = el.tagName.toLowerCase()
@@ -170,7 +173,11 @@ function project(text: string, format: WireFormat, context: SplitContext): { vis
       // An escaped literal `@`: ordinary text, not a placeholder, so it projects as itself
       token = '@'
     } else if (STRUCTURAL.test(run)) {
-      token = ' '
+      // Nothing, not a space: a tag wraps, it does not separate. `<em>Dr</em>.` serialises to
+      // `<t id="1">Dr</t>.` and projecting the tags as spaces gave ` Dr . `, where the abbreviation
+      // guard sees `Dr .` and cannot suppress the cut — styling would change where sentences end
+      // (Codex on #126). The source's own spaces still separate what it separates.
+      token = ''
       if (OPENING.test(run)) openEnds.set(after, index)
     } else {
       // An annotation belongs to the text before it and must not open a sentence. Content shows its
