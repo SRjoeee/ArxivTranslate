@@ -1,5 +1,5 @@
 // 会话与链的绑定（Codex 在 #59 指出的两条 P1）
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSessionRouter } from '@/entrypoints/background/sessions'
 import type { TranslationTransport } from '@/providers/transport'
 
@@ -9,14 +9,53 @@ function fakeTransport(name: string, cancelled: string[] = []): TranslationTrans
     name,
     cancelled,
     translate: async () => ({ ok: true, result: { segments: [], provider: name }, cached: 0 }),
-    cancel: async scope => { cancelled.push(`${name}:${scope}`); return 1 },
+    cancel: async (scope, options) => { cancelled.push(`${name}:${scope}${options?.remember === false ? ':soft' : ''}`); return 1 },
     status: async () => ({ providerId: name, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, chain: [name], engine: { id: name, displayName: name } }),
   } as TranslationTransport & { name: string; cancelled: string[] }
 }
 
 const nameOf = (t: TranslationTransport) => (t as unknown as { name: string }).name
 
+afterEach(() => vi.useRealTimers())
+
 describe('createSessionRouter', () => {
+  it('同文档换 hash 不算跳走：宽限期内还有请求就不撤', async () => {
+    // `tabs.onUpdated` 的 loading 分不出「换了个 hash」和「跳到别的网址」——实测两种情况 changeInfo
+    // 都只有 {status:'loading'}。当场撤会把一个还活着的页面判死：用户点正文里的引用跳到参考文献，
+    // 那一整块的译文全部 aborted（2026-09-09 实测 86 块全失败）
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    const router = createSessionRouter(async () => transport)
+    await router.forCall('session-1', 7)
+
+    router.mayHaveLeft(7)
+    // 跳到新位置之后，视口观察器立刻为新露出来的块发请求
+    await router.forCall('session-1', 7)
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(transport.cancelled).toEqual([])
+    expect(router.bound()).toEqual(['session-1'])
+  })
+
+  it('真的跳走：宽限到点撤掉，但不把 scope 判死', async () => {
+    // 判死是给「确定的终结」用的（用户按停止、关标签页）。猜出来的不能判死：猜错时页面还活着，
+    // 它后半篇的每一次请求都会被直接 aborted，而且永远好不了
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    const router = createSessionRouter(async () => transport)
+    await router.forCall('session-1', 7)
+
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    expect(transport.cancelled).toEqual(['链:session-1:soft'])
+    expect(router.bound()).toEqual([])
+    // 猜错了也能回来：同一个 scope 再来请求，不会再被撤一次
+    transport.cancelled.length = 0
+    await router.forCall('session-1', 7)
+    expect(transport.cancelled).toEqual([])
+  })
+
   it('一次会话认准开始时的那条链：配置中途变更不换引擎，之后开始的会话才用新链', async () => {
     const first = fakeTransport('旧链')
     const second = fakeTransport('新链')

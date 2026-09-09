@@ -69,10 +69,15 @@ export default defineBackground(() => {
   /**
    * 导航离开也要撤（Codex 在 #59 指出）：`onRemoved` 只管关闭，标签页跳到别的网址时不触发。
    * 而「同一标签页出现新 scope 就撤掉旧的」那条只在**新页面也是 arXiv 论文**时才会发生——
-   * 跳到任何别的站点，旧队列就一直跑到批次耗尽预算为止
+   * 跳到任何别的站点，旧队列就一直跑到批次耗尽预算为止。
+   *
+   * **但 loading 分不出同文档换 hash 与真的跳走**：实测点正文里的引用跳到参考文献时，`changeInfo`
+   * 同样只有 `{status:'loading'}`，没有 `url` 可比（这两个钩子都不带 `tabs` 权限）。当场撤等于把
+   * 一个还活着的页面判死，它后半篇的译文会全部 aborted（用户 2026-09-09 报的）。所以交给 router
+   * 按住一会儿：这个标签页再来一次请求就说明页面还在，撤销取消
    */
   browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === 'loading') dropTab(tabId, '导航离开')
+    if (changeInfo.status === 'loading') router.mayHaveLeft(tabId)
   })
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
