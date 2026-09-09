@@ -476,6 +476,39 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     shape.pairs > 0 && shape.mismatched === 0 && shape.protectedNodes > 0,
     `${shape.pairs} 对配对，${shape.protectedNodes} 个受保护节点，对不上的 ${shape.mismatched} 个`)
   check('微软引擎：译文里没有记号残留', shape.markerLeak === 0, `残留 ${shape.markerLeak} 处`)
+
+  // ── 悬停对照高亮（§7.7，#105）：只有这条路径能证 ─────────────────────────────
+  // 单元测试把浏览器那半边全打了桩（happy-dom 没有 CSS.highlights，Range 也读不回来），
+  // 而对齐只有微软会报，所以「真的画在了两侧对应的那一句上」只能在这里验。
+  const hover = await page.evaluate(async () => {
+    const at = document.querySelector('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')
+    const id = at?.getAttribute('data-axt-for')
+    const src = id ? document.querySelector(`[data-axt-id="${id}"]`) : null
+    if (!at || !src) return { reason: 'no translated block' }
+    const before = document.documentElement.outerHTML
+    // 指针放在译文里第一行文字上
+    const rect = at.getBoundingClientRect()
+    at.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + 8, clientY: rect.top + 6, bubbles: true }))
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+    const textOf = name => [...(CSS.highlights.get(name) ?? [])].map(r => r.toString()).join('')
+    return {
+      source: textOf('axt-sentence-source'),
+      target: textOf('axt-sentence-target'),
+      flag: document.documentElement.getAttribute('data-axt-hl'),
+      // 高亮一个 DOM 节点都不许碰（§7.1）
+      domUnchanged: before === document.documentElement.outerHTML.replace(/ data-axt-hl="on"/, ''),
+      inSource: src.textContent?.includes(textOf('axt-sentence-source')) ?? false,
+      inTarget: at.textContent?.includes(textOf('axt-sentence-target')) ?? false,
+    }
+  })
+  check('悬停对照高亮：原文与译文两侧同时亮起（§7.7 / #105）',
+    hover.flag === 'on' && (hover.source?.length ?? 0) > 0 && (hover.target?.length ?? 0) > 0,
+    `flag=${hover.flag} 原文 ${hover.source?.length ?? 0} 字、译文 ${hover.target?.length ?? 0} 字${hover.reason ? ` (${hover.reason})` : ''}`)
+  check('悬停对照高亮：两侧选中的都是各自块里的文字，没有跨块',
+    hover.inSource === true && hover.inTarget === true, `原文命中 ${hover.inSource}、译文命中 ${hover.inTarget}`)
+  check('悬停对照高亮：一个 DOM 节点都没动（§7.1）',
+    hover.domUnchanged === true, `DOM ${hover.domUnchanged ? '未变' : '变了'}`)
+
   await page.screenshot({ path: `${SHOTS}/microsoft.png` })
   await page.close()
 

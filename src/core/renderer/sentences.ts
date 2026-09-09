@@ -61,6 +61,17 @@ export function sentenceMapOf(el: Element): SentenceMap | undefined {
 }
 
 /**
+ * Whether a record still describes the page.
+ *
+ * `restore()` removes every translation node but leaves the originals in place, so entries keyed by
+ * an original element outlive the block they described. Rather than tracking registrations — which
+ * would mean holding the elements strongly and defeating the point of a WeakMap — a stale entry is
+ * recognised on use: its translation node is no longer in the document. One property read, and it
+ * covers re-rendering and `clearTranslation` too.
+ */
+const live = (map: SentenceMap) => map.target.root.isConnected
+
+/**
  * The block a node sits in, walking up until a registered element is found.
  *
  * Bounded by `limit` ancestors rather than by the document root: the walk runs on every pointer
@@ -72,7 +83,7 @@ export function sentenceMapAt(node: Node, limit = 12): { map: SentenceMap; side:
   let el: Element | null = node.nodeType === 1 ? (node as Element) : node.parentElement
   for (let i = 0; el && i < limit; i++, el = el.parentElement) {
     const map = registry.get(el)
-    if (map) return { map, side: map.source.root === el ? 'source' : 'target' }
+    if (map && live(map)) return { map, side: map.source.root === el ? 'source' : 'target' }
   }
   return undefined
 }

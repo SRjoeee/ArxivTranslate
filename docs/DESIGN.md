@@ -472,6 +472,19 @@ interface ProtectedBlock {
 - only 模式下 pending 的原块照常可见（隐藏规则只认 `translated`，§7.4），圆环跟在后面
 - **失败态**（PR 2b，2026-09-05）：失败块旁插 `.axt-t.axt-error` 小部件——Shadow DOM 里一个"重试"按钮与带原因的"！"（宿主与"！"都带 `title`），原块标 `failed` 画红线。重试 = 把该块再交给 `run.translate`，先删小部件再插 pending；popup 的"重试失败的 N 块"（`axt:retry-failed`）走同一条路。原因由 pipeline 逐段记下（provider 的 kind + message、"译文的占位符与原文对不上"、"已取消"）。Read Frog 的 React + jotai + @tabler/icons + base-ui 版本不搬（§12 取舍）；side 模式下小部件落在右栏，与它的行内错误块位置相当
 
+### 7.7 悬停对照高亮 [决定，2026-09-09 实现，issue #105]
+
+鼠标停在原文或译文的某一句上，**原文与译文里对应的那一句同时出现底色**。要解决的是长段落里「这句译文对应哪一句原文」这个每天都要问几十遍的问题。
+
+- **底色，不是文字高亮。** 文字位置一个像素都不动，只有背景色出现与消失（用户 2026-09-09 明确）。用 CSS Custom Highlight API 画：`CSS.highlights.set(name, new Highlight(...ranges))` 吃的是 `Range`，**不往 DOM 里插任何包裹节点**，§7.1 的不变量因此自动成立，`restore()` 也没有额外要撤的东西。页面上唯一的痕迹是 `<html>` 上的 `data-axt-hl`，而全局状态本来就归那里
+- **实测过的边界**（写代码前在真实 Chrome 里量的，规范列表与实际能画的不是一回事）：`::highlight()` 认 `background-color`；`border-radius` 与 `padding` 解析后被忽略；`background-image` 完全不画（所以没有渐变荧光笔）。**被忽略的 `padding` 正是「不可能位移」的保证**——这个伪元素没有自己的盒子可以撑大
+- **淡入淡出要绕一层。** `::highlight()` 规则里写不了 `transition`（它不是元素、没有可过渡的状态），但它**可以读一个自定义属性**，而 `@property` 注册成 `<color>` 的属性能插值。于是过渡挂在 `:root` 上、由属性开关驱动，伪元素只负责读当前值。实测：把一段 2s 过渡截四个时刻，四张图互不相同
+- **时间曲线**（不对称是有意的）：出现前等 80 ms 再用 140 ms `ease-out` 淡入——指针扫过一段会路过三四句，不等就会连闪三下；**句与句之间的移动完全不过渡**，`Range` 直接换，下一帧底色就在别处，加淡入会把两句糊在一起、显得跟不上手；离开用 220 ms `ease-in`，比进来略长，收得柔和。`prefers-reduced-motion` 时直接开关，高亮本身照旧
+- **命中判定**用 `caretPositionFromPoint`，不用 `highlightsFromPoint`——后者能直接回答，但它是 Chrome 140 的接口，而 `minimum_chrome_version` 是 131。每次指针移动只做一次 `caretPositionFromPoint` + 一次向上找块 + 两次二分；合帧到 `requestAnimationFrame`，句子没变就不重建 `Range`
+- **句边界从引擎来，不猜。** 只有引擎报了句边界、且两侧长度都能精确重建原串时才登记（§8.6 / `providers/alignment.ts`）。目前只有微软报。没有对齐的块（Google、LLM）不登记，悬停无反应——**猜出来的配对会把高亮打在错的句子上，那比没有高亮更糟**
+- 三样东西（原文侧线上偏移、译文侧线上偏移、句边界）只在渲染那一瞬同时存在，所以在 `renderText` 之后登记进 `src/core/renderer/sentences.ts` 的模块级 `WeakMap`。**不写 `data-axt-*` 属性**：§7.1 允许追加，但这是每块几百个数字，写进去会撑大读者正在读的文档、跟着页面被序列化出去、每次指针移动还要再解析一遍。WeakMap 还会随节点一起消失，`restore()` 不需要为它多跑一趟清理；`restore()` 之后原块仍在、译文节点已删，用 `target.root.isConnected` 当场识别失效条目
+- 颜色跟随 `--axt-green`，与荧光笔族同一个色源，`styleVarsRule` 从 `config.style.accent` 改写它——一个颜色控件，不是两个。开关是 `config.reading.sentenceHighlight`，默认开
+
 ---
 
 ## 8. Provider 接口

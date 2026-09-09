@@ -8,8 +8,8 @@ import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } 
 import {
   applyStyle,
   clearPairMargins, createModeController, createPrep, installAnchorFallback,
-  restore, setImageModes,
-  type Mode, type ModeController,
+  restore, setImageModes, startSentenceHighlight,
+  type Mode, type ModeController, type SentenceHighlight,
 } from '@/core/renderer'
 import { escapeText, unescapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
@@ -40,6 +40,8 @@ export default defineContentScript({
     let modes: ModeController | null = null
     /** 页内锚点兜底的卸载函数（issue #44）：会话开始时装、恢复原文时拆 */
     let uninstallAnchors: (() => void) | null = null
+    /** 悬停对照高亮（§7.7）：跟着一次翻译会话起停，配置关掉时根本不装监听 */
+    let highlight: SentenceHighlight | null = null
     let savedMode: Mode = 'stack'
     /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性 */
     let style: Config['style'] = DEFAULT_CONFIG.style
@@ -78,6 +80,8 @@ export default defineContentScript({
 
     /** 结束当前会话：断开观察器、删 pending、撤掉排队与在飞的请求；页面上的译文留着 */
     function endRun(): void {
+      highlight?.stop()
+      highlight = null
       title?.stop()
       title = null
       run?.stop()
@@ -116,6 +120,8 @@ export default defineContentScript({
       // 页内锚点兜底（issue #44）：only 模式下目标块被隐藏，交叉引用点了不动窝
       uninstallAnchors?.()
       uninstallAnchors = installAnchorFallback(document)
+      // 只在这条路径上装：没开翻译时没有译文，也就没有对照可言
+      if (config.reading.sentenceHighlight) highlight = startSentenceHighlight(document) ?? null
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
       prep.reset() // 新会话：镜像允许再跑一次、量宽缓存清空、栏宽重读

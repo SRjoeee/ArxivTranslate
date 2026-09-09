@@ -89,6 +89,12 @@ export const configSchema = z.object({
     threshold: z.number().min(0).max(1),
   }).default({ ...DEFAULT_PRELOAD }),
   /**
+   * 阅读辅助（§7.7，v10 起）：悬停时把原文与译文里对应的那一句一起用底色标出来（issue #105）。
+   * 默认开——它只在引擎报了句边界、且两边都能重建时才有东西可显示，其余情形本就无声无息、无代价。
+   * 带 default，所以没有这个字段的既有存储照常通过校验，不用升 CONFIG_VERSION
+   */
+  reading: z.object({ sentenceHighlight: z.boolean() }).default({ sentenceHighlight: true }),
+  /**
    * 图片翻译（§15，v8 起）：在哪些模式下给位图叠译文。默认三种都开；空数组 = 关闭。
    * 只是显示闸——切到没开的模式只隐藏叠加层，不重新请求；helper 没检测到时设置页灰掉、整条路径不跑
    */
@@ -114,5 +120,6 @@ export const DEFAULT_CONFIG: Config = {
   fallback: { enabled: true },
   prompts: DEFAULT_PROMPTS_CONFIG,
   preload: { ...DEFAULT_PRELOAD },
+  reading: { sentenceHighlight: true },
   image: { modes: [...MODE_VALUES] },
 }
