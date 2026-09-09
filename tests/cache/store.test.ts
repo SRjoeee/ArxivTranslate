@@ -6,37 +6,51 @@ let n = 0
 const make = (limits?: Partial<CacheLimits>) =>
   new TranslationCache({ db: createCacheDb(`axt-test-${++n}`, { indexedDB, IDBKeyRange }), limits })
 
+/** `get` 现在返回整条记录（译文 + 可选的句子对齐）；只关心文字的断言走这个 */
+const text = async (cache: { get: (k: string, now?: number) => Promise<{ translation: string } | null> }, key: string, now?: number) =>
+  (await cache.get(key, now))?.translation ?? null
+
 describe('TranslationCache', () => {
+  it('句子对齐随译文一起存取；旧记录没有这个字段就是没有对齐（#105）', async () => {
+    const c = make()
+    const alignment = { source: [3, 4], target: [2, 3] }
+    expect(await c.set('k', { translation: '译文', alignment }, '2410.00260')).toBe(true)
+    expect(await c.get('k')).toEqual({ translation: '译文', alignment })
+    // 只给译文的写法照旧可用，读回来不带 alignment 这个键
+    expect(await c.set('plain', '只有译文', '2410.00260')).toBe(true)
+    expect(await c.get('plain')).toEqual({ translation: '只有译文' })
+  })
+
   it('set / get 往返，未命中为 null', async () => {
     const c = make()
-    expect(await c.get('k')).toBeNull()
+    expect(await text(c, 'k')).toBeNull()
     expect(await c.set('k', '译文', '2410.00260')).toBe(true)
-    expect(await c.get('k')).toBe('译文')
+    expect(await text(c, 'k')).toBe('译文')
   })
 
   it('过期返回 null', async () => {
     const c = make({ ttlMs: 1000 })
     await c.set('k', 'v', 'p', 0)
-    expect(await c.get('k', 500)).toBe('v')
-    expect(await c.get('k', 2000)).toBeNull()
+    expect(await text(c, 'k', 500)).toBe('v')
+    expect(await text(c, 'k', 2000)).toBeNull()
   })
 
   it('内存热层：持久层被清空后仍能命中', async () => {
     const c = make()
     await c.set('k', 'v', 'p')
     await c.db.entries.clear()
-    expect(await c.get('k')).toBe('v')
+    expect(await text(c, 'k')).toBe('v')
   })
 
   it('超容量按最久未访问淘汰，热层同步删除', async () => {
     const c = make({ maxEntries: 2 })
     await c.set('a', 'A', 'p', 1)
     await c.set('b', 'B', 'p', 2)
-    expect(await c.get('a', 3)).toBe('A')
+    expect(await text(c, 'a', 3)).toBe('A')
     await c.set('c', 'C', 'p', 4)
-    expect(await c.get('b', 5)).toBeNull()
-    expect(await c.get('a', 6)).toBe('A')
-    expect(await c.get('c', 7)).toBe('C')
+    expect(await text(c, 'b', 5)).toBeNull()
+    expect(await text(c, 'a', 6)).toBe('A')
+    expect(await text(c, 'c', 7)).toBe('C')
     expect((await c.stats()).entries).toBe(2)
   })
 
@@ -45,8 +59,8 @@ describe('TranslationCache', () => {
     await c.set('k1', 'v1', 'A')
     await c.set('k2', 'v2', 'B')
     expect(await c.clear('A')).toBe(1)
-    expect(await c.get('k1')).toBeNull()
-    expect(await c.get('k2')).toBe('v2')
+    expect(await text(c, 'k1')).toBeNull()
+    expect(await text(c, 'k2')).toBe('v2')
     expect(await c.clear()).toBe(1)
     expect((await c.stats()).entries).toBe(0)
   })
@@ -82,7 +96,7 @@ describe('TranslationCache', () => {
     const c = make({ maxEntryBytes: 10 })
     expect(await c.set('k', 'x'.repeat(100), 'p')).toBe(false)
     expect(await c.set('k', '', 'p')).toBe(false)
-    expect(await c.get('k')).toBeNull()
+    expect(await text(c, 'k')).toBeNull()
   })
 })
 
@@ -112,8 +126,8 @@ describe('TranslationCache：写入不扫全库', () => {
     await c.set('a', 'x'.repeat(150), 'p', 1)
     await c.set('b', 'x'.repeat(150), 'p', 2)
     await c.set('c', 'x'.repeat(150), 'p', 3)
-    expect(await c.get('a', 4)).toBeNull()
-    expect(await c.get('c', 5)).not.toBeNull()
+    expect(await text(c, 'a', 4)).toBeNull()
+    expect(await text(c, 'c', 5)).not.toBeNull()
     expect((await c.stats()).bytes).toBeLessThanOrEqual(400)
   })
 })
@@ -141,7 +155,7 @@ describe('账面（totals）的正确性（Codex 在 #14 指出）', () => {
     await c.set('new', 'v', 'p', 0)
     const before = totalsOf(c)!.count
     // 热层容量为 0，读会走持久层；此时 old 已过期
-    expect(await c.get('old', 2000)).toBeNull()
+    expect(await text(c, 'old', 2000)).toBeNull()
     expect(totalsOf(c)!.count).toBe(before - 1)
     expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
   })
@@ -151,7 +165,7 @@ describe('账面（totals）的正确性（Codex 在 #14 指出）', () => {
     await c.set('old', 'v', 'p', 0)
     await c.set('new', 'v', 'p', 0)
     const before = totalsOf(c)!.count
-    expect(await c.get('old', 2000)).toBeNull()
+    expect(await text(c, 'old', 2000)).toBeNull()
     // 热层那条是 fire-and-forget 的删除，等它落地
     for (let i = 0; i < 50 && totalsOf(c)!.count === before; i++) await new Promise(r => setTimeout(r, 5))
     expect(totalsOf(c)!.count).toBe(before - 1)
@@ -175,10 +189,10 @@ describe('账面（totals）的正确性（Codex 在 #14 指出）', () => {
     const c = make({ maxEntries: 2, ttlMs: 1000, memoryEntries: 0 })
     await c.set('a', 'v', 'p', 0)
     await c.set('b', 'v', 'p', 1500) // b 晚建，2000 时还没过期
-    expect(await c.get('a', 2000)).toBeNull() // a 过期，被惰性删掉
+    expect(await text(c, 'a', 2000)).toBeNull() // a 过期，被惰性删掉
     await c.set('c', 'v', 'p', 2000)
-    expect(await c.get('b', 2000)).toBe('v')
-    expect(await c.get('c', 2000)).toBe('v')
+    expect(await text(c, 'b', 2000)).toBe('v')
+    expect(await text(c, 'c', 2000)).toBe('v')
   })
 
   it('过期记录在读到之后被并发 set 覆盖：不删新记录，也不拿旧尺寸减账（Codex 在 #63 指出）', async () => {
@@ -189,7 +203,7 @@ describe('账面（totals）的正确性（Codex 在 #14 指出）', () => {
     await c.set('k', '长很多的新译文内容', 'p', 2000)
     expect(await reading).toBeNull()
     // 新记录必须还在，且账面与库一致（拿旧的 byteSize 减账会让 bytes 对不上）
-    expect(await c.get('k', 2000)).toBe('长很多的新译文内容')
+    expect(await text(c, 'k', 2000)).toBe('长很多的新译文内容')
     expect(totalsOf(c)!.count).toBe((await c.stats()).entries)
     expect(totalsOf(c)!.bytes).toBe((await c.stats()).bytes)
   })
