@@ -15,7 +15,6 @@ import { splitSentences } from '@/core/sentences'
  * `@property` custom property), and the ranges in a real browser on #123.
  */
 function stubBrowser(doc: Document) {
-  const highlights = new Map<string, { ranges: Range[] }>()
   const view = doc.defaultView as unknown as Record<string, unknown>
   const caret = vi.fn<(x: number, y: number) => { offsetNode: Node; offset: number } | null>(() => null)
   const timers: { fn: () => void; delay: number }[] = []
@@ -24,8 +23,6 @@ function stubBrowser(doc: Document) {
   // highlight thinks a frame is always pending and stops updating.
   const frames: (() => void)[] = []
 
-  vi.stubGlobal('CSS', { highlights })
-  vi.stubGlobal('Highlight', class { ranges: Range[]; constructor(...ranges: Range[]) { this.ranges = ranges } })
   Object.assign(doc, { caretPositionFromPoint: caret })
   // happy-dom measures nothing, so the layout is declared here. By default every character lives in
   // one 200×20 box at the origin: a pointer inside it is on the text, one outside is in the margin.
@@ -42,6 +39,9 @@ function stubBrowser(doc: Document) {
   const view2 = doc.defaultView as unknown as { Range: { prototype: Range }; Element: { prototype: Element } }
   view2.Range.prototype.getBoundingClientRect = () => queued.shift() ?? line1
   view2.Element.prototype.getBoundingClientRect = () => line1
+  // Bands are drawn from line-level rectangles. One line per range by default; `nextLines` sets more.
+  let lines: DOMRect[] = [line1]
+  view2.Range.prototype.getClientRects = () => Object.assign([...lines], { item: (i: number) => lines[i] ?? null }) as unknown as DOMRectList
   // Which text interval each painted range was built from. `startOffset` cannot be read back in
   // happy-dom, so the calls that set it are recorded instead.
   const starts: [number, number][] = []
@@ -55,13 +55,43 @@ function stubBrowser(doc: Document) {
     range.setEnd = (n: Node, o: number) => { if (from >= 0) starts.push([from, o]); setEnd(n, o) }
     return range
   }
+  // happy-dom has no ResizeObserver. The stub registers the callback **when `observe` is called**,
+  // not when the observer is constructed, so a controller that never observes anything reports no
+  // reflows — otherwise the test would pass without the observation being wired up at all.
+  const resizes: (() => void)[] = []
+  view.ResizeObserver = class {
+    fn: () => void
+    constructor(fn: () => void) { this.fn = fn }
+    observe() { resizes.push(this.fn) }
+    disconnect() { const at = resizes.indexOf(this.fn); if (at >= 0) resizes.splice(at, 1) }
+  }
+  // Same shape for MutationObserver: registered on observe, and the test hands it records
+  const mutators: ((records: { target: Node }[]) => void)[] = []
+  const watching: MutationObserverInit[] = []
+  view.MutationObserver = class {
+    fn: (records: { target: Node }[]) => void
+    constructor(fn: (records: { target: Node }[]) => void) { this.fn = fn }
+    observe(_target: Node, init: MutationObserverInit) { watching.push(init); mutators.push(this.fn) }
+    disconnect() { const at = mutators.indexOf(this.fn); if (at >= 0) mutators.splice(at, 1) }
+  }
+  // happy-dom has no FontFaceSet; the stub keeps the listener so a test can fire the swap
+  const fonts: (() => void)[] = []
+  Object.defineProperty(doc, 'fonts', {
+    configurable: true,
+    value: { addEventListener: (_e: string, fn: () => void) => fonts.push(fn), removeEventListener: () => {} },
+  })
   view.requestAnimationFrame = (fn: () => void) => frames.push(fn)
   view.cancelAnimationFrame = () => {}
   view.setTimeout = (fn: () => void, delay: number) => { timers.push({ fn, delay }); return timers.length }
   view.clearTimeout = (id: number) => { if (timers[id - 1]) timers[id - 1] = { fn: () => {}, delay: 0 } }
 
   return {
-    highlights,
+    /** The bands that were painted */
+    bands: () => Array.from(doc.querySelectorAll('.axt-hl > div')),
+    /** How many lines one range reports */
+    nextLines: (...rects: DOMRect[]) => { lines = rects },
+    line1,
+    line2,
     caret,
     /** The `[from, to]` of every range that was built, in order */
     starts: () => starts.splice(0),
@@ -81,6 +111,33 @@ function stubBrowser(doc: Document) {
     /** One pointer move plus the frame it schedules. Defaults to a point on the text. */
     move: (clientX = 10, clientY = 10) => {
       doc.dispatchEvent(Object.assign(new Event('pointermove'), { clientX, clientY }))
+      for (const fn of frames.splice(0)) fn()
+    },
+    /** A scroll dispatched from `el` (capture phase) plus the frame it schedules */
+    scrollOn: (el: EventTarget) => {
+      el.dispatchEvent(new Event('scroll'))
+      for (const fn of frames.splice(0)) fn()
+    },
+    /** What the MutationObserver was asked to watch */
+    watching: () => watching,
+    /** A web font finishing its swap, plus the frame it schedules */
+    fontSwap: () => {
+      for (const fn of fonts) fn()
+      for (const fn of frames.splice(0)) fn()
+    },
+    /** DOM records reported by the MutationObserver, plus the frame they schedule */
+    mutate: (target: Node) => {
+      for (const fn of mutators) fn([{ target }])
+      for (const fn of frames.splice(0)) fn()
+    },
+    /** A reflow reported by the ResizeObserver, plus the frame it schedules */
+    reflow: () => {
+      for (const fn of resizes) fn()
+      for (const fn of frames.splice(0)) fn()
+    },
+    /** A window resize plus the frame it schedules */
+    resize: () => {
+      doc.defaultView?.dispatchEvent(new Event('resize'))
       for (const fn of frames.splice(0)) fn()
     },
     /** A pointer move with no frame after it, for testing coalescing */
@@ -123,10 +180,9 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()
 
-    expect([...browser.highlights.keys()].sort()).toEqual(['axt-sentence-source', 'axt-sentence-target'])
+    expect(browser.bands().map(b => b.getAttribute('data-axt-hl-side'))).toEqual(['source', 'target'])
     // Both sides light up from one hit, which is the whole point
-    expect(browser.highlights.get('axt-sentence-source')!.ranges.length).toBeGreaterThan(0)
-    expect(browser.highlights.get('axt-sentence-target')!.ranges.length).toBeGreaterThan(0)
+    expect(browser.bands().length).toBe(2)
     expect(target.isConnected).toBe(true)
     hl.stop()
   })
@@ -139,14 +195,288 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
     browser.move()
-    const first = browser.highlights.get('axt-sentence-source')
-    // Well past "First sentence here. " — and the fixture really does split in two, or moving
-    // between sentences would not be under test at all
+    // The stub gives every range the same rectangle, so the painted boxes cannot tell the two
+    // sentences apart; the recorder shows which stretch of text was measured, which is the thing
+    // that has to change when the pointer moves to the next sentence.
+    const first = browser.starts()
     expect(sentences).toBe(2)
     browser.caret.mockReturnValue({ offsetNode: text, offset: text.data.length - 3 })
     browser.move()
+    const second = browser.starts()
 
-    expect(browser.highlights.get('axt-sentence-source')).not.toBe(first)
+    expect(first.at(-2)).not.toEqual(second.at(-2))
+    expect(browser.bands().length).toBe(2)
+    hl.stop()
+  })
+
+  it('repaints after a reflow, which produces no pointer event of its own', () => {
+    // A resize, a browser zoom or a font swap re-lays out the line the bands were traced from, and
+    // the sentence cache would suppress the repaint for as long as the pointer stayed on the same
+    // sentence — leaving the tint behind where the text used to be (Codex on #138).
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const r = (top: number) =>
+      ({ left: 0, top, right: 200, bottom: top + 20, width: 200, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    const before = browser.bands().map(b => b.getAttribute('style'))
+
+    browser.nextLines(r(300))
+    browser.resize()
+
+    expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
+    expect(browser.bands().every(b => (b.getAttribute('style') ?? '').includes('top:300.0px'))).toBe(true)
+    hl.stop()
+  })
+
+  it('repaints when a container scrolls its own text, and not when the page does', () => {
+    // The bands are absolute boxes in document coordinates, so the page's own scroll carries them
+    // along — repainting for that would cost a hit test and a set of geometry reads on every frame
+    // of ordinary reading. An element scrolling inside `overflow` is the opposite: its text moves
+    // relative to the document while the bands stay put, and it produces no pointer event either
+    // (Codex on #138).
+    const { doc, source, target } = page(TWO)
+    // The pair inside a scroller of its own — `<body>` scrolling is the page scrolling
+    const scroller = doc.createElement('div')
+    source.before(scroller)
+    scroller.append(source, target)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const r = (top: number) =>
+      ({ left: 0, top, right: 200, bottom: top + 20, width: 200, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    const before = browser.bands().map(b => b.getAttribute('style'))
+
+    browser.starts()
+    browser.scrollOn(doc)
+    expect(browser.starts()).toEqual([]) // the page scrolling rebuilds nothing
+
+    browser.nextLines(r(300))
+    browser.scrollOn(scroller)
+
+    expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
+    expect(browser.bands().every(b => (b.getAttribute('style') ?? '').includes('top:300.0px'))).toBe(true)
+    hl.stop()
+  })
+
+  it('fades out when a reflow moves the sentence away from the pointer', () => {
+    // Invalidating by forgetting what is painted breaks the miss path — it returns early when
+    // nothing is on screen, so the bands would sit there for good once the repaint found no
+    // sentence under the pointer (Codex on #138). The entry has to survive as stale.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    expect(browser.bands().length).toBe(2)
+
+    // The reflow put blank space under the pointer
+    browser.caret.mockReturnValue(null)
+    browser.resize()
+    expect(browser.bands().length).toBe(2) // held through the grace period, as a pointer crossing a gap is
+    browser.flushTimers()
+
+    expect(browser.bands()).toEqual([])
+    hl.stop()
+  })
+
+  it('measures the bands from the layer\'s own origin, not the root element\'s', () => {
+    // The layer is `position: absolute; top: 0; left: 0`, so its rectangle is the origin of whatever
+    // containing block it landed in — the initial one normally, the body's padding box when the host
+    // positions `<body>`. Measuring against `documentElement` assumed the first case and shifted
+    // every band by the body's offset in the second (Codex on #138).
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const proto = (doc.defaultView as unknown as { Element: { prototype: Element } }).Element.prototype
+    const previous = proto.getBoundingClientRect
+    const shifted = { left: 8, top: 8, right: 8, bottom: 8, width: 0, height: 0, x: 8, y: 8, toJSON: () => ({}) } as DOMRect
+    proto.getBoundingClientRect = function (this: Element) {
+      return this.classList?.contains('axt-hl') ? shifted : browser.line1
+    }
+    const hl = startSentenceHighlight(doc)!
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+
+    // the sentence's line is at (0, 0); the layer starts 8px in, so the band has to come back by 8
+    expect(browser.bands().map(b => b.getAttribute('style'))).toEqual([
+      'left:-8.0px;top:-8.0px;width:200.0px;height:20.0px',
+      'left:-8.0px;top:-8.0px;width:200.0px;height:20.0px',
+    ])
+    hl.stop()
+    proto.getBoundingClientRect = previous
+  })
+
+  it('does not repaint at coordinates the pointer has left', () => {
+    // `x`/`y` keep the last position they were given, so a resize or a scroll arriving after the
+    // pointer left the document would hit-test where the pointer no longer is — and before the
+    // first move those coordinates are (0, 0), which a startup resize would test (Codex on #138).
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+
+    // A resize before the pointer has ever been over the document paints nothing
+    browser.resize()
+    expect(browser.bands()).toEqual([])
+
+    browser.move()
+    expect(browser.bands().length).toBe(2)
+
+    // …and once it leaves, a resize must not bring the tint back
+    doc.dispatchEvent(new Event('pointerleave'))
+    expect(browser.bands()).toEqual([])
+    browser.resize()
+    expect(browser.bands()).toEqual([])
+    hl.stop()
+  })
+
+  it('repaints when the page reflows under a pointer that never moved', () => {
+    // Translation arrives progressively and the controller starts before the run does, so a block
+    // completing above the pointed-at sentence pushes it down with no resize, no scroll and no
+    // pointer event to notice (Codex on #138).
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const r = (top: number) =>
+      ({ left: 0, top, right: 200, bottom: top + 20, width: 200, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    const before = browser.bands().map(b => b.getAttribute('style'))
+
+    browser.nextLines(r(300))
+    browser.reflow()
+
+    expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
+    expect(browser.bands().every(b => (b.getAttribute('style') ?? '').includes('top:300.0px'))).toBe(true)
+    hl.stop()
+  })
+
+  it('repaints when content is inserted, and not when the bands themselves are written', () => {
+    // A block landing between two others re-wraps everything below it without necessarily changing
+    // the document's height, so the size observer alone can miss it (Codex on #138). The bands go
+    // into the layer, which is inside `<body>` too — reacting to those would repaint forever.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const r = (top: number) =>
+      ({ left: 0, top, right: 200, bottom: top + 20, width: 200, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    const before = browser.bands().map(b => b.getAttribute('style'))
+
+    // our own write into the layer changes nothing
+    browser.starts()
+    browser.mutate(doc.querySelector('.axt-hl')!)
+    expect(browser.starts()).toEqual([])
+
+    // a translation landing in the page does
+    browser.nextLines(r(300))
+    browser.mutate(source.parentElement!)
+    expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
+    // …and a CSS-only reflow has to be visible too: a class toggled on an ancestor re-lays out its
+    // subtree without inserting anything, and a font swap does it without any mutation at all
+    expect(browser.watching()[0]).toMatchObject({ childList: true, subtree: true, attributes: true, characterData: true })
+    browser.nextLines(r(500))
+    browser.fontSwap()
+    expect(browser.bands().every(b => (b.getAttribute('style') ?? '').includes('top:500.0px'))).toBe(true)
+    hl.stop()
+  })
+
+  it('asks what the pointer is on once the page stops scrolling', () => {
+    // The bands travel with their sentence, so the tint stays where it belongs — but the pointer is
+    // now over a different sentence, and nothing else will notice until it moves (Codex on #138).
+    // Once per gesture, not once per frame: the per-frame hit test is the cost this must not have.
+    const { doc, source, target } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    browser.starts()
+
+    // scrolling itself rebuilds nothing…
+    browser.scrollOn(doc)
+    expect(browser.starts()).toEqual([])
+    expect(browser.delays()).toContain(120)
+
+    // …until it settles, and then the pointer is asked again
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.flushTimers(120)
+    for (const fn of browser.frames.splice(0)) fn()
+    expect(browser.starts().length).toBeGreaterThan(0)
+    hl.stop()
+  })
+
+  it('keeps a band inside the container that clips its text', () => {
+    // The layer hangs off `<body>`, outside whatever clipped the text — and `getClientRects()`
+    // reports the whole layout box, including the part scrolled out of sight. A wide table in side
+    // mode scrolls inside `overflow-x: auto`, so an unclipped band would run past it and paint over
+    // the column beside it (Codex on #138).
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const box = { left: 0, top: 0, right: 80, bottom: 20, width: 80, height: 20, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+    const scroller = source.parentElement as HTMLElement
+    scroller.style.overflowX = 'auto'
+    scroller.style.overflowY = 'hidden'
+    scroller.getBoundingClientRect = () => box
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+
+    // the stub's line is 200 wide; the container is 80
+    expect(browser.bands().map(b => b.getAttribute('style'))).toEqual([
+      'left:0.0px;top:0.0px;width:80.0px;height:20.0px',
+      'left:0.0px;top:0.0px;width:80.0px;height:20.0px',
+    ])
+    hl.stop()
+  })
+
+  it('merges rectangles that share a line into one band', () => {
+    // A range reports more than one rectangle for a line when it crosses inline elements of
+    // different heights — a formula in the middle of a sentence. Drawing them as they come leaves a
+    // notch where the maths is, which is exactly the ragged look this replaced (user report with a
+    // screenshot, 2026-09-09). One line is always one band.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const r = (left: number, top: number, right: number, bottom: number) =>
+      ({ left, top, right, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect
+
+    // One line cut into three by a formula, plus a second line of its own
+    browser.nextLines(r(0, 0, 60, 20), r(60, 2, 90, 18), r(90, 0, 200, 20), r(0, 30, 150, 50))
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+
+    const bands = browser.bands().filter(b => b.getAttribute('data-axt-hl-side') === 'source')
+    expect(bands).toHaveLength(2)
+    expect(bands[0]!.getAttribute('style')).toBe('left:0.0px;top:0.0px;width:200.0px;height:20.0px')
+    expect(bands[1]!.getAttribute('style')).toBe('left:0.0px;top:30.0px;width:150.0px;height:20.0px')
+    hl.stop()
+  })
+
+  it('draws the bands outside the content, so §7.1 is untouched', () => {
+    const { doc, source, target } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const before = source.outerHTML + target.outerHTML
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+
+    expect(browser.bands().length).toBe(2)
+    // 原块与译文一个字节都没动，底色层挂在 body 上、不在它们之间
+    expect(source.outerHTML + target.outerHTML).toBe(before)
+    expect(doc.querySelector('.axt-hl')!.parentElement!.tagName.toLowerCase()).toBe('body')
+    expect(source.nextElementSibling).toBe(target)
     hl.stop()
   })
 
@@ -176,11 +506,11 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
     browser.move()
-    const first = browser.highlights.get('axt-sentence-source')
+    const first = browser.bands()[0]!.getAttribute('style')
     browser.caret.mockReturnValue({ offsetNode: text, offset: 5 })
     browser.move()
 
-    expect(browser.highlights.get('axt-sentence-source')).toBe(first)
+    expect(browser.bands()[0]!.getAttribute('style')).toBe(first)
     hl.stop()
   })
 
@@ -203,7 +533,7 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
     browser.move()
     browser.flushTimers()
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
     first.stop()
     second.stop()
   })
@@ -217,13 +547,13 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
 
     setMode(doc, 'side')
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
 
     browser.move() // same sentence, same position
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
     hl.stop()
   })
 
@@ -240,7 +570,7 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.move()
 
     browser.flushTimers(120)
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
     hl.stop()
   })
 
@@ -255,12 +585,12 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move(600, 10) // far to the right of the text
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
     browser.move(10, 400) // far below it
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
 
     browser.move(10, 10) // the same caret, now actually under the pointer
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
     hl.stop()
   })
 
@@ -325,7 +655,7 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.nextRects('line2', 'line1')
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 4 })
     browser.move(150, 10) // on the first line, where the character before the caret is
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
     hl.stop()
   })
 
@@ -339,7 +669,7 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()
 
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
     hl.stop()
   })
 
@@ -351,16 +681,16 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()
     hl.stop()
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
 
     // And after stopping, a pointer move is not listened for any more
     browser.move()
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
 
-    browser.highlights.set('axt-sentence-source', { ranges: [] })
-    doc.documentElement.setAttribute('data-axt-hl', 'on')
+    // 外部清空同样什么都不留
     clearSentenceHighlights(doc)
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
+    expect(doc.querySelectorAll('.axt-hl')).toHaveLength(0)
   })
 
   it('restore() drops the tint along with the translation nodes', () => {
@@ -370,10 +700,10 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
 
     restore(doc)
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
     hl.stop()
   })
 })

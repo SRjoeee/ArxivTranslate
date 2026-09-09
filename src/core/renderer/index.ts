@@ -65,16 +65,23 @@ function styleSheet(style?: StyleOptions): string {
 }
 
 /**
- * 只改外观、不碰任何译文节点（#47）：写 `data-axt-style`，重算注入表的内容。
- * 设置页改颜色时走这条，**不重新请求翻译**（§8.5 的 chainConfigChanged 本来就忽略 style）。
- * 翻译没开着（没有注入表）时什么都不做——下次 enable 会带上新值
+ * Appearance only, no translation node touched (#47): write `data-axt-style` and recompute the
+ * injected sheet. This is the path a colour change in the settings page takes, and it **does not
+ * re-request anything** (§8.5's `chainConfigChanged` ignores `style` already). With translation off
+ * there is no injected sheet and nothing to do — the next `enable` carries the new values.
  */
 export function applyStyle(doc: Document, style: StyleOptions): boolean {
   const sheet = doc.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)
   if (!sheet) return false
   setStylePreset(doc, style)
   const css = styleSheet(style)
-  if (sheet.textContent !== css) sheet.textContent = css
+  if (sheet.textContent !== css) {
+    sheet.textContent = css
+    // Font size, leading and weight can all change here, and then the line is no longer where the
+    // bands were traced. They are absolute boxes in document coordinates and cannot follow a
+    // reflow, so drop them; the next pointer move repaints against the new layout (Codex on #138).
+    clearSentenceHighlights(doc)
+  }
   return true
 }
 
