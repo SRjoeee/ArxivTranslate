@@ -23,6 +23,8 @@ export type WireSpan =
        * consecutive anchors, so a lookup is a search plus an addition.
        */
       anchors: readonly (readonly [number, number])[]
+      /** A node was skipped just before this run, so it is not DOM-adjacent to the previous one */
+      breakBefore?: boolean
     }
   | {
       /**
@@ -40,6 +42,8 @@ export type WireSpan =
        * `<t id="N">` pair and bracket the element's content instead.
        */
       role: 'void' | 'open' | 'close'
+      /** A node was skipped just before this run, so it is not DOM-adjacent to the previous one */
+      breakBefore?: boolean
     }
 
 /**
@@ -81,19 +85,7 @@ export function spanAt(spans: readonly WireSpan[], wireOffset: number): WireSpan
   return undefined
 }
 
-/**
- * Wire interval `[from, to)` as a `Range`.
- *
- * A boundary inside a placeholder resolves to that node's own boundary, so a sentence that opens or
- * closes on a formula still contains it. Resolving such a boundary to the neighbouring text span
- * instead would drop the formula, and an interval covering only a placeholder would collapse
- * (Codex pointed this out on #123).
- *
- * Returns undefined only when there is nothing to select: no spans, an empty interval, or an
- * interval past the end of the wire text.
- */
-export function rangeOf(spans: readonly WireSpan[], from: number, to: number): Range | undefined {
-  if (spans.length === 0 || to <= from) return undefined
+function oneRange(spans: readonly WireSpan[], from: number, to: number): Range | undefined {
   const start = spanAt(spans, from)
   const end = spanAt(spans, to - 1)
   if (!start || !end) return undefined
@@ -111,4 +103,35 @@ export function rangeOf(spans: readonly WireSpan[], from: number, to: number): R
   else if (end.role === 'open') range.setEndBefore(end.node)
   else range.setEndAfter(end.node)
   return range
+}
+
+/**
+ * Wire interval `[from, to)` as ranges.
+ *
+ * **Usually one range, but not always.** `serialize` skips nodes we injected ourselves, so when an
+ * inner block finished translating first its translation sits in the DOM between two runs that are
+ * adjacent in wire coordinates. One range spanning that gap would contain the inner translation and
+ * highlight it as if it were source text (Codex pointed this out on #123), so the interval is cut
+ * at every such discontinuity. `Highlight` takes any number of ranges, so the caller just spreads
+ * them.
+ *
+ * A boundary inside a placeholder resolves to that node's own boundary, so a sentence that opens or
+ * closes on a formula still contains it.
+ *
+ * Returns an empty array when there is nothing to select: no spans, an empty interval, or an
+ * interval past the end of the wire text.
+ */
+export function rangesOf(spans: readonly WireSpan[], from: number, to: number): Range[] {
+  if (spans.length === 0 || to <= from) return []
+  const out: Range[] = []
+  let segmentStart = from
+  for (const span of spans) {
+    if (span.from <= from || span.from >= to || !span.breakBefore) continue
+    const range = oneRange(spans, segmentStart, span.from)
+    if (range) out.push(range)
+    segmentStart = span.from
+  }
+  const last = oneRange(spans, segmentStart, to)
+  if (last) out.push(last)
+  return out
 }

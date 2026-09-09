@@ -69,6 +69,7 @@ const collapseWhitespace = (text: string) => text.replace(HTML_SPACE, ' ')
 function makeTracker(format: WireFormat, parts: string[], spans: WireSpan[]) {
   let len = 0
   let afterSpace = false
+  let pendingBreak = false
   return {
     /**
      * A placeholder run. It holds no collapsible whitespace and neither starts nor ends with any,
@@ -76,9 +77,18 @@ function makeTracker(format: WireFormat, parts: string[], spans: WireSpan[]) {
      * a placeholder has to resolve to that node's own boundary, otherwise a sentence opening or
      * closing on a formula would drop it (Codex pointed this out on #123).
      */
+    /**
+     * Marks that a node was skipped here, so the next run is not DOM-adjacent to the previous one
+     * even though their wire offsets are. Only injected nodes are skipped, and a range spanning the
+     * gap would contain the translation they hold (Codex pointed this out on #123).
+     */
+    skipped() {
+      pendingBreak = true
+    },
     raw(s: string, node: Node, role: 'void' | 'open' | 'close') {
       parts.push(s)
-      spans.push({ kind: 'slot', node, from: len, to: len + s.length, role })
+      spans.push(pendingBreak ? { kind: 'slot', node, from: len, to: len + s.length, role, breakBefore: true } : { kind: 'slot', node, from: len, to: len + s.length, role })
+      pendingBreak = false
       len += s.length
       afterSpace = false
     },
@@ -105,7 +115,8 @@ function makeTracker(format: WireFormat, parts: string[], spans: WireSpan[]) {
       if (out.length === 0) return
       parts.push(out)
       len += out.length
-      spans.push({ kind: 'text', node, from, to: len, anchors })
+      spans.push(pendingBreak ? { kind: 'text', node, from, to: len, anchors, breakBefore: true } : { kind: 'text', node, from, to: len, anchors })
+      pendingBreak = false
     },
   }
 }
@@ -128,7 +139,10 @@ export function serialize(root: Element, format: WireFormat = 'tags', options: {
       } else if (child.nodeType === ELEMENT_NODE) {
         const el = child as Element
         // 我们自己插的译文 / 镜像不是原文：再次翻译时它们已经在原块内部（Codex 在 #8 指出）
-        if (isInjected(el)) continue
+        if (isInjected(el)) {
+          tracker?.skipped()
+          continue
+        }
         const c = classify(el)
         const isVoid = c ? !(inCell && c.kind === 'unit' && hasText(el)) : !hasText(el)
         // markers 没有成对记号（实测 Google 只有 70.6%，见 tokens.ts）：除了「带功能的元素」按 void

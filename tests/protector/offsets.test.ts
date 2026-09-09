@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { extract } from '@/core/extractor'
-import { nodeOffsetAt, rangeOf, serialize, spanAt, type WireSpan } from '@/core/protector'
+import { nodeOffsetAt, rangesOf, serialize, spanAt, type WireSpan } from '@/core/protector'
 import { el } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
@@ -48,7 +48,7 @@ function boundaryCalls(root: Element, spans: readonly WireSpan[], from: number, 
   }
   const doc = root.ownerDocument
   const spy = vi.spyOn(doc, 'createRange').mockReturnValue(recorder as unknown as Range)
-  rangeOf(spans, from, to)
+  rangesOf(spans, from, to)
   spy.mockRestore()
   return calls
 }
@@ -181,6 +181,23 @@ describe('wire offsets to DOM (#105)', () => {
     expect(block.text).toContain(' ')
     const at = block.text.indexOf('and then')
     expect(textOf(block.offsets!, at, at + 8)).toBe('and then')
+  })
+
+  it('cuts the interval where an injected node was skipped, instead of spanning it', () => {
+    // An inner block that finished translating first leaves its translation in the DOM between two
+    // runs that are adjacent in wire coordinates. One range across that gap would highlight the
+    // inner translation as if it were source text (Codex on #123).
+    const root = el('<p class="ltx_p">before <span class="axt-t" data-axt-for="x">translated</span> after</p>')
+    const block = serialize(root, 'tags', { offsets: true })
+    expect(block.text).toBe('before after')
+    expect(block.offsets!.map(s => Boolean(s.breakBefore))).toEqual([false, true])
+    // Two ranges, so the injected sibling between them is not covered
+    expect(boundaryCalls(root, block.offsets!, 0, block.text.length)).toEqual([
+      'start@text("before"):0',
+      'end@text("before"):7',
+      'start@text(" after"):1',
+      'end@text(" after"):6',
+    ])
   })
 
   it('holds on real fixture blocks: every span is well formed and its wire length matches', () => {
