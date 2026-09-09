@@ -17,6 +17,22 @@ const FIGURE = '<figure class="ltx_figure" id="F1">'
   + '<figcaption class="ltx_caption" id="F1.cap">Figure 1. Training time.</figcaption></figure>'
 const RASTER = '<figure class="ltx_figure" id="F2"><img class="ltx_graphics" src="https://arxiv.org/html/x/a.png" id="F2.g1"></figure>'
 
+/** One run of `text` on a baseline `degrees` off horizontal: one `<use>` per character, as arXiv emits. */
+function tilted(text: string, degrees: number): string {
+  const radians = (degrees * Math.PI) / 180
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
+  const size = 8
+  const glyphs = [...text]
+    .map((ch, i) => {
+      const along = 20 + i * size * 0.55
+      const across = 50
+      return `<use data-text="${ch}" transform="matrix(${size * cos},${size * sin},0,0,${along * cos - across * sin},${along * sin + across * cos})"/>`
+    })
+    .join('')
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">${glyphs}</svg>`
+}
+
 /** happy-dom gives an <object> no contentDocument, so the embedded figure is planted by hand. */
 function plant(el: Element, markup: string | null) {
   Object.defineProperty(el, 'contentDocument', {
@@ -73,6 +89,20 @@ describe('SVG figures in the image pipeline (§15.5)', () => {
     const spans = Array.from(doc.querySelectorAll(`.${IMG_CLASS} span`))
     const vertical = spans.filter(s => (s.getAttribute('style') ?? '').includes('rotate('))
     expect(vertical.map(s => s.getAttribute('title'))).toEqual(['wall time per epoch [ms]'])
+  })
+
+  it('lays a label a fraction of a degree off horizontal out as a horizontal one', async () => {
+    // The overlay's rotated geometry swaps the two axes, so it is only right at an exact quarter
+    // turn. `quarterTurn` tolerates 1.8° of slop, and that residual used to reach `labelStyle`
+    // as a truthy angle and select that layout — a wide axis label came out a tall narrow strip
+    // (Codex on #134). Two runs in the corpus are translatable and sit off horizontal by 1e-5°.
+    const { targets, run, doc } = setup(tilted('Energy', 0.5))
+    await run.translate(targets.filter(t => t.kind === 'svg'))
+    const spans = Array.from(doc.querySelectorAll(`.${IMG_CLASS} span`))
+    expect(spans.map(s => s.getAttribute('title'))).toEqual(['Energy'])
+    const style = spans[0]!.getAttribute('style') ?? ''
+    expect(style).not.toContain('rotate(')
+    expect(style).toMatch(/^left:[\d.]+%;top:[\d.]+%;width:[\d.]+%;height:[\d.]+%;font-size:min\([\d.]+cqh,[\d.]+cqw\)$/)
   })
 
   it('fails the figure rather than the run when the embedded document is not there', async () => {

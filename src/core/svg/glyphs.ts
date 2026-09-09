@@ -157,7 +157,7 @@ export function viewBoxOf(svg: Element): { x: number; y: number; w: number; h: n
 }
 
 /**
- * Whether the overlay can place a run of this orientation.
+ * The quarter turn the overlay will place a run at, or `undefined` when it is not near one.
  *
  * Only upright and the two quarter turns. Everything downstream describes a rotated label by its
  * axis-aligned bounding box plus an angle, and that only *is* the label's own box at a quarter
@@ -170,15 +170,28 @@ export function viewBoxOf(svg: Element): { x: number; y: number; w: number; h: n
  * occur in the corpus, so there is nothing to gain by handling it and something to lose by
  * pretending to.
  *
+ * **The result is snapped, not merely accepted.** The tolerance below accepts a run up to 1.8° off
+ * the axis, and consumers of the angle downstream do not read it as a number — they ask whether it
+ * is truthy. `linesToBoxes` refuses to merge a line that carries one, and `labelStyle` selects the
+ * ±90° layout that swaps width for height and cqw for cqh. Passing a tolerated residual through
+ * therefore drew a label a fraction of a degree off horizontal as a tall narrow strip (Codex on
+ * #134). Returning the nearest quarter turn exactly means no consumer can see an angle that is
+ * neither 0 nor ±90°. Real data reaches the tolerance: 17 runs in the corpus sit within 1e-4° of
+ * horizontal without being exactly horizontal, two of them translatable, and 22 rotated ones sit
+ * at -90.000002° rather than -90°.
+ *
  * Measured over the whole corpus (55047 glyphs, 253 files): 90.61% upright, 8.01% at -90°, 0.11% at
  * +90°, and **1.27% at 38 other angles**, the commonest -30°. An earlier seven-paper sample
  * contained none of the last group and the survey wrongly concluded there were only two angles
  * (Codex caught that on #133).
  */
-function placeable(angle: number): boolean {
+function quarterTurn(angle: number): number | undefined {
   const quarters = angle / (Math.PI / 2)
   const nearest = Math.round(quarters)
-  return Math.abs(quarters - nearest) < 0.02 && Math.abs(nearest) <= 1
+  if (Math.abs(quarters - nearest) >= 0.02 || Math.abs(nearest) > 1) return undefined
+  // Just below horizontal `Math.round` yields `-0`; normalising it away keeps the returned value
+  // exactly one of 0, +π/2 and -π/2, which is the whole point of snapping
+  return nearest === 0 ? 0 : nearest * (Math.PI / 2)
 }
 
 /**
@@ -213,10 +226,13 @@ export function linesOf(svg: Element): OcrLine[] {
   if (!box) return []
   const out: OcrLine[] = []
   for (const run of runsOf(svg)) {
-    if (!placeable(run.angle)) continue
+    const angle = quarterTurn(run.angle)
+    if (angle === undefined) continue
+    // The corners keep the run's true angle: the box is then the text's own, and the axis-aligned
+    // bounds taken downstream cover it whichever way the residual leans
     const quad = cornersOf(run).map(([x, y]) => [(x - box.x) / box.w, (y - box.y) / box.h] as [number, number])
-    // 横排的不带 angle，与 OCR 后端产出的行形状完全一致
-    out.push(run.angle === 0 ? { text: run.text, quad: quad as Quad, conf: 1 } : { text: run.text, quad: quad as Quad, conf: 1, angle: run.angle })
+    // An upright run carries no angle at all, exactly the shape the OCR backend produces
+    out.push(angle === 0 ? { text: run.text, quad: quad as Quad, conf: 1 } : { text: run.text, quad: quad as Quad, conf: 1, angle })
   }
   return out
 }

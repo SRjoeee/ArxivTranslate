@@ -127,6 +127,31 @@ describe('SVG glyph extraction (#121)', () => {
     expect(runsOf(parse(at(10 * Math.cos(-Math.PI / 6), 10 * Math.sin(-Math.PI / 6))))).toHaveLength(1)
   })
 
+  it('snaps a tolerated near-quarter-turn to the exact quarter turn', () => {
+    // `quarterTurn` deliberately tolerates a run up to 1.8° off the axis, but that residual once
+    // travelled downstream verbatim, and every consumer of `angle` only asks whether it is
+    // truthy: `linesToBoxes` refuses to merge a line that has one, and `labelStyle` picks the ±90°
+    // layout that swaps width for height and cqw for cqh. A label a fraction of a degree off
+    // horizontal was therefore drawn as a tall narrow strip (Codex on #134). It is not
+    // hypothetical: 17 runs in the corpus sit at a near-zero but nonzero angle, and two of them
+    // (`ym`, `xm` in 2609.08661v1/fig2.svg) are translatable.
+    const at = (degrees: number) => {
+      const radians = (degrees * Math.PI) / 180
+      return `<use data-text="A" transform="matrix(${10 * Math.cos(radians)},${10 * Math.sin(radians)},0,0,50,50)"/>`
+    }
+    const parse = (markup: string) =>
+      new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${markup}</svg>`, 'image/svg+xml').documentElement
+    const angleOf = (degrees: number) => linesOf(parse(at(degrees)))[0]!.angle
+
+    // Horizontal, and everything the tolerance lets pass for horizontal, carries no angle at all —
+    // the same shape the OCR backend produces
+    for (const degrees of [0, 0.5, -0.5, 1.7, -1.7]) expect([degrees, angleOf(degrees)]).toEqual([degrees, undefined])
+    expect('angle' in linesOf(parse(at(0.5)))[0]!).toBe(false)
+    // A quarter turn is exact, so `labelStyle` rotates by exactly ±90°
+    for (const degrees of [90, 89.5, 90.5]) expect([degrees, angleOf(degrees)]).toEqual([degrees, Math.PI / 2])
+    for (const degrees of [-90, -89.5, -90.5]) expect([degrees, angleOf(degrees)]).toEqual([degrees, -Math.PI / 2])
+  })
+
   it('reports nothing for a figure with no glyphs', () => {
     const doc = new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0H10V10H0Z"/></svg>', 'image/svg+xml')
     expect(runsOf(doc.documentElement)).toEqual([])
