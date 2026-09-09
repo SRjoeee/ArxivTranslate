@@ -826,6 +826,52 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列补上 ${q.extra} 发、其中${q.confirmed ? '有没见过的请求体（确有排队的新批次，不是同一批重发）' : '全是同一批重发——队列里没有排队的活，这条断言无效'}；导航离开再放开全部槽位后新增 ${late} 个`)
 }
 
+// ── side 模式下图注的对照高亮（issue #139）：屏幕上那份是克隆件 ──────────────
+{
+  // 只有真实浏览器能证：判据是「哪一份有盒子」，而 happy-dom 量不出任何几何。
+  // 微软是眼下唯一在图注这种块上也报句边界的引擎（§8.6）
+  const { page, logs } = await openPaper(PAPER, 'edge.microsoft.com')
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await page.bringToFront()
+  await popup.getByRole('button', { name: '左右', exact: true }).click()
+  await sleep(500)
+  await popup.close()
+  await page.evaluate(() => document.querySelector('figure .ltx_caption')?.scrollIntoView({ block: 'center' }))
+  await waitForLog(logs, IDLE, 120_000)
+  await sleep(1500)
+  const caption = await page.evaluate(async () => {
+    const mode = document.documentElement.getAttribute('data-axt-mode')
+    const src = [...document.querySelectorAll('.ltx_caption[data-axt-id]')].find(c => c.getClientRects().length)
+    if (!src) return { mode, reason: '没有可见的原文图注' }
+    const walk = document.createTreeWalker(src, NodeFilter.SHOW_TEXT)
+    let point = null
+    for (let t = walk.nextNode(); t && !point; t = walk.nextNode()) {
+      for (let i = 0; i + 1 <= t.data.length && !point; i++) {
+        if (/\s/.test(t.data[i])) continue
+        const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + 1)
+        const b = r.getBoundingClientRect()
+        if (b.width > 0 && b.height > 0 && b.top > 0) point = { x: b.left + b.width / 2, y: b.top + b.height / 2 }
+      }
+    }
+    if (!point) return { mode, reason: '图注上找不到可瞄准的字' }
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: point.x, clientY: point.y, bubbles: true }))
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+    const bands = [...document.querySelectorAll('.axt-hl > div')]
+    const side = which => bands.filter(b => b.getAttribute('data-axt-hl-side') === which)
+    const inSplit = side('target').every(b => {
+      const r = b.getBoundingClientRect()
+      const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      return !!el?.closest('.axt-split')
+    })
+    return { mode, source: side('source').length, target: side('target').length, inSplit }
+  })
+  await page.close()
+  check('side 模式：图注的对照高亮画在右栏那份克隆件上（issue #139）',
+    caption.mode === 'side' && caption.source > 0 && caption.target > 0 && caption.inSplit === true,
+    `模式 ${caption.mode}，原文 ${caption.source} 条底、译文 ${caption.target} 条底${caption.inSplit ? '（都落在克隆件里）' : ''}${caption.reason ? ` (${caption.reason})` : ''}`)
+}
+
 // ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
 {
   await options.bringToFront()

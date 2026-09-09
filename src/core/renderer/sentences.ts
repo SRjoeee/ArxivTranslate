@@ -45,14 +45,56 @@ export interface SentenceMap {
  * that is where it is *inserted*, and split-figure copies and mirrors are inserted after it later.
  */
 const maps = new WeakMap<Element, SentenceMap>()
-const targetOf = new WeakMap<Element, WeakRef<Element>>()
+/**
+ * A source element's translations, newest first.
+ *
+ * More than one because side mode copies a whole figure into the right column and **the copy is
+ * what the reader sees** — the original translation is still there, hidden, and still registered.
+ * Both are kept and the first *rendered* one answers, so the highlight follows the copy while it
+ * exists and falls back to the original the moment the copy is dropped (issue #139).
+ */
+const targetsOf = new WeakMap<Element, WeakRef<Element>[]>()
+
+/**
+ * Whether this element is the one on screen.
+ *
+ * Switching modes does not remove a split copy, it hides one side or the other with CSS — stack
+ * hides the copy, only hides the original — so "still in the document" cannot tell them apart.
+ * `checkVisibility` can, and is Chrome 105+ against a floor of 131. Where it does not exist, being
+ * in the document is the best available answer.
+ */
+const rendered = (el: Element): boolean =>
+  typeof el.checkVisibility === 'function' ? el.checkVisibility() : el.isConnected
 
 /** The record reachable from either side of a block, or undefined once the translation is gone. */
 function recordOf(el: Element): SentenceMap | undefined {
   const own = maps.get(el)
   if (own) return own
-  const target = targetOf.get(el)?.deref()
-  return target ? maps.get(target) : undefined
+  const refs = targetsOf.get(el)
+  if (!refs || refs.length === 0) return undefined
+  // One translation, which is every block that is not a split figure: no question to ask, and no
+  // style query to pay for on the way to answering it
+  if (refs.length === 1) {
+    const only = refs[0]!.deref()
+    return only ? maps.get(only) : undefined
+  }
+  let fallback: SentenceMap | undefined
+  for (const ref of refs) {
+    const target = ref.deref()
+    const map = target && maps.get(target)
+    if (!map) continue
+    if (rendered(target)) return map
+    fallback ??= map
+  }
+  // Nothing on screen: hand back one anyway, so `live()` can report it as stale rather than this
+  // looking like a block that was never registered
+  return fallback
+}
+
+/** Remembers a translation for this source, newest first, dropping refs whose node is gone. */
+function remember(source: Element, target: Element): void {
+  const kept = (targetsOf.get(source) ?? []).filter(ref => ref.deref() !== undefined)
+  targetsOf.set(source, [new WeakRef(target), ...kept])
 }
 
 /**
@@ -71,7 +113,37 @@ export function registerSentences(source: Element, target: Element, sourceSpans:
     target: { root: target, spans: targetSpans, index: indexSpans(targetSpans) },
   }
   maps.set(target, map)
-  targetOf.set(source, new WeakRef(target))
+  remember(source, target)
+}
+
+/**
+ * Registers the copy side mode made of a translation, so the highlight can paint on what is on
+ * screen.
+ *
+ * `splitFigures` copies a whole figure — caption included — into the right column and hides the
+ * original. The registry held the original translation, which has no boxes once hidden, so a
+ * figure caption tinted on the source side and nothing at all on the other (issue #139, reported
+ * from real reading).
+ *
+ * **The node mapping comes from the caller**, taken while the two trees were still identical.
+ * Rebuilding it here would mean matching two trees that are no longer isomorphic: the copy has had
+ * the original member of every pair removed from it by then.
+ */
+export function mirrorSentences(target: Element, copy: Element, twin: (node: Node) => Node | undefined): void {
+  const map = maps.get(target)
+  if (!map) return
+  const moved = (span: WireSpan): WireSpan => {
+    const node = twin(span.node)
+    if (!node) return span
+    // 分支写开而不是一把 spread：联合类型经过 spread 会被展宽，`kind` 的字面量类型就丢了。
+    // 文本 span 的 node 是 `Text`——同构的克隆里对应位置一定同类型，但**查一下再用**，
+    // 不合就留着原来那个（它至多让这一段不亮，而不是把偏移算到别的节点上）
+    if (span.kind !== 'text') return { ...span, node }
+    return node.nodeType === Node.TEXT_NODE ? { ...span, node: node as Text } : span
+  }
+  const spans = map.target.spans.map(moved)
+  maps.set(copy, { pairs: map.pairs, source: map.source, target: { root: copy, spans, index: indexSpans(spans) } })
+  remember(map.source.root, copy)
 }
 
 /** The record for an element, or undefined if this block has no usable alignment. */

@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { nodeOffsetAt, rehydrate, serialize, wireOffsetAt } from '@/core/protector'
 import { registerSentences, sentenceAt, sentenceMapAt, sentenceMapOf } from '@/core/renderer'
+import { SPLIT_CLASS, splitFigures } from '@/core/renderer/split-figures'
+import { docOf } from './helpers'
 import { splitSentences } from '@/core/sentences'
 import { verifyAlignment } from '@/providers/alignment'
 
@@ -33,6 +35,69 @@ describe('sentence registry (#105)', () => {
     expect(sentenceMapAt(source.firstChild!)?.side).toBe('source')
     expect(sentenceMapAt(target.firstChild!)?.side).toBe('target')
     expect(sentenceMapAt(source)?.map.pairs.length).toBe(lengths.length)
+  })
+
+  it('side 模式拆图之后，高亮跟着屏幕上那份走（#139）', () => {
+    // `splitFigures` 把整张图连图注一起克隆到右栏，**读者看到的是克隆件**，而原件那份译文被藏起来了。
+    // 只登记原件的话，悬停图注时译文侧算出来的矩形是空的——用户 2026-09-10 在 2609.04987v1 上报的
+    // 拆图只在翻译根里扫，所以页面要有 `article.ltx_document`
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
+    const source = d.querySelector('figcaption')!
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('figcaption')
+    // `renderText` 打的那两个标记：拆图按 `.axt-t` 找译文，没有它这张图根本不会被拆
+    target.className = 'axt-t'
+    target.setAttribute('data-axt-for', 'F1.cap')
+    target.append(fragment)
+    source.after(target)
+    const lengths = splitSentences(block.text)
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+
+    expect(splitFigures(d)).toBe(1)
+    const clone = d.querySelector(`.${SPLIT_CLASS}`)!
+    const copy = clone.querySelector('figcaption')!
+    expect(copy.textContent).toBe(target.textContent)
+
+    // 悬停克隆件里的图注：解析得到同一个块，而且认得出这是译文那一侧
+    const inCopy = sentenceMapAt(copy.firstChild!)
+    expect(inCopy?.side).toBe('target')
+    expect(inCopy?.map.pairs.length).toBe(lengths.length)
+    // 悬停原文时，译文那侧指向的是**克隆件**——原件那份在 side 模式下没有盒子
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
+    // span 换成了克隆里的节点，不是原件的
+    const nodes = new Set(sentenceMapOf(copy)!.target.spans.map(s => s.node))
+    expect([...nodes].every(n => copy.contains(n))).toBe(true)
+    expect([...nodes].some(n => target.contains(n))).toBe(false)
+  })
+
+  it('切回 stack 时副本被藏起来，高亮回落到原件那份（#139）', () => {
+    // **切模式不会删掉副本**，只是用 CSS 把一边藏起来（stack 藏副本、only 藏原件）。
+    // 所以判据是「谁在屏幕上」而不是「谁还在文档里」——后者两边都成立，高亮会画在看不见的那份上
+    // 拆图只在翻译根里扫，所以页面要有 `article.ltx_document`
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
+    const source = d.querySelector('figcaption')!
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    const target = d.createElement('figcaption')
+    // `renderText` 打的那两个标记：拆图按 `.axt-t` 找译文，没有它这张图根本不会被拆
+    target.className = 'axt-t'
+    target.setAttribute('data-axt-for', 'F1.cap')
+    target.append(fragment)
+    source.after(target)
+    const lengths = splitSentences(block.text)
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+    splitFigures(d)
+    const copy = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
+    // side：两边都在屏幕上，取副本（右栏那份就是它）
+    for (const el of [target, copy]) Object.assign(el, { checkVisibility: () => true })
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
+
+    // stack：副本被 CSS 藏了，但**还在文档里**——回落到原件那份
+    Object.assign(copy, { checkVisibility: () => false })
+    expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(target)
   })
 
   it('registers nothing without an alignment, so those blocks simply do not highlight', () => {

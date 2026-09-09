@@ -14,6 +14,7 @@ import { ID_ATTR } from '@/core/extractor'
 import { IMG_CLASS } from '@/core/marks'
 import { hashText } from '@/shared/hash'
 import { MIRROR_CLASS } from './mirror'
+import { mirrorSentences } from './sentences'
 import { PENDING_CLASS } from './pending'
 import { FOR_ATTR, T_CLASS } from './index'
 
@@ -48,6 +49,27 @@ function translationKey(fig: Element): string {
  */
 function hasLooseMedia(fig: Element): boolean {
   return Array.from(fig.querySelectorAll(FIGURE_MEDIA)).some(m => m.closest(`[${ID_ATTR}], .${T_CLASS}`) === null)
+}
+
+/**
+ * 两棵刚克隆出来、还完全一样的树的节点对应表。
+ *
+ * `cloneNode(true)` 之后、任何删除之前调用：那一刻两边的节点按文档序一一对应，配对是数出来的
+ * 而不是猜出来的。文本节点也要（译文那侧的 span 大多落在文本节点上），所以用 NodeIterator 而不是
+ * `querySelectorAll`
+ */
+function pairNodes(from: Element, to: Element): Map<Node, Node> {
+  const doc = from.ownerDocument
+  const a = doc.createNodeIterator(from)
+  const b = doc.createNodeIterator(to)
+  const out = new Map<Node, Node>()
+  for (;;) {
+    const x = a.nextNode()
+    const y = b.nextNode()
+    if (!x || !y) break
+    out.set(x, y)
+  }
+  return out
 }
 
 /** 元素所在的最外层 figure（嵌套分图交给最外层一起复制）；不在图里返回 null */
@@ -121,6 +143,10 @@ export function splitFigures(root: Document | Element): number {
     if (figureMirror?.classList.contains(MIRROR_CLASS)) figureMirror.remove()
 
     const clone = fig.cloneNode(true) as Element
+    // **趁两棵树还完全一样的这一刻**把每个节点的对应件记下来。下面几步会从克隆里删掉每对的原文成员，
+    // 之后两棵树就不同构了，再想配对只能靠猜。悬停对照高亮要靠这张表把译文那侧的 span 挪到
+    // 屏幕上真正显示的那一份上（issue #139）
+    const twins = pairNodes(fig, clone)
     // 还在等译文 / 翻失败的对：副本里去掉圆环与小部件、留原文，译文到了 key 变化会重建
     for (const pending of Array.from(clone.querySelectorAll(`.${PENDING_CLASS}, .axt-error`))) pending.remove()
     // 克隆件只留译文：每对里把原文成员摘掉（译文自己不会被摘）
@@ -135,6 +161,12 @@ export function splitFigures(root: Document | Element): number {
 
     fig.setAttribute(SPLIT_ATTR, '')
     fig.after(clone)
+    // 图注的译文在右栏是这一份克隆件，原件那份被 side 模式藏起来了；不登记的话悬停时
+    // 译文侧算出来的矩形是空的，一条底都画不出来（issue #139，用户 2026-09-10 反馈）
+    for (const original of Array.from(fig.querySelectorAll(REAL_TRANSLATION))) {
+      const copy = twins.get(original)
+      if (copy?.nodeType === 1 && copy.isConnected) mirrorSentences(original, copy as Element, node => twins.get(node))
+    }
     made++
   }
   return made
