@@ -70,6 +70,11 @@ export function tableCells(table: Element): Element[] {
   return Array.from(table.querySelectorAll(TABLE_RULES.cell))
 }
 
+/** 是不是表格块的根：表格的句子按单元格登记，拆图签名要走进单元格（renderer/split-figures.ts） */
+export function isTableRoot(el: Element): boolean {
+  return el.matches(TABLE_RULES.root)
+}
+
 /** protector 序列化时要知道根是不是单元格：格里的翻译单元不另成块，要走进去（§5.3） */
 export function isTableCell(el: Element): boolean {
   return el.matches(TABLE_RULES.cell)

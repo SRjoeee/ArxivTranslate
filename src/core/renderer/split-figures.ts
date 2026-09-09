@@ -9,7 +9,7 @@
 // 实在不能重排的（宽公式、宽 SVG，实测 8 张图里有 3 张溢出 78 / 102 / 209px）退化为栏内横滑，
 // 字号一律不动。试过把栏宽喂给 ar5iv 的 `--main-width`（它按 .33/.5 的比例算面板宽），
 // 实测更糟：面板缩成 160px 还溢出 555px，所以那个变量保持不动。
-import { DOCUMENT_ROOT, FIGURE_MEDIA } from '@/core/rules/latexml'
+import { DOCUMENT_ROOT, FIGURE_MEDIA, isTableRoot, tableCells } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
 import { IMG_CLASS } from '@/core/marks'
 import { hashText } from '@/shared/hash'
@@ -36,11 +36,24 @@ const REAL_OR_IMAGE = `${REAL_TRANSLATION}, .${IMG_CLASS}`
 /** 克隆时译文内容的签名，用来判断译文有没有增加或改变、要不要重建 */
 const KEY_ATTR = 'data-axt-split-key'
 
+/**
+ * 一个译文节点此刻的句子登记签名。
+ *
+ * 表格是唯一把登记放在**后代**上的译文：`renderTable` 按单元格回报「原格 → 克隆格」，`.axt-t` 表格
+ * 本身从来没被登记过，只问它永远得到空签名，「表格从没对齐变成有对齐、正文不变」这种转换就看不见，
+ * 副本原样留下、格子一格也没被镜像（Codex 在 #148 指出；实测 2312.11805v4 的 Figure 10 / 20 就是
+ * 图里带表的可拆插图）。判根是一次 `matches`，非表格的译文不多走一趟子树
+ */
+function signatureOf(t: Element): string {
+  const own = sentenceSignatureOf(t)
+  return isTableRoot(t) ? `${own}/${tableCells(t).map(sentenceSignatureOf).join(',')}` : own
+}
+
 /** 译文的签名：数量相同但内容变了（换目标语言重翻）也要重建，只数个数会一直用陈旧的副本（Codex 在 #26 指出） */
 function translationKey(fig: Element): string {
   // 正文之外还要看**句子登记**：正文一样但登记从「没有」变成「有」时，副本原样留下就永远不会被
   // 镜像，悬停它什么也查不到（Codex 在 #148 指出）
-  const texts = Array.from(fig.querySelectorAll(REAL_OR_IMAGE), t => `${t.textContent ?? ''}\u0000${sentenceSignatureOf(t)}`)
+  const texts = Array.from(fig.querySelectorAll(REAL_OR_IMAGE), t => `${t.textContent ?? ''}\u0000${signatureOf(t)}`)
   return `${texts.length}:${hashText(JSON.stringify(texts))}`
 }
 

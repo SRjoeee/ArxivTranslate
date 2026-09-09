@@ -223,6 +223,48 @@ describe('sentence registry (#105)', () => {
     expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(rebuilt)
   })
 
+  it('表格从「没有对齐」变成「有对齐」时，签名要走进单元格，副本才会重建（#148）', () => {
+    // 表格是唯一把句子登记在**后代**上的译文：`renderTable` 按单元格回报「原格 → 克隆格」，
+    // `.axt-t` 表格本身从来没被登记过。签名只问表格就永远是空的，这种正文不变的转换看不见，
+    // 副本原样留下、格子一格也没被镜像（Codex 在 #148 指出）。
+    // 结构照 `renderTable`：整张 `.ltx_tabular` 克隆一份带 .axt-t，格子在克隆里
+    const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
+      + '<figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption>'
+      + '<figcaption class="ltx_caption axt-t" data-axt-for="F1.cap">图 1。</figcaption>'
+      + '<table class="ltx_tabular" id="F1.tab" data-axt-id="F1.tab"><tbody><tr>'
+      + '<td class="ltx_td">One. Two.</td></tr></tbody></table></figure>')
+    const table = d.getElementById('F1.tab')!
+    const cell = table.querySelector('td')!
+    const clone = table.cloneNode(true) as Element
+    clone.removeAttribute('id')
+    clone.removeAttribute('data-axt-id')
+    clone.classList.add('axt-t')
+    clone.setAttribute('data-axt-for', 'F1.tab')
+    table.after(clone)
+    const target = clone.querySelector('td')!
+    const block = serialize(cell, 'tags')
+    const fragment = rehydrate(block.text, block, d)
+    target.textContent = ''
+    target.append(fragment)
+
+    // 第一轮：没有对齐
+    registerSentences(cell, target, block.offsets, fragment.offsets, undefined)
+    expect(splitFigures(d)).toBe(1)
+    const first = d.querySelector(`.${SPLIT_CLASS} td`)!
+    expect(sentenceMapAt(first.firstChild!)).toBeUndefined()
+
+    // 第二轮：同样的正文，这次有对齐了——副本必须重建，格子在副本里登记好
+    const lengths = splitSentences(block.text)
+    registerSentences(cell, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+    expect(splitFigures(d)).toBe(1)
+    const rebuilt = d.querySelector(`.${SPLIT_CLASS} td`)!
+    expect(rebuilt).not.toBe(first)
+    Object.assign(target, { checkVisibility: () => false })
+    Object.assign(rebuilt, { checkVisibility: () => true })
+    expect(sentenceMapAt(rebuilt.firstChild!)?.side).toBe('target')
+    expect(sentenceMapAt(cell.firstChild!)?.map.target.root).toBe(rebuilt)
+  })
+
   it('registers nothing without an alignment, so those blocks simply do not highlight', () => {
     // Every Google and LLM block today. A guessed pairing would light up the wrong sentence.
     const { source, target, block, spans } = render('<p class="ltx_p">One. Two.</p>')
