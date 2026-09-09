@@ -477,49 +477,60 @@ stands for inline SVG.
 
 **Sample.** Recent papers from eight arXiv categories: 178 with an HTML version. **99 of them (55.6%) carry
 at least one SVG figure**, and counting figures rather than papers, **880 of 1792 (49.1%) are SVG** against
-912 bitmaps. **All 321 SVG assets the crawl discovered were measured**, over two channels: 281 fetched and
-parsed over HTTP, and the 40 that answer 406 to curl (see below) read in a real browser through their
-`<object>`'s `contentDocument`, which is what the extension will actually see. Every glyph-level figure below
-is the sum of the two, so the denominator is the whole discovered set rather than the part curl could reach
-(Codex asked on #133 for the 406 group to be counted, not set aside). Two further in-browser passes — 84
-figures for `<foreignObject>`, 44 for reachability — answer narrower questions and are labelled as the
-sub-samples they are where they are used.
+912 bitmaps. Of those 880 the crawl fetched the first four `<object>`s of each paper — 48 of the 99 papers
+carry more — which resolve to **316 distinct assets, and all 316 were measured**, over two channels: **276
+fetched and parsed over HTTP**, cached locally one directory per paper, and the 40 that answer 406 to curl
+(see below) read in a real browser through their `<object>`'s `contentDocument`, which is what the extension
+will actually see. Every count below is the sum of the two, so the denominator is the whole sampled set
+rather than the part curl could reach (Codex asked on #133 for the 406 group to be counted, not set aside).
+A reachability pass over 44 further figures answers a narrower question and is labelled as the sub-sample it
+is where it is used.
+
+**276 fetchable files, not 281.** The crawl logged 281 non-error asset references but only 276 distinct
+paths: five files are referenced twice within the same paper and were counted twice, and the earlier totals
+counted them twice as well. Every per-file and per-glyph count in this section is over the 276 distinct
+files, which is also what re-scanning the local corpus reproduces. The 281 is corrected rather than kept
+alongside, so there is one denominator and not two.
 
 **The headline holds only where glyphs are drawn as `<use>`.** That is every figure that draws them at all,
-but 10.3% draw letter outlines straight into `<path>` instead, and nearly a third of those carry real words
+but 10.1% draw letter outlines straight into `<path>` instead, and nearly a third of those carry real words
 that no amount of `data-text` reading will reach — see point 4. OCR is what would serve them.
 
 ### 1. `data-text` is reliable — coverage of real glyphs is 100%
 
 | | over HTTP | 406 group, in browser | all |
 |---|---|---|---|
-| files measured | 281 | 40 | **321** |
-| `<use>` elements | 55064 | 3684 | 58748 |
-| carrying `data-text` | 55047 | 3684 (**100%**) | 58731 (**99.97%**) |
-| — of those files, drawing glyphs as `<use>` at all | 253 | 35 | 288 |
-| files where every `<use>` carries it | 248 | 35 | **283 / 288 (98.3%)** |
+| files measured | 276 | 40 | **316** |
+| `<use>` elements | 54361 | 3684 | 58045 |
+| carrying `data-text` | 54344 | 3684 (**100%**) | 58028 (**99.97%**) |
+| — of those files, drawing glyphs as `<use>` at all | 249 | 35 | 284 |
+| files where every `<use>` carries it | 244 | 35 | **279 / 284 (98.2%)** |
 | files where some do | 5 | 0 | 5 |
 | **files where none do** | 0 | 0 | **0** |
-| files with no `<use>` — see point 4 | 28 | 5 | 33 |
+| files with no `<use>` — see point 4 | 27 | 5 | 32 |
 
-The file rows are counted against the 288 that draw glyphs as `<use>`, not against all 321. The other 33
+The file rows are counted against the 284 that draw glyphs as `<use>`, not against all 316. The other 32
 draw their outlines directly and have nothing for those rows to be true or false about; folding them into the
-denominator would report 88.2% and read as though 12% of files were partially covered (Codex on #133).
+denominator would report 88.3% and read as though 12% of files were partially covered (Codex on #133).
 
 All seventeen exceptions are `<use xlink:href="#pattern_tile_N">` — hatch-fill tiles, not glyphs, and all
 seventeen are in the HTTP group; the 40 read in the browser contain no non-glyph `<use>` at all. **Coverage of
-actual glyphs is 100%, on every asset the crawl found.**
+actual glyphs is 100%, on every asset the survey sampled.**
 
-**No text lives outside the glyphs.** Not one file has a `<text>` element or a `<tspan>` (0/321, both
-channels), and an in-browser pass over 84 figures found **zero `<foreignObject>` nodes**, as did all 40 of the
-406 group — so the "HTML labels inside SVG" representation §2.9 records for inline TikZ does not occur here,
-and `data-text` really is the only channel (Codex raised this on #133; the check is what makes the claim
-sound, not the absence of `<text>` alone).
+**No text lives outside the glyphs — checked on every asset, not on a sample.** Not one file has a `<text>`
+element or a `<tspan>`, and **not one has a `<foreignObject>`**: 0 of 316, across both channels. Each half was
+measured through its own channel — the 276 fetchable files parsed off the local corpus, the 40 curl cannot
+reach read in the browser through `contentDocument` — and the two together are the whole set. An earlier
+revision rested the `<foreignObject>` claim on an in-browser pass over 84 figures plus those 40, at most 124
+of the set, while stating it as though it held everywhere; Codex asked on #133 for the rest, and the rest
+agrees. So the "HTML labels inside SVG" representation §2.9 records for inline TikZ does not occur here, and
+`data-text` really is the only channel — that check is what makes the claim sound, not the absence of
+`<text>` alone.
 
-**The id suffix is not a usable fallback.** A suffix like `font_2_99` equals the codepoint in only 21.59% of
-cases (12283/56880 over both channels), and bimodally by file: 67 files where it always does, 213 where it
-never does (there it is a font-internal glyph index), 8 mixed. Issue #121's observation on three files holds
-on the larger sample.
+**The id suffix is not a usable fallback.** A suffix like `font_2_99` equals the codepoint in only 21.83% of
+cases (12283/56257 over both channels), and bimodally by file: 67 files where it always does, 209 where it
+never does (there it is a font-internal glyph index), 8 mixed — 284 files, the ones that draw glyphs as
+`<use>`. Issue #121's observation on three files holds on the larger sample.
 
 ### 2. Spaces are mostly explicit glyphs, so word segmentation is not the main problem
 
@@ -539,9 +550,9 @@ below (Codex asked for this to be measured across the sample rather than general
 
 ### 3. The hard part is segmentation, and it comes in two kinds
 
-**(a) Line and label boundaries.** The converter does **no grouping at all**: every glyph of a figure is a
-direct child of `<svg>` (measured: 159 of 159 in one figure), so ticks, axis titles and legends run together
-as `"110100Number of terms N1015..."`.
+**(a) Line and label boundaries.** The converter emits no *semantic* grouping: ticks, axis titles and legends
+arrive in document order with nothing marking where one label ends, so they run together as
+`"110100Number of terms N1015..."`.
 
 A prototype confirmed geometric grouping works. Decompose `transform="matrix(a,b,c,d,e,f)"` into an angle
 `atan2(b,a)` and a size `hypot(a,b)`, project along the baseline, and cut on gaps. It separated the labels on
@@ -557,24 +568,61 @@ the first attempt:
 Superscripts separate onto their own baselines, which is right for `10^15`. **Rotation must come out of that
 decomposition** rather than from reading `a` as the size.
 
-Angles over the **whole corpus** — all 288 glyph-bearing files, 58731 glyphs:
+**That decomposition reads one matrix, so it is only right if nothing above the glyph is transformed — and
+nothing is.** Over all 276 fetchable files and 54344 glyphs, **not one glyph sits under an ancestor carrying
+a `transform`**, and no root `<svg>` carries one either. A glyph's own `matrix(...)` is therefore the whole
+transform from its coordinates to the figure's. Were a `<use>` ever nested under a transformed `<g>`, reading
+its matrix alone would compute the wrong baseline, angle and size and put the label somewhere arbitrary.
+That last check is the fetchable channel only — 276 of the 316 files, 54344 of 58028 glyphs; the 40 read in
+the browser were measured for glyph coverage, `<foreignObject>` and angles, but not for nesting.
+
+**The reason is not that the tree is flat, because it is not.** An earlier revision of this section said the
+converter does no grouping at all, on the strength of a single 159-glyph figure that happened to be flat;
+Codex questioned that sample on #133, and over the same 276 files **21.1% of glyphs (11467) are not direct
+children of the root `<svg>`**, nested up to four deep:
+
+| depth below root | 0 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|---|
+| glyphs | 42877 | 6766 | 3036 | 1599 | 66 |
+
+Grouping happens; what does not happen is a transform on any of those containers. The implementation now
+enforces that rather than assuming it: `src/core/svg/glyphs.ts` on `feat/svg-figures` (commit `fb877e1`)
+skips any glyph with a transformed ancestor, so a figure that ever did nest one would go untranslated instead
+of being drawn from half a transform. (Forward reference — that lives on the implementation branch; this PR
+is the survey and carries no code.)
+
+Angles over the **whole sampled set** — all 284 glyph-bearing files, 58028 glyphs:
 
 | | | |
 |---|---|---|
-| 0° | 52996 | 90.235% |
-| -90° | 4959 | 8.444% |
-| +90° | 62 | 0.106% |
-| **42 other values** | **714** | **1.216%**, commonest -30° |
+| 0° | 52387 | 90.279% |
+| -90° | 4906 | 8.455% |
+| +90° | 62 | 0.107% |
+| **42 other values** | **673** | **1.160%**, commonest -30° |
 
 (The first version of this table omitted the +90° row and totalled 99.89%, leaving 62 glyphs unexplained —
-Codex noticed the arithmetic on #133. Both quarter turns are handled; it is the last row that is dropped.)
+Codex noticed the arithmetic on #133. Both quarter turns are handled; it is the last row that is dropped.
+The counts came down from 58731 when the five duplicated files went out of the denominator, see **Sample**;
+the shape did not move.)
 
 A seven-paper sample of 10465 glyphs contained only the first two, and this section previously concluded
-there were only two. There are not (Codex caught this on #133). The distinction is not cosmetic: an overlay
-describes a rotated label as an axis-aligned box plus an angle, which only *is* the label's box at multiples
-of 90°, so the other 1.22% cannot be placed that way. **The #121 implementation has to drop those runs**
-rather than approximate them — a requirement recorded here, not behaviour that exists: this PR is the survey
-and carries no code (Codex asked twice for forward references to be marked as such).
+there were only two. There are not (Codex caught this on #133).
+
+**Recommendation for v1: place the quarter turns, drop the rest — a scope decision with a measured cost, not
+a claim that other angles are impossible to place.** An arbitrary angle is representable: a run already
+carries its four corners, rotated with the text, so the placement information is there. What is missing is an
+overlay layout that consumes it. The overlay describes a label as the axis-aligned bounding box of those
+corners plus an angle, and `labelStyle` renders the angle by swapping width for height and `cqw` for `cqh`.
+That swap is exact at a quarter turn and only there: off one, the bounding box is larger than the text — at
+30° much larger — and `cqw`/`cqh` stop corresponding to the label's own axes, so the label would be drawn at
+the wrong size across the plot. Supporting other angles means a layout that positions and sizes a label along
+its own axes instead. That is a piece of work, not a barrier; v1 does not need it and this survey does not
+promise it.
+
+**What the decision costs is the last row of the table above: 673 glyphs, 1.160% of 58028, commonest -30°.**
+(Forward reference — `quarterTurn` in `src/core/svg/glyphs.ts` on `feat/svg-figures` is where the decision
+now lives; this PR is the survey and carries no code, and Codex asked twice for forward references to be
+marked as such.)
 
 **(b) Spaces that were dropped.** In a syntax-highlighted code listing, `if` and `log_counting` belong to
 differently coloured spans and the space between them has no glyph, so the run reads `"iflog_counting == 8:"`,
@@ -587,16 +635,16 @@ gaps run to p95 = 0.818 and max = 1.12, about two advances), which needs a per-r
 than a global constant.
 
 **The §5 skip rules do not reach it.** They select `.ltx_listing`, `code` and friends in the HTML; a listing
-inside an externally referenced SVG is a flat run of `<use>` glyphs and matches none of them (Codex pointed
-this out on #133). So the SVG path has to recognise code itself — from the shape of the runs, since there is
-no markup left to go on — or it will send code for translation with its spaces missing. That is a
+inside an externally referenced SVG is a bare sequence of `<use>` glyphs and matches none of them (Codex
+pointed this out on #133). So the SVG path has to recognise code itself — from the shape of the runs, since
+there is no markup left to go on — or it will send code for translation with its spaces missing. That is a
 requirement on the #121 implementation, not something the existing rules give for free.
 
 ### 4. One figure in ten carries no readable glyphs, and nearly a third of those still carry words
 
-33 of 321 files (10.3%, 32 distinct — 28 from the HTTP group, 5 from the 406 group) have neither `<use>` nor
-`<text>`. **They are not pure graphics.** An exporter can put letter outlines straight into `<path>`, and
-rendering **all 32** shows that most of them do:
+32 of 316 files (10.1% — 27 from the HTTP group, 5 from the 406 group) have neither `<use>` nor `<text>`.
+**They are not pure graphics.** An exporter can put letter outlines straight into `<path>`, and rendering
+**all 32** shows that most of them do:
 
 | | |
 |---|---|
@@ -649,23 +697,24 @@ new semantics for embedded documents, and the nested browsing context problem sh
 and their `.png` assets do too — while the same figures render and read fine in the page. All 40, across 23
 papers, were therefore read in a browser through `contentDocument`: **40/40 reachable, 3684 `<use>` elements,
 3684 carrying `data-text` (100%), zero `<text>`, zero `<tspan>`, zero `<foreignObject>`**, and 5 files drawing
-outlines directly with no `<use>` at all (12.5%, against 10.0% in the HTTP group). Rendering those 5 puts four
+outlines directly with no `<use>` at all (12.5%, against 9.8% in the HTTP group). Rendering those 5 puts four
 in "mathematics only" and one — `cw: clockwise` / `ccw: counterclockwise` — in "word labels".
 
 So the 406 is a property of arXiv's asset serving and not of a different encoding; it affects crawling
-surveys, not the product. This is why the tables above are totals over 321 files rather than 281 (Codex on
-#133).
+surveys, not the product. This is why the tables above are totals over 316 distinct files rather than the 276
+curl could fetch (Codex on #133).
 
 ### Revisions to issue #121
 
 - "Grouping glyphs into semantic runs is the bulk of the work" — **not so**. Spaces are mostly explicit and
   document order is exact. The work is geometric line segmentation (verified feasible) and, only for code,
   restoring dropped spaces from a per-run advance estimate.
-- "The id suffix is a usable fallback" — **not so**, 21.59%.
+- "The id suffix is a usable fallback" — **not so**, 21.83%.
 - "Survey coverage before building anything" — **`data-text` can be relied on** wherever glyphs are drawn as
-  `<use>`, which is every figure that uses them — measured over all 321 assets the crawl found, not only the
-  281 curl could fetch. The 10.3% that draw outlines directly are the population a fallback would serve, and
-  9 of those 32 carry real word labels, so that fallback has a job rather than a theoretical one.
+  `<use>`, which is every figure that uses them — measured over all 316 distinct assets the survey sampled,
+  not only the 276 curl could fetch. The 10.1% that draw outlines directly are the population a fallback
+  would serve, and 9 of those 32 carry real word labels, so that fallback has a job rather than a
+  theoretical one.
 
 ### Revision to DESIGN.md §15.1
 
