@@ -18,6 +18,8 @@ const PAPER2 = process.env.AXT_PAPER2 ?? '2312.17527'
 const PAPER3 = process.env.AXT_PAPER3 ?? '2312.17141'
 /** 第四篇：12 篇 fixture 里指向翻译块的锚点最多的一篇（64 个），只译文模式的锚点用例靠它 */
 const PAPER4 = process.env.AXT_PAPER4 ?? '2609.00246'
+/** 6 张外部 SVG 图，其中 fig_closure 有竖排轴标签（§15.5） */
+const SVG_PAPER = process.env.AXT_SVG_PAPER ?? '2609.03768'
 const GOOGLE = 'translate-pa.googleapis.com'
 /** 请求收尾的两个事件：成功与失败都要把 end 记上，否则它会一直算在飞 */
 const SETTLED_EVENTS = ['requestfinished', 'requestfailed']
@@ -259,25 +261,27 @@ await options.fill(marginInput, '1000')
 await options.getByRole('button', { name: '保存', exact: true }).click()
 await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 
-// ── 设置页：图片翻译的模式闸（配置 v8，DESIGN §15）保存后重载仍在；helper 没装时整节灰掉 ──────
+// ── 设置页：图内文字翻译的模式闸（配置 v8，DESIGN §15）保存后重载仍在；**不再按 helper 灰掉** ──────
 {
   const names = ['左右对照', '上下对照', '仅译文']
   const boxOf = name => options.getByRole('checkbox', { name, exact: true })
+  // §15.5：helper 只决定位图，SVG 图不需要它，所以复选框任何时候都该可用
   const enabled = await boxOf('上下对照').isEnabled()
-  if (enabled && !process.env.AXT_E2E_IMAGES) {
+  const hint = await options.getByText(/helper/).first().textContent()
+  check('设置页：图内文字翻译不因为没装 helper 而整节灰掉（§15.5）', enabled === true, `可用 ${enabled}`)
+  check('设置页：提示语说清楚 helper 只影响位图', /SVG/.test(hint ?? ''), (hint ?? '').slice(0, 90))
+
+  if (!process.env.AXT_E2E_IMAGES) {
     await boxOf('上下对照').check()
     await options.getByRole('button', { name: '保存', exact: true }).click()
     await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
     await options.reload({ waitUntil: 'domcontentloaded' })
     await options.getByRole('checkbox', { name: '上下对照', exact: true }).waitFor({ timeout: 5_000 })
     const states = await Promise.all(names.map(n => boxOf(n).isChecked()))
-    check('设置页：图片翻译只勾「上下对照」保存后重载仍在', JSON.stringify(states) === JSON.stringify([false, true, false]), `读回 ${states.join(',')}`)
+    check('设置页：图内文字翻译只勾「上下对照」保存后重载仍在', JSON.stringify(states) === JSON.stringify([false, true, false]), `读回 ${states.join(',')}`)
     await boxOf('上下对照').uncheck()
     await options.getByRole('button', { name: '保存', exact: true }).click()
     await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
-  } else {
-    const hint = await options.getByText(/helper/).first().textContent()
-    check('设置页：图片翻译一节在 helper 未检测到时灰掉并说明原因', !enabled && /未检测到/.test(hint ?? ''), hint ?? '')
   }
 }
 
@@ -515,6 +519,98 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 切回 google-web，后面的检查沿用原来的引擎
   await options.bringToFront()
   await options.selectOption('select >> nth=0', 'google-web')
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+}
+
+// ── SVG 图翻译（§15.5，#121）：不需要 helper，所以这里跑而不是在 e2e:image 里 ────────────
+// 唯一能证明整条几何链路成立的地方：viewBox 坐标 → 归一化 → 主文档里的百分比 / 容器单位。
+// 单元测试把 <object> 的 contentDocument 打了桩，真实的嵌套文档只有真浏览器里有
+{
+  await options.bringToFront()
+  const svgModeBox = options.getByRole('checkbox', { name: '上下对照', exact: true })
+  await svgModeBox.check()
+  await options.getByRole('button', { name: '保存', exact: true }).click()
+  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+
+  const { page, logs } = await openPaper(SVG_PAPER, GOOGLE)
+  await waitForLog(logs, IDLE, 120_000)
+  // 图是按视口调度的，滚一遍把它们都放出来
+  await scrollThrough(page)
+  await sleep(3000)
+
+  const svg = await page.evaluate(() => {
+    const objs = [...document.querySelectorAll('object[type="image/svg+xml"]')]
+    const out = { objects: objs.length, reachable: 0, overlays: 0, sibling: 0, aligned: 0, rotated: 0, labels: [], covered: [] }
+    for (const o of objs) {
+      if (o.contentDocument?.querySelector('svg')) out.reachable++
+      const next = o.nextElementSibling
+      if (!next?.classList.contains('axt-img')) continue
+      out.overlays++
+      out.sibling++
+      const a = o.getBoundingClientRect()
+      const b = next.getBoundingClientRect()
+      // 锚点定位：叠加层的矩形应当与 <object> 的矩形重合
+      if (Math.abs(a.left - b.left) < 2 && Math.abs(a.top - b.top) < 2 && Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2) out.aligned++
+      for (const span of next.querySelectorAll('span')) {
+        const style = span.getAttribute('style') ?? ''
+        if (style.includes('rotate(')) out.rotated++
+        if (out.labels.length < 8) out.labels.push(span.getAttribute('title'))
+        // **整条几何链路的端到端检查**：白框应当正好盖住它译的那段原文字。
+        // 把叠加层的框换成图的归一化坐标，与内文档里那几个字形的实际范围比——
+        // 两者都归一化到 <object> 的框，所以 viewBox → 归一化 → 主文档百分比 / 容器单位
+        // 这一整串只要有一处错，差值就会露出来
+        const title = span.getAttribute('title') ?? ''
+        const d = o.contentDocument
+        const chars = [...(d?.querySelectorAll('use[data-text]') ?? [])]
+        if (title && d) {
+          const iw = d.defaultView.innerWidth, ih = d.defaultView.innerHeight
+          const s = span.getBoundingClientRect()
+          const box = { l: (s.left - a.left) / a.width, r: (s.right - a.left) / a.width, t: (s.top - a.top) / a.height, b: (s.bottom - a.top) / a.height }
+          // 同一串文字可能在图里出现多次（`epoch` 也是 `wall time per epoch [ms]` 的一部分），
+          // 取**最贴合的那一处**：找错了实例会报出一个与产品无关的巨大差值
+          let best = null
+          for (let i = 0; i + title.length <= chars.length; i++) {
+            if (chars.slice(i, i + title.length).map(c => c.getAttribute('data-text')).join('') !== title) continue
+            const rs = chars.slice(i, i + title.length).map(c => c.getBoundingClientRect())
+            const g = { l: Math.min(...rs.map(r => r.left)) / iw, r: Math.max(...rs.map(r => r.right)) / iw, t: Math.min(...rs.map(r => r.top)) / ih, b: Math.max(...rs.map(r => r.bottom)) / ih }
+            const slack = Math.max(box.l - g.l, g.r - box.r, box.t - g.t, g.b - box.b)
+            if (best === null || slack < best) best = slack
+          }
+          if (best !== null) out.covered.push({ title, slack: +best.toFixed(4) })
+        }
+      }
+    }
+    return out
+  })
+  check('SVG 图：嵌套文档全部可达（§15.5）',
+    svg.objects > 0 && svg.reachable === svg.objects, `${svg.reachable}/${svg.objects} 张可读`)
+  check('SVG 图：叠加层作为 <object> 的下一个兄弟插入，没装 helper 也照翻',
+    svg.overlays > 0 && svg.sibling === svg.overlays, `${svg.overlays} 个叠加层，全部是下一个兄弟`)
+  check('SVG 图：叠加层的矩形与图重合（锚点定位对 <object> 成立）',
+    svg.overlays > 0 && svg.aligned === svg.overlays, `${svg.aligned}/${svg.overlays} 张对齐`)
+  check('SVG 图：标签来自图里真实的文字，不是 OCR 认出来的',
+    svg.labels.some(t => /[A-Za-z]{3,}/.test(t ?? '')), JSON.stringify(svg.labels.slice(0, 4)))
+  check('SVG 图：竖排的轴标签被转过来了（§15.5）',
+    svg.rotated > 0, `${svg.rotated} 个竖排标签`)
+  // 每个白框都要盖住它译的那段原文字：正的 slack 表示某一边露了出来
+  // 0.002 是亚像素：实测最大 0.0009，抗锯齿与四舍五入的量级
+  const uncovered = svg.covered.filter(c => c.slack > 0.002)
+  check('SVG 图：白框盖住它译的那段原文字（viewBox → 屏幕的整条几何链路）',
+    svg.covered.length > 0 && uncovered.length === 0,
+    `${svg.covered.length} 个标签比对，最大露出 ${Math.max(0, ...svg.covered.map(c => c.slack)).toFixed(4)}；${JSON.stringify(uncovered.slice(0, 3))}`)
+
+  await page.screenshot({ path: `${SHOTS}/svg-figures.png`, fullPage: false })
+
+  const after = await page.evaluate(() => {
+    const r = { before: document.querySelectorAll('.axt-img').length }
+    return r
+  })
+  check('SVG 图：确实插了叠加层（恢复检查的前置）', after.before > 0, `${after.before} 个`)
+  await page.close()
+
+  await options.bringToFront()
+  await svgModeBox.uncheck()
   await options.getByRole('button', { name: '保存', exact: true }).click()
   await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
 }

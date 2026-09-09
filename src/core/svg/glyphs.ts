@@ -185,8 +185,10 @@ function axisAligned(angle: number): boolean {
 function cornersOf(run: GlyphRun): [number, number][] {
   const cos = Math.cos(run.angle)
   const sin = Math.sin(run.angle)
-  // The last glyph's own width is not recorded, so one nominal advance stands in for it
-  const end = run.to + 0.55 * run.size
+  // 最后一个字形自己的宽度没有记录，用一个名义宽度顶上。0.70 em 是量出来的：白框要盖住它译的
+  // 那段原文字，0.55 em 时结尾是大写字母的标签会露出约 0.7% 图宽（`training cost C`），
+  // 0.70 降到 0.09%（亚像素），再放大到 0.80 没有任何改善，只会让窄结尾的框多外扩
+  const end = run.to + 0.7 * run.size
   const top = run.across - run.size * 0.78
   const bottom = run.across + run.size * 0.22
   const at = (along: number, across: number): [number, number] => [along * cos - across * sin, along * sin + across * cos]
