@@ -299,6 +299,18 @@ describe('wire offsets to DOM (#105)', () => {
     expect(calls.filter(c => c.startsWith('start')).length).toBeGreaterThan(1)
   })
 
+  it('does not re-walk a closing slot\'s own subtree', () => {
+    // A closing slot stands for the boundary after its element, so descending into it walks that
+    // element twice — quadratic on nested markup — and finds the injected node inside it again, as
+    // if it came after the close. The interval then splits once more than it should (Codex on #123).
+    const root = el('<p class="ltx_p">a <em>x <span class="axt-t" data-axt-for="i">t</span> y</em> tail</p>')
+    const block = serialize(root, 'tags', { offsets: true })
+    const calls = boundaryCalls(root, block.offsets!, 0, block.text.length)
+    // Two ranges: around the injected span inside <em>, and nothing extra after the close
+    expect(calls).toHaveLength(4)
+    expect(calls.filter(c => c.startsWith('start'))).toHaveLength(2)
+  })
+
   it('returns nothing for an interval reaching past the tiled wire text', () => {
     // The loop used to push the earlier segments before the final oneRange failed, so a malformed
     // request came back as a truncated prefix instead of nothing (Codex on #123).

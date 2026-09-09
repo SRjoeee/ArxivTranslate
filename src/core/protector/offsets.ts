@@ -150,15 +150,19 @@ function carveInjected(node: Element): Range[] {
  * Returns an empty array when there is nothing to select: no spans, an empty interval, or an
  * interval past the end of the wire text.
  */
-/** The next node in document order, never leaving `scope`'s subtree. */
-function nextInOrder(node: Node, scope: Node): Node | undefined {
-  if (node.firstChild) return node.firstChild
+/** The next node in document order after this whole subtree, never leaving `scope`. */
+function afterSubtree(node: Node, scope: Node): Node | undefined {
   let current: Node | null = node
   while (current && current !== scope) {
     if (current.nextSibling) return current.nextSibling
     current = current.parentNode
   }
   return undefined
+}
+
+/** The next node in document order, never leaving `scope`'s subtree. */
+function nextInOrder(node: Node, scope: Node): Node | undefined {
+  return node.firstChild ?? afterSubtree(node, scope)
 }
 
 /** Nearest node containing both, so a walk between them cannot escape into the rest of the page. */
@@ -183,14 +187,19 @@ function commonAncestor(a: Node, b: Node): Node {
  * sibling, and reports a discontinuity at every ordinary closing tag. Scanning the rest of the page
  * once per closing tag also makes building a highlight quadratic in the document (Codex on #123).
  */
-function injectedBetween(a: Node, b: Node): boolean {
+function injectedBetween(from: WireSpan, to: WireSpan): boolean {
+  const a = from.node
+  const b = to.node
   if (a === b) return false
   const scope = commonAncestor(a, b)
-  let node: Node | undefined = a
+  // A closing slot stands for the boundary *after* its element, so that subtree is already behind
+  // us. Descending into it walks the element a second time — quadratic on nested markup — and
+  // rediscovers any injected descendant as if it came after the close (Codex on #123).
+  let node = from.kind === 'slot' && from.role === 'close' ? afterSubtree(a, scope) : nextInOrder(a, scope)
   while (node) {
-    node = nextInOrder(node, scope)
-    if (!node || node === b) return false
+    if (node === b) return false
     if (node.nodeType === 1 && isInjected(node as Element)) return true
+    node = nextInOrder(node, scope)
   }
   return false
 }
@@ -242,7 +251,7 @@ export function rangesOf(spans: readonly WireSpan[], from: number, to: number): 
       previous = span
       continue
     }
-    if (span.from > from && previous && injectedBetween(previous.node, span.node)) {
+    if (span.from > from && previous && injectedBetween(previous, span)) {
       flush(span.from)
       segmentStart = span.from
     }
