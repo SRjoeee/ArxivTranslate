@@ -24,7 +24,7 @@
 import { HL_CLASS, PEEK_CLASS } from '@/core/marks'
 import { rangesOf, wireOffsetAt } from '@/core/protector'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { createPeek, type PeekAnchor } from './peek'
+import { createPeek, movesText, type PeekAnchor } from './peek'
 import { rendered, sentenceAt, sentenceMapAt } from './sentences'
 
 /** Which side a band belongs to, so the stylesheet can tell them apart if it ever needs to. */
@@ -546,9 +546,19 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
         let reflowed = false
         for (const record of records) {
           if (record.target === layer || peek.contains(record.target)) continue
-          // Inside the element the panel is showing, the registered offsets may now be stale
-          peek.touched(record)
           reflowed = true
+          if (record.type === 'attributes') {
+            peek.restyled(record.target)
+            continue
+          }
+          // Text moved inside a registered block: its offsets are stale from now on, whether or
+          // not a panel is showing it — the next dwell would clone across the old boundaries
+          // otherwise (Codex on #149). A walk of WeakMap lookups, only for the records that
+          // are not the pipeline's own
+          if (movesText(record)) {
+            const found = sentenceMapAt(record.target)
+            if (found) peek.expire(found.map)
+          }
         }
         if (reflowed) invalidate()
       })

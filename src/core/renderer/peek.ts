@@ -91,14 +91,18 @@ export interface Peek {
   /** Whether a node is the panel or inside it, so its own mutations are not taken for a reflow. */
   contains(node: Node): boolean
   /**
-   * A mutation was observed. One that changes the *content* of the element the panel is showing
-   * makes the registered offsets stale — a sentence boundary may now fall anywhere — so the panel
-   * closes and that registration is refused until the block is registered again; re-cloning with
-   * the old offsets would show a false alignment (Codex on #149, twice). Attribute changes do not
-   * move text, and nodes of our own arriving inside the block — a footnote's translation — are
-   * skipped by the offsets already, so neither counts.
+   * A registration's offsets no longer describe its text: something changed the content of a
+   * registered block — panel open or not, a dwell counting or not (Codex on #149, three times).
+   * That registration is refused until the block is registered again, and a panel showing it
+   * closes; re-cloning with the old offsets would show a false alignment.
    */
-  touched(record: Pick<MutationRecord, 'target' | 'type'> & Partial<Pick<MutationRecord, 'addedNodes' | 'removedNodes'>>): void
+  expire(registration: object): void
+  /**
+   * An attribute changed at `node`. Inside the element the panel is showing, the clone is out of
+   * date even though the offsets still hold — a class toggled on an inline child hides or reveals
+   * part of the sentence — so the next `show` of the same key rebuilds it (Codex on #149).
+   */
+  restyled(node: Node): void
   /**
    * Whether the margin tier can be used for a sentence at these lines: the margin is wide enough,
    * and nothing the page itself shows there meets the panel's footprint.
@@ -115,8 +119,20 @@ export interface Peek {
 
 const same = (a: PeekKey, b: PeekKey) => a.root === b.root && a.index === b.index && a.shown === b.shown && a.registration === b.registration
 
-/** Whether a mutation record can have moved text that registered offsets point into. */
-function movesText(record: Pick<MutationRecord, 'target' | 'type'> & Partial<Pick<MutationRecord, 'addedNodes' | 'removedNodes'>>): boolean {
+/** The parts of a mutation record the panel looks at; tests hand in plain objects. */
+export type Mutation = Pick<MutationRecord, 'target' | 'type'> & Partial<Pick<MutationRecord, 'addedNodes' | 'removedNodes'>>
+
+/**
+ * Whether a mutation can have moved text that registered offsets point into.
+ *
+ * Attribute changes never do. Nor does anything happening inside a node of our own, or our own
+ * nodes arriving or leaving — a translation rendered, a spinner removed, a footnote's translation
+ * inserted inside its paragraph: `rangesOf` skips injected nodes, so the offsets around them hold.
+ * Those are also exactly the mutations the pipeline makes right after registering a block, whose
+ * records reach the observer after the registration; counting them would expire every block the
+ * moment it was registered.
+ */
+export function movesText(record: Mutation): boolean {
   if (record.type === 'attributes') return false
   const inside = record.target.nodeType === 1 ? (record.target as Element) : record.target.parentElement
   if (inside?.closest(INJECTED_SELECTOR)) return false
@@ -155,6 +171,8 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
   let pending: { key: PeekKey; ranges: () => Range[]; anchor: PeekAnchor; timer: number } | null = null
   /** Registrations whose offsets a mutation has made stale; shown again only once re-registered */
   const dirty = new WeakSet<object>()
+  /** The open panel's clone is out of date (an attribute changed inside the shown element) */
+  let stale = false
 
   const cancel = () => {
     if (pending) view?.clearTimeout(pending.timer)
@@ -221,6 +239,7 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
     place(panel, anchor)
     panel.hidden = false
     open = key
+    stale = false
   }
 
   return {
@@ -235,7 +254,7 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
         this.hide()
         return
       }
-      if (open && panel && same(open, key)) {
+      if (open && panel && same(open, key) && !stale) {
         // The same sentence re-measured after a reflow — or the page's theme changed under it:
         // the content stands, only the position and the copied type move
         place(panel, anchor)
@@ -265,6 +284,7 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
       cancel()
       if (!open) return
       open = null
+      stale = false
       if (panel) {
         panel.hidden = true
         panel.replaceChildren()
@@ -279,11 +299,13 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
     contains(node) {
       return panel?.contains(node) ?? false
     },
-    touched(record) {
-      const showing = open
-      if (!showing?.shown.contains(record.target) || !movesText(record)) return
-      dirty.add(showing.registration)
-      this.hide()
+    expire(registration) {
+      dirty.add(registration)
+      if (open?.registration === registration) this.hide()
+      if (pending?.key.registration === registration) cancel()
+    },
+    restyled(node) {
+      if (open?.shown.contains(node)) stale = true
     },
     marginFree(articleRight, top, bottom, viewport) {
       const margin = viewport.width - articleRight - 2 * GAP_PX

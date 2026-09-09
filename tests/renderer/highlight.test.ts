@@ -67,11 +67,12 @@ function stubBrowser(doc: Document) {
     disconnect() { const at = resizes.indexOf(this.fn); if (at >= 0) resizes.splice(at, 1) }
   }
   // Same shape for MutationObserver: registered on observe, and the test hands it records
-  const mutators: ((records: { target: Node }[]) => void)[] = []
+  type Record = { target: Node; type?: MutationRecordType }
+  const mutators: ((records: Record[]) => void)[] = []
   const watching: MutationObserverInit[] = []
   view.MutationObserver = class {
-    fn: (records: { target: Node }[]) => void
-    constructor(fn: (records: { target: Node }[]) => void) { this.fn = fn }
+    fn: (records: Record[]) => void
+    constructor(fn: (records: Record[]) => void) { this.fn = fn }
     observe(_target: Node, init: MutationObserverInit) { watching.push(init); mutators.push(this.fn) }
     disconnect() { const at = mutators.indexOf(this.fn); if (at >= 0) mutators.splice(at, 1) }
   }
@@ -127,8 +128,8 @@ function stubBrowser(doc: Document) {
       for (const fn of frames.splice(0)) fn()
     },
     /** DOM records reported by the MutationObserver, plus the frame they schedule */
-    mutate: (target: Node) => {
-      for (const fn of mutators) fn([{ target }])
+    mutate: (target: Node, type: MutationRecordType = 'childList') => {
+      for (const fn of mutators) fn([{ target, type }])
       for (const fn of frames.splice(0)) fn()
     },
     /** A reflow reported by the ResizeObserver, plus the frame it schedules */
@@ -849,7 +850,7 @@ describe('source peek through the pointer (#141)', () => {
 
     // The registered offsets no longer describe this text; recloning would cross into the next sentence
     ;(source.firstChild as Text).data = 'Changed text here. Second sentence here.'
-    browser.mutate(source.firstChild!)
+    browser.mutate(source.firstChild!, 'characterData')
     expect(panel(doc)?.hidden).toBe(true)
     browser.move()
     browser.flushTimers(PEEK_DWELL_MS)
@@ -869,6 +870,21 @@ describe('source peek through the pointer (#141)', () => {
     hl.stop()
   })
 
+  it('expires a registration changed while no panel is open, so the next dwell shows nothing', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    // Changed before any hover — during a dwell, or after a scroll closed the panel, it is the same
+    ;(source.firstChild as Text).data = 'Changed text here. Second sentence here.'
+    browser.mutate(source.firstChild!, 'characterData')
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)).toBeNull()
+    hl.stop()
+  })
+
   it('re-reads the page\'s colours when the root\'s attributes change, as a theme switch does', () => {
     const { doc, source, target } = live()
     const browser = stubBrowser(doc)
@@ -884,7 +900,7 @@ describe('source peek through the pointer (#141)', () => {
       browser.flushTimers(PEEK_DWELL_MS)
       expect(panel(doc)?.getAttribute('style')).toContain('color:rgb(0, 0, 0)')
       colour = 'rgb(249, 247, 247)'
-      browser.mutate(doc.documentElement)
+      browser.mutate(doc.documentElement, 'attributes')
       expect(panel(doc)?.getAttribute('style')).toContain('color:rgb(249, 247, 247)')
       hl.stop()
     } finally {

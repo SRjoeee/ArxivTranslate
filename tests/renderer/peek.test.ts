@@ -2,7 +2,7 @@
 // from the pointer is covered with the rest of the controller in `highlight.test.ts`.
 import { describe, expect, it } from 'vitest'
 import { INJECTED_SELECTOR, isInjected } from '@/core/marks'
-import { AT_ATTR, PEEK_DWELL_MS, createPeek, type PeekAnchor } from '@/core/renderer/peek'
+import { AT_ATTR, PEEK_DWELL_MS, createPeek, movesText, type PeekAnchor } from '@/core/renderer/peek'
 
 const doc = () => new DOMParser().parseFromString('<html><body></body></html>', 'text/html')
 
@@ -293,36 +293,72 @@ describe('source peek (#141)', () => {
     expect(d.querySelector('.axt-peek')!.textContent).toBe('译文。')
   })
 
-  it('closes on a content change inside the element it shows, and refuses that registration until a new one', () => {
+  it('an expired registration closes the panel, cancels a dwell, and is refused until a new one', () => {
     const d = doc()
     const t = timers(d)
-    d.body.innerHTML = '<p id="a">Original.</p><p id="z">Elsewhere.</p>'
+    d.body.innerHTML = '<p id="a">Original.</p>'
     const a = d.getElementById('a')!
     const peek = createPeek(d)
     const registration = {}
     peek.show(KEY(a, 0, a, registration), () => [rangeOver(a)], wide)
     t.fire()
-    expect(d.querySelector('.axt-peek')!.textContent).toBe('Original.')
-    // Somewhere else, or an attribute, or one of our own nodes arriving: nothing happens
-    peek.touched({ target: d.getElementById('z')!.firstChild!, type: 'characterData' })
-    peek.touched({ target: a, type: 'attributes' })
-    const ours = d.createElement('span')
-    ours.className = 'axt-t'
-    peek.touched({ target: a, type: 'childList', addedNodes: [ours] as unknown as NodeList, removedNodes: [] as unknown as NodeList })
     expect(d.querySelector<HTMLElement>('.axt-peek')!.hidden).toBe(false)
-    // The text itself: the offsets are stale, so the panel closes …
+    // Text changed under it: closed …
     a.firstChild!.textContent = 'X.'
-    peek.touched({ target: a.firstChild!, type: 'characterData' })
+    peek.expire(registration)
     expect(d.querySelector<HTMLElement>('.axt-peek')!.hidden).toBe(true)
-    // … and stays closed for that registration, however long the pointer rests
+    // … and refused for that registration, however long the pointer rests
     peek.show(KEY(a, 0, a, registration), () => [rangeOver(a)], wide)
     t.fire()
     expect(d.querySelector<HTMLElement>('.axt-peek')!.hidden).toBe(true)
+    // Expired while a dwell is counting: the dwell is dropped
+    const later = {}
+    peek.show(KEY(a, 0, a, later), () => [rangeOver(a)], wide)
+    expect(t.delays()).toEqual([PEEK_DWELL_MS])
+    peek.expire(later)
+    expect(t.delays()).toEqual([])
     // A new registration of the block is a new key: shown again
     peek.show(KEY(a, 0, a, {}), () => [rangeOver(a)], wide)
     t.fire()
     expect(d.querySelector<HTMLElement>('.axt-peek')!.hidden).toBe(false)
     expect(d.querySelector('.axt-peek')!.textContent).toBe('X.')
+  })
+
+  it('movesText: what can and cannot have moved registered text', () => {
+    const d = doc()
+    d.body.innerHTML = '<p id="a">Text <span class="axt-t" id="t">译</span> more.</p>'
+    const a = d.getElementById('a')!
+    const ours = d.getElementById('t')!
+    const list = (...nodes: Node[]) => nodes as unknown as NodeList
+    expect(movesText({ target: a, type: 'attributes' })).toBe(false)
+    expect(movesText({ target: a.firstChild!, type: 'characterData' })).toBe(true)
+    expect(movesText({ target: ours.firstChild!, type: 'characterData' })).toBe(false) // inside ours
+    expect(movesText({ target: a, type: 'childList', addedNodes: list(ours), removedNodes: list() })).toBe(false) // ours arriving
+    expect(movesText({ target: a, type: 'childList', addedNodes: list(d.createTextNode('x')), removedNodes: list() })).toBe(true)
+    expect(movesText({ target: a, type: 'childList', addedNodes: list(), removedNodes: list() })).toBe(true)
+  })
+
+  it('rebuilds the clone after an attribute change inside the element it shows', () => {
+    const d = doc()
+    const t = timers(d)
+    d.body.innerHTML = '<p id="a">Shown <span id="i" hidden>later</span>.</p>'
+    const a = d.getElementById('a')!
+    const inner = d.getElementById('i')!
+    const peek = createPeek(d)
+    let built = 0
+    const ranges = () => { built++; return [rangeOver(a)] }
+    peek.show(KEY(a), ranges, wide)
+    t.fire()
+    expect(d.querySelector('.axt-peek span')!.hasAttribute('hidden')).toBe(true)
+    inner.removeAttribute('hidden')
+    peek.restyled(inner)
+    peek.show(KEY(a), ranges, wide)
+    expect(built).toBe(2)
+    expect(d.querySelector('.axt-peek span')!.hasAttribute('hidden')).toBe(false)
+    // Elsewhere: nothing
+    peek.restyled(d.body)
+    peek.show(KEY(a), ranges, wide)
+    expect(built).toBe(2)
   })
 
   it('never asks for a negative height when a sentence fills the viewport', () => {
