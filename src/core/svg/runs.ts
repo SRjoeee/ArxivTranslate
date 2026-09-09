@@ -18,9 +18,13 @@
 /**
  * Two or more of these reads as code.
  *
- * Neither `[]` nor `()` are in the set, and both exclusions were forced by real labels: `wall time
- * per epoch [ms]` carries a unit in brackets, and `Energy (GeV)` carries one in parentheses. A
- * parenthesis only says "code" when it is a call, which `CALL` below tests for separately.
+ * **No brackets of any kind are in the set**, and every exclusion was forced by a real label.
+ * `wall time per epoch [ms]` and `Energy (GeV)` carry units. A rule for "the parenthesis touches
+ * the name, so it is a call" looked safe and was not: measured over 428 translatable runs it was
+ * the *only* thing rejecting 11 of them, and all 11 were legends — `LZwindow55–270keV(oneevent)`,
+ * `conservativesolarceiling(thermalized)`, `ΓN/log(N)` (Codex pointed this out on #134). It also
+ * turned out to be catching nothing: with it removed, every one of the fixture's 27 source lines is
+ * still rejected by the rules below.
  */
 const BRACES = /[{};]/g
 
@@ -36,9 +40,6 @@ const STATEMENT_END = /[;{}]\s*$/
 /** A listing's line-number gutter that merged into the code beside it (`1   staticint`) */
 const GUTTER = /^\d+\s{2,}/
 
-/** A call: the parenthesis touches the name. `Energy (GeV)` has a space there and is not one. */
-const CALL = /\w\(/
-
 /**
  * Whether a run is source code rather than prose.
  *
@@ -52,6 +53,5 @@ export function looksLikeCode(text: string): boolean {
   if (OPERATORS.test(trimmed)) return true
   if (SNAKE_CASE.test(trimmed)) return true
   if (STATEMENT_END.test(trimmed)) return true
-  if (CALL.test(trimmed)) return true
   return (trimmed.match(BRACES) ?? []).length >= 2
 }

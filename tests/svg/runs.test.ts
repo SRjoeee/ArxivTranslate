@@ -69,6 +69,28 @@ describe('what to translate in a figure (#121)', () => {
     expect([...seen].sort()).toEqual([...PROSE, ...CODE].sort())
   })
 
+  it('leaves labels whose parenthesis is a unit, not a call', () => {
+    // Every one of these is a real legend from the corpus that an earlier "the bracket touches the
+    // name, so it is a call" rule rejected. Measured over 428 translatable runs, that rule was the
+    // only thing rejecting 11 of them and every one was a label (Codex on #134). It was also
+    // catching nothing the other rules missed.
+    for (const text of [
+      'LZwindow55–270keV(oneevent)',
+      'sideband350–590keV(empty)',
+      'conservativesolarceiling(thermalized)',
+      'nominalsolarceiling(coolingcomputed)',
+      'nominalsolarceiling(δ=341keV)',
+      'fullZcoupling,excluded(δ=364keV)',
+      '270–350keV(nopublishedcounts)',
+      'ΓN/log(N)',
+      '/dy(×2)',
+      'Time(s)',
+      'Accuracy(%)',
+    ]) {
+      expect([text, looksLikeCode(text)]).toEqual([text, false])
+    }
+  })
+
   it('leaves prose that merely mentions punctuation alone', () => {
     for (const text of ['Energy (GeV)', 'Accuracy [%]', 'Fig. 3: results', 'p < 0.05', 'x-axis, log scale', 'Time (s) vs. depth']) {
       expect([text, looksLikeCode(text)]).toEqual([text, false])

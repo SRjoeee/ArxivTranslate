@@ -115,10 +115,14 @@ describe('SVG glyph extraction (#121)', () => {
     const at = (a: number, b: number) => `<use data-text="A" transform="matrix(${a},${b},0,0,50,50)"/>`
     const parse = (markup: string) =>
       new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${markup}</svg>`, 'image/svg+xml').documentElement
-    // 0°, -90°, and -30°
+    // 0°, -90°, +90° are placeable; -30° is not
     expect(linesOf(parse(at(10, 0)))).toHaveLength(1)
     expect(linesOf(parse(at(0, -10)))).toHaveLength(1)
+    expect(linesOf(parse(at(0, 10)))).toHaveLength(1)
     expect(linesOf(parse(at(10 * Math.cos(-Math.PI / 6), 10 * Math.sin(-Math.PI / 6))))).toEqual([])
+    // 180° is dropped as well: its box is right but the overlay's rotated geometry swaps the axes,
+    // which a half turn does not (Codex on #134). It does not occur in the corpus either.
+    expect(linesOf(parse(at(-10, 0)))).toEqual([])
     // runsOf still reports it — the angle is read correctly, it is the overlay that cannot place it
     expect(runsOf(parse(at(10 * Math.cos(-Math.PI / 6), 10 * Math.sin(-Math.PI / 6))))).toHaveLength(1)
   })
