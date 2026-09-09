@@ -43,7 +43,7 @@ export interface SessionRouter {
 /**
  * @param current 取「此刻的」链；配置变更后它返回新的一条，已绑定的会话不受影响
  * @param options.onDrop 每撤掉一个 scope 调一次：翻译队列之外还有别的按 scope 排队的东西（图片 OCR，§15.2），
- *   撤会话时一起撤；返回它撤掉的条数
+ *   撤会话时一起撤；返回它撤掉的条数。`remember` 一并传下去——猜出来的终结在那条队列上同样不能判死
  */
 /**
  * 「可能跳走了」按住多久再撤。
@@ -54,7 +54,7 @@ export interface SessionRouter {
  */
 const NAVIGATION_GRACE_MS = 3000
 
-export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string) => number } = {}): SessionRouter {
+export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string, options: { remember: boolean }) => number } = {}): SessionRouter {
   /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
   const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number }>()
   /**
@@ -87,7 +87,7 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
       sessions.delete(scope)
       if (remember) dropped.add(scope)
       // 别的按 scope 排队的东西（图片 OCR）先撤，不等建链：建链可能挂在 Translator.availability() 上（Codex 在 #87 指出）
-      cancelled += options.onDrop?.(scope) ?? 0
+      cancelled += options.onDrop?.(scope, { remember }) ?? 0
       // 只经 bind 绑过、从没翻过字的会话（bound 有值、没 transport）：这个 worker 里没有它的翻译请求，不用为撤它建一条链。
       // 完全没绑过的也要撤：worker 中途重启过，绑定丢了但队列里可能还有这个 scope 的任务
       if (bound && !bound.transport) continue

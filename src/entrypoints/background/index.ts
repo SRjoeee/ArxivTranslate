@@ -57,7 +57,7 @@ export default defineBackground(() => {
     keepAlive: () => void browser.runtime.getPlatformInfo(),
   })
   const ocr = createOcrService({ helper, cache })
-  const router = createSessionRouter(transportOf, { onDrop: scope => ocr.cancel(scope) })
+  const router = createSessionRouter(transportOf, { onDrop: (scope, options) => ocr.cancel(scope, options) })
 
   // 两个生命周期钩子都只给 tabId / status，不需要 "tabs" 权限
   const dropTab = (tabId: number, why: string) => {

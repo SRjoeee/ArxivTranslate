@@ -1,7 +1,7 @@
 // OCR 服务（DESIGN §15.2）：查 OCR 缓存，未命中才叫 helper，结果写回。
 // 缓存与译文共用一个 Dexie 库（cachePortOf），键由 ocrCacheKey 算——只随图片字节与 helper 版本变。
 import { ocrCacheKey } from '@/cache/key'
-import { CACHE_READ_BUDGET_MS, type CachePort, readWithBudget } from '@/providers/translate-service'
+import { CACHE_READ_BUDGET_MS, type CachePort, type CancelOptions, readWithBudget } from '@/providers/translate-service'
 import type { HelperStatus, OcrCall, OcrMessageResponse, OcrResult } from '@/shared/ocr'
 import { HelperError, type HelperClient } from './helper'
 
@@ -15,7 +15,8 @@ export interface OcrServiceDeps {
 export interface OcrService {
   status(): Promise<HelperStatus>
   ocr(call: OcrCall): Promise<OcrMessageResponse>
-  cancel(scope: string): number
+  /** 撤掉该 scope 排队与在飞的识别；`remember: false` 只排空、不判死（见 `CancelOptions`） */
+  cancel(scope: string, options?: CancelOptions): number
 }
 
 /** 缓存里的记录得是我们写的那个形状，别的东西撞了键也不能当结果用 */
@@ -67,8 +68,11 @@ export function createOcrService(deps: OcrServiceDeps): OcrService {
       }
     },
 
-    cancel(scope) {
-      cancelled.add(scope)
+    cancel(scope, { remember = true } = {}) {
+      // 判死只给确定的终结用。猜出来的（`tabs.onUpdated` 分不出同文档换 hash 与真的跳走）不能判死：
+      // 猜错时页面还活着，它后面滚到的每一张图都会直接 aborted（Codex 在 #143 指出翻译那条改了、
+      // 这条没改）
+      if (remember) cancelled.add(scope)
       return deps.helper.cancel(scope)
     },
   }

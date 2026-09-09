@@ -37,6 +37,25 @@ describe('createSessionRouter', () => {
     expect(router.bound()).toEqual(['session-1'])
   })
 
+  it('猜出来的终结在 OCR 那条队列上同样不判死', async () => {
+    // 撤会话时图片 OCR 的排队一起撤（onDrop）。但那条队列自己也记「撤过的 scope」，
+    // 猜错时页面还活着，它后面滚到的每一张图都会直接 aborted（Codex 在 #143 指出）
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    const soft: boolean[] = []
+    const router = createSessionRouter(async () => transport, { onDrop: (_scope, options) => { soft.push(options.remember); return 0 } })
+    await router.forCall('session-1', 7)
+
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(soft).toEqual([false])
+
+    // 确定的终结照旧判死
+    await router.forCall('session-2', 8)
+    await router.dropTab(8)
+    expect(soft).toEqual([false, true])
+  })
+
   it('真的跳走：宽限到点撤掉，但不把 scope 判死', async () => {
     // 判死是给「确定的终结」用的（用户按停止、关标签页）。猜出来的不能判死：猜错时页面还活着，
     // 它后半篇的每一次请求都会被直接 aborted，而且永远好不了
