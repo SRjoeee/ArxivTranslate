@@ -442,7 +442,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
         layer.append(el)
       }
     }
-    if (anchor) peek.show({ root: map.source.root, index: sentence.index, shown: map[other].root }, () => rangesOf(map[other].spans, sentence[other].from, sentence[other].to), anchor)
+    if (anchor) peek.show({ root: map.source.root, index: sentence.index, shown: map[other].root, registration: map }, () => rangesOf(map[other].spans, sentence[other].from, sentence[other].to), anchor)
     else peek.hide()
   }
 
@@ -546,8 +546,8 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
         let reflowed = false
         for (const record of records) {
           if (record.target === layer || peek.contains(record.target)) continue
-          // Inside the element the panel is showing, the clone itself is now stale
-          peek.touched(record.target)
+          // Inside the element the panel is showing, the registered offsets may now be stale
+          peek.touched(record)
           reflowed = true
         }
         if (reflowed) invalidate()
@@ -559,6 +559,10 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   // skipped the same way as the layer's; it is `position: fixed` and never changes the body's box
   // either, so the size observer does not see it
   if (doc.body) mutations?.observe(doc.body, { childList: true, subtree: true, attributes: true, characterData: true })
+  // The root's own attributes as well: the site switches its theme with `data-theme` on `<html>`,
+  // which re-colours everything without a pointer event, and the panel copies the page's colours
+  // inline (Codex on #149). Same observer, so the repaint re-reads them
+  mutations?.observe(doc.documentElement, { attributes: true })
   /**
    * A font swapping under the text.
    *

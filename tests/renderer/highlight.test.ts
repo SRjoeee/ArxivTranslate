@@ -716,7 +716,8 @@ describe('hover sentence highlight (§7.7)', () => {
 })
 
 describe('source peek through the pointer (#141)', () => {
-  /** The window's own document: see `page()` */
+  /** The window's own document: see `page()`. Shared across tests, so a failing one leaves its
+   * controller attached and the tests after it see two — read the first failure, not the rest */
   const live = () => page(TWO, document)
   /** Only mode: the original is `display: none`, so it reports itself as not rendered */
   const hide = (el: Element) => Object.assign(el, { checkVisibility: () => false })
@@ -836,7 +837,7 @@ describe('source peek through the pointer (#141)', () => {
     hl.stop()
   })
 
-  it('reclones when the hidden side changes in place under an open panel', () => {
+  it('closes when the hidden side changes under an open panel, until the block is registered again', () => {
     const { doc, source, target } = live()
     const browser = stubBrowser(doc)
     const hl = startSentenceHighlight(doc)!
@@ -846,11 +847,49 @@ describe('source peek through the pointer (#141)', () => {
     browser.flushTimers(PEEK_DWELL_MS)
     expect(panel(doc)?.textContent?.trim()).toBe('First sentence here.')
 
-    // Same length, so the registered offsets still hold; only the characters changed
-    ;(source.firstChild as Text).data = 'Fresh sentence here. Second sentence here.'
+    // The registered offsets no longer describe this text; recloning would cross into the next sentence
+    ;(source.firstChild as Text).data = 'Changed text here. Second sentence here.'
     browser.mutate(source.firstChild!)
-    expect(panel(doc)?.textContent?.trim()).toBe('Fresh sentence here.')
+    expect(panel(doc)?.hidden).toBe(true)
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.hidden).toBe(true)
+
+    // Registered again — as the pipeline does after a re-render — the block may be shown
+    const block = serialize(source, 'tags')
+    const fragment = rehydrate(block.text, block, doc)
+    target.replaceChildren(fragment)
+    const lengths = splitSentences(block.text, 'tags')
+    registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
+    browser.mutate(doc.body)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 1 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.textContent?.trim()).toBe('Changed text here.')
     hl.stop()
+  })
+
+  it('re-reads the page\'s colours when the root\'s attributes change, as a theme switch does', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const view = doc.defaultView!
+    const real = view.getComputedStyle
+    let colour = 'rgb(0, 0, 0)'
+    view.getComputedStyle = ((el: Element) => ({ font: '', color: el === source ? colour : '', backgroundColor: '', overflowX: '', overflowY: '', fontSize: '16px' })) as typeof real
+    try {
+      const hl = startSentenceHighlight(doc)!
+      hide(source)
+      browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+      browser.move()
+      browser.flushTimers(PEEK_DWELL_MS)
+      expect(panel(doc)?.getAttribute('style')).toContain('color:rgb(0, 0, 0)')
+      colour = 'rgb(249, 247, 247)'
+      browser.mutate(doc.documentElement)
+      expect(panel(doc)?.getAttribute('style')).toContain('color:rgb(249, 247, 247)')
+      hl.stop()
+    } finally {
+      view.getComputedStyle = real
+    }
   })
 
   it('spans only the part of a wide block that is on screen', () => {

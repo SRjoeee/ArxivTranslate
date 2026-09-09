@@ -34,7 +34,7 @@ const wide: PeekAnchor = { top: 400, bottom: 425, block: { left: 320, width: 800
 /** 1100 wide: 134px beside the article, no room for a panel */
 const narrow: PeekAnchor = { ...wide, block: { left: 150, width: 800 }, articleRight: 966, viewport: { width: 1100, height: 900 } }
 
-const KEY = (root: Element, index = 0, shown: Element = root) => ({ root, index, shown })
+const KEY = (root: Element, index = 0, shown: Element = root, registration: object = root) => ({ root, index, shown, registration })
 
 describe('source peek (#141)', () => {
   it('shows the sentence only after the dwell, and counts the dwell per sentence', () => {
@@ -293,27 +293,36 @@ describe('source peek (#141)', () => {
     expect(d.querySelector('.axt-peek')!.textContent).toBe('译文。')
   })
 
-  it('rebuilds the clone after a mutation inside the element it shows, and only then', () => {
+  it('closes on a content change inside the element it shows, and refuses that registration until a new one', () => {
     const d = doc()
     const t = timers(d)
     d.body.innerHTML = '<p id="a">Original.</p><p id="z">Elsewhere.</p>'
     const a = d.getElementById('a')!
     const peek = createPeek(d)
-    let built = 0
-    const ranges = () => { built++; return [rangeOver(a)] }
-    peek.show(KEY(a), ranges, wide)
+    const registration = {}
+    peek.show(KEY(a, 0, a, registration), () => [rangeOver(a)], wide)
     t.fire()
     expect(d.querySelector('.axt-peek')!.textContent).toBe('Original.')
-    // A mutation somewhere else: the same key only moves the panel
-    peek.touched(d.getElementById('z')!.firstChild!)
-    peek.show(KEY(a), ranges, wide)
-    expect(built).toBe(1)
-    // In place, inside the shown element: the clone is rebuilt from what is there now
-    a.firstChild!.textContent = 'Changed.'
-    peek.touched(a.firstChild!)
-    peek.show(KEY(a), ranges, wide)
-    expect(built).toBe(2)
-    expect(d.querySelector('.axt-peek')!.textContent).toBe('Changed.')
+    // Somewhere else, or an attribute, or one of our own nodes arriving: nothing happens
+    peek.touched({ target: d.getElementById('z')!.firstChild!, type: 'characterData' })
+    peek.touched({ target: a, type: 'attributes' })
+    const ours = d.createElement('span')
+    ours.className = 'axt-t'
+    peek.touched({ target: a, type: 'childList', addedNodes: [ours] as unknown as NodeList, removedNodes: [] as unknown as NodeList })
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.hidden).toBe(false)
+    // The text itself: the offsets are stale, so the panel closes …
+    a.firstChild!.textContent = 'X.'
+    peek.touched({ target: a.firstChild!, type: 'characterData' })
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.hidden).toBe(true)
+    // … and stays closed for that registration, however long the pointer rests
+    peek.show(KEY(a, 0, a, registration), () => [rangeOver(a)], wide)
+    t.fire()
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.hidden).toBe(true)
+    // A new registration of the block is a new key: shown again
+    peek.show(KEY(a, 0, a, {}), () => [rangeOver(a)], wide)
+    t.fire()
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.hidden).toBe(false)
+    expect(d.querySelector('.axt-peek')!.textContent).toBe('X.')
   })
 
   it('never asks for a negative height when a sentence fills the viewport', () => {
