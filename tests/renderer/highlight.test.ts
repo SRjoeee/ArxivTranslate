@@ -852,6 +852,23 @@ describe('source peek through the pointer (#141)', () => {
     hl.stop()
   })
 
+  it('renders nothing for a dwell that ends after the highlight was cleared from outside', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    clearSentenceHighlights(doc) // setMode() during the dwell
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)).toBeNull()
+    // The next pointer move starts a fresh dwell, which does render
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)).not.toBeNull()
+    hl.stop()
+  })
+
   it('asks checkVisibility about visibility and opacity, which keep their boxes', () => {
     const { doc, source, target } = live()
     const browser = stubBrowser(doc)

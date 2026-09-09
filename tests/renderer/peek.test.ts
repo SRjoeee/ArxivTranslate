@@ -2,7 +2,7 @@
 // from the pointer is covered with the rest of the controller in `highlight.test.ts`.
 import { describe, expect, it } from 'vitest'
 import { INJECTED_SELECTOR, isInjected } from '@/core/marks'
-import { AT_ATTR, PEEK_DWELL_MS, createPeek, type PeekAnchor } from '@/core/renderer/peek'
+import { AT_ATTR, PEEK_DWELL_MS, createPeek, marginOccupied, type PeekAnchor } from '@/core/renderer/peek'
 
 const doc = () => new DOMParser().parseFromString('<html><body></body></html>', 'text/html')
 
@@ -30,11 +30,11 @@ function rangeOver(node: Node): Range {
 const TYPE = { font: '16px sans-serif', color: 'rgb(0, 0, 0)', background: 'rgb(255, 255, 255)' }
 const TYPED = ';font:16px sans-serif;color:rgb(0, 0, 0);background-color:rgb(255, 255, 255)'
 /** A 1440×900 viewport with the article spanning 304–1136 (52rem centred) and a block inside it. */
-const wide: PeekAnchor = { top: 400, bottom: 425, block: { left: 320, width: 800 }, articleRight: 1136, viewport: { width: 1440, height: 900 }, type: TYPE }
+const wide: PeekAnchor = { top: 400, bottom: 425, block: { left: 320, width: 800 }, articleRight: 1136, marginFree: true, viewport: { width: 1440, height: 900 }, type: TYPE }
 /** 1100 wide: 134px beside the article, no room for a panel */
 const narrow: PeekAnchor = { ...wide, block: { left: 150, width: 800 }, articleRight: 966, viewport: { width: 1100, height: 900 } }
 
-const KEY = (root: Element, index = 0) => ({ root, index })
+const KEY = (root: Element, index = 0, shown: Element = root) => ({ root, index, shown })
 
 describe('source peek (#141)', () => {
   it('shows the sentence only after the dwell, and counts the dwell per sentence', () => {
@@ -219,6 +219,66 @@ describe('source peek (#141)', () => {
     // In the margin the same choice is between top-aligned and hanging
     peek.show(KEY(a, 2), () => [rangeOver(a)], { ...wide, top: 700, bottom: 725 })
     expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute('style')).toBe(`left:1144px;bottom:175px;width:288px;max-height:717px${TYPED}`)
+  })
+
+  it('stays out of a margin the page already uses', () => {
+    const d = doc()
+    const t = timers(d)
+    d.body.innerHTML = '<p id="a">One.</p>'
+    const a = d.getElementById('a')!
+    const peek = createPeek(d)
+    peek.show(KEY(a), () => [rangeOver(a)], { ...wide, marginFree: false })
+    t.fire()
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute(AT_ATTR)).toBe('below')
+  })
+
+  it('marginOccupied: something of the page\'s own in the gutter rows below the sentence', () => {
+    const d = doc()
+    d.body.innerHTML = '<span class="ltx_note"><span class="ltx_note_content" id="n">note</span></span><p id="a">One.</p>'
+    const note = d.getElementById('n')!
+    const hits: Record<number, Element | null> = {}
+    Object.assign(d, { elementFromPoint: (_x: number, y: number) => hits[y] ?? null })
+    // Nothing there
+    expect(marginOccupied(d, 1136, 400, 900)).toBe(false)
+    // A footnote 120px down the gutter
+    hits[520] = note
+    expect(marginOccupied(d, 1136, 400, 900)).toBe(true)
+    // Something that is not gutter content
+    hits[520] = d.body
+    expect(marginOccupied(d, 1136, 400, 900)).toBe(false)
+    // Rows past the viewport are not asked
+    hits[520] = note
+    expect(marginOccupied(d, 1136, 400, 500)).toBe(false)
+  })
+
+  it('a dwell whose sentence is no longer current renders nothing', () => {
+    // `clearSentenceHighlights()` from outside — setMode, applyStyle — finds no panel to remove
+    // while the dwell is counting; the timer asks before rendering
+    const d = doc()
+    const t = timers(d)
+    d.body.innerHTML = '<p id="a">One.</p>'
+    const a = d.getElementById('a')!
+    let current = true
+    const peek = createPeek(d, () => current)
+    peek.show(KEY(a), () => [rangeOver(a)], wide)
+    current = false
+    t.fire()
+    expect(d.querySelector('.axt-peek')).toBeNull()
+  })
+
+  it('rebuilds when the other side becomes the hidden one, or the hidden side is re-rendered', () => {
+    const d = doc()
+    const t = timers(d)
+    d.body.innerHTML = '<p id="a">Original.</p><p id="b">译文。</p>'
+    const a = d.getElementById('a')!
+    const b = d.getElementById('b')!
+    const peek = createPeek(d)
+    peek.show(KEY(a, 0, a), () => [rangeOver(a)], wide)
+    t.fire()
+    expect(d.querySelector('.axt-peek')!.textContent).toBe('Original.')
+    // Same sentence, the translation is now the hidden side: not a position-only update
+    peek.show(KEY(a, 0, b), () => [rangeOver(b)], wide)
+    expect(d.querySelector('.axt-peek')!.textContent).toBe('译文。')
   })
 
   it('has no margin tier without an article root', () => {

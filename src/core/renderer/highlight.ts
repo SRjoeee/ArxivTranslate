@@ -24,7 +24,7 @@
 import { HL_CLASS, PEEK_CLASS } from '@/core/marks'
 import { rangesOf, wireOffsetAt } from '@/core/protector'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { createPeek, type PeekAnchor } from './peek'
+import { createPeek, marginOccupied, type PeekAnchor } from './peek'
 import { rendered, sentenceAt, sentenceMapAt } from './sentences'
 
 /** Which side a band belongs to, so the stylesheet can tell them apart if it ever needs to. */
@@ -268,7 +268,9 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
 
   const view = doc.defaultView
   const clearTimer = (id: number) => { if (id !== 0) view?.clearTimeout(id) }
-  const peek = createPeek(doc)
+  // A dwell that ends after the highlight was cleared from outside must not render: the epoch is
+  // what those clears bump, and `shown` is what this controller last painted
+  const peek = createPeek(doc, key => shown !== null && shown.at === epoch && shown.root === key.root && shown.index === key.index)
   /** The article root, whose right edge is where the margin begins. Static for the page's life. */
   const article = doc.querySelector(DOCUMENT_ROOT)
 
@@ -403,11 +405,14 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
         // as a style preset dresses the visible translation. Computed style resolves for a
         // `display: none` element as for any other; only layout values are missing
         const counterpart = map[other].root
+        const articleRight = article?.getBoundingClientRect().right
+        const top = first.top + origin.top
         anchor = {
-          top: first.top + origin.top,
+          top,
           bottom: last.top + last.height + origin.top,
           block: { left: block.left, width: block.width },
-          articleRight: article?.getBoundingClientRect().right,
+          articleRight,
+          marginFree: articleRight !== undefined && !marginOccupied(doc, articleRight, top, view.innerHeight),
           viewport: { width: view.innerWidth, height: view.innerHeight },
           type: { font: view.getComputedStyle(counterpart).font, color: textColour(counterpart, view), background: pageBackground(doc, view) },
         }
@@ -422,7 +427,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
         layer.append(el)
       }
     }
-    if (anchor) peek.show({ root: map.source.root, index: sentence.index }, () => rangesOf(map[other].spans, sentence[other].from, sentence[other].to), anchor)
+    if (anchor) peek.show({ root: map.source.root, index: sentence.index, shown: map[other].root }, () => rangesOf(map[other].spans, sentence[other].from, sentence[other].to), anchor)
     else peek.hide()
   }
 

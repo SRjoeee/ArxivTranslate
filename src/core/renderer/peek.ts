@@ -17,7 +17,7 @@
 // `z-index: -1`, and anything inside it would be painted under the page.
 
 import { PEEK_CLASS, stripInjected } from '@/core/marks'
-import { ANNOTATION_SELECTOR } from '@/core/rules/latexml'
+import { ANNOTATION_SELECTOR, MARGIN_ASIDE } from '@/core/rules/latexml'
 
 /**
  * How long the pointer has to rest on one sentence before its counterpart is shown.
@@ -44,8 +44,14 @@ const COMFORT_PX = 240
 /** Which tier the panel was placed in; read by tests and available to the stylesheet. */
 export const AT_ATTR = 'data-axt-peek-at'
 
-/** The sentence a panel shows, by the same identity the highlight caches: block and index. */
-export interface PeekKey { root: Element; index: number }
+/**
+ * What a panel shows: the sentence by the identity the highlight caches (block and index), and the
+ * element whose text is cloned. The last one matters when the sides swap — a class flipped on the
+ * page hides the other side while the pointer stays on the same sentence — or when the hidden side
+ * is re-rendered: same sentence, different content, and a position-only update would keep showing
+ * the old clone (Codex on #149).
+ */
+export interface PeekKey { root: Element; index: number; shown: Element }
 
 /** Where the visible side of the sentence is, in viewport coordinates, read before anything is written. */
 export interface PeekAnchor {
@@ -56,6 +62,8 @@ export interface PeekAnchor {
   block: { left: number; width: number }
   /** The article's right edge, where the margin begins; undefined when there is no article root */
   articleRight: number | undefined
+  /** Whether the margin beside the sentence is empty; `marginOccupied` answers it in the read phase */
+  marginFree: boolean
   viewport: { width: number; height: number }
   /**
    * How the page sets its own text, so the panel reads as part of it. Taken from the visible block
@@ -80,9 +88,35 @@ export interface Peek {
   contains(node: Node): boolean
 }
 
-const same = (a: PeekKey, b: PeekKey) => a.root === b.root && a.index === b.index
+const same = (a: PeekKey, b: PeekKey) => a.root === b.root && a.index === b.index && a.shown === b.shown
 
-export function createPeek(doc: Document): Peek {
+/** Rows sampled down the gutter, in CSS pixels from the sentence's top. */
+const GUTTER_PROBES = [8, 120, 240]
+
+/**
+ * Whether the page already shows something in the margin where the panel would go.
+ *
+ * From 96rem up ar5iv keeps footnotes and publication notes at the page's right edge, and
+ * `localizeNotes` leaves the translated ones there (§7.2). A panel over them would hide exactly
+ * what the margin tier promises not to (Codex on #149). Three hit tests down the gutter, made in
+ * the frame's read phase; the panel itself is inert and never answers one.
+ */
+export function marginOccupied(doc: Document, articleRight: number, top: number, viewportHeight: number): boolean {
+  if (typeof doc.elementFromPoint !== 'function') return false
+  const x = articleRight + 2 * GAP_PX
+  return GUTTER_PROBES.some(dy => {
+    const y = top + dy
+    return y < viewportHeight && !!doc.elementFromPoint(x, y)?.closest(MARGIN_ASIDE)
+  })
+}
+
+/**
+ * @param current Whether a sentence is still the one the highlight shows, asked when its dwell
+ * ends. `clearSentenceHighlights()` runs from outside the controller — `setMode()`, `applyStyle()`
+ * — and finds no panel to remove while the dwell is still counting; without the question the timer
+ * would go on to render a panel for a page that has since changed (Codex on #149).
+ */
+export function createPeek(doc: Document, current: (key: PeekKey) => boolean = () => true): Peek {
   const view = doc.defaultView
   // Root font size, for the rem thresholds. Read once: browser zoom scales CSS pixels and rem alike
   const rem = Number.parseFloat(view?.getComputedStyle(doc.documentElement).fontSize ?? '') || 16
@@ -109,7 +143,7 @@ export function createPeek(doc: Document): Peek {
     const below = roomBelow >= COMFORT_PX || roomBelow >= a.top
     let at: 'margin' | 'below' | 'above'
     let css: string
-    if (margin >= MIN_MARGIN_REM * rem) {
+    if (margin >= MIN_MARGIN_REM * rem && a.marginFree) {
       at = 'margin'
       const left = (a.articleRight ?? 0) + GAP_PX
       const width = Math.min(margin, MAX_MARGIN_REM * rem)
@@ -188,7 +222,7 @@ export function createPeek(doc: Document): Peek {
       const timer = view?.setTimeout(() => {
         const due = pending
         pending = null
-        if (due) render(due.key, due.ranges, due.anchor)
+        if (due && current(due.key)) render(due.key, due.ranges, due.anchor)
       }, PEEK_DWELL_MS) ?? 0
       pending = { key, ranges, anchor, timer }
     },
