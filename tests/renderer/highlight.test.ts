@@ -39,7 +39,7 @@ function stubBrowser(doc: Document) {
   const view2 = doc.defaultView as unknown as { Range: { prototype: Range }; Element: { prototype: Element } }
   view2.Range.prototype.getBoundingClientRect = () => queued.shift() ?? line1
   view2.Element.prototype.getBoundingClientRect = () => line1
-  // 画底色要的是行级矩形。默认每个 Range 报一行，测试要多行时用 `nextLines`
+  // Bands are drawn from line-level rectangles. One line per range by default; `nextLines` sets more.
   let lines: DOMRect[] = [line1]
   view2.Range.prototype.getClientRects = () => Object.assign([...lines], { item: (i: number) => lines[i] ?? null }) as unknown as DOMRectList
   // Which text interval each painted range was built from. `startOffset` cannot be read back in
@@ -61,9 +61,9 @@ function stubBrowser(doc: Document) {
   view.clearTimeout = (id: number) => { if (timers[id - 1]) timers[id - 1] = { fn: () => {}, delay: 0 } }
 
   return {
-    /** 画出来的底色条 */
+    /** The bands that were painted */
     bands: () => Array.from(doc.querySelectorAll('.axt-hl > div')),
-    /** 一个 Range 报几行 */
+    /** How many lines one range reports */
     nextLines: (...rects: DOMRect[]) => { lines = rects },
     line1,
     line2,
@@ -86,6 +86,11 @@ function stubBrowser(doc: Document) {
     /** One pointer move plus the frame it schedules. Defaults to a point on the text. */
     move: (clientX = 10, clientY = 10) => {
       doc.dispatchEvent(Object.assign(new Event('pointermove'), { clientX, clientY }))
+      for (const fn of frames.splice(0)) fn()
+    },
+    /** A window resize plus the frame it schedules */
+    resize: () => {
+      doc.defaultView?.dispatchEvent(new Event('resize'))
       for (const fn of frames.splice(0)) fn()
     },
     /** A pointer move with no frame after it, for testing coalescing */
@@ -143,8 +148,9 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
     browser.move()
-    // 桩给每个 Range 的矩形都一样，所以看画出来的样式区分不了两句；
-    // 用记录器看画的是哪一段文字——那才是「跟着指针换句」的本体
+    // The stub gives every range the same rectangle, so the painted boxes cannot tell the two
+    // sentences apart; the recorder shows which stretch of text was measured, which is the thing
+    // that has to change when the pointer moves to the next sentence.
     const first = browser.starts()
     expect(sentences).toBe(2)
     browser.caret.mockReturnValue({ offsetNode: text, offset: text.data.length - 3 })
@@ -153,6 +159,53 @@ describe('hover sentence highlight (§7.7)', () => {
 
     expect(first.at(-2)).not.toEqual(second.at(-2))
     expect(browser.bands().length).toBe(2)
+    hl.stop()
+  })
+
+  it('repaints after a reflow, which produces no pointer event of its own', () => {
+    // A resize, a browser zoom or a font swap re-lays out the line the bands were traced from, and
+    // the sentence cache would suppress the repaint for as long as the pointer stayed on the same
+    // sentence — leaving the tint behind where the text used to be (Codex on #138).
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const r = (top: number) =>
+      ({ left: 0, top, right: 200, bottom: top + 20, width: 200, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+    const before = browser.bands().map(b => b.getAttribute('style'))
+
+    browser.nextLines(r(300))
+    browser.resize()
+
+    expect(browser.bands().map(b => b.getAttribute('style'))).not.toEqual(before)
+    expect(browser.bands().every(b => (b.getAttribute('style') ?? '').includes('top:300.0px'))).toBe(true)
+    hl.stop()
+  })
+
+  it('keeps a band inside the container that clips its text', () => {
+    // The layer hangs off `<body>`, outside whatever clipped the text — and `getClientRects()`
+    // reports the whole layout box, including the part scrolled out of sight. A wide table in side
+    // mode scrolls inside `overflow-x: auto`, so an unclipped band would run past it and paint over
+    // the column beside it (Codex on #138).
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const box = { left: 0, top: 0, right: 80, bottom: 20, width: 80, height: 20, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+    const scroller = source.parentElement as HTMLElement
+    scroller.style.overflowX = 'auto'
+    scroller.style.overflowY = 'hidden'
+    scroller.getBoundingClientRect = () => box
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+
+    // the stub's line is 200 wide; the container is 80
+    expect(browser.bands().map(b => b.getAttribute('style'))).toEqual([
+      'left:0.0px;top:0.0px;width:80.0px;height:20.0px',
+      'left:0.0px;top:0.0px;width:80.0px;height:20.0px',
+    ])
     hl.stop()
   })
 
@@ -167,7 +220,7 @@ describe('hover sentence highlight (§7.7)', () => {
     const r = (left: number, top: number, right: number, bottom: number) =>
       ({ left, top, right, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect
 
-    // 一行被公式切成三块，另一行一块
+    // One line cut into three by a formula, plus a second line of its own
     browser.nextLines(r(0, 0, 60, 20), r(60, 2, 90, 18), r(90, 0, 200, 20), r(0, 30, 150, 50))
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()

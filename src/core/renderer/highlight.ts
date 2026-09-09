@@ -86,7 +86,7 @@ function layerOf(doc: Document): Element {
  * offset parent is the page origin: a site that gives `<body>` a margin or a position would
  * otherwise shift every band.
  */
-function bandsOf(doc: Document, ranges: readonly Range[]): { left: number; top: number; width: number; height: number }[] {
+function bandsOf(doc: Document, ranges: readonly Range[], clip: Clip): { left: number; top: number; width: number; height: number }[] {
   const origin = doc.documentElement.getBoundingClientRect()
   const rects: DOMRect[] = []
   for (const range of ranges) for (const rect of Array.from(range.getClientRects())) if (rect.width > 0 && rect.height > 0) rects.push(rect)
@@ -101,7 +101,57 @@ function bandsOf(doc: Document, ranges: readonly Range[]): { left: number; top: 
       line.right = Math.max(line.right, rect.right)
     } else lines.push({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right })
   }
-  return lines.map(l => ({ left: l.left - origin.left, top: l.top - origin.top, width: l.right - l.left, height: l.bottom - l.top }))
+  return lines
+    .map(l => ({
+      left: Math.max(l.left, clip.left),
+      top: Math.max(l.top, clip.top),
+      right: Math.min(l.right, clip.right),
+      bottom: Math.min(l.bottom, clip.bottom),
+    }))
+    .filter(l => l.right > l.left && l.bottom > l.top)
+    .map(l => ({ left: l.left - origin.left, top: l.top - origin.top, width: l.right - l.left, height: l.bottom - l.top }))
+}
+
+/** Viewport-space bounds a side's bands may paint in. */
+interface Clip { left: number; top: number; right: number; bottom: number }
+
+/** The `overflow` values that clip. Anything else — `visible`, or nothing at all — does not. */
+const CLIPS = /^(?:hidden|clip|scroll|auto)$/
+
+/**
+ * Where the bands for this side are allowed to paint: the intersection of every clipping ancestor's
+ * box.
+ *
+ * The layer hangs off `<body>`, which is what keeps §7.1 intact — but it also puts the bands outside
+ * whatever clipped the text they trace. A wide table in side mode scrolls inside `overflow-x: auto`
+ * (`modes.css`, `[data-axt-fit="scroll"]` and `.axt-split`), and `Range.getClientRects()` reports
+ * the full layout box of the text, including the part scrolled out of sight — so an unclipped band
+ * would run past the container and paint over whatever sits beside it (Codex on #138).
+ *
+ * Read once per repaint, which happens only when the pointer moves to another sentence, and only
+ * over the ancestors of one block.
+ */
+function clipOf(root: Element, view: Window): Clip {
+  const clip: Clip = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity }
+  // From the block itself: a container that scrolls its own content clips it just as an ancestor does
+  for (let node: Element | null = root; node; node = node.parentElement) {
+    const style = view.getComputedStyle(node)
+    // `overflow: hidden` on one axis clips that axis alone; the other stays visible. Matched by the
+    // values that clip rather than by "not visible": a computed style can report an empty string.
+    const x = CLIPS.test(style.overflowX)
+    const y = CLIPS.test(style.overflowY)
+    if (!x && !y) continue
+    const box = node.getBoundingClientRect()
+    if (x) {
+      clip.left = Math.max(clip.left, box.left)
+      clip.right = Math.min(clip.right, box.right)
+    }
+    if (y) {
+      clip.top = Math.max(clip.top, box.top)
+      clip.bottom = Math.min(clip.bottom, box.bottom)
+    }
+  }
+  return clip
 }
 
 /**
@@ -239,11 +289,13 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     // pure work. This is the common case — a pointer resting on a line of text hits it every frame.
     if (shown && shown.at === epoch && shown.root === map.source.root && shown.index === sentence.index) return
     shown = { root: map.source.root, index: sentence.index, at: epoch }
-    // 两侧的几何都在写任何东西之前读完，读写不交错（CLAUDE.md 的性能纪律）
-    const sides = [
-      { side: 'source', bands: bandsOf(doc, rangesOf(map.source.spans, sentence.source.from, sentence.source.to)) },
-      { side: 'target', bands: bandsOf(doc, rangesOf(map.target.spans, sentence.target.from, sentence.target.to)) },
-    ] as const
+    // Both sides are measured before anything is written: reads and writes never interleave
+    const sides = view
+      ? ([
+          { side: 'source', bands: bandsOf(doc, rangesOf(map.source.spans, sentence.source.from, sentence.source.to), clipOf(map.source.root, view)) },
+          { side: 'target', bands: bandsOf(doc, rangesOf(map.target.spans, sentence.target.from, sentence.target.to), clipOf(map.target.root, view)) },
+        ] as const)
+      : []
     const layer = layerOf(doc)
     layer.textContent = ''
     for (const { side, bands } of sides) {
@@ -266,14 +318,32 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     clearNow()
   }
 
+  /**
+   * A reflow moves the text but not the bands.
+   *
+   * The bands are absolute boxes in document coordinates, so scrolling carries them along — but a
+   * window resize, a browser zoom or a font swap re-lays out the line they were traced from, and
+   * nothing about that produces a pointer event. Worse, the sentence cache would suppress the
+   * repaint even once the pointer did move, as long as it stayed on the same sentence (Codex on
+   * #138). Dropping the cache and asking for a frame re-measures at the pointer's own position,
+   * which is where the reader is looking; a reflow that moved that sentence out from under it
+   * fades out through the ordinary miss path.
+   */
+  const onResize = () => {
+    shown = null
+    if (frame === 0) frame = view?.requestAnimationFrame(update) ?? 0
+  }
+
   doc.addEventListener('pointermove', onMove, { passive: true })
   // Leaving the window keeps no pointer events coming, so the tint would stay behind
   doc.addEventListener('pointerleave', onLeave)
+  view?.addEventListener('resize', onResize)
 
   return {
     stop() {
       doc.removeEventListener('pointermove', onMove)
       doc.removeEventListener('pointerleave', onLeave)
+      view?.removeEventListener('resize', onResize)
       if (frame !== 0) view?.cancelAnimationFrame(frame)
       hit()
       // Unconditionally, not conditioned on anything being shown: another run of this document may
