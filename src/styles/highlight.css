@@ -1,38 +1,43 @@
 /* Hover sentence highlight (DESIGN §7.7, issue #105).
 
-   Painted with the CSS Custom Highlight API, so **not one byte of the document changes**: no
-   wrapper spans, no attributes on the text, nothing for `restore()` to undo. §7.1's DOM invariant
-   holds for free, and the source column keeps whatever markup arXiv shipped.
+   **Flat bands behind the text, one per line.** The first version painted with the CSS Custom
+   Highlight API, which needs no DOM — but `::highlight()` fills the text's own boxes, so a
+   paragraph with inline formulas came out as scattered patches with gaps wherever the maths was,
+   following the letters instead of sitting behind them. What is wanted is the same flat wash the
+   `highlight` style preset gives a whole translation, scoped to one sentence.
 
-   What `::highlight()` accepts was measured in Chrome before this was written, because the spec's
-   list and what actually paints are not the same:
-     - `background-color` ✓
-     - `border-radius`, `padding` — parsed, then ignored
-     - `background-image` — not painted at all, so no gradient highlighters here
-   The ignored `padding` is why this design cannot shift the text even by accident: the highlight
-   has no box of its own to grow. The background appears and disappears, the letters never move.
+   So the bands are drawn: a `Range`'s line-level rectangles, merged per line, as absolutely
+   positioned boxes in one container on `<body>` — outside `article.ltx_document` entirely.
+   §7.1 holds: the original subtree is untouched, nothing lands between a paired original and its
+   translation, and `restore()` takes the container away with every other injected node.
 
-   **No transition, deliberately, and it cost too much to keep** (2026-09-09). `::highlight()` cannot
-   carry one itself, so the first version drove it through an `@property`-registered custom property
-   that `:root` transitioned. That works — four distinct screenshots across a 2s fade — but the
-   property has to be `inherits: true` for the pseudo-element to read it, which means every frame of
-   every fade recomputes an inherited property for the whole document tree. Measured while sweeping
-   a paragraph on a 292-block paper:
+   **Behind, never over.** `z-index: -1` on the layer puts every band under the page's own content,
+   so the text keeps its own colour and antialiasing and nothing shifts by a pixel — the background
+   appears and disappears, the letters never move.
 
-   |                  | p50   | p95    | max    |
-   |------------------|-------|--------|--------|
-   | highlight off    | 8.3ms | 9.1ms  | 9.4ms  |
-   | on, no fade      | 8.3ms | 9.1ms  | 9.5ms  |
-   | on, fading       | 8.4ms | 13.0ms | 16.9ms |
+   No transition. It was measured and removed on 2026-09-09: `::highlight()` could only be faded
+   through an inherited custom property, which recomputes for the whole document tree on every
+   frame of the fade and took the worst frames from 9.4ms to 16.9ms. The bands could be faded
+   cheaply now that they are ordinary elements, but the shape of that animation is the user's call
+   and will come back through its own issue. */
 
-   Without the fade the feature is free; with it, the worst frames reach the 60Hz budget and the
-   user reported exactly that as stutter. The tint now simply appears and disappears with the
-   ranges. A better animation is wanted and will come back through its own issue. */
+.axt-hl {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* The layer itself has no size; only its children do */
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: -1;
+}
 
-::highlight(axt-sentence-source),
-::highlight(axt-sentence-target) {
+.axt-hl > div {
+  position: absolute;
   /* Follows `--axt-green`, the same colour source as the highlighter presets, which `styleVarsRule`
-     rewrites from `config.style.accent`. One colour control, not two. 22% stays readable over body
+     rewrites from `config.style.accent`. One colour control, not two. 22% stays readable under body
      text in both light and dark themes. */
   background-color: color-mix(in oklab, var(--axt-green, currentColor) 22%, transparent);
+  /* A hair of rounding so the band reads as a wash rather than a table cell */
+  border-radius: 2px;
 }

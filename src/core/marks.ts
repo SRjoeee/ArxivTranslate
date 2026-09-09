@@ -7,12 +7,18 @@ export const T_CLASS = 'axt-t'
  * 拆图时把 <img> 当配对原件删掉、抑制镜像、被二十个样式预设装饰。它只是"我们的节点"，不是"译文节点"
  */
 export const IMG_CLASS = 'axt-img'
+/**
+ * 悬停对照高亮的底色层（DESIGN §7.7）：第四种注入标记。**挂在 `<body>` 上、不在正文树里**——
+ * 它是按行画出来的绝对定位矩形，不参与配对、不参与拆图、不被样式预设装饰；
+ * 放进正文树会被当成译文节点处理。恢复原文时随 INJECTED_SELECTOR 一起删掉
+ */
+export const HL_CLASS = 'axt-hl'
 /** 所有注入节点：提取、序列化、克隆清理、恢复原文都用这一个选择器 */
-export const INJECTED_SELECTOR = `.${T_CLASS}, .${IMG_CLASS}`
+export const INJECTED_SELECTOR = `.${T_CLASS}, .${IMG_CLASS}, .${HL_CLASS}`
 
 /** 是不是我们注入的节点（译文 / 镜像 / 拆分副本 / 图片叠加层）——提取与序列化都要跳过它们 */
 export function isInjected(el: Element): boolean {
-  return el.classList.contains(T_CLASS) || el.classList.contains(IMG_CLASS)
+  return el.classList.contains(T_CLASS) || el.classList.contains(IMG_CLASS) || el.classList.contains(HL_CLASS)
 }
 
 /** 所有注入属性的前缀（CLAUDE.md 硬规则 5） */

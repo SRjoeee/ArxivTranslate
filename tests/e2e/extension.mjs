@@ -496,36 +496,88 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   check('微软引擎：译文里没有记号残留', shape.markerLeak === 0, `残留 ${shape.markerLeak} 处`)
 
   // ── 悬停对照高亮（§7.7，#105）：只有这条路径能证 ─────────────────────────────
-  // 单元测试把浏览器那半边全打了桩（happy-dom 没有 CSS.highlights，Range 也读不回来），
-  // 而对齐只有微软会报，所以「真的画在了两侧对应的那一句上」只能在这里验。
+  // 单元测试把浏览器那半边全打了桩（happy-dom 量不出任何几何），而对齐只有微软会报，
+  // 所以「底色真的画在了两侧对应的那一句上、每行一条」只能在这里验
   const hover = await page.evaluate(async () => {
     const at = document.querySelector('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')
     const id = at?.getAttribute('data-axt-for')
     const src = id ? document.querySelector(`[data-axt-id="${id}"]`) : null
     if (!at || !src) return { reason: 'no translated block' }
-    const before = document.documentElement.outerHTML
-    // 指针放在译文里第一行文字上
-    const rect = at.getBoundingClientRect()
-    at.dispatchEvent(new PointerEvent('pointermove', { clientX: rect.left + 8, clientY: rect.top + 6, bubbles: true }))
+    src.scrollIntoView({ block: 'center' })
+    const before = src.outerHTML + at.outerHTML
+    // 必须瞄准一个真实字形的中心：命中判定现在是「指针在不在这个字的框里」，
+    // 块的几何中心可能落在行间空白上，那正是要被拒的情况（用户 2026-09-09 反馈的第 1 条）
+    const tail = host => {
+      const w = document.createTreeWalker(host, NodeFilter.SHOW_TEXT)
+      let out = null
+      for (let t = w.nextNode(); t; t = w.nextNode()) {
+        for (let i = t.data.length - 1; i >= 0; i--) {
+          if (/\s/.test(t.data[i])) continue
+          const r = document.createRange()
+          r.setStart(t, i); r.setEnd(t, i + 1)
+          const b = r.getBoundingClientRect()
+          if (b.width > 0 && b.height > 0) { out = b; break }
+        }
+      }
+      return out
+    }
+    const walk = document.createTreeWalker(at, NodeFilter.SHOW_TEXT)
+    let point = null
+    for (let t = walk.nextNode(); t && !point; t = walk.nextNode()) {
+      for (let i = 0; i + 1 <= t.data.length && !point; i++) {
+        if (/\s/.test(t.data[i])) continue
+        const r = document.createRange()
+        r.setStart(t, i); r.setEnd(t, i + 1)
+        const b = r.getBoundingClientRect()
+        if (b.width > 0 && b.height > 0 && b.top > 0) point = { x: b.left + b.width / 2, y: b.top + b.height / 2, ch: t.data[i] }
+      }
+    }
+    if (!point) return { reason: 'no glyph to aim at' }
+    document.dispatchEvent(new PointerEvent('pointermove', { clientX: point.x, clientY: point.y, bubbles: true }))
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
-    const textOf = name => [...(CSS.highlights.get(name) ?? [])].map(r => r.toString()).join('')
+    const bands = [...document.querySelectorAll('.axt-hl > div')]
+    const boxOf = el => { const b = el.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom } }
+    const sides = { source: bands.filter(b => b.getAttribute('data-axt-hl-side') === 'source'), target: bands.filter(b => b.getAttribute('data-axt-hl-side') === 'target') }
+    // 每行只能有一条：按纵向重叠分组，组数应当等于条数
+    const lines = new Set(bands.map(b => Math.round(boxOf(b).t / 4)))
+    const within = (el, host) => { const a = boxOf(el), h = host.getBoundingClientRect(); return a.l >= h.left - 2 && a.r <= h.right + 2 && a.t >= h.top - 2 && a.b <= h.bottom + 2 }
     return {
-      source: textOf('axt-sentence-source'),
-      target: textOf('axt-sentence-target'),
-      registries: CSS.highlights.size,
-      // 高亮一个 DOM 节点都不许碰（§7.1）
-      domUnchanged: before === document.documentElement.outerHTML,
-      inSource: src.textContent?.includes(textOf('axt-sentence-source')) ?? false,
-      inTarget: at.textContent?.includes(textOf('axt-sentence-target')) ?? false,
+      bands: bands.length,
+      source: sides.source.length,
+      target: sides.target.length,
+      onePerLine: lines.size === bands.length,
+      inSource: sides.source.every(b => within(b, src)),
+      inTarget: sides.target.every(b => within(b, at)),
+      // 高亮一个正文节点都不许碰（§7.1）：底色层挂在 body 上
+      domUnchanged: before === src.outerHTML + at.outerHTML,
+      layerOnBody: document.querySelector('.axt-hl')?.parentElement?.tagName.toLowerCase(),
+      point,
+      // 指针挪到同一行的右侧空白（页面边缘）：caretPositionFromPoint 仍会答出那行的最后一个字，
+      // 只有真正的命中判定才能把它拒掉（用户 2026-09-09 反馈的第 1 条）
+      gutter: await (async () => {
+        // 末行行尾之后、但仍在块的框内：caretPositionFromPoint 在这里会答出末行最后一个字，
+        // 块也确实映射得到句子，所以只有真正的命中判定能拒掉它——正是用户看到的那个位置
+        const last = tail(at)
+        const box = at.getBoundingClientRect()
+        if (!last || box.right - last.right < 40) return { skipped: box.right - (last?.right ?? 0) }
+        const gx = last.right + 20
+        document.dispatchEvent(new PointerEvent('pointermove', { clientX: gx, clientY: last.top + last.height / 2, bubbles: true }))
+        await new Promise(r => setTimeout(r, 260))
+        return { bands: document.querySelectorAll('.axt-hl > div').length, gap: box.right - last.right }
+      })(),
     }
   })
   check('悬停对照高亮：原文与译文两侧同时亮起（§7.7 / #105）',
-    hover.registries === 2 && (hover.source?.length ?? 0) > 0 && (hover.target?.length ?? 0) > 0,
-    `注册表 ${hover.registries} 个，原文 ${hover.source?.length ?? 0} 字、译文 ${hover.target?.length ?? 0} 字${hover.reason ? ` (${hover.reason})` : ''}`)
-  check('悬停对照高亮：两侧选中的都是各自块里的文字，没有跨块',
-    hover.inSource === true && hover.inTarget === true, `原文命中 ${hover.inSource}、译文命中 ${hover.inTarget}`)
-  check('悬停对照高亮：一个 DOM 节点都没动（§7.1）',
-    hover.domUnchanged === true, `DOM ${hover.domUnchanged ? '未变' : '变了'}`)
+    hover.source > 0 && hover.target > 0,
+    `原文 ${hover.source} 条底、译文 ${hover.target} 条底${hover.reason ? ` (${hover.reason})` : ''}`)
+  check('悬停对照高亮：每行恰好一条底，不按字形碎（用户 2026-09-09 反馈）',
+    hover.onePerLine === true, `${hover.bands} 条底，落在 ${hover.bands} 行上`)
+  check('悬停对照高亮：底色都落在各自的块内，没有跨块',
+    hover.inSource === true && hover.inTarget === true, `原文 ${hover.inSource}、译文 ${hover.inTarget}`)
+  check('悬停对照高亮：指针在右侧空白处不触发（用户 2026-09-09 反馈）',
+    hover.gutter?.bands === 0, `末行行尾右侧 ${hover.gutter?.gap?.toFixed(0)}px 空白处画了 ${hover.gutter?.bands} 条底`)
+  check('悬停对照高亮：正文一个节点都没动，底色层挂在 body 上（§7.1）',
+    hover.domUnchanged === true && hover.layerOnBody === 'body', `DOM ${hover.domUnchanged ? '未变' : '变了'}，层挂在 ${hover.layerOnBody}`)
 
   // 悬停高亮的注册表不能因为原块还在文档里就把摘掉的译文永远留住（Codex 在 #130 指出）。
   // happy-dom 不释放任何已摘除的节点——对照实验里连什么都不引用的 <p> 都收不掉——所以这条只有
@@ -543,7 +595,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     nodes.length = 0
     // 译文节点全部摘掉、原块留在文档里，正是会把注册表条目吊住的那种情形
     for (const n of [...document.querySelectorAll('[data-axt-for]')]) n.remove()
-    CSS.highlights.clear()
+    document.querySelector('.axt-hl')?.remove()
     for (let i = 0; i < 8; i++) { gc(); await new Promise(r => setTimeout(r, 30)) }
     return { before, alive: watch.filter(w => w.deref() !== undefined).length }
   })

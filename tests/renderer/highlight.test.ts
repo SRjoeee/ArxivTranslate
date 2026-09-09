@@ -15,7 +15,6 @@ import { splitSentences } from '@/core/sentences'
  * `@property` custom property), and the ranges in a real browser on #123.
  */
 function stubBrowser(doc: Document) {
-  const highlights = new Map<string, { ranges: Range[] }>()
   const view = doc.defaultView as unknown as Record<string, unknown>
   const caret = vi.fn<(x: number, y: number) => { offsetNode: Node; offset: number } | null>(() => null)
   const timers: { fn: () => void; delay: number }[] = []
@@ -24,8 +23,6 @@ function stubBrowser(doc: Document) {
   // highlight thinks a frame is always pending and stops updating.
   const frames: (() => void)[] = []
 
-  vi.stubGlobal('CSS', { highlights })
-  vi.stubGlobal('Highlight', class { ranges: Range[]; constructor(...ranges: Range[]) { this.ranges = ranges } })
   Object.assign(doc, { caretPositionFromPoint: caret })
   // happy-dom measures nothing, so the layout is declared here. By default every character lives in
   // one 200×20 box at the origin: a pointer inside it is on the text, one outside is in the margin.
@@ -42,6 +39,9 @@ function stubBrowser(doc: Document) {
   const view2 = doc.defaultView as unknown as { Range: { prototype: Range }; Element: { prototype: Element } }
   view2.Range.prototype.getBoundingClientRect = () => queued.shift() ?? line1
   view2.Element.prototype.getBoundingClientRect = () => line1
+  // 画底色要的是行级矩形。默认每个 Range 报一行，测试要多行时用 `nextLines`
+  let lines: DOMRect[] = [line1]
+  view2.Range.prototype.getClientRects = () => Object.assign([...lines], { item: (i: number) => lines[i] ?? null }) as unknown as DOMRectList
   // Which text interval each painted range was built from. `startOffset` cannot be read back in
   // happy-dom, so the calls that set it are recorded instead.
   const starts: [number, number][] = []
@@ -61,7 +61,12 @@ function stubBrowser(doc: Document) {
   view.clearTimeout = (id: number) => { if (timers[id - 1]) timers[id - 1] = { fn: () => {}, delay: 0 } }
 
   return {
-    highlights,
+    /** 画出来的底色条 */
+    bands: () => Array.from(doc.querySelectorAll('.axt-hl > div')),
+    /** 一个 Range 报几行 */
+    nextLines: (...rects: DOMRect[]) => { lines = rects },
+    line1,
+    line2,
     caret,
     /** The `[from, to]` of every range that was built, in order */
     starts: () => starts.splice(0),
@@ -123,10 +128,9 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()
 
-    expect([...browser.highlights.keys()].sort()).toEqual(['axt-sentence-source', 'axt-sentence-target'])
+    expect(browser.bands().map(b => b.getAttribute('data-axt-hl-side'))).toEqual(['source', 'target'])
     // Both sides light up from one hit, which is the whole point
-    expect(browser.highlights.get('axt-sentence-source')!.ranges.length).toBeGreaterThan(0)
-    expect(browser.highlights.get('axt-sentence-target')!.ranges.length).toBeGreaterThan(0)
+    expect(browser.bands().length).toBe(2)
     expect(target.isConnected).toBe(true)
     hl.stop()
   })
@@ -139,14 +143,56 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
     browser.move()
-    const first = browser.highlights.get('axt-sentence-source')
-    // Well past "First sentence here. " — and the fixture really does split in two, or moving
-    // between sentences would not be under test at all
+    // 桩给每个 Range 的矩形都一样，所以看画出来的样式区分不了两句；
+    // 用记录器看画的是哪一段文字——那才是「跟着指针换句」的本体
+    const first = browser.starts()
     expect(sentences).toBe(2)
     browser.caret.mockReturnValue({ offsetNode: text, offset: text.data.length - 3 })
     browser.move()
+    const second = browser.starts()
 
-    expect(browser.highlights.get('axt-sentence-source')).not.toBe(first)
+    expect(first.at(-2)).not.toEqual(second.at(-2))
+    expect(browser.bands().length).toBe(2)
+    hl.stop()
+  })
+
+  it('merges rectangles that share a line into one band', () => {
+    // A range reports more than one rectangle for a line when it crosses inline elements of
+    // different heights — a formula in the middle of a sentence. Drawing them as they come leaves a
+    // notch where the maths is, which is exactly the ragged look this replaced (user report with a
+    // screenshot, 2026-09-09). One line is always one band.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const r = (left: number, top: number, right: number, bottom: number) =>
+      ({ left, top, right, bottom, width: right - left, height: bottom - top, x: left, y: top, toJSON: () => ({}) }) as DOMRect
+
+    // 一行被公式切成三块，另一行一块
+    browser.nextLines(r(0, 0, 60, 20), r(60, 2, 90, 18), r(90, 0, 200, 20), r(0, 30, 150, 50))
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+
+    const bands = browser.bands().filter(b => b.getAttribute('data-axt-hl-side') === 'source')
+    expect(bands).toHaveLength(2)
+    expect(bands[0]!.getAttribute('style')).toBe('left:0.0px;top:0.0px;width:200.0px;height:20.0px')
+    expect(bands[1]!.getAttribute('style')).toBe('left:0.0px;top:30.0px;width:150.0px;height:20.0px')
+    hl.stop()
+  })
+
+  it('draws the bands outside the content, so §7.1 is untouched', () => {
+    const { doc, source, target } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    const before = source.outerHTML + target.outerHTML
+
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
+    browser.move()
+
+    expect(browser.bands().length).toBe(2)
+    // 原块与译文一个字节都没动，底色层挂在 body 上、不在它们之间
+    expect(source.outerHTML + target.outerHTML).toBe(before)
+    expect(doc.querySelector('.axt-hl')!.parentElement!.tagName.toLowerCase()).toBe('body')
+    expect(source.nextElementSibling).toBe(target)
     hl.stop()
   })
 
@@ -176,11 +222,11 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
     browser.move()
-    const first = browser.highlights.get('axt-sentence-source')
+    const first = browser.bands()[0]!.getAttribute('style')
     browser.caret.mockReturnValue({ offsetNode: text, offset: 5 })
     browser.move()
 
-    expect(browser.highlights.get('axt-sentence-source')).toBe(first)
+    expect(browser.bands()[0]!.getAttribute('style')).toBe(first)
     hl.stop()
   })
 
@@ -203,7 +249,7 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.caret.mockReturnValue({ offsetNode: text, offset: 3 })
     browser.move()
     browser.flushTimers()
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
     first.stop()
     second.stop()
   })
@@ -217,13 +263,13 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
 
     setMode(doc, 'side')
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
 
     browser.move() // same sentence, same position
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
     hl.stop()
   })
 
@@ -240,7 +286,7 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.move()
 
     browser.flushTimers(120)
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
     hl.stop()
   })
 
@@ -255,12 +301,12 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move(600, 10) // far to the right of the text
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
     browser.move(10, 400) // far below it
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
 
     browser.move(10, 10) // the same caret, now actually under the pointer
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
     hl.stop()
   })
 
@@ -325,7 +371,7 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.nextRects('line2', 'line1')
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 4 })
     browser.move(150, 10) // on the first line, where the character before the caret is
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
     hl.stop()
   })
 
@@ -339,7 +385,7 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()
 
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
     hl.stop()
   })
 
@@ -351,16 +397,16 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()
     hl.stop()
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
 
     // And after stopping, a pointer move is not listened for any more
     browser.move()
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
 
-    browser.highlights.set('axt-sentence-source', { ranges: [] })
-    doc.documentElement.setAttribute('data-axt-hl', 'on')
+    // 外部清空同样什么都不留
     clearSentenceHighlights(doc)
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
+    expect(doc.querySelectorAll('.axt-hl')).toHaveLength(0)
   })
 
   it('restore() drops the tint along with the translation nodes', () => {
@@ -370,10 +416,10 @@ describe('hover sentence highlight (§7.7)', () => {
 
     browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 3 })
     browser.move()
-    expect(browser.highlights.size).toBe(2)
+    expect(browser.bands().length).toBe(2)
 
     restore(doc)
-    expect(browser.highlights.size).toBe(0)
+    expect(browser.bands().length).toBe(0)
     hl.stop()
   })
 })

@@ -1,20 +1,28 @@
 // Hover sentence highlight (DESIGN §7.7, issue #105): point at a sentence on either side and both
 // it and its counterpart are tinted.
 //
-// **Nothing here touches the DOM.** The tint is painted through the CSS Custom Highlight API, which
-// takes plain `Range`s and needs no wrapper elements, so §7.1's invariant — the original subtree is
-// never modified — holds without a cleanup path. The only trace on the page is one attribute on
-// `<html>`, which is where §7.1 puts global state anyway.
+// **Painted as bands, one per line, not as glyph shapes.** The first version used the CSS Custom
+// Highlight API, which needs no DOM at all — but `::highlight()` paints the text's own boxes, so a
+// paragraph with inline formulas came out as scattered patches with gaps wherever the maths was,
+// and it followed the letters rather than sitting behind them. The user asked for the flat band the
+// `highlight` style preset already produces, and showed both side by side.
 //
-// The registry (`sentences.ts`) holds what is needed at pointer time; this file is the part that
-// runs on every pointer move, so it is written to do as little as possible.
+// A `Range` reports its geometry as line-level rectangles — measured on a real paragraph, one
+// rectangle per line at a uniform 25px, covering formulas and text alike — so drawing those is what
+// gives the flat look. Rectangles that share a line are merged, so a line is always exactly one
+// band however many boxes the range is made of.
+//
+// **§7.1 still holds.** The bands live in one container appended to `<body>`, outside
+// `article.ltx_document` entirely: the original subtree is not touched, nothing is inserted between
+// the paired nodes, and `restore()` removes the container with every other injected node because it
+// carries `HL_CLASS`.
 
+import { HL_CLASS } from '@/core/marks'
 import { rangesOf, wireOffsetAt } from '@/core/protector'
 import { sentenceAt, sentenceMapAt } from './sentences'
 
-/** Highlight registry names. Namespaced like everything else we put on the page (§ hard rule 5). */
-const SOURCE_HIGHLIGHT = 'axt-sentence-source'
-const TARGET_HIGHLIGHT = 'axt-sentence-target'
+/** Which side a band belongs to, so the stylesheet can tell them apart if it ever needs to. */
+const SIDE_ATTR = 'data-axt-hl-side'
 /**
  * How long a miss is tolerated before the tint fades out.
  *
@@ -53,18 +61,56 @@ let epoch = 0
  * directly, but it landed in Chrome 140 and `minimum_chrome_version` is 131.
  */
 function supported(doc: Document): boolean {
-  return typeof CSS !== 'undefined' && 'highlights' in CSS && typeof doc.caretPositionFromPoint === 'function' && typeof Highlight === 'function'
+  return typeof doc.caretPositionFromPoint === 'function'
+}
+
+/** The one container every band lives in, created on first use. */
+function layerOf(doc: Document): Element {
+  const existing = doc.body.querySelector(`:scope > .${HL_CLASS}`)
+  if (existing) return existing
+  const layer = doc.createElement('div')
+  layer.className = HL_CLASS
+  doc.body.append(layer)
+  return layer
+}
+
+/**
+ * Line-level bands for a set of ranges, in document coordinates.
+ *
+ * A `Range` reports one rectangle per line box, but a line can produce more than one when the range
+ * crosses inline elements of different heights. They are merged by vertical overlap so that a line
+ * is always exactly one band — which is the whole point of the flat look, and what keeps a formula
+ * from leaving a notch in the middle of a sentence.
+ *
+ * Offsets are taken against `documentElement`'s own rectangle rather than assuming the container's
+ * offset parent is the page origin: a site that gives `<body>` a margin or a position would
+ * otherwise shift every band.
+ */
+function bandsOf(doc: Document, ranges: readonly Range[]): { left: number; top: number; width: number; height: number }[] {
+  const origin = doc.documentElement.getBoundingClientRect()
+  const rects: DOMRect[] = []
+  for (const range of ranges) for (const rect of Array.from(range.getClientRects())) if (rect.width > 0 && rect.height > 0) rects.push(rect)
+  const lines: { top: number; bottom: number; left: number; right: number }[] = []
+  for (const rect of rects.sort((a, b) => a.top - b.top || a.left - b.left)) {
+    // Same line when they overlap vertically by more than half the shorter one
+    const line = lines.find(l => Math.min(l.bottom, rect.bottom) - Math.max(l.top, rect.top) > Math.min(l.bottom - l.top, rect.height) / 2)
+    if (line) {
+      line.top = Math.min(line.top, rect.top)
+      line.bottom = Math.max(line.bottom, rect.bottom)
+      line.left = Math.min(line.left, rect.left)
+      line.right = Math.max(line.right, rect.right)
+    } else lines.push({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right })
+  }
+  return lines.map(l => ({ left: l.left - origin.left, top: l.top - origin.top, width: l.right - l.left, height: l.bottom - l.top }))
 }
 
 /**
  * Drops whatever is painted right now. Safe to call at any time and on a document that never
  * started a highlight: `restore()` and `setMode()` use it without knowing whether one is running.
  */
-export function clearSentenceHighlights(_doc: Document): void {
+export function clearSentenceHighlights(doc: Document): void {
   epoch++
-  if (typeof CSS === 'undefined' || !('highlights' in CSS)) return
-  CSS.highlights.delete(SOURCE_HIGHLIGHT)
-  CSS.highlights.delete(TARGET_HIGHLIGHT)
+  doc.body?.querySelector(`:scope > .${HL_CLASS}`)?.remove()
 }
 
 export interface SentenceHighlight {
@@ -193,8 +239,21 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
     // pure work. This is the common case — a pointer resting on a line of text hits it every frame.
     if (shown && shown.at === epoch && shown.root === map.source.root && shown.index === sentence.index) return
     shown = { root: map.source.root, index: sentence.index, at: epoch }
-    CSS.highlights.set(SOURCE_HIGHLIGHT, new Highlight(...rangesOf(map.source.spans, sentence.source.from, sentence.source.to)))
-    CSS.highlights.set(TARGET_HIGHLIGHT, new Highlight(...rangesOf(map.target.spans, sentence.target.from, sentence.target.to)))
+    // 两侧的几何都在写任何东西之前读完，读写不交错（CLAUDE.md 的性能纪律）
+    const sides = [
+      { side: 'source', bands: bandsOf(doc, rangesOf(map.source.spans, sentence.source.from, sentence.source.to)) },
+      { side: 'target', bands: bandsOf(doc, rangesOf(map.target.spans, sentence.target.from, sentence.target.to)) },
+    ] as const
+    const layer = layerOf(doc)
+    layer.textContent = ''
+    for (const { side, bands } of sides) {
+      for (const band of bands) {
+        const el = doc.createElement('div')
+        el.setAttribute(SIDE_ATTR, side)
+        el.setAttribute('style', `left:${band.left.toFixed(1)}px;top:${band.top.toFixed(1)}px;width:${band.width.toFixed(1)}px;height:${band.height.toFixed(1)}px`)
+        layer.append(el)
+      }
+    }
   }
 
   const onMove = (event: PointerEvent) => {
