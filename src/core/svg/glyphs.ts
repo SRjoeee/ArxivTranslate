@@ -202,10 +202,12 @@ export function viewBoxOf(svg: Element): { x: number; y: number; w: number; h: n
  * horizontal without being exactly horizontal, two of them translatable, and 22 rotated ones sit
  * at -90.000002° rather than -90°.
  *
- * Measured over the whole corpus (55047 glyphs, 253 files): 90.61% upright, 8.01% at -90°, 0.11% at
- * +90°, and **1.27% at 38 other angles**, the commonest -30°. An earlier seven-paper sample
- * contained none of the last group and the survey wrongly concluded there were only two angles
- * (Codex caught that on #133).
+ * Measured over the whole sampled set (58028 glyphs, 284 glyph-bearing files): 90.279% upright,
+ * 8.455% at -90°, 0.107% at +90°, and **1.160% at 42 other angles**, the commonest -30°. An earlier
+ * seven-paper sample contained none of the last group and the survey wrongly concluded there were
+ * only two angles (Codex caught that on #133). Those counts were once quoted as 55047 glyphs over
+ * 253 files: the crawl logged 281 asset references but only 276 distinct paths, five files being
+ * referenced twice within their paper and counted twice (`docs/RESEARCH.md` §6.11).
  */
 function quarterTurn(angle: number): number | undefined {
   const quarters = angle / (Math.PI / 2)
