@@ -817,7 +817,8 @@ describe('source peek through the pointer (#141)', () => {
     hl.stop()
   })
 
-  it('stays open when a container scrolls its own text; the panel just moves', () => {
+  it('closes when a container scrolls its own text too, and dwells again once it stops', () => {
+    // Sentences crossing a stationary pointer while a table scrolls must not each get a warm switch
     const { doc, source, target } = live()
     const browser = stubBrowser(doc)
     const hl = startSentenceHighlight(doc)!
@@ -825,11 +826,46 @@ describe('source peek through the pointer (#141)', () => {
     browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
     browser.move()
     browser.flushTimers(PEEK_DWELL_MS)
-    const content = panel(doc)!.firstChild
+    expect(panel(doc)?.hidden).toBe(false)
 
     browser.scrollOn(target)
+    expect(panel(doc)?.hidden).toBe(true)
+    expect(browser.delays()).toContain(PEEK_DWELL_MS) // the re-test found the same sentence: a fresh dwell
+    browser.flushTimers(PEEK_DWELL_MS)
     expect(panel(doc)?.hidden).toBe(false)
-    expect(panel(doc)?.firstChild).toBe(content) // repositioned, not rebuilt
+    hl.stop()
+  })
+
+  it('reclones when the hidden side changes in place under an open panel', () => {
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    expect(panel(doc)?.textContent?.trim()).toBe('First sentence here.')
+
+    // Same length, so the registered offsets still hold; only the characters changed
+    ;(source.firstChild as Text).data = 'Fresh sentence here. Second sentence here.'
+    browser.mutate(source.firstChild!)
+    expect(panel(doc)?.textContent?.trim()).toBe('Fresh sentence here.')
+    hl.stop()
+  })
+
+  it('anchors to the part of a sentence that is on screen', () => {
+    // The pointer is on a later line of a sentence whose first line is above the viewport
+    const { doc, source, target } = live()
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+    hide(source)
+    const r = (top: number) => ({ left: 0, top, right: 200, bottom: top + 20, width: 200, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+    browser.nextLines(r(-300), r(0))
+    browser.caret.mockReturnValue({ offsetNode: target.firstChild!, offset: 3 })
+    browser.move()
+    browser.flushTimers(PEEK_DWELL_MS)
+    // Below the visible line (0–20), not below the off-screen first line
+    expect(panel(doc)?.getAttribute('style')).toContain('top:28px')
     hl.stop()
   })
 

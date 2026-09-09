@@ -406,10 +406,19 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
         // `display: none` element as for any other; only layout values are missing
         const counterpart = map[other].root
         const articleRight = article?.getBoundingClientRect().right
-        const top = first.top + origin.top
+        // Anchored to the part of the sentence that is on screen. A long sentence can start above
+        // the viewport while the pointer is on one of its later lines, and its first line's
+        // negative top would put the panel's start off screen (Codex on #149). The bands were
+        // shifted to the layer's origin; the viewport coordinates are recovered here
+        const vh = view.innerHeight
+        const lineTop = (b: { top: number }) => b.top + origin.top
+        const lineBottom = (b: { top: number; height: number }) => b.top + b.height + origin.top
+        const onScreen = own.filter(b => lineTop(b) >= 0 && lineBottom(b) <= vh)
+        const clamp = (n: number) => Math.min(Math.max(n, 0), vh)
+        const top = clamp(lineTop(onScreen[0] ?? first))
         anchor = {
           top,
-          bottom: last.top + last.height + origin.top,
+          bottom: clamp(lineBottom(onScreen[onScreen.length - 1] ?? last)),
           block: { left: block.left, width: block.width },
           articleRight,
           marginFree: articleRight !== undefined && !marginOccupied(doc, articleRight, top, view.innerHeight),
@@ -472,6 +481,10 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   const onScroll = (event: Event) => {
     const target = event.target
     if (target !== doc && target !== doc.documentElement && target !== doc.body) {
+      // Closed and cooled like a page scroll: the sentences crossing a stationary pointer while a
+      // table scrolls must not each get a warm switch (Codex on #149). The re-test still runs at
+      // once, so the same sentence starts a fresh dwell
+      peek.hide()
       invalidate()
       return
     }
@@ -524,12 +537,14 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
    */
   const mutations = view?.MutationObserver
     ? new view.MutationObserver(records => {
+        let reflowed = false
         for (const record of records) {
-          if (record.target !== layer && !peek.contains(record.target)) {
-            invalidate()
-            return
-          }
+          if (record.target === layer || peek.contains(record.target)) continue
+          // Inside the element the panel is showing, the clone itself is now stale
+          peek.touched(record.target)
+          reflowed = true
         }
+        if (reflowed) invalidate()
       })
     : undefined
   // `attributes` as well as `childList`: a class or inline style toggled on an ancestor re-lays out

@@ -86,6 +86,12 @@ export interface Peek {
   remove(): void
   /** Whether a node is the panel or inside it, so its own mutations are not taken for a reflow. */
   contains(node: Node): boolean
+  /**
+   * A mutation happened at `node`. Inside the element the panel is showing, the clone is stale —
+   * same sentence, same element, different content — and the next `show` of the same key rebuilds
+   * it instead of only moving the panel (Codex on #149). Anywhere else it is nothing to the panel.
+   */
+  touched(node: Node): void
 }
 
 const same = (a: PeekKey, b: PeekKey) => a.root === b.root && a.index === b.index && a.shown === b.shown
@@ -125,6 +131,8 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
   let open: PeekKey | null = null
   /** A sentence waiting out the dwell */
   let pending: { key: PeekKey; ranges: () => Range[]; anchor: PeekAnchor; timer: number } | null = null
+  /** The open panel's clone no longer matches the element it was taken from */
+  let stale = false
 
   const cancel = () => {
     if (pending) view?.clearTimeout(pending.timer)
@@ -148,16 +156,17 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
       const left = (a.articleRight ?? 0) + GAP_PX
       const width = Math.min(margin, MAX_MARGIN_REM * rem)
       // Top-aligned to the sentence's first line; hanging from its last line when that is roomier
+      // `max-height` never below zero: a sentence filling the viewport leaves no room on either side
       css = below
-        ? `left:${left}px;top:${a.top}px;width:${width}px;max-height:${a.viewport.height - a.top - GAP_PX}px`
-        : `left:${left}px;bottom:${a.viewport.height - a.bottom}px;width:${width}px;max-height:${a.bottom - GAP_PX}px`
+        ? `left:${left}px;top:${a.top}px;width:${width}px;max-height:${Math.max(0, a.viewport.height - a.top - GAP_PX)}px`
+        : `left:${left}px;bottom:${a.viewport.height - a.bottom}px;width:${width}px;max-height:${Math.max(0, a.bottom - GAP_PX)}px`
     } else if (below) {
       at = 'below'
       const top = a.bottom + GAP_PX
-      css = `left:${a.block.left}px;top:${top}px;width:${a.block.width}px;max-height:${a.viewport.height - top - GAP_PX}px`
+      css = `left:${a.block.left}px;top:${top}px;width:${a.block.width}px;max-height:${Math.max(0, a.viewport.height - top - GAP_PX)}px`
     } else {
       at = 'above'
-      css = `left:${a.block.left}px;bottom:${a.viewport.height - a.top + GAP_PX}px;width:${a.block.width}px;max-height:${a.top - 2 * GAP_PX}px`
+      css = `left:${a.block.left}px;bottom:${a.viewport.height - a.top + GAP_PX}px;width:${a.block.width}px;max-height:${Math.max(0, a.top - 2 * GAP_PX)}px`
     }
     const { font, color, background } = a.type
     if (font) css += `;font:${font}`
@@ -191,6 +200,7 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
     place(panel, anchor)
     panel.hidden = false
     open = key
+    stale = false
   }
 
   return {
@@ -201,7 +211,7 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
         panel = undefined
         open = null
       }
-      if (open && panel && same(open, key)) {
+      if (open && panel && same(open, key) && !stale) {
         // The same sentence re-measured after a reflow: the content stands, only the position moves
         place(panel, anchor)
         return
@@ -230,6 +240,7 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
       cancel()
       if (!open) return
       open = null
+      stale = false
       if (panel) {
         panel.hidden = true
         panel.replaceChildren()
@@ -243,6 +254,9 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
     },
     contains(node) {
       return panel?.contains(node) ?? false
+    },
+    touched(node) {
+      if (open && !stale && open.shown.contains(node)) stale = true
     },
   }
 }

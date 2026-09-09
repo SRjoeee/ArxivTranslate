@@ -281,6 +281,40 @@ describe('source peek (#141)', () => {
     expect(d.querySelector('.axt-peek')!.textContent).toBe('译文。')
   })
 
+  it('rebuilds the clone after a mutation inside the element it shows, and only then', () => {
+    const d = doc()
+    const t = timers(d)
+    d.body.innerHTML = '<p id="a">Original.</p><p id="z">Elsewhere.</p>'
+    const a = d.getElementById('a')!
+    const peek = createPeek(d)
+    let built = 0
+    const ranges = () => { built++; return [rangeOver(a)] }
+    peek.show(KEY(a), ranges, wide)
+    t.fire()
+    expect(d.querySelector('.axt-peek')!.textContent).toBe('Original.')
+    // A mutation somewhere else: the same key only moves the panel
+    peek.touched(d.getElementById('z')!.firstChild!)
+    peek.show(KEY(a), ranges, wide)
+    expect(built).toBe(1)
+    // In place, inside the shown element: the clone is rebuilt from what is there now
+    a.firstChild!.textContent = 'Changed.'
+    peek.touched(a.firstChild!)
+    peek.show(KEY(a), ranges, wide)
+    expect(built).toBe(2)
+    expect(d.querySelector('.axt-peek')!.textContent).toBe('Changed.')
+  })
+
+  it('never asks for a negative height when a sentence fills the viewport', () => {
+    const d = doc()
+    const t = timers(d)
+    d.body.innerHTML = '<p id="a">One.</p>'
+    const a = d.getElementById('a')!
+    const peek = createPeek(d)
+    peek.show(KEY(a), () => [rangeOver(a)], { ...narrow, top: 4, bottom: 896 })
+    t.fire()
+    expect(d.querySelector<HTMLElement>('.axt-peek')!.getAttribute('style')).toContain('max-height:0px')
+  })
+
   it('has no margin tier without an article root', () => {
     const d = doc()
     const t = timers(d)
