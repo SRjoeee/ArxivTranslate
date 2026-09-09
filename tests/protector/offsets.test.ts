@@ -284,6 +284,21 @@ describe('wire offsets to DOM (#105)', () => {
     ])
   })
 
+  it('carves only void slots, never the halves of a pair', () => {
+    // A paired element is its open run, its text spans and its close run. Carving on either half
+    // covers the whole element however little of it the interval asked for, and both halves carve
+    // it again — the same element twice (Codex on #123). Injected content inside a pair sits
+    // between the text spans, where injectedBetween finds it.
+    const root = el('<p class="ltx_p">a <em>First. <span class="axt-t" data-axt-for="x">t</span>Second.</em> b</p>')
+    const block = serialize(root, 'tags', { offsets: true })
+    const calls = boundaryCalls(root, block.offsets!, 0, block.text.length)
+    // Carving always opens with startBefore on the carved node, so its absence is the assertion.
+    // `endAfter:em` on its own is the ordinary close-slot boundary and is expected.
+    expect(calls.filter(c => c === 'startBefore:em')).toHaveLength(0)
+    // The gap inside the pair is still found by injectedBetween, so the interval is still split
+    expect(calls.filter(c => c.startsWith('start')).length).toBeGreaterThan(1)
+  })
+
   it('returns nothing for an interval reaching past the tiled wire text', () => {
     // The loop used to push the earlier segments before the final oneRange failed, so a malformed
     // request came back as a truncated prefix instead of nothing (Codex on #123).

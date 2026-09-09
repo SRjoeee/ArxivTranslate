@@ -227,9 +227,14 @@ export function rangesOf(spans: readonly WireSpan[], from: number, to: number): 
   }
   for (const span of spans) {
     if (span.to <= from || span.from >= to) continue
-    // A slot holding our own translation — a footnote whose content was translated in place — is
-    // covered by carved pieces instead of one range enclosing the whole node (Codex on #123).
-    const holds = span.kind === 'slot' && span.node.nodeType === 1 && (span.node as Element).querySelector(INJECTED_SELECTOR)
+    // A *void* slot holding our own translation — a footnote whose content was translated in place
+    // — is covered by carved pieces instead of one range enclosing the whole node (Codex on #123).
+    //
+    // Only void. A paired element is represented by its open and close runs with text spans in
+    // between, so carving on either half would cover the whole element however little of it the
+    // interval asked for, and both halves would carve it again. Injected content inside a pair sits
+    // between those text spans, where injectedBetween already finds it.
+    const holds = span.kind === 'slot' && span.role === 'void' && span.node.nodeType === 1 && (span.node as Element).querySelector(INJECTED_SELECTOR)
     if (holds) {
       flush(span.from)
       out.push(...carveInjected(span.node as Element))
