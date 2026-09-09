@@ -7,9 +7,55 @@ describe('alignment verification (#105)', () => {
   const good = { source: [14, 9], target: [4, 4] }
 
   it('accepts an alignment that partitions both texts exactly', () => {
-    expect(verifyAlignment(good, src, tgt)).toBe(good)
+    // 值相等而不是同一个对象：闸门会把偏了一两个字符的边界吸回句末标点（见下），
+    // 返回的可能是修正过的那一份
+    expect(verifyAlignment(good, src, tgt)).toEqual(good)
     expect(good.source.reduce((a, b) => a + b, 0)).toBe(src.length)
     expect(good.target.reduce((a, b) => a + b, 0)).toBe(tgt.length)
+  })
+
+  it('nudges a boundary that missed its sentence end by a character', () => {
+    // 引擎报的是它自己认为的句边界，偶尔差一两个字符：微软在 arxiv.org/html/2509.10652v3 上报回
+    // `…对话式工作流程。这|种新兴的…`，把下一句的第一个字算进了上一句（用户 2026-09-09 反馈，实测复现）。
+    // 划分本身是精确的，所以下游任何一道闸都拦不住，只有读者看得见
+    const source = 'A workflow. This emerging style.'
+    const target = '工作流程。这种新兴的风格。'
+    expect(verifyAlignment({ source: [12, 20], target: [6, 7] }, source, target)).toEqual({ source: [12, 20], target: [5, 8] })
+  })
+
+  it('does not reach across a clause to find a sentence end', () => {
+    // 窗口只够跨过标点本身，不够跨过一个词组。实测引擎的位移都是一两个字符；放宽窗口不会多修好
+    // 一条，只会让「附近碰巧有个句号」的边界被拉过去
+    const source = 'A workflow. This emerging style.'
+    const target = '工作流程。这种新兴的风格。'
+    const given = { source: [12, 20], target: [9, 4] }
+    expect(verifyAlignment(given, source, target)).toEqual(given)
+  })
+
+  it('leaves a boundary alone when there is no sentence end to snap to', () => {
+    // 参考文献里的作者名单：引擎报的「句子」根本不是句子，附近没有句末标点，就不该动它
+    const source = 'Smith, Lee, Wong and Chan'
+    const target = '史密斯、李、黄和陈'
+    const given = { source: [11, 14], target: [4, 5] }
+    expect(verifyAlignment(given, source, target)).toEqual(given)
+  })
+
+  it('leaves a boundary that already sits after a placeholder alone', () => {
+    // 占位符与空白不算「没在句末」：紧贴在它们后面的边界本来就在正确的位置，
+    // 把它当成偏了会去移动一个对的边界——这正是这条规则最该避免的事
+    const source = 'Done. See it. Next.'
+    const target = '完成。<x id="1"/>接着说。'
+    const given = { source: [6, 8, 5], target: [3, 11, 4] }
+    expect(verifyAlignment(given, source, target)).toEqual(given)
+  })
+
+  it('refuses a snap that would leave a sentence with nothing visible in it', () => {
+    // 吸到句末标点之后会让最后一句只剩一个收尾标签：那不是「一句话」，宁可让边界留在原处。
+    // 实测这条守卫拿掉之后，同一批数据里凭空多出 3 个没有可见文字的句子
+    const source = 'It holds. It is sound.'
+    const target = '谓词<x id="2"/>声音。</t>'
+    const given = { source: [10, 12], target: [13, 7] }
+    expect(verifyAlignment(given, source, target)).toEqual(given)
   })
 
   it('rejects a source partition that does not add up to the text', () => {

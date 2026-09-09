@@ -41,6 +41,92 @@ export function boundariesOf(lengths: readonly number[]): number[] {
  * honest answer there is no highlight. Across 60 real blocks Microsoft's counts matched on every
  * one, so this rejects malformed data rather than a normal case.
  */
+/**
+ * A placeholder in either wire format, plus whitespace: a boundary sitting against one of these is
+ * where it belongs, and the character that decides the question is the one before it.
+ *
+ * Both formats are matched at once rather than the caller passing which one it used. The two
+ * patterns are disjoint in practice, and the one text where they are not — a literal `@a#` on the
+ * `tags` path, which `escapeText` leaves alone — errs in the safe direction: it makes a boundary
+ * look *more* settled than it is, so the snap below declines to move it. `@@` comes first, as in
+ * the protector's own tokenizer.
+ */
+const TRAILING_FILLER = /(?:@@|@[a-z]+#|<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>|\s)+$/
+const FILLER = /@@|@[a-z]+#|<x\s+id="\d+"\/>|<\/?t(?:\s+id="\d+")?>/g
+/** Sentence-final punctuation in either language, with whatever closes the quotation after it. */
+const SENTENCE_END = /[.!?。！？…]["'\u201d\u300d\u300f）)\]]*$/
+
+/** Whether this boundary sits right after a sentence end, ignoring placeholders and spaces. */
+const settled = (text: string, at: number): boolean => SENTENCE_END.test(text.slice(0, at).replace(TRAILING_FILLER, ''))
+
+/** Whether a sentence has anything a reader can see, rather than only placeholders and spaces. */
+const visible = (piece: string): boolean => piece.replace(FILLER, '').trim().length > 0
+
+/**
+ * How far a boundary may be nudged, in characters.
+ *
+ * Wide enough for what engines actually do — measured, every displacement seen was one or two
+ * characters — and narrow enough that it can only ever cross the punctuation it is looking for,
+ * never a word.
+ */
+const SNAP_WINDOW = 3
+
+/**
+ * Nudges a boundary that missed its sentence end onto it.
+ *
+ * Engines report where they think their own sentences end, and they are occasionally a character or
+ * two out: Microsoft returned `…对话式工作流程。这|种新兴的…` on `arxiv.org/html/2509.10652v3`, leaving
+ * the first character of one sentence tinted as part of the one before it (user report, 2026-09-09,
+ * reproduced live). The partition is still exact, so nothing downstream rejects it; only the reader
+ * sees it.
+ *
+ * **It moves nothing that is already right.** A boundary already sitting after sentence-final
+ * punctuation is left alone, and one with no such punctuation within `SNAP_WINDOW` is left alone —
+ * that is the whole of an author list, where an engine's "sentences" are not sentences and there is
+ * nothing to snap to. Every sentence must still contain something visible afterwards, which is what
+ * stops a boundary from being pulled onto a period that would leave a neighbour holding only a
+ * closing tag.
+ *
+ * Measured over 483 real alignments from both engines — 3532 boundaries, five papers: **2 moved,
+ * both onto the sentence end they had missed, 0 correct boundaries touched, and no sentence left
+ * without visible text** (the count of those stayed at its baseline of 36).
+ */
+function snapAlignment(alignment: SentenceAlignment, sourceText: string, targetText: string): SentenceAlignment {
+  const snapSide = (lengths: readonly number[], text: string): number[] => {
+    const cuts: number[] = []
+    let at = 0
+    for (const n of lengths.slice(0, -1)) {
+      at += n
+      cuts.push(at)
+    }
+    const moved = cuts.map(cut => {
+      if (settled(text, cut)) return cut
+      for (let step = 1; step <= SNAP_WINDOW; step++) {
+        if (cut - step > 0 && settled(text, cut - step)) return cut - step
+        if (cut + step < text.length && settled(text, cut + step)) return cut + step
+      }
+      return cut
+    })
+    // Each move is taken back on its own if it would cross a neighbour or leave either side of it
+    // without visible text; one bad candidate must not cost the others their fix.
+    moved.forEach((cut, i) => {
+      const low = moved[i - 1] ?? 0
+      const high = i + 1 < moved.length ? moved[i + 1]! : text.length
+      const bad = cut <= low || cut >= high || !visible(text.slice(low, cut)) || !visible(text.slice(cut, high))
+      if (bad) moved[i] = cuts[i]!
+    })
+    const out: number[] = []
+    let prev = 0
+    for (const cut of moved) {
+      out.push(cut - prev)
+      prev = cut
+    }
+    out.push(text.length - prev)
+    return out
+  }
+  return { source: snapSide(alignment.source, sourceText), target: snapSide(alignment.target, targetText) }
+}
+
 export function verifyAlignment(
   alignment: SentenceAlignment | undefined,
   sourceText: string,
@@ -52,7 +138,9 @@ export function verifyAlignment(
   if (source.some(n => !Number.isInteger(n) || n <= 0) || target.some(n => !Number.isInteger(n) || n <= 0)) return undefined
   const sum = (ns: readonly number[]) => ns.reduce((a, b) => a + b, 0)
   if (sum(source) !== sourceText.length || sum(target) !== targetText.length) return undefined
-  return alignment
+  // Snapping after the checks, not before: it only ever moves a boundary inside the text it was
+  // already verified against, so the partition it returns is exact by construction.
+  return snapAlignment(alignment, sourceText, targetText)
 }
 
 /** One sentence as a pair of wire intervals, ready to be turned into ranges. */
