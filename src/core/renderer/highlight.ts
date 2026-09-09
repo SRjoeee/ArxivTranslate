@@ -117,27 +117,40 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
   }
 
   /**
-   * Whether the pointer is actually over the character the caret landed on.
+   * Whether the pointer is actually over text, rather than merely nearest to some.
    *
-   * One `getBoundingClientRect` on a one-character range, and only once a candidate exists. Nothing
-   * has been written to the DOM at this point in the frame, so it does not force a reflow.
+   * **The caret is an insertion point, not the character under the pointer.** On the right half of
+   * a glyph Chromium returns the position *after* it, so measuring the character at the offset
+   * measures the next one — and at a line wrap that next character is on the following line, a
+   * whole line-height away. Checking only it would reject a pointer sitting plainly on the last
+   * word of a line (Codex pointed this out on #136). Both characters the caret sits between are
+   * measured, and either one containing the pointer is a hit.
+   *
+   * At most two `getBoundingClientRect` calls, and only once a candidate exists. Nothing has been
+   * written to the DOM at this point in the frame, so neither forces a reflow.
    */
+  const inside = (rect: DOMRect | undefined): boolean =>
+    !!rect && !(rect.width === 0 && rect.height === 0)
+    && x >= rect.left - HIT_SLACK_PX && x <= rect.right + HIT_SLACK_PX
+    && y >= rect.top - HIT_SLACK_PX && y <= rect.bottom + HIT_SLACK_PX
+
+  const charRect = (text: Text, from: number): DOMRect | undefined => {
+    if (from < 0 || from + 1 > text.data.length) return undefined
+    const range = doc.createRange()
+    range.setStart(text, from)
+    range.setEnd(text, from + 1)
+    return range.getBoundingClientRect()
+  }
+
   const onTheText = (node: Node, offset: number): boolean => {
-    let rect: DOMRect | undefined
-    if (node.nodeType === 3) {
-      const text = node as Text
-      const from = Math.max(0, Math.min(offset, text.data.length - 1))
-      if (text.data.length === 0) return false
-      const range = doc.createRange()
-      range.setStart(text, from)
-      range.setEnd(text, from + 1)
-      rect = range.getBoundingClientRect()
-    } else if (node.nodeType === 1) {
+    if (node.nodeType === 1) {
       // A formula or other placeholder: its own box is the thing under the pointer
-      rect = (node as Element).getBoundingClientRect()
+      return inside((node as Element).getBoundingClientRect())
     }
-    if (!rect || (rect.width === 0 && rect.height === 0)) return false
-    return x >= rect.left - HIT_SLACK_PX && x <= rect.right + HIT_SLACK_PX && y >= rect.top - HIT_SLACK_PX && y <= rect.bottom + HIT_SLACK_PX
+    if (node.nodeType !== 3) return false
+    const text = node as Text
+    // The character after the caret, then the one before it
+    return inside(charRect(text, offset)) || inside(charRect(text, offset - 1))
   }
 
   const update = () => {

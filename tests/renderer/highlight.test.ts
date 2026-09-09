@@ -27,13 +27,18 @@ function stubBrowser(doc: Document) {
   vi.stubGlobal('CSS', { highlights })
   vi.stubGlobal('Highlight', class { ranges: Range[]; constructor(...ranges: Range[]) { this.ranges = ranges } })
   Object.assign(doc, { caretPositionFromPoint: caret })
-  // happy-dom measures nothing, so every character is declared to live in one 200×20 box at the
-  // origin. That is enough for the hit test to be real: a pointer inside it is on the text and one
-  // outside it is in the margin, which is the distinction being checked.
-  const box = { left: 0, top: 0, right: 200, bottom: 20, width: 200, height: 20, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+  // happy-dom measures nothing, so the layout is declared here. By default every character lives in
+  // one 200×20 box at the origin: a pointer inside it is on the text, one outside is in the margin.
+  // `wrapAt` moves the character at that offset down a line, which is what a line wrap looks like
+  // to the hit test.
+  const line1 = { left: 0, top: 0, right: 200, bottom: 20, width: 200, height: 20, x: 0, y: 0, toJSON: () => ({}) } as DOMRect
+  const line2 = { left: 0, top: 30, right: 200, bottom: 50, width: 200, height: 20, x: 0, y: 30, toJSON: () => ({}) } as DOMRect
+  // Queued by call order rather than keyed by offset: happy-dom's `Range.startOffset` does not
+  // report what was set on it, so the stub cannot tell the two characters apart any other way.
+  const queued: DOMRect[] = []
   const view2 = doc.defaultView as unknown as { Range: { prototype: Range }; Element: { prototype: Element } }
-  view2.Range.prototype.getBoundingClientRect = () => box
-  view2.Element.prototype.getBoundingClientRect = () => box
+  view2.Range.prototype.getBoundingClientRect = () => queued.shift() ?? line1
+  view2.Element.prototype.getBoundingClientRect = () => line1
   view.requestAnimationFrame = (fn: () => void) => frames.push(fn)
   view.cancelAnimationFrame = () => {}
   view.setTimeout = (fn: () => void, delay: number) => { timers.push({ fn, delay }); return timers.length }
@@ -42,6 +47,8 @@ function stubBrowser(doc: Document) {
   return {
     highlights,
     caret,
+    /** Rects for the next `getBoundingClientRect` calls, in order. `line2` is one line down. */
+    nextRects: (...which: ('line1' | 'line2')[]) => { queued.push(...which.map(n => (n === 'line2' ? line2 : line1))) },
     /** Runs whatever is scheduled, optionally only the timers of one delay */
     flushTimers: (delay?: number) => {
       const due = delay === undefined ? timers.splice(0) : timers.filter(t => t.delay === delay)
@@ -232,6 +239,23 @@ describe('hover sentence highlight (§7.7)', () => {
     expect(browser.highlights.size).toBe(0)
 
     browser.move(10, 10) // the same caret, now actually under the pointer
+    expect(browser.highlights.size).toBe(2)
+    hl.stop()
+  })
+
+  it('accepts a pointer on the last character of a wrapped line', () => {
+    // `caretPositionFromPoint` gives an insertion point: on the right half of a glyph it returns
+    // the position *after* it. At a line wrap the character at that offset is on the next line, so
+    // measuring only it rejects a pointer sitting plainly on the last word of a line (Codex on
+    // #136). Both characters the caret sits between are measured.
+    const { doc, source } = page(TWO)
+    const browser = stubBrowser(doc)
+    const hl = startSentenceHighlight(doc)!
+
+    // The character after the caret is measured first and has wrapped; the one before it has not
+    browser.nextRects('line2', 'line1')
+    browser.caret.mockReturnValue({ offsetNode: source.firstChild!, offset: 4 })
+    browser.move(150, 10) // on the first line, where the character before the caret is
     expect(browser.highlights.size).toBe(2)
     hl.stop()
   })
