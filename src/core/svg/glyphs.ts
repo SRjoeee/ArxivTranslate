@@ -3,8 +3,8 @@
 // arXiv's SVG figures carry no `<text>`: every character is an outline, drawn by a `<use>` that
 // points at a glyph in `<defs>`. What makes them readable anyway is that each of those `<use>`
 // elements is annotated with the character it draws, so the text is *read*, not recognised — the
-// error rate is zero rather than whatever OCR would get wrong. Measured over 55064 glyphs in 281
-// figures, `data-text` is present on every one that is a glyph (`docs/RESEARCH.md` §6.11).
+// error rate is zero rather than whatever OCR would get wrong. Measured over 58045 glyphs in 316
+// distinct figures, `data-text` is present on every one that is a glyph (`docs/RESEARCH.md` §6.11).
 //
 // The output is `OcrLine[]`, the same shape the OCR helper returns, so everything downstream —
 // `linesToBoxes`, the translate call, the overlay — is shared with the bitmap path and knows
