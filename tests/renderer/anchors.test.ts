@@ -269,4 +269,5 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off()
     vi.restoreAllMocks()
   })
+
 })
