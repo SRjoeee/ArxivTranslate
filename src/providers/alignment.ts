@@ -42,6 +42,7 @@ export function boundariesOf(lengths: readonly number[]): number[] {
  * one, so this rejects malformed data rather than a normal case.
  */
 import { MARKER_RE, TAG_RE } from '@/core/protector'
+import { ABBR } from '@/core/sentences'
 
 /**
  * A placeholder in either wire format, plus whitespace: a boundary sitting against one of these is
@@ -69,6 +70,8 @@ const SENTENCE_END = /[.!?。！？…]["'\u201d\u300d\u300f）)\]]*$/
  * never causes one.
  */
 const CONTINUATION = /^[a-z0-9]/
+/** Just the closers, for walking to the end of a terminator that is more than one character. */
+const CLOSER = /["'\u201d\u300d\u300f）)\]]/
 
 /**
  * Whether this boundary sits right after a sentence end.
@@ -89,8 +92,16 @@ const settled = (text: string, at: number): boolean => SENTENCE_END.test(text.sl
  * ours to second-guess, and treating it as unsettled invited a snap that split `?)` in two
  * (measured, one regression before the two predicates were separated).
  */
-const snappable = (text: string, at: number): boolean =>
-  settled(text, at) && !CONTINUATION.test(text.slice(at).replace(LEADING_FILLER, ''))
+const snappable = (text: string, at: number): boolean => {
+  // 标点必须**紧贴**在前面（空格不算）。中间隔着占位符，说明下一句是从受保护内容开头的——
+  // 公式之类；把边界拉到它后面等于把这个公式判给上一句，而指针落在公式里时又会选到错的那一对
+  //（Codex 在 #145 指出）
+  const before = text.slice(0, at).replace(/\s+$/, '')
+  // 缩写的句点不是句末。`U.S. D|epartment` 后面是大写，continuation 那条看不出来，
+  // 用切句器实测过的那份缩写表来判（Codex 在 #145 指出）
+  if (!SENTENCE_END.test(before) || ABBR.test(before)) return false
+  return !CONTINUATION.test(text.slice(at).replace(LEADING_FILLER, ''))
+}
 
 /** Whether a sentence has anything a reader can see, rather than only placeholders and spaces. */
 const visible = (piece: string): boolean => piece.replace(FILLER, '').trim().length > 0
@@ -133,7 +144,13 @@ function snapAlignment(alignment: SentenceAlignment, sourceText: string, targetT
       cuts.push(at)
     }
     const moved = cuts.map(cut => {
-      if (settled(text, cut)) return cut
+      if (settled(text, cut)) {
+        // 已经落在句末标点后，但可能停在多字符终止标点的中间：`甲。|”乙` 里那个引号属于上一句
+        //（Codex 在 #145 指出）。只跨收尾标点，跨不到别的东西上
+        let end = cut
+        while (end + 1 < text.length && CLOSER.test(text[end] ?? '') && settled(text, end + 1)) end++
+        return end
+      }
       for (let step = 1; step <= SNAP_WINDOW; step++) {
         if (cut - step > 0 && snappable(text, cut - step)) return cut - step
         if (cut + step < text.length && snappable(text, cut + step)) {
@@ -146,14 +163,15 @@ function snapAlignment(alignment: SentenceAlignment, sourceText: string, targetT
       }
       return cut
     })
-    // Each move is taken back on its own if it would cross a neighbour or leave either side of it
-    // without visible text; one bad candidate must not cost the others their fix.
-    moved.forEach((cut, i) => {
+    // **要么全用、要么全不用。** 逐个回退会让结果取决于迭代顺序：前一个因为撞上邻居被退回原位，
+    // 后一个再拿这个**已经退回**的值当邻居去校验，于是两个候选吸到同一个标点上时会切出
+    // `[1, 2, 4]` 这种错位（Codex 在 #145 指出）。对着候选的快照整体校验一次，不满足就整侧不动
+    const ok = moved.every((cut, i) => {
       const low = moved[i - 1] ?? 0
-      const high = i + 1 < moved.length ? moved[i + 1]! : text.length
-      const bad = cut <= low || cut >= high || !visible(text.slice(low, cut)) || !visible(text.slice(cut, high))
-      if (bad) moved[i] = cuts[i]!
+      const high = moved[i + 1] ?? text.length
+      return cut > low && cut < high && visible(text.slice(low, cut)) && visible(text.slice(cut, high))
     })
+    if (!ok) return [...lengths]
     const out: number[] = []
     let prev = 0
     for (const cut of moved) {

@@ -28,7 +28,7 @@ import { fromAlpha, type WireFormat } from '@/core/protector'
  * and the journal-volume style that produced the only failures measured; the rest are the
  * abbreviations that actually appear in arXiv prose and bibliographies.
  */
-const ABBR =
+export const ABBR =
   /\b(?:[A-Z]|Fig|Figs|Eq|Eqs|Sec|Secs|Ref|Refs|Thm|Def|Lem|Prop|Cor|Rev|Phys|Lett|Nucl|Astron|Astrophys|Mon|Not|Proc|Conf|Int|J|vs|etc|cf|al|approx|resp|Dr|Prof|St|No|Vol|pp|Ed|Eds|Sci|Rep|e\.g|i\.e)\.$/
 
 /**

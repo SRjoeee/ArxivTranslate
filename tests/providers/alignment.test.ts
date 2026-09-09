@@ -97,6 +97,38 @@ describe('alignment verification (#105)', () => {
     expect(verifyAlignment(given, source, target)).toEqual(given)
   })
 
+  it('moves a boundary that stopped inside a terminator to the end of it', () => {
+    // `甲。|”乙` 里那个引号属于上一句。切点已经落在句末标点后了，但停在多字符终止标点的中间
+    //（Codex 在 #145 指出这条走不到下面的前向搜索）
+    expect(verifyAlignment({ source: [3, 2], target: [2, 3] }, 'A. B.', '甲。”乙。'))
+      .toEqual({ source: [3, 2], target: [3, 2] })
+  })
+
+  it('does not snap onto the period of an acronym before a capitalised word', () => {
+    // `U.S. D|epartment`：后面是大写，「后面不能是小写或数字」那条看不出来。用切句器实测过的
+    // 那份缩写表来判（Codex 在 #145 指出）
+    const source = 'U.S. Department. Next.'
+    const cut = source.indexOf('D') + 1
+    const given = { source: [cut, source.length - cut], target: [3, 3] }
+    expect(verifyAlignment(given, source, '第一。第二。')).toEqual(given)
+  })
+
+  it('leaves a sentence-opening placeholder with the sentence it opens', () => {
+    // 标点与切点之间隔着占位符，说明下一句是从受保护内容（公式之类）开头的。把边界拉到它后面
+    // 等于把这个公式判给上一句，而指针落在公式里时又会选到错的那一对（Codex 在 #145 指出）
+    const target = '甲。<x id="1"/>乙。'
+    const cut = target.indexOf('乙') + 1
+    const given = { source: [3, 2], target: [cut, target.length - cut] }
+    expect(verifyAlignment(given, 'A. B.', target)).toEqual(given)
+  })
+
+  it('leaves the whole side alone when two boundaries want the same spot', () => {
+    // 逐个回退会让结果取决于迭代顺序：前一个因为撞上邻居退回原位，后一个再拿这个已经退回的值
+    // 当邻居去校验，于是切出 `[1, 2, 4]` 这种错位——中间那句只配到 `。”`（Codex 在 #145 指出）
+    const given = { source: [3, 3, 2], target: [1, 3, 3] }
+    expect(verifyAlignment(given, 'A. B. C.', '甲。”乙。丙。')).toEqual(given)
+  })
+
   it('rejects a source partition that does not add up to the text', () => {
     // The engine reporting boundaries for a string other than the one we sent is the failure this
     // catches — trusting it would put the highlight on the wrong characters.
