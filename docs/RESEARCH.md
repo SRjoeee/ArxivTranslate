@@ -468,16 +468,21 @@ DESIGN §15 只记了用上的两个（`macos-vision-ocr`、`ImageTrans_chrome_e
 
 **浏览器内 PaddleOCR 的体积实测**（`reference/ImageTrans_chrome_extension/ImageTrans/paddleocr/`）：`rec.onnx` 20 M、`ort-wasm-simd-threaded.jsep.wasm` 25 M、`PP-OCRv6_det_small.onnx` 与 `opencv.js` 各 9.5 M、`model.onnx` 10 M；加载与推理胶水 `page-ocr.js` 779 行。
 
-## 6.11 SVG figure text is exactly recoverable, no OCR needed (2026-09-09, survey before starting issue #121)
+## 6.11 SVG figures drawn with `<use>` glyphs need no OCR; the rest still do (2026-09-09, survey before starting issue #121)
 
 **Population.** This section is about **externally referenced figures**, `<object type="image/svg+xml">`. That
 is a different population from the inline `svg.ltx_picture` (TikZ) elements measured in §2.9, and the two do
 not generalise to each other — §2.9's conclusion that inline SVG carries no translatable DOM text still
 stands for inline SVG.
 
-**Sample.** Recent papers from eight arXiv categories: 178 with an HTML version, of which **99 (55.6%) carry
-SVG figures**; 281 SVG files fetched and parsed (40 unreachable to curl, see below); plus an in-browser pass
-reading every figure's `contentDocument`, which is what the extension will actually see.
+**Sample.** Recent papers from eight arXiv categories: 178 with an HTML version. **99 of them (55.6%) carry
+at least one SVG figure**, and counting figures rather than papers, **880 of 1792 (49.1%) are SVG** against
+912 bitmaps. 281 SVG files were fetched and parsed (40 unreachable to curl, see below), plus an in-browser
+pass reading every figure's `contentDocument`, which is what the extension will actually see.
+
+**The headline holds only where glyphs are drawn as `<use>`.** That is every figure that draws them at all,
+but 10% draw letter outlines straight into `<path>` instead, and a third of those carry real words that no
+amount of `data-text` reading will reach — see point 4. OCR is what would serve them.
 
 ### 1. `data-text` is reliable — coverage of real glyphs is 100%
 
@@ -539,11 +544,15 @@ decomposition** rather than from reading `a` as the size.
 
 Angles over the **whole corpus** — all 253 files, 55047 glyphs:
 
-| | |
-|---|---|
-| 0° | 90.61% |
-| -90° | 8.01% |
-| **38 other values** | **1.27%** (700 glyphs), commonest -30° |
+| | | |
+|---|---|---|
+| 0° | 49876 | 90.606% |
+| -90° | 4409 | 8.010% |
+| +90° | 62 | 0.113% |
+| **38 other values** | **700** | **1.272%**, commonest -30° |
+
+(The first version of this table omitted the +90° row and totalled 99.89%, leaving 62 glyphs unexplained —
+Codex noticed the arithmetic on #133. Both quarter turns are handled; it is the last row that is dropped.)
 
 A seven-paper sample of 10465 glyphs contained only the first two, and this section previously concluded
 there were only two. There are not (Codex caught this on #133). The distinction is not cosmetic: an overlay
@@ -637,8 +646,8 @@ affects crawling surveys, not the product.
 
 §15.1 and §15 currently say v1 translates bitmaps only and skips SVG, on the strength of the §2.9 audit —
 which counted **inline** `svg.ltx_picture` (TikZ) and did not look at externally referenced
-`<object type="image/svg+xml">` figures at all. Those are 55.6% of the figures on arXiv and their text is
-exactly recoverable. **§15.1's "skip SVG" has to be narrowed to inline SVG**, and the external path
+`<object type="image/svg+xml">` figures at all. Those are 49.1% of the figures in the sample (880 of 1792)
+and their text is exactly recoverable wherever it is drawn as `<use>` glyphs. **§15.1's "skip SVG" has to be narrowed to inline SVG**, and the external path
 described as its own recogniser feeding the same overlay (Codex pointed out on #133 that leaving the DESIGN
 table stale would let later work follow the obsolete requirement, since DESIGN is the source of truth).
 
@@ -672,7 +681,8 @@ table stale would let later work follow the obsolete requirement, since DESIGN i
 | 19 | §14 arXiv 自身 JS 冲突 | 实测无冲突面（无 MutationObserver / MathJax / 脚注 JS，脚注弹出纯 CSS），风险可降为低 | §3.3 |
 | 22 | ~~§8 / §10 provider 请求跑在 background~~ | ~~建议把 provider 的 fetch 移到 content script~~ **已废止（2026-09-06）**：依据的 §6.5 三条结论全部推翻（§6.7 / §6.8），且「Read Frog 在 content 发请求」是误读。**与第 24 行方向相反，以第 24 行为准**；实际实现是移到 background（issue #42，已合并） | ~~§6.5~~ → §6.7 / §6.8 |
 | 23 | §8 `google-gtx` 用 `translate_a/single`、`preservesMarkup: false` | 改用 Read Frog 的 `translate-pa.googleapis.com/v1/translateHtml`：实测保留占位符，`preservesMarkup: true`，批量 150 条 556 ms | §6.6 |
-| 20 | §15.1 SVG 图文字按普通块翻译 | 实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics` | §2.9 |
+| 20 | ~~§15.1 SVG 图文字按普通块翻译~~ **已被 27 取代** | ~~实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics`~~ 这条只看了**内联** SVG，见 27 | §2.9 |
 | 24 | §8.0 请求跑在 content script | 实测 content 侧 fetch 受 CORS 与**本地网络门禁**约束（§6.7）：不带 CORS 头的端点、本机端点（Ollama；http 与 https 一样被拦）从 content 不可达，从 background 可达；连接测试走 background、正式翻译走 content，两条路径行为不一致。且 §8.0 引用的「Read Frog 在 content 发请求」核对为误读。建议：抽离 transport，默认在 background 执行请求（无 CORS 预检、不受本地网络门禁、key 不进页面世界），content 只保留调度；~~先按 issue #42 要求重测冷启动延迟，再定~~ **重测已完成**（§6.7 真实 Chrome 三轮 77–81 ms、§6.8 长请求 45 / 90 s 均存活），**已按本条实现并合并**（issue #42） | §6.7 / §6.8 |
 | 25 | §2「非目标 [延后]」把「微软免费通道」列为 v1 不做；§8.1 正文写「gtx 与微软 edge 通道不接（后者 auth 端点已 404）」 | **依据已失效**：那条 auth 流程确实没了，但它的**无鉴权后继**今天可用（§5.1）。#104 已经把 `markers` 线上格式与能力协商做进 main，微软正是它存在的理由。建议：把这两处改成「可接入，`wireFormats: ['markers']`」，并在 §8.1 的 provider 表里加一行 | §5.1 |
 | 26 | §8.1 provider 表没有「支持语言范围」这一列 | 免费引擎不是每种目标语言都支持：微软实测 179 个目标里 71 个 400。建议 provider 接口增加一个「这个目标语言能不能翻」的判定，`buildChain` 与设置页据此过滤，而不是等运行时报错 | §5.1 |
+| 27 | §15.1「跳过 SVG」收窄成「跳过**内联** SVG」 | 外部引用的 `<object type="image/svg+xml">` 是另一个群体，占样本里 1792 张图的 49.1%；文字以带 `data-text` 的 `<use>` 字形画出，可精确读出、不需要 OCR。用 `<path>` 直接画轮廓的那 10% 仍然需要 OCR 回退 | §6.11 |
