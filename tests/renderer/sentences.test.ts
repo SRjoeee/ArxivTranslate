@@ -90,6 +90,11 @@ describe('sentence lookup round trip (#105)', () => {
    * and exercises exactly the path the renderer will.
    */
   it('the sentence found for a character has boundaries that cover it, across fixtures', () => {
+    // Violations are collected rather than asserted per character: an `expect` per character means
+    // over a million assertion objects, which costs seven times what the work itself does (906ms of
+    // real work, measured). Reporting them together also shows how widespread a break is instead of
+    // stopping at the first one.
+    const violations: string[] = []
     let chars = 0
     let blocks = 0
     for (const f of readdirSync(FIXTURE_DIR).filter(n => n.endsWith('.html')).slice(0, 3)) {
@@ -107,27 +112,40 @@ describe('sentence lookup round trip (#105)', () => {
           const target = d.createElement(b.el.tagName)
           target.append(frag)
           registerSentences(b.el, target, block.offsets, frag.offsets, alignment!)
-          const pairs = sentenceMapOf(b.el)!.pairs
+          const map = sentenceMapOf(b.el)!
           blocks++
 
-          for (const [side, spans] of [['source', block.offsets], ['target', frag.offsets]] as const) {
+          for (const side of ['source', 'target'] as const) {
+            const { spans, index } = map[side]
             for (const span of spans) {
               if (span.kind !== 'text') continue
+              // Walked once, carrying the next boundary forward, rather than asking twice per
+              // character: this runs over every character of every fixture block.
+              let next = wireOffsetAt(index, span.node, 0)
               for (let k = 0; k < span.node.data.length; k++) {
-                const wire = wireOffsetAt(spans, span.node, k)
-                // A character that the tracker collapsed away occupies no wire position and so
-                // belongs to no sentence — the run `"). \n"` goes out as `"). "`. It renders as
-                // nothing, so no pointer can land on it, and asking which sentence owns it is not
-                // a question with an answer.
-                if (wire === wireOffsetAt(spans, span.node, k + 1)) continue
-                const sentence = sentenceAt(pairs, side, wire!)
-                // Every offset inside a span is inside some sentence: they partition the wire text
-                expect([f, b.id, fmt, side, k, sentence !== undefined]).toEqual([f, b.id, fmt, side, k, true])
-                const { from, to } = sentence![side]
+                const wire = next
+                next = wireOffsetAt(index, span.node, k + 1)
+                // A character the tracker collapsed away occupies no wire position and so belongs
+                // to no sentence — the run `"). \n"` goes out as `"). "`. It renders as nothing, so
+                // no pointer can land on it, and which sentence owns it is not a question with an
+                // answer.
+                if (wire === next) continue
+                const where = `${f} ${b.id} ${fmt} ${side} k=${k}`
+                if (wire === undefined) {
+                  violations.push(`${where}: no wire offset`)
+                  continue
+                }
+                const sentence = sentenceAt(map.pairs, side, wire)
+                if (!sentence) {
+                  violations.push(`${where}: wire ${wire} is in no sentence`)
+                  continue
+                }
+                const { from, to } = sentence[side]
                 // `nodeOffsetAt` clamps to the span, which is what `rangesOf` relies on when a
                 // sentence starts or ends outside this run
-                const covers = nodeOffsetAt(span, from) <= k && k < nodeOffsetAt(span, to)
-                expect([f, b.id, fmt, side, k, covers]).toEqual([f, b.id, fmt, side, k, true])
+                if (!(nodeOffsetAt(span, from) <= k && k < nodeOffsetAt(span, to))) {
+                  violations.push(`${where}: sentence ${sentence.index} covers [${nodeOffsetAt(span, from)},${nodeOffsetAt(span, to)}) in this run`)
+                }
                 chars++
               }
             }
@@ -135,7 +153,7 @@ describe('sentence lookup round trip (#105)', () => {
         }
       }
     }
-    expect(blocks).toBeGreaterThan(900)
-    expect(chars).toBeGreaterThan(500000)
+    expect(violations.slice(0, 5)).toEqual([])
+    expect([violations.length, blocks > 900, chars > 500_000]).toEqual([0, true, true])
   })
 })

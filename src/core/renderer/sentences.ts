@@ -12,13 +12,15 @@
 // and have to be parsed back on every pointer move. A WeakMap also disappears with the nodes, so
 // `restore()` needs no cleanup pass to avoid leaking a block that was removed.
 
-import type { WireSpan } from '@/core/protector'
+import { indexSpans, type SpanIndex, type WireSpan } from '@/core/protector'
 import { type SentenceAlignment, type SentencePair, sentencePairs } from '@/providers/alignment'
 
 /** One side of a block: the element the pointer can be over, and the wire spans inside it. */
 export interface SentenceSide {
   root: Element
   spans: readonly WireSpan[]
+  /** `spans` keyed by node, so a pointer hit is a lookup rather than a scan (`offsets.ts`) */
+  index: SpanIndex
 }
 
 /** A block whose two sides can be highlighted together. */
@@ -48,8 +50,8 @@ export function registerSentences(source: Element, target: Element, sourceSpans:
   if (!alignment || !targetSpans) return
   const map: SentenceMap = {
     pairs: sentencePairs(alignment),
-    source: { root: source, spans: sourceSpans },
-    target: { root: target, spans: targetSpans },
+    source: { root: source, spans: sourceSpans, index: indexSpans(sourceSpans) },
+    target: { root: target, spans: targetSpans, index: indexSpans(targetSpans) },
   }
   registry.set(source, map)
   registry.set(target, map)

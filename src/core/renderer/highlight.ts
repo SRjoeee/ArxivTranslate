@@ -103,7 +103,7 @@ export function startSentenceHighlight(doc: Document): SentenceHighlight | undef
       return
     }
     const { map, side } = found
-    const wire = wireOffsetAt(map[side].spans, node, caret.offset)
+    const wire = wireOffsetAt(map[side].index, node, caret.offset)
     const sentence = wire === undefined ? undefined : sentenceAt(map.pairs, side, wire)
     if (!sentence) {
       miss()

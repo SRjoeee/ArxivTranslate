@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
-import { decodeText, nodeOffsetAt, rehydrate, scanTokens, serialize, tokenize, wireOffsetAt, type PositionedToken } from '@/core/protector'
+import { decodeText, indexSpans, nodeOffsetAt, rehydrate, scanTokens, serialize, tokenize, wireOffsetAt, type PositionedToken } from '@/core/protector'
 import { el } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
@@ -101,15 +101,58 @@ describe('rehydrate offsets (#105)', () => {
       const block = serialize(el(markup), fmt)
       const frag = rehydrate(block.text, block, d)
       const spans = frag.offsets
+      const index = indexSpans(spans)
       for (const span of spans) {
         if (span.kind !== 'text') continue
         // Every wire offset in the span, grouped by the node offset it resolves to
         const last = new Map<number, number>()
         for (let w = span.from; w <= span.to; w++) last.set(nodeOffsetAt(span, w), w)
         for (let k = 0; k <= span.node.data.length; k++) {
-          expect([markup, k, wireOffsetAt(spans, span.node, k)]).toEqual([markup, k, last.get(k)])
+          expect([markup, k, wireOffsetAt(index, span.node, k)]).toEqual([markup, k, last.get(k)])
         }
       }
     }
+  })
+
+  it('a position inside a placeholder resolves to where that placeholder starts', () => {
+    // The pointer lands on a symbol inside a formula, not on any text run. Walking up from it to
+    // the node the slot was recorded for is what makes that a hit; without it the caret is simply
+    // outside every span and the sentence containing the formula never lights up.
+    const d = doc()
+    const root = el('<p class="ltx_p">Before <math class="ltx_Math"><mi>x</mi></math> after.</p>')
+    const block = serialize(root, 'tags')
+    const index = indexSpans(block.offsets)
+    const slot = block.offsets.find(s => s.kind === 'slot')!
+    const deep = root.querySelector('mi')!
+
+    expect(wireOffsetAt(index, deep, 0)).toBe(slot.from)
+    expect(wireOffsetAt(index, deep.firstChild!, 0)).toBe(slot.from)
+    // And a node belonging to no block at all is still a miss
+    expect(wireOffsetAt(index, d.createElement('p'), 0)).toBeUndefined()
+  })
+
+  it('a paired element resolves to where it opens, not where it closes', () => {
+    // A paired element is recorded twice, as its `open` and `close` runs, and both name the same
+    // node — so the index has to keep the first. A hit on the element itself is a hit *inside* it;
+    // resolving to the closing run would put it in whatever sentence follows.
+    const root = el('<p class="ltx_p">One <span class="ltx_text ltx_font_italic">two</span> three.</p>')
+    const block = serialize(root, 'tags')
+    const index = indexSpans(block.offsets)
+    const slots = block.offsets.filter(s => s.kind === 'slot')
+    expect(slots.map(s => (s.kind === 'slot' ? s.role : null))).toEqual(['open', 'close'])
+    expect(wireOffsetAt(index, root.querySelector('span')!, 0)).toBe(slots[0]!.from)
+  })
+
+  it('resolves to the innermost run containing the position, not an enclosing one', () => {
+    // A formula nested inside a paired element: walking up has to stop at the formula's own slot.
+    // Carrying on to the element that wraps it would answer with the wrapper's opening run, which
+    // is a different place in the wire text and can be a different sentence.
+    const root = el('<p class="ltx_p">A <span class="ltx_text ltx_font_italic">b <math class="ltx_Math"><mi>x</mi></math> c</span> d.</p>')
+    const block = serialize(root, 'tags')
+    const index = indexSpans(block.offsets)
+    const open = block.offsets.find(s => s.kind === 'slot' && s.role === 'open')!
+    const math = block.offsets.find(s => s.kind === 'slot' && s.role === 'void')!
+    expect(open.from).toBeLessThan(math.from)
+    expect(wireOffsetAt(index, root.querySelector('mi')!, 0)).toBe(math.from)
   })
 })

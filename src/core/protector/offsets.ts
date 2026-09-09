@@ -72,17 +72,48 @@ export function nodeOffsetAt(span: Extract<WireSpan, { kind: 'text' }>, wireOffs
 }
 
 /**
- * Offset within a node back to the wire offset — the inverse of `nodeOffsetAt`, for turning a hover
- * position into a sentence. Anchors are 1:1 between divergences, so find the last one at or before
- * the node offset and add the difference.
+ * Node → the span it belongs to. Built once per block, used on every pointer move.
+ *
+ * The lookup used to be a linear scan of the spans, with a `contains()` call per span when the
+ * position was inside a placeholder's subtree. That is a hit test running on every frame over a
+ * block that can hold hundreds of runs, so on a formula-dense paragraph it meant hundreds of DOM
+ * calls per frame. A map costs one pass at registration and turns the scan into a lookup.
+ *
+ * **The first span for a node wins, and that matters.** A paired element is recorded twice, as its
+ * `open` and `close` runs, and both name the same element. A pointer landing on the element itself
+ * is inside it, so it has to resolve to where it opens; keeping the closing run instead would put
+ * the hit in whatever sentence comes after it.
  */
-export function wireOffsetAt(spans: readonly WireSpan[], node: Node, nodeOffset: number): number | undefined {
-  const span = spans.find(s => s.kind === 'text' && s.node === node)
-  if (span?.kind !== 'text') {
-    // A placeholder has no interior positions, so any hit on it is its start
-    const slot = spans.find(s => s.node === node || (s.node.nodeType === 1 && (s.node as Element).contains(node)))
-    return slot?.from
-  }
+export type SpanIndex = ReadonlyMap<Node, WireSpan>
+
+export function indexSpans(spans: readonly WireSpan[]): SpanIndex {
+  const index = new Map<Node, WireSpan>()
+  for (const span of spans) if (!index.has(span.node)) index.set(span.node, span)
+  return index
+}
+
+/**
+ * A DOM position back to a wire offset — the inverse of `nodeOffsetAt`, which #123 did not need
+ * because it only ever went from an interval to a `Range`. Hit testing goes the other way.
+ *
+ * **The answer is the last wire offset that maps back to this node offset, not the first.** A caret
+ * at node offset k sits after character k-1, so everything encoding characters 0..k-1 is behind it,
+ * including all five characters of an `&amp;`. With `A & B`, node 2 is before the ampersand at wire
+ * 2 and node 3 is after it at wire 7 — not wire 3, where the escape begins. Both choices satisfy
+ * "wireOffsetAt then nodeOffsetAt returns k", which is why that property alone does not pin this
+ * down and `tests/protector/scan.test.ts` asserts maximality instead.
+ *
+ * A position inside a placeholder resolves to where that placeholder's wire run starts: the caret
+ * is somewhere inside a formula, and the formula is one indivisible run. Positions deeper inside it
+ * are found by walking up to the node the slot was recorded for, which is bounded by the depth of
+ * the markup rather than by the number of runs in the block.
+ */
+export function wireOffsetAt(index: SpanIndex, node: Node, nodeOffset: number): number | undefined {
+  let span = index.get(node)
+  // Inside a placeholder's subtree — a caret landing within a formula
+  for (let up: Node | null = node.parentNode; !span && up; up = up.parentNode) span = index.get(up)
+  if (!span) return undefined
+  if (span.kind !== 'text') return span.from
   const clamped = Math.max(0, Math.min(nodeOffset, span.node.data.length))
   let lo = 0
   let hi = span.anchors.length - 1
