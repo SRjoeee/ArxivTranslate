@@ -19,8 +19,18 @@ export interface SessionRouter {
   bind(scope: string, tabId: number | undefined): void
   /** 撤掉这些 scope 并解绑，返回撤掉的条数 */
   drop(scopes: readonly string[]): Promise<number>
-  /** 标签页关闭 / 导航：撤掉挂在它上面的会话 */
+  /** 标签页关闭：撤掉挂在它上面的会话 */
   dropTab(tabId: number): Promise<number>
+  /**
+   * 这个标签页**可能**跳走了（`tabs.onUpdated` 报了 loading）。
+   *
+   * 只是可能：同文档换 hash 与真的跳到别的网址在那个事件里完全一样——实测两种情况 `changeInfo`
+   * 都只有 `{status:'loading'}`，没有 `url` 可比（没有 `tabs` 权限）。所以不当场撤，先按住
+   * `NAVIGATION_GRACE_MS`；这段时间里这个标签页只要还有一次请求，就说明页面还活着，取消这次撤销。
+   * 真跳走的页面不会再有请求，宽限到点照撤（用户 2026-09-09 报的：点正文里的引用跳到参考文献，
+   * 那一整块的译文全部失败）
+   */
+  mayHaveLeft(tabId: number): void
   /**
    * 把所有进行中的会话迁到新链上。**只给用户的显式动作用**（下载完语言包后的 `axt:engine-ready`）：
    * 被动的配置变更故意不迁，见本文件开头
@@ -33,9 +43,27 @@ export interface SessionRouter {
 /**
  * @param current 取「此刻的」链；配置变更后它返回新的一条，已绑定的会话不受影响
  * @param options.onDrop 每撤掉一个 scope 调一次：翻译队列之外还有别的按 scope 排队的东西（图片 OCR，§15.2），
- *   撤会话时一起撤；返回它撤掉的条数
+ *   撤会话时一起撤；返回它撤掉的条数。`remember` 一并传下去——猜出来的终结在那条队列上同样不能判死
+ * @param options.stillThere 宽限到点时问一句「这个标签页还是刚才那个页面吗」。页面自己分得清同文档
+ *   换 hash 与真的跳走：它还在就还答得出同一个会话 id。没有这个的话，跳到一个不需要新翻译的位置
+ *   （目的地已经翻过了）就没有任何请求来取消撤销，正在翻的那一批会被白白排空（Codex 在 #143 指出）。
+ *   三态而不是真假：`'same'` 页面还在；`'other'` 答上来了但不是刚才那个会话——**这是确定的终结**，
+ *   可以判死；`'unknown'` 连消息都没送到——可能真没了，也可能只是新文档的 content script 还没装上，
+ *   所以只排空、不判死（Codex 在 #143 指出这两种要分开）
+ * @param options.stillLoading 这个标签页还在加载吗。跨文档导航提交得慢时，正在离开的旧文档还答得出
+ *   同一个会话——「还在」这个回答只有在标签页**不再加载**时才可信。还在加载就再按一次，最多几轮
+ *   （Codex 在 #143 指出不能只等 `complete`：目的地的 load 卡住时那个事件根本不会来）
  */
-export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string) => number } = {}): SessionRouter {
+/**
+ * 「可能跳走了」按住多久再撤。
+ *
+ * 只需要盖住「页面还活着，正要为新露出来的内容发请求」这段：跳到参考文献之后，视口观察器在同一帧
+ * 就把新块排上了。给到 3 秒是留足余量，代价是真跳走的标签页多跑 3 秒——原先那条路径的暴露上限是
+ * 一个批次的预算（180 秒），这点增量可以忽略
+ */
+const NAVIGATION_GRACE_MS = 3000
+
+export function createSessionRouter(current: () => Promise<TranslationTransport>, options: { onDrop?: (scope: string, options: { remember: boolean }) => number; stillThere?: (tabId: number, scope: string) => Promise<'same' | 'other' | 'unknown'>; stillLoading?: (tabId: number) => Promise<boolean> } = {}): SessionRouter {
   /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
   const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number }>()
   /**
@@ -45,22 +73,82 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
    * 之后带这个 scope 的请求在 translate-service 里直接 aborted
    */
   const dropped = new Set<string>()
+  /** 按住的「可能跳走了」，按标签页；这个标签页再来一次请求就取消 */
+  const leaving = new Map<number, ReturnType<typeof setTimeout>>()
 
-  const drop = async (scopes: readonly string[]): Promise<number> => {
+  /** 这个标签页还活着：把按住的撤销取消掉 */
+  const stayed = (tabId: number | undefined): void => {
+    if (tabId === undefined) return
+    const timer = leaving.get(tabId)
+    if (timer === undefined) return
+    clearTimeout(timer)
+    leaving.delete(tabId)
+  }
+
+  /**
+   * @param options.remember 撤过就判死（默认 true）。猜出来的终结传 false：猜错的话页面还活着，
+   *   判死等于把它后半篇永久钉在 aborted 上
+   */
+  /**
+   * 「还在加载就再问一遍」最多几轮。
+   *
+   * 有上限是因为一直卡在加载中的标签页会让它变成一个永不停止的轮询。四轮 ~12 秒之后仍然
+   * 在加载、而且页面还答得出同一个会话，那就当它确实是同一个文档
+   */
+  const LOADING_RETRIES = 3
+
+  const drop = async (scopes: readonly string[], { remember = true }: { remember?: boolean } = {}): Promise<number> => {
     let cancelled = 0
     for (const scope of scopes) {
       const bound = sessions.get(scope)
-      sessions.delete(scope)
-      dropped.add(scope)
+      // 猜出来的终结**不解绑**：解绑之后这个 scope 再来请求就成了「没绑过的新会话」，`forCall` 会把它
+      // 挂到**当前**那条链上——期间用户要是改过引擎 / 提示词 / 目标语言，同一轮译文就会中途换链，
+      // 正好是 §8.0 那条「一次会话认准它开始时的那条链」要防的（Codex 在 #143 指出）。
+      // 排空照做，绑定留着：真跳走的话这条记录跟着标签页关闭或下一轮新 scope 一起清掉
+      if (remember) {
+        sessions.delete(scope)
+        dropped.add(scope)
+      }
       // 别的按 scope 排队的东西（图片 OCR）先撤，不等建链：建链可能挂在 Translator.availability() 上（Codex 在 #87 指出）
-      cancelled += options.onDrop?.(scope) ?? 0
+      cancelled += options.onDrop?.(scope, { remember }) ?? 0
       // 只经 bind 绑过、从没翻过字的会话（bound 有值、没 transport）：这个 worker 里没有它的翻译请求，不用为撤它建一条链。
       // 完全没绑过的也要撤：worker 中途重启过，绑定丢了但队列里可能还有这个 scope 的任务
       if (bound && !bound.transport) continue
       const transport = bound?.transport ?? await current()
-      cancelled += await transport.cancel(scope)
+      cancelled += await transport.cancel(scope, { remember })
     }
     return cancelled
+  }
+
+  /**
+   * 按住一次撤销，到点问页面自己。
+   *
+   * 「还在加载」时页面的回答不可信——正在离开的旧文档也还答得出同一个会话——所以那时不下结论，
+   * 再按一次（有上限，见 `LOADING_RETRIES`）
+   */
+  const arm = (tabId: number, scopes: readonly string[], attempt: number): void => {
+    stayed(tabId)
+    if (scopes.length === 0) return
+    leaving.set(tabId, setTimeout(() => {
+      leaving.delete(tabId)
+      void (async () => {
+        // 没有探针时按原来的判断走：证据仍然只有「这段时间没有请求」，那只够软撤
+        const answers = options.stillThere
+          ? await Promise.all(scopes.map(s => options.stillThere!(tabId, s)))
+          : scopes.map(() => 'unknown' as const)
+        const live = scopes.filter((_, i) => answers[i] === 'same')
+        if (live.length > 0 && attempt < LOADING_RETRIES && await options.stillLoading?.(tabId)) {
+          arm(tabId, scopes, attempt + 1)
+          return
+        }
+        // 答上来了但换了会话：页面确实走了，这是确定的终结，判死——否则挂在 helper 握手上、
+        // 还没进任何队列的那些请求醒来之后照发不误（Codex 在 #143 指出）
+        const confirmed = scopes.filter((_, i) => answers[i] === 'other')
+        const unsure = scopes.filter((_, i) => answers[i] === 'unknown')
+        if (confirmed.length > 0) await drop(confirmed)
+        if (unsure.length > 0) await drop(unsure, { remember: false })
+      })()
+    }, NAVIGATION_GRACE_MS))
   }
 
   const scopesOfTab = (tabId: number): string[] =>
@@ -68,6 +156,9 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
 
   return {
     async forCall(scope, tabId) {
+      // **不因为「这个标签页又发请求了」就取消按住的撤销**：真跳走时旧文档常常还能再发一两条，
+      // 那只证明新文档还没接管，不证明页面还在。取消掉之后新文档一提交，content script 就没了，
+      // 也没人再武装一次，旧会话的队列会一直跑（Codex 在 #143 指出）。到点问页面自己才是判据
       if (scope === undefined) return current()
       const bound = sessions.get(scope)
       if (bound?.transport) return bound.transport
@@ -101,7 +192,15 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
       sessions.set(scope, tabId !== undefined ? { tabId } : {})
     },
     drop,
-    dropTab: tabId => drop(scopesOfTab(tabId)),
+    dropTab: tabId => {
+      stayed(tabId)
+      return drop(scopesOfTab(tabId))
+    },
+    mayHaveLeft(tabId) {
+      // 现在挂在这个标签页上的会话，取的是**按住那一刻**的：页面自己第一次加载也会报 loading，
+      // 那时它还没有会话，到点再取就会把这中间刚开起来的那个会话撤掉
+      arm(tabId, scopesOfTab(tabId), 0)
+    },
     rebindAll(transport) {
       for (const [scope, session] of sessions) sessions.set(scope, { ...session, transport })
     },

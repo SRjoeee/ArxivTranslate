@@ -78,10 +78,22 @@ export interface TranslateServiceDeps {
   batch?: Partial<Pick<BatchOptions<QueueItem, TranslationOutcome>, 'batchDelay' | 'maxRetries' | 'enableFallbackToIndividual'>>
 }
 
+export interface CancelOptions {
+  /**
+   * 记住这个 scope 已经撤过，之后带它的调用一律直接 aborted（默认 true）。
+   *
+   * 用户按停止、标签页关掉——这些是**确定**的终结，记住它才能堵住「请求正挂在读缓存上、撤完才醒来」
+   * 那个窗口（#1881）。而**猜**出来的终结不能记：同文档换 hash 与真的跳走在 `tabs.onUpdated` 里
+   * 长得一模一样（实测 `changeInfo` 都只有 `{status:'loading'}`），猜错时页面还活着，记下去就等于
+   * 把它后半篇的翻译永久判死（用户 2026-09-09 报的参考文献全失败）
+   */
+  remember?: boolean
+}
+
 export interface TranslateService {
   translate(call: TranslateCall): Promise<TranslateMessageResponse>
-  /** 撤掉该 scope 排队与在飞的请求；返回撤掉的条数。之后带同一 scope 的调用直接返回 aborted */
-  cancel(scope: string): number
+  /** 撤掉该 scope 排队与在飞的请求；返回撤掉的条数。默认之后带同一 scope 的调用直接返回 aborted */
+  cancel(scope: string, options?: CancelOptions): number
 }
 
 /** Read Frog 的默认队列参数（DEFAULT_CONFIG.pageTranslation.requestQueueConfig 与 translation-queues.ts 里的常量） */
@@ -470,10 +482,10 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     }
   }
 
-  const cancel = (scope: string): number => {
+  const cancel = (scope: string, { remember = true }: CancelOptions = {}): number => {
     // 先登记再排空：登记是同步的，还挂在读缓存上的调用醒来就能看到；
     // 先撤批处理再撤请求队列，反过来攒着的批次会在两次排空之间刷出新任务（Read Frog translation-queues.ts:616）
-    cancelledScopes.markScope(scope)
+    if (remember) cancelledScopes.markScope(scope)
     let cancelled = 0
     for (const { requestQueue, batchQueue } of queues.values()) {
       cancelled += batchQueue.cancelByScope(scope)

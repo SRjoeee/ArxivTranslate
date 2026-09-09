@@ -58,7 +58,35 @@ export default defineBackground(() => {
     keepAlive: () => void browser.runtime.getPlatformInfo(),
   })
   const ocr = createOcrService({ helper, cache })
-  const router = createSessionRouter(transportOf, { onDrop: scope => ocr.cancel(scope) })
+  const router = createSessionRouter(transportOf, {
+    onDrop: (scope, options) => ocr.cancel(scope, options),
+    /**
+     * 那个标签页还是不是刚才那个页面：问它自己。
+     *
+     * 页面还在就答得出同一个会话 id；真跳走了 content script 已经没了，`sendMessage` 直接抛。
+     * 只在宽限到点时问一次，而且只在这个标签页那段时间一个请求都没有的情况下才走到这里
+     */
+    /**
+     * 这个标签页还在加载吗。`tabs.get` 的 `status` 不在需要 `tabs` 权限的那几个字段里
+     * （被挡的是 url / title / favIconUrl），所以这条不扩权限
+     */
+    stillLoading: async tabId => {
+      try {
+        return (await browser.tabs.get(tabId)).status === 'loading'
+      } catch {
+        return false
+      }
+    },
+    stillThere: async (tabId, scope) => {
+      try {
+        const status = await browser.tabs.sendMessage(tabId, { type: 'axt:page-status' })
+        return (status as { session?: string | null } | undefined)?.session === scope ? 'same' : 'other'
+      } catch {
+        // 消息没送到：可能真没了，也可能新文档的 content script 还没装上。分不清就不判死
+        return 'unknown'
+      }
+    },
+  })
 
   // 两个生命周期钩子都只给 tabId / status，不需要 "tabs" 权限
   const dropTab = (tabId: number, why: string) => {
@@ -78,10 +106,19 @@ export default defineBackground(() => {
   /**
    * 导航离开也要撤（Codex 在 #59 指出）：`onRemoved` 只管关闭，标签页跳到别的网址时不触发。
    * 而「同一标签页出现新 scope 就撤掉旧的」那条只在**新页面也是 arXiv 论文**时才会发生——
-   * 跳到任何别的站点，旧队列就一直跑到批次耗尽预算为止
+   * 跳到任何别的站点，旧队列就一直跑到批次耗尽预算为止。
+   *
+   * **但 loading 分不出同文档换 hash 与真的跳走**：实测点正文里的引用跳到参考文献时，`changeInfo`
+   * 同样只有 `{status:'loading'}`，没有 `url` 可比（这两个钩子都不带 `tabs` 权限）。当场撤等于把
+   * 一个还活着的页面判死，它后半篇的译文会全部 aborted（用户 2026-09-09 报的）。所以交给 router
+   * 按住一会儿：这个标签页再来一次请求就说明页面还在，撤销取消
    */
   browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === 'loading') dropTab(tabId, '导航离开')
+    // **loading 与 complete 都要按一次**。跨文档导航提交得慢时，旧文档在 loading 之后还活着，
+    // 到点探针问到的是它、答的是同一个会话，撤销就被放掉了——而它随后就没了，再没人问第二次
+    //（Codex 在 #143 指出）。complete 时新文档已经就位：同文档换 hash 的话探针照样答「还在」，
+    // 真跳走的话答的就是新会话或者根本答不上
+    if (changeInfo.status === 'loading' || changeInfo.status === 'complete') router.mayHaveLeft(tabId)
   })
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {

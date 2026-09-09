@@ -7,7 +7,7 @@ import type { Config } from '@/config/schema'
 import type { RenderPath } from '@/cache/key'
 import { buildChain } from '.'
 import { createFallbackService } from './fallback'
-import { createTranslateService, type CachePort, type TranslateCall, type TranslateMessageResponse, type TranslateServiceDeps } from './translate-service'
+import { createTranslateService, type CachePort, type CancelOptions, type TranslateCall, type TranslateMessageResponse, type TranslateServiceDeps } from './translate-service'
 import type { ProviderErrorKind, TranslationProvider } from './types'
 
 /** 此刻实际在用的引擎与最近一次降级原因（§8.5）；popup 据此解释译文为什么换了引擎 */
@@ -40,8 +40,8 @@ export interface ProviderStatus {
 
 export interface TranslationTransport {
   translate(call: TranslateCall): Promise<TranslateMessageResponse>
-  /** 撤掉该 scope 排队与在飞的请求，返回撤掉的条数 */
-  cancel(scope: string): Promise<number>
+  /** 撤掉该 scope 排队与在飞的请求，返回撤掉的条数。`remember: false` 只排空、不判死（见 `CancelOptions`） */
+  cancel(scope: string, options?: CancelOptions): Promise<number>
   status(): Promise<ProviderStatus>
 }
 
@@ -122,7 +122,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
 
   return {
     translate,
-    cancel: async scope => service.cancel(scope),
+    cancel: async (scope, options) => service.cancel(scope, options),
     status,
   }
 }
