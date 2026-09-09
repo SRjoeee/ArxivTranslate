@@ -64,6 +64,8 @@ extId = worker.url().split('/')[2]
 
 const IDLE = /session idle: (\d+)\/(\d+) requested of (\d+)/
 const IMAGES_IDLE = /images idle: (\d+)\/(\d+) of (\d+), (\d+) failed/
+/** content 报的图数，SVG 与位图分开数；两种都进同一条流水线，idle 的分母是两者之和 */
+const IMAGE_COUNTS = /\[axt\] images: (\d+) SVG \+ (\d+) bitmaps/
 async function waitForLog(logs, pattern, timeoutMs, predicate = () => true) {
   const t0 = Date.now()
   while (Date.now() - t0 < timeoutMs) {
@@ -127,13 +129,14 @@ const page = await context.newPage()
 const logs = []
 page.on('console', m => { const text = m.text(); if (text.includes('[axt]')) logs.push({ t: Date.now(), text }) })
 await page.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
-// 位图数从 content 的日志里取，换论文（AXT_PAPER）时期望跟着变（Codex 在 #89 指出）
-const bitmaps = await waitForLog(logs, /\[axt\] images: (\d+) bitmaps/, 20_000)
-const N = bitmaps ? +/(\d+) bitmaps/.exec(bitmaps.text)[1] : 0
-check('content 认出了页面上的位图', N >= 1, bitmaps?.text ?? '没有 images 日志')
+// 图数从 content 的日志里取，换论文（AXT_PAPER）时期望跟着变（Codex 在 #89 指出）
+const counted = await waitForLog(logs, IMAGE_COUNTS, 20_000)
+const found = counted ? IMAGE_COUNTS.exec(counted.text) : null
+const N = found ? +found[1] + +found[2] : 0
+check('content 认出了页面上的图', N >= 1, counted?.text ?? '没有 images 日志')
 await scrollThrough(page)
 const idle = await waitForLog(logs, IMAGES_IDLE, 90_000, m => +m[2] === N && +m[1] + +m[4] === N)
-check(`stack：${N} 张位图都进入并处理完（images idle）`, !!idle, idle?.text ?? logs.filter(l => /images/.test(l.text)).map(l => l.text).join(' | '))
+check(`stack：${N} 张图都进入并处理完（images idle）`, !!idle, idle?.text ?? logs.filter(l => /images/.test(l.text)).map(l => l.text).join(' | '))
 await sleep(500)
 let probe = await page.evaluate(PROBE)
 const withOverlay = probe.filter(p => p.overlay)
@@ -194,7 +197,7 @@ const page2 = await context.newPage()
 const logs2 = []
 page2.on('console', m => { const text = m.text(); if (text.includes('[axt]')) logs2.push({ t: Date.now(), text }) })
 await page2.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
-await waitForLog(logs2, /\[axt\] images: (\d+) bitmaps/, 20_000)
+await waitForLog(logs2, IMAGE_COUNTS, 20_000)
 await scrollThrough(page2)
 await waitForLog(logs2, IDLE, 90_000)
 await sleep(1000)

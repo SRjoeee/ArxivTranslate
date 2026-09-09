@@ -225,7 +225,7 @@ export default defineContentScript({
           prep.touch(rendered)
         },
       })
-            console.debug(`[axt] images: ${targets.filter(t => t.kind === 'svg').length} SVG + ${targets.filter(t => t.kind === 'raster').length} 位图，modes ${config.image.modes.join('/')}`)
+            console.debug(`[axt] images: ${targets.filter(t => t.kind === 'svg').length} SVG + ${targets.filter(t => t.kind === 'raster').length} bitmaps, modes ${config.image.modes.join('/')}`)
 
       /**
        * 位图要等 helper。**探测失败或没装也要收尾**：上一轮成功画过的位图叠加层还挂在页面上，
