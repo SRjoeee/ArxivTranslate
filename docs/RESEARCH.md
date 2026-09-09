@@ -468,68 +468,127 @@ DESIGN §15 只记了用上的两个（`macos-vision-ocr`、`ImageTrans_chrome_e
 
 **浏览器内 PaddleOCR 的体积实测**（`reference/ImageTrans_chrome_extension/ImageTrans/paddleocr/`）：`rec.onnx` 20 M、`ort-wasm-simd-threaded.jsep.wasm` 25 M、`PP-OCRv6_det_small.onnx` 与 `opencv.js` 各 9.5 M、`model.onnx` 10 M；加载与推理胶水 `page-ocr.js` 779 行。
 
-## 6.11 SVG 图的文字可以精确还原，不需要 OCR（2026-09-09，issue #121 开工前调查）
+## 6.11 SVG figure text is exactly recoverable, no OCR needed (2026-09-09, survey before starting issue #121)
 
-**样本**：arXiv API 按 8 个类别取近期论文，178 篇有 HTML 版，其中 **99 篇（55.6%）带 SVG 图**；抓到并解析 281 个 SVG 文件（40 个 curl 拿不到，见下）；另在真实浏览器里逐图读 `contentDocument` 复核。
+**Population.** This section is about **externally referenced figures**, `<object type="image/svg+xml">`. That
+is a different population from the inline `svg.ltx_picture` (TikZ) elements measured in §2.9, and the two do
+not generalise to each other — §2.9's conclusion that inline SVG carries no translatable DOM text still
+stands for inline SVG.
 
-### 结论一：`data-text` 是可靠的，覆盖率实质是 100%
+**Sample.** Recent papers from eight arXiv categories: 178 with an HTML version, of which **99 (55.6%) carry
+SVG figures**; 281 SVG files fetched and parsed (40 unreachable to curl, see below); plus an in-browser pass
+reading every figure's `contentDocument`, which is what the extension will actually see.
+
+### 1. `data-text` is reliable — coverage of real glyphs is 100%
 
 | | |
 |---|---|
-| `<use>` 总数 | 55064 |
-| 带 `data-text` | 55047（**99.97%**） |
-| 整文件全覆盖 | 248 / 281 |
-| 部分覆盖 | 5 |
-| **一个都没有** | **0** |
+| `<use>` elements | 55064 |
+| carrying `data-text` | 55047 (**99.97%**) |
+| files where every one carries it | 248 / 281 |
+| files where some do | 5 |
+| **files where none do** | **0** |
 
-那 17 个例外**全部**是 `<use xlink:href="#pattern_tile_N">`——填充花纹的 tile，不是字形。**真实字形的覆盖率是 100%**。
+All seventeen exceptions are `<use xlink:href="#pattern_tile_N">` — hatch-fill tiles, not glyphs. **Coverage of
+actual glyphs is 100%.**
 
-**没有任何一个文件带 `<text>` 元素**（0/281）：文字全部转成了轮廓，`data-text` 是唯一的通道。
+**No text lives outside the glyphs.** Not one file has a `<text>` element (0/281), and an in-browser pass over
+84 figures found **zero `<foreignObject>` nodes** — so the "HTML labels inside SVG" representation §2.9
+records for inline TikZ does not occur here, and `data-text` really is the only channel (Codex raised this on
+#133; the check is what makes the claim sound, not the absence of `<text>` alone).
 
-**id 后缀不能当回退**：`font_2_99` 这样的后缀等于码点的只有 21.75%（11568/53196），而且按文件是双峰的——62 个文件整体成立、185 个整体不成立（那是字体内部的字形索引）。issue #121 里三个文件的观察在更大样本上成立。
+**The id suffix is not a usable fallback.** A suffix like `font_2_99` equals the codepoint in only 21.75% of
+cases (11568/53196), and bimodally by file: 62 files where it always does, 185 where it never does (there it
+is a font-internal glyph index). Issue #121's observation on three files holds on the larger sample.
 
-### 结论二：空格大多是显式字形，所以「分词」不是难点
+### 2. Spaces are mostly explicit glyphs, so word segmentation is not the hard part
 
-2740 个字形里有 84 个 `data-text=" "`。**按文档顺序直接拼接就得到准确原文**：`"Number of terms N"` 一字不差。issue #121 里担心的「词边界要从字形推进宽度推」在大多数情况下不需要。
+One figure carries 84 `data-text=" "` glyphs among 2740. **Concatenating `data-text` in document order gives
+the text exactly**: `"Number of terms N"`, character for character. What issue #121 expected — deriving word
+boundaries from glyph advances — is not needed for the common case.
 
-### 结论三：真正的难点是分段，而且分两种
+### 3. The hard part is segmentation, and it comes in two kinds
 
-**（a）行 / 标签边界**——转换器**不做任何分组**：一整张图的字形平铺在 `<svg>` 的直接子节点下（实测一张图 159 个字形全是直接子节点），刻度、轴标题、图例拼成一条 `"110100Number of terms N1015..."`。
+**(a) Line and label boundaries.** The converter does **no grouping at all**: every glyph of a figure is a
+direct child of `<svg>` (measured: 159 of 159 in one figure), so ticks, axis titles and legends run together
+as `"110100Number of terms N1015..."`.
 
-原型验证了几何分组可行：把 `transform="matrix(a,b,c,d,e,f)"` 分解出角度 `atan2(b,a)` 与字号 `hypot(a,b)`，沿基线方向投影分组，间隙超过阈值就切段。一次就切对了：
+A prototype confirmed geometric grouping works. Decompose `transform="matrix(a,b,c,d,e,f)"` into an angle
+`atan2(b,a)` and a size `hypot(a,b)`, project along the baseline, and cut on gaps. It separated the labels on
+the first attempt:
 
 ```
-   0°  25px ×17  "Number of terms N"      ← 轴标题
-   0°  20px × 3  "100"                    ← 刻度
- -90°  17.5px× 1  "R"                     ← 旋转的 y 轴标签
-   0°  16px ×16  "Ei-series, xa=50"       ← 图例
+   0°  25px ×17  "Number of terms N"      ← axis title
+   0°  20px × 3  "100"                    ← tick
+ -90°  17.5px× 1  "R"                     ← rotated y-axis label
+   0°  16px ×16  "Ei-series, xa=50"       ← legend
 ```
 
-上下标因基线不同自然分段（`10` 与 `15` 分开），对 `10^15` 这类恰好是对的。**旋转必须分解矩阵**，不能把 `a` 当字号读：实测 9.44% 的 `<use>` 带旋转（5197/55064）。
+Superscripts separate onto their own baselines, which is right for `10^15`. **Rotation must come out of that
+decomposition** rather than from reading `a` as the size: 9.44% of glyphs are rotated (5197/55064), and the
+angle takes exactly two values across 10465 measured glyphs — 0° (91.05%) and -90° (8.95%). No third value
+occurs, so the two can be handled exactly instead of approximated.
 
-**（b）被省略的空格**——语法高亮的代码清单里，`if` 与 `log_counting` 属于不同颜色的段，它们之间的空格**没有对应字形**，拼出来是 `"iflog_counting == 8:"`、`"staticint"`。
+**(b) Spaces that were dropped.** In a syntax-highlighted code listing, `if` and `log_counting` belong to
+differently coloured spans and the space between them has no glyph, so the run reads `"iflog_counting == 8:"`,
+`"staticint"`.
 
-**这个不能靠单个间隙大小判断**：实测相邻两个非空格字符的间隙中位数是 0.553 字号，而涉及显式空格字形的间隙中位数是 0.550——**两者完全重合**，因为等宽字体里每个字符的推进宽度相同。可用的信号是**双倍宽度的间隙**（非空格间隙 p95=0.818、max=1.12，约等于两个推进），所以要按 run 估计本地推进宽度再比，不能用全局常数。
+**This cannot be decided from gap size.** Gaps between two non-space characters have a median of 0.553 of the
+font size; gaps involving an explicit space glyph have a median of 0.550 — the same, because a monospace
+advance does not depend on what it is advancing past. The usable signal is a **double-width** gap (non-space
+gaps run to p95 = 0.818 and max = 1.12, about two advances), which needs a per-run advance estimate rather
+than a global constant. The blast radius is small: this happens in code, and code is skipped by the rules
+(DESIGN §5) anyway.
 
-影响面有限：这主要发生在代码清单里，而代码本来就在跳过规则内（DESIGN §5）。
+### 4. One figure in ten has no text at all
 
-### 结论四：一成的 SVG 图根本没有文字
+28 of 281 files (10%) have neither `<use>` nor `<text>` — pure graphics. These should never reach a
+translator.
 
-281 个文件里 28 个（10%）没有任何 `<use>` 也没有 `<text>`——纯图形。这些图连请求都不该发。
+### 5. `contentDocument` is reachable, and does not even need a scroll
 
-### 结论五：`contentDocument` 要等，而且不是每个都等得到
+Measured across four papers and 44 figures with explicit waits and `load` listeners: **44/44 reachable, all of
+them already reachable before scrolling anything into view**. An earlier probe in this survey reported 19/27
+for one paper; that probe raced its own measurement and the number is withdrawn.
 
-`<object>` 是懒加载的。实测一篇 27 个图的论文，滚动到位并等 2.5 s 后只有 19 个 `contentDocument` 可达；另一篇 3 个里 2 个。**这与 #109 的图片叠加层闪烁是同一个嵌套浏览上下文问题**：拿不到就得等 `load`，而替换 `<object>` 元素会销毁它。
+This matters because it settles the fourth of issue #121's "what is actually hard" list. Combined with the
+next point, nothing needs to be written into the embedded document.
 
-### 顺带：curl 拿不到的 40 个文件不是缺失
+### 6. viewBox coordinates map linearly onto the `<object>` element box
 
-`https://arxiv.org/html/<id>/<file>.svg` 对部分论文一律返回 **406**，与 `Accept`、UA 都无关，同一篇的 `.png` 也是 406。但**在浏览器里这些图正常渲染、`contentDocument` 正常可读**（2609.09114v1：3 个图 2 个可达、213 个字形、100% `data-text`）。扩展走的是页内 `contentDocument`，不受影响；只是做爬虫式调查时要知道这条路会漏。
+Comparing a glyph's position computed from the `viewBox` against where it actually renders, on three figures:
 
-### 对 issue #121 的修订
+| predicted | actual |
+|---|---|
+| nx 0.1310, ny 0.9346 | nx 0.1339, ny 0.9346 |
+| nx 0.1009, ny 0.9266 | nx 0.1037, ny 0.9264 |
+| nx 0.1176, ny 0.9275 | nx 0.1203, ny 0.9275 |
 
-- 「分词是工作量的大头」**不成立**——空格大多是显式字形，按文档顺序拼接即准确。真正要做的是**几何分段**（已验证可行）与**补回被省略的空格**（需要按 run 估推进宽度）。
-- 「id 后缀可以当回退」**不成立**，只有 21.75%。
-- 「先调查覆盖率再动手」的结论是：**`data-text` 可以依赖**，但**回退路径仍然必须有**——不是为了没有 `data-text` 的图（不存在），而是为了那 10% 没有文字的图（直接跳过）和 `contentDocument` 拿不到的图。
+`ny` agrees to four decimal places. The constant 0.0028 offset in `nx` is the glyph's left side bearing —
+`e` is the origin, `rect.left` is the inked box — not an error in the mapping. arXiv sets `aspect-ratio` on
+the `<object>` to match the viewBox, so nothing is letterboxed in practice.
+
+**So an overlay can live entirely in the main document, reading the embedded one and never writing to it.**
+That removes issue #121's fourth difficulty outright: §7.1's DOM invariant is untouched, `restore()` needs no
+new semantics for embedded documents, and the nested browsing context problem shared with #109 reduces to
+"can we read it", which point 5 answers.
+
+### Incidentally: the 40 files curl could not fetch are not missing
+
+`https://arxiv.org/html/<id>/<file>.svg` answers **406** for some papers regardless of `Accept` or user agent,
+and their `.png` assets do too — while the same figures render and read fine in the page (2609.09114v1: 3
+figures, all reachable, 213 glyphs, 100% `data-text`). The extension reads through `contentDocument`, so this
+affects crawling surveys, not the product.
+
+### Revisions to issue #121
+
+- "Grouping glyphs into semantic runs is the bulk of the work" — **not so**. Spaces are mostly explicit and
+  document order is exact. The work is geometric line segmentation (verified feasible) and, only for code,
+  restoring dropped spaces from a per-run advance estimate.
+- "The id suffix is a usable fallback" — **not so**, 21.75%.
+- "Survey coverage before building anything" — the answer is that **`data-text` can be relied on**, but a
+  fallback is still needed: not for figures without `data-text` (there are none) but for the 10% with no text
+  at all, which should simply be skipped.
 
 ---
 
