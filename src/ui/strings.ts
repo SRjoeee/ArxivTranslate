@@ -65,7 +65,7 @@ export const S = {
     retry: '重试', // S-P-61
   },
   mode: {
-    stack: '上下', // S-P-70
+    stack: '上下', // S-P-70；顺序见 MODE_ORDER
     side: '左右',
     only: '仅译文',
     stackTitle: '译文紧跟在原文下方', // S-P-71
@@ -75,6 +75,13 @@ export const S = {
   },
   actionFailed: (message: string) => message, // S-P-90
 } as const
+
+/**
+ * The order the three modes are offered in (UI.md S-P-70). 左右 comes first: on a wide screen it is
+ * the layout most readers stay in. Presentation only — `MODE_VALUES` (config/schema.ts) stays the
+ * data order, and both the popup's mode bar and the settings page's image modes read this one
+ */
+export const MODE_ORDER = ['side', 'stack', 'only'] as const
 
 /** The settings page (docs/UI.md §3.2). Same register as `S`: nouns for states, verbs for buttons */
 export const O = {
