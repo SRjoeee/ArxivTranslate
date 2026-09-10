@@ -157,12 +157,13 @@ export default defineBackground(() => {
       case 'axt:engine-ready':
         // 语言包下载完之前建的链里没有这个引擎（buildChain 会把 isAvailable 为假的剔掉），
         // 或者它已被永久降级。重建一条新链，让它重新参与（§8.5，Codex 在 #50 指出）。
-        // **进行中的会话也要迁过去**（Codex 在 #59 指出）：popup 明说「接下来的段落会用离线引擎」，
-        // 不迁的话那一页会一直用着旧的兜底链，承诺落空。这是用户显式动作，与被动的配置变更不同——
-        // 后者故意不迁（见 sessions.ts）
+        // **进行中的会话是否迁过去由发起方决定**（Codex 在 #59 / #157 指出）：popup 的语言包下载明说
+        // 「接下来的段落会用离线翻译」，不迁的话那一页会一直用着旧的兜底链、承诺落空；设置页没有这句
+        // 承诺，在那里迁会把一个正翻着某种语言的会话接到为另一种语言建的链上。被动的配置变更一律不迁
+        //（见 sessions.ts）
         activate()
           .then(async a => {
-            router.rebindAll(a.transport)
+            if (message.rebind !== false) router.rebindAll(a.transport)
             return a.transport.status()
           })
           .then(status => sendResponse({ reset: status.chain.includes(message.id) }))

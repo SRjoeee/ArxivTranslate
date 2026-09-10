@@ -62,8 +62,17 @@ export interface AxtMessages {
   'axt:cache-stats': { request: Record<never, never>; response: { ok: true; entries: number; bytes: number } | { ok: false; message: string } }
   /** popup → content：把翻失败的块再翻一遍（§7.6） */
   'axt:retry-failed': { request: Record<never, never>; response: { retried: number } }
-  /** popup → background：某个引擎刚被用户修好（语言包下载完）；重建引擎链，让它重新参与降级（§8.5） */
-  'axt:engine-ready': { request: { id: string }; response: { reset: boolean } }
+  /**
+   * popup / options → background: something the reader did changed which services can serve
+   * (a language pack finished downloading, a service was deleted). Rebuild the chain so later
+   * sessions see it.
+   *
+   * `rebind` says whether the pages **already translating** move onto the new chain too. The popup's
+   * pack download promises "接下来的段落会用离线翻译", so it rebinds; the settings page promises no
+   * such thing, and rebinding there would hand a session translating into one language a chain
+   * built for another (Codex on #157). Absent means true, the behaviour before the field existed
+   */
+  'axt:engine-ready': { request: { id: string; rebind?: boolean }; response: { reset: boolean } }
   /** options / content → background：本机 OCR helper 是否可用（DESIGN §15.4 的 ping 检测） */
   'axt:helper-status': { request: Record<never, never>; response: HelperStatus }
   /** content → background：给一张位图做 OCR；结果按 imageHash 缓存（§15.2） */

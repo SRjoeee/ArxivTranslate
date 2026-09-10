@@ -47,15 +47,16 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(busy.items[2]).toMatchObject({ disabled: true, hint: '语言包下载中', action: { busy: true } })
   })
 
-  it("a reader's services come after the built-ins, named the way they named them", () => {
+  it("a reader's services sit where the contract puts the LLM — after the free ones, before Chrome (S-P-46)", () => {
     const llm = input('P15')
     const m = derivePopupView({ ...llm, menu: 'service' }).menu!
-    const own = m.items[3]!
+    expect(m.items.map(i => i.id)).toEqual(['microsoft', 'google-web', llm.config!.services[0]!.id, 'chrome-builtin', '__manage'])
+    const own = m.items[2]!
     expect(own).toMatchObject({ id: llm.config!.services[0]!.id, name: 'deepseek-v4-flash', hint: 'deepseek/deepseek-v4-flash', selected: true })
     // Without a key the row still selects; the note under the card is what says it cannot run
     const noKey = derivePopupView({ ...llm, config: { ...llm.config!, services: [{ ...llm.config!.services[0]!, apiKey: '' }] }, menu: 'service' }).menu!
-    expect(noKey.items[3]).toMatchObject({ hint: '尚未配置 API Key' })
-    expect(noKey.items[3]!.disabled).toBeFalsy()
+    expect(noKey.items[2]).toMatchObject({ hint: '尚未配置 API Key' })
+    expect(noKey.items[2]!.disabled).toBeFalsy()
   })
   it('P3 language menu: every language, searchable by any of its names or its code', () => {
     const m = view('P3').menu!

@@ -99,8 +99,10 @@ export function useOptionsData(): OptionsData {
     setPack('downloading')
     try {
       await downloadPack(target)
-      // The chain lives in background (§8.0): have it rebuild one with the now-usable offline service
-      await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).catch(() => undefined)
+      // The chain lives in background (§8.0): have it rebuild one with the now-usable offline
+      // service. `rebind: false` — a page translating in another tab keeps the chain it started on,
+      // because this page promised nothing about it and its target language may differ (Codex on #157)
+      await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin', rebind: false }).catch(() => undefined)
     } finally {
       setPack(await packState(target))
     }

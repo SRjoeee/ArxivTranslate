@@ -52,6 +52,10 @@ export interface CommandDeps {
 export function actionFor(status: Pick<PageStatus, 'progress'> | undefined): 'axt:translate-page' | 'axt:restore-page' | undefined {
   const state = status?.progress?.state
   if (state === undefined) return undefined
+  // A paused session (a fatal error) retries, matching the popup's 重新翻译 — the shortcut badge sits
+  // on that very button, so restoring here would undo the translations the reader asked to retry
+  // (Codex on #157). Only a running one restores
+  if (state === 'stopped' && status?.progress?.fatal !== undefined) return 'axt:translate-page'
   return state === 'idle' ? 'axt:translate-page' : 'axt:restore-page'
 }
 

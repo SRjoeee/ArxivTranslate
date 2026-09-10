@@ -115,6 +115,10 @@ export function ServiceDrawer({ service, patch, onClose }: {
       provider: latest.provider === gone ? 'microsoft' : latest.provider,
     }))
     if (savedURL) await releaseHostPermission(savedURL, saved.services.map(s => s.baseURL))
+    // A page translating in another tab is pinned to the chain it started on, so a deleted service
+    // would go on spending its key whenever the reader scrolls (Codex on #157). Deleting is the
+    // reader's explicit action, so those sessions move onto a chain that no longer has it
+    await sendMessage({ type: 'axt:engine-ready', id: gone, rebind: true }).catch(() => undefined)
     onClose()
   }
 

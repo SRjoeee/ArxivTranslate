@@ -233,9 +233,10 @@ function serviceItems(config: Config, pack: PackState | null): MenuItem[] {
   return [
     { id: 'microsoft', name: S.service.microsoft, hint: microsoftOk ? S.service.free : S.service.microsoft_unsupported, selected: config.provider === 'microsoft', disabled: !microsoftOk },
     { id: 'google-web', name: S.service.google, hint: S.service.free, selected: config.provider === 'google-web' },
-    chrome(),
-    // The reader's own, in the order the settings page lists them, then the way to that page
+    // The reader's own sit where the contract puts the LLM: after the two free services and before
+    // Chrome (UI.md S-P-46). Then the way to the page where they are managed
     ...config.services.map(s => ({ id: s.id, name: s.name, hint: serviceRuns(s) ? s.model : S.service.llm_noKey, selected: config.provider === s.id })),
+    chrome(),
     { id: MANAGE_SERVICES, name: S.service.manage, selected: false },
   ]
 }

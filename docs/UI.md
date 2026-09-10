@@ -65,7 +65,7 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 
 | 编号 | 位置 / 何时 | 文案 | 备注 |
 |---|---|---|---|
-| S-P-01 | 品牌行 | Readarxiv | [定] 2026-09-10 更名；商店名、扩展 `name`、网站 readarxiv.org 同步 |
+| S-P-01 | 品牌行 | Readarxiv | [定] 2026-09-10 更名；扩展 manifest `name` 已同步，商店名与 readarxiv.org 待办 |
 | S-P-02 | 品牌行齿轮 `aria-label`；每条说明旁的按钮 | 设置 | The one button of every note; opens the options page |
 | S-P-03 | 非 arXiv 页 / 页面加载中（P0） | 打开 arXiv 论文的 HTML 页面后即可翻译 | Same sentence for both cases; never "后台未响应" |
 | S-P-10 | 服务行标签 | 翻译服务 | The row opens the service menu (S-P-40…46) under itself |

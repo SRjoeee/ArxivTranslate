@@ -103,7 +103,11 @@ export default defineContentScript({
     let running: NonNullable<PageStatus['running']> | null = null
     /** The session's start-time inputs, for the parts a settings change can restart on their own (images) */
     let current: { session: string; config: Config; context: Parameters<typeof startTranslation>[0]['context']; renderPath: RenderPath } | null = null
-    /** The service a permanent hand-over already restarted the page for; one restart per hand-over */
+    /**
+     * The service a permanent hand-over already restarted this session for; one restart per
+     * hand-over. **Reset by every `start()`**: kept across sessions it would suppress the restart
+     * a later service needs, when that one hands over to the same engine (Codex on #157)
+     */
     let restartedFor: string | null = null
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
     let progress: Progress = idle()
@@ -163,6 +167,7 @@ export default defineContentScript({
       if (config.reading.sentenceHighlight) highlight = startSentenceHighlight(document) ?? null
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
+      restartedFor = null
       const startEngine = status.engine.id
       running = { provider: config.provider, target: config.targetLanguage, engine: startEngine }
       current = { session, config, context, renderPath: status.renderPath }
