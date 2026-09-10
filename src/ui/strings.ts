@@ -202,10 +202,10 @@ export function serviceName(id: string, services: readonly { id: string; name: s
 
 /**
  * The helper's one-line install for this extension (helper/install-remote.sh, documented in
- * helper/README.md). The ref names the branch the script and the sources are fetched from: the
- * Phase 1 integration branch until it merges, then `main` — one constant to change
+ * helper/README.md). The ref names the branch the script and the sources are fetched from; it is
+ * `main` once this work is there, and a branch name while a change to the helper is under review
  */
-const HELPER_REF = 'ui/phase-1'
+const HELPER_REF = 'main'
 export const HELPER_GUIDE_URL = `https://github.com/SRjoeee/ArxivTranslate/blob/${HELPER_REF}/helper/README.md`
 export function helperInstallCommand(extensionId: string): string {
   return `curl -fsSL https://raw.githubusercontent.com/SRjoeee/ArxivTranslate/${HELPER_REF}/helper/install-remote.sh | bash -s -- ${extensionId} ${HELPER_REF}`
