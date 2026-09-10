@@ -37,20 +37,20 @@ describe('localizeNotes', () => {
     expect(placed.getAttributeNames().some(n => n.startsWith('data-axt-'))).toBe(false)
   })
 
-  it('副本自己的原文收进 .axt-note-s，标号留在外面：only 模式才藏得住它（用户 2026-09-10 反馈）', () => {
-    // 副本是占位符回填出来的克隆，没有块标记，[data-axt-state="translated"] 的隐藏规则碰不到它；
-    // 裸文本节点没法用 CSS 藏，所以先收进一层壳
+  it('gathers the copy\'s own original into .axt-note-s with the marks outside, so only mode can hide it (reported 2026-09-10)', () => {
+    // The copy is a clone from a placeholder with no block mark, so the [data-axt-state="translated"]
+    // rule never reaches it; bare text nodes cannot be hidden by CSS, hence the wrapper
     const doc = withNote()
     localizeNotes(doc)
     const c = copy(doc)
     const wrapper = c.querySelector(':scope > .axt-note-s')!
     expect(wrapper).not.toBeNull()
     expect(wrapper.textContent).toBe('English note')
-    // 标号仍是副本的直接子节点，译文接在壳后面
+    // The marks remain direct children of the copy; the translation follows the wrapper
     expect(c.querySelector(':scope > .ltx_note_mark')).not.toBeNull()
     expect(wrapper.querySelector('.ltx_note_mark')).toBeNull()
     expect(c.lastElementChild!.classList.contains('axt-note-t')).toBe(true)
-    // 幂等：再跑一遍不会套第二层
+    // Idempotent: a second run adds no second wrapper
     localizeNotes(doc)
     expect(c.querySelectorAll('.axt-note-s')).toHaveLength(1)
     // 放进去的译文里，标号藏着而不是删掉（镜像句子登记要两棵树同构），所以 textContent 里有第二个 1
@@ -58,7 +58,7 @@ describe('localizeNotes', () => {
     expect(c.textContent).toBe('1English note1中文脚注')
   })
 
-  it('译文还没到时不包原文：样式只藏「有译文相伴」的原文，副本里的内容一个字不丢', () => {
+  it('does not wrap before the translation arrives: the stylesheet hides an original only beside a translation, so nothing is lost', () => {
     const doc = withNote(false)
     localizeNotes(doc)
     expect(copy(doc).querySelector('.axt-note-s')).toBeNull()

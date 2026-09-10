@@ -27,10 +27,12 @@ const LOCALIZED_ATTR = 'data-axt-note'
 /** 复制进副本的译文换上的 class：脱掉 ar5iv 的脚注框外壳（见下） */
 export const NOTE_T_CLASS = 'axt-note-t'
 /**
- * 副本里**自己那份原文**的包裹：副本是占位符回填出来的克隆，没有块标记，only 模式的隐藏规则
- * （`[data-axt-state="translated"]`）碰不到它，于是仅译文下边注里英文照样露着（用户 2026-09-10 在
- * 2609.09360v1 上反馈）。裸文本节点没法用 CSS 藏，所以把标号之外的原文节点收进这一层，样式表按模式藏它；
- * 只在译文确实复制进来时才藏（`:has(> .axt-note-t)`），没跑到的副本仍是原文，不丢内容
+ * The wrapper around the copy's **own original text**. The copy is a clone rebuilt from the
+ * placeholder and carries no block mark, so only mode's hiding rule (`[data-axt-state="translated"]`)
+ * never reaches it and the margin note kept showing its English (reported on 2609.09360v1,
+ * 2026-09-10). Bare text nodes cannot be hidden by CSS, so the original's nodes — everything but
+ * the marks — go into this span and the stylesheet hides it per mode; only next to a translation
+ * that actually arrived (`:has(> .axt-note-t)`), so a copy without one keeps showing its text.
  */
 export const NOTE_S_CLASS = 'axt-note-s'
 
@@ -152,8 +154,9 @@ export function localizeNotes(root: Document | Element): number {
       const existing = copy.querySelector(`:scope > .${NOTE_T_CLASS}`)
       if (existing?.textContent === fresh.textContent) return // 已归位且内容没变
       existing?.remove()
-      // 副本保留自己的原文，译文接在后面：一份边注里英文在上、中文在下。原文先收进一层壳，
-      // only 模式才藏得住它（标号留在壳外，边注的编号在所有模式下都要可见）
+      // The copy keeps its own original with the translation appended: one margin note, English
+      // above, Chinese below. The original goes into a wrapper first, which is what only mode can
+      // hide (the marks stay outside: the note's number must show in every mode)
       const wrapper = wrapSource(copy)
       copy.append(fresh)
       // The copy is what is on screen: its sentence registration comes along, so pointing at the
