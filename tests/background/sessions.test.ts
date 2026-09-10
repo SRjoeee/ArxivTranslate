@@ -304,6 +304,32 @@ describe('createSessionRouter', () => {
     expect(second.cancelled).toEqual(['新链:session-1'])
   })
 
+  it('dropAndRebindAll 先撤掉旧链上的活再迁：删掉的服务不能继续用它的 key 发请求', async () => {
+    const first = fakeTransport('旧链')
+    const second = fakeTransport('新链')
+    let current = first
+    const router = createSessionRouter(async () => current)
+    await router.forCall('session-1', 1)
+    await router.forCall('session-2', 2)
+    current = second
+    // 只换指针的话，排着的与在飞的请求还在旧链上跑，用的是那个已被删掉的服务的 key（Codex 在 #157 指出）
+    await router.dropAndRebindAll(second)
+    // `soft` = remember: false — the scope keeps living on the new chain, only the old chain's work goes
+    expect(first.cancelled).toEqual(['旧链:session-1:soft', '旧链:session-2:soft'])
+    expect(nameOf(await router.forCall('session-1', 1))).toBe('新链')
+    // 会话没被判死：它继续活在新链上，只是旧链上的活被清空了
+    expect(router.bound()).toEqual(['session-1', 'session-2'])
+  })
+
+  it('transportFor 只读地取出会话自己那条链，不会顺手绑一个新的', async () => {
+    const t = fakeTransport('链')
+    const router = createSessionRouter(async () => t)
+    await router.forCall('session-1', 1)
+    expect(nameOf(router.transportFor('session-1')!)).toBe('链')
+    expect(router.transportFor('从没有过的')).toBeUndefined()
+    expect(router.bound()).toEqual(['session-1'])
+  })
+
   it('不同标签页的同名 scope 互不影响（会话 id 本来就唯一，这条是护栏）', async () => {
     const t = fakeTransport('链')
     const router = createSessionRouter(async () => t)

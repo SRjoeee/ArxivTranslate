@@ -54,7 +54,8 @@ export interface TranslationTransport {
   translate(call: TranslateCall): Promise<TranslateMessageResponse>
   /** 撤掉该 scope 排队与在飞的请求，返回撤掉的条数。`remember: false` 只排空、不判死（见 `CancelOptions`） */
   cancel(scope: string, options?: CancelOptions): Promise<number>
-  status(): Promise<ProviderStatus>
+  /** `scope` asks about that session's own chain rather than the current global one (§8.5) */
+  status(scope?: string): Promise<ProviderStatus>
 }
 
 export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' | 'batch' | 'cacheReadBudgetMs'> {

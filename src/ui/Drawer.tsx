@@ -2,6 +2,8 @@
 // on the backdrop close it; the panel itself is a dialog for assistive technology.
 import { type ReactNode, useEffect, useRef } from 'react'
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 export function Drawer({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   const panel = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -16,18 +18,24 @@ export function Drawer({ title, onClose, children, footer }: { title: string; on
    */
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null
-    panel.current?.focus()
+    // The **first control**, not the panel: from the panel itself Shift+Tab matches neither wrap
+    // below and walks out to what the backdrop covers (Codex on #157)
+    const first = panel.current?.querySelector<HTMLElement>(FOCUSABLE)
+    ;(first ?? panel.current)?.focus()
     return () => opener?.focus?.()
   }, [])
   /** Tab stays inside while it is open: the first and last focusable elements wrap onto each other */
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== 'Tab' || !panel.current) return
-    const focusable = panel.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')
+    const focusable = panel.current.querySelectorAll<HTMLElement>(FOCUSABLE)
     const first = focusable[0]
     const last = focusable[focusable.length - 1]
     if (!first || !last) return
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+    const here = document.activeElement
+    // The panel counts as "before the first": it is where focus lands when a drawer has no controls
+    // to hold it, and Shift+Tab from there must wrap to the end rather than leave
+    if (e.shiftKey && (here === first || here === panel.current)) { e.preventDefault(); last.focus() }
+    else if (!e.shiftKey && here === last) { e.preventDefault(); first.focus() }
   }
   return (
     <div className="fixed inset-0 z-20 flex justify-end">

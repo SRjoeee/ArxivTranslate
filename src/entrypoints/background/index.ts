@@ -149,7 +149,8 @@ export default defineBackground(() => {
           .then(cancelled => sendResponse({ cancelled }))
         return true
       case 'axt:provider-status':
-        transportOf()
+        // A page asking about its own session gets its own chain; everyone else gets the current one
+        Promise.resolve((message.scope && router.transportFor(message.scope)) || transportOf())
           .then(t => t.status())
           .then(sendResponse)
           .catch((e: unknown) => console.error('[axt] provider-status 失败', e))
@@ -162,7 +163,9 @@ export default defineBackground(() => {
         // 其余只重建链，正在翻的页面保留它开始时的那条。被动的配置变更一律不迁（见 sessions.ts）
         activate()
           .then(async a => {
-            if (message.rebindAll) router.rebindAll(a.transport)
+            // Cancelling first is what makes a deleted service stop: re-pointing alone leaves its
+            // queued and in-flight work running on the transport being replaced (Codex on #157)
+            if (message.rebindAll) await router.dropAndRebindAll(a.transport)
             else if (message.scope) router.rebind(message.scope, a.transport)
             return a.transport.status()
           })

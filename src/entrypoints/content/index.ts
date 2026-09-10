@@ -206,10 +206,12 @@ export default defineContentScript({
           // screen from one service and the rest from another. Start over on the service that is
           // actually available, so the whole page reads from one hand (UI.md, decided 2026-09-10).
           // Temporary hand-overs (rate limits, timeouts) keep going: they come back on their own
-          void backend.status().then(s => {
+          void backend.status(session).then(s => {
             if (getSessionId() !== session) return
-            // Ask about **this session's own engine**: the most recent hand-over may belong to some
-            // intermediate free engine that failed transiently (Codex on #157)
+            // Ask **this session's own chain** about **this session's own engine**: the page keeps
+            // the chain it started on while another tab changes the settings, and the most recent
+            // hand-over may belong to some intermediate free engine that failed transiently
+            // (Codex on #157)
             const kind = s.demotions.find(d => d.id === startEngine)?.kind
             if (kind !== 'no-key' && kind !== 'auth') return
             restarted = true

@@ -55,8 +55,15 @@ export interface AxtMessages {
   'axt:translate': { request: TranslateCall; response: TranslateMessageResponse }
   /** content → background：撤掉一次会话排队与在飞的请求（恢复原文、重开） */
   'axt:cancel-scope': { request: { scope: string }; response: { cancelled: number } }
-  /** popup / options / content → background：引擎链的能力与实时状态 */
-  'axt:provider-status': { request: Record<never, never>; response: ProviderStatus }
+  /**
+   * popup / options / content → background: what the chain can do and how it is doing.
+   *
+   * `scope` asks about **that session's own chain**. A page keeps the chain it started on while
+   * another tab changes the settings (see sessions.ts), so answering it from the current global
+   * chain would describe someone else's (Codex on #157). Without it the answer is the global one,
+   * which is what the popup and the settings page want
+   */
+  'axt:provider-status': { request: { scope?: string }; response: ProviderStatus }
   /** 清空缓存，或只清某篇论文 */
   'axt:cache-clear': { request: { paper?: string }; response: { ok: true; removed: number } | { ok: false; message: string } }
   'axt:cache-stats': { request: Record<never, never>; response: { ok: true; entries: number; bytes: number } | { ok: false; message: string } }
