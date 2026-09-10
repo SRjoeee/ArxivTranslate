@@ -99,6 +99,7 @@ const S = {
     sessionOver: '这次翻译已经停止',
     notPaper: '不是 arXiv HTML 页面',
     nothingToTranslate: '这一页没有可翻译的内容',
+    abstractLink: (brand: string) => `双语版本（${brand}）`, // 摘要页的入口（issue #146）
     noService: '未配置 API key，请先到设置页填写',
   },
 } as const
@@ -167,6 +168,8 @@ const O = {
     advanced: '高级',
     advancedHint: '只填声明，不写选择器和花括号；字体与字号仍随论文',
     duplicate: '复制一份',
+    /** 复制出来的那份叫什么：显示名 + 这个后缀（config/appearance.ts 的 duplicateStyle） */
+    copySuffix: '副本',
     delete: '删除',
     done: '完成',
     preloadRange: '提前翻译的范围',

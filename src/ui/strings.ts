@@ -10,11 +10,21 @@
 // The pack is chosen once, before anything renders (`applyLocale`), so nothing on screen is ever
 // half translated.
 import { BUILT_IN_HIGHLIGHTS, BUILT_IN_STYLES } from '@/config/appearance'
-import { type LangCode, label } from '@/config/languages'
-import { FALLBACK_LOCALE, LOCALES, LOCALE_LANGUAGE_NAMES, type Locale, type LocaleCode } from '@/locales'
+import { LANG_CODE_TO_EN_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
+import { FALLBACK_LOCALE, LOCALES, type Locale, type LocaleCode } from '@/locales'
 import type { ProviderErrorKind } from '@/providers/types'
 
 export { PREVIEW_SOURCE, PREVIEW_TARGET } from '@/locales/preview'
+
+/**
+ * Which set of language names each interface language uses for the target-language menu. A pack
+ * does not carry its own copy of 179 language names — adding a language must stay one small file —
+ * so it points at a table instead, and a language without one reads them in English
+ */
+export const LOCALE_LANGUAGE_NAMES: Record<LocaleCode, Partial<Record<LangCode, string>>> = {
+  'zh-CN': LANG_CODE_TO_ZH_NAME,
+  en: LANG_CODE_TO_EN_NAME,
+}
 
 let currentCode: LocaleCode = FALLBACK_LOCALE
 let current: Locale = LOCALES[FALLBACK_LOCALE]
@@ -51,6 +61,11 @@ export function languageName(code: LangCode): string {
  * interface's language; a profile the reader added, or a shipped one they **renamed**, keeps the
  * name they gave it — which is what "the stored name is still the one it shipped with" tests for
  */
+/** What a duplicate is called: the name as displayed, plus the pack's suffix (clipped by the schema) */
+export function copyName(profile: { id: string; name: string }, kind: 'styles' | 'highlights' = 'styles'): string {
+  return `${profileName(profile, kind)} ${O.reading.copySuffix}`
+}
+
 export function profileName(profile: { id: string; name: string }, kind: 'styles' | 'highlights' = 'styles'): string {
   const shipped = kind === 'styles' ? BUILT_IN_STYLES : BUILT_IN_HIGHLIGHTS
   const original = shipped.find(p => p.id === profile.id)

@@ -50,6 +50,14 @@ describe('locale packs', () => {
     }
   })
 
+  it('摘要页那条链接每种语言都带上当前的产品名：旧名字曾经写死在那个入口里（Codex 在 #161 指出）', () => {
+    for (const code of LOCALE_CODES) {
+      const { S } = LOCALES[code]
+      expect(S.page.abstractLink(S.brand), code).toContain(S.brand)
+      expect(S.page.abstractLink(S.brand), code).not.toMatch(/ArxivTranslate/)
+    }
+  })
+
   it('pickLocale：读者选定的优先，其次浏览器的精确码，再次同语言，最后英文', () => {
     expect(pickLocale('zh-CN', ['en'])).toBe('zh-CN')
     expect(pickLocale('auto', ['zh-CN', 'en'])).toBe('zh-CN')

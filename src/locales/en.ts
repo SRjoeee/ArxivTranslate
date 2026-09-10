@@ -96,6 +96,7 @@ const S: Locale['S'] = {
     sessionOver: 'That translation has ended',
     notPaper: 'Not an arXiv HTML page',
     nothingToTranslate: 'Nothing on this page to translate',
+    abstractLink: brand => `Bilingual version (${brand})`,
     noService: 'No API key yet. Add one in the settings',
   },
 }
@@ -163,6 +164,7 @@ const O: Locale['O'] = {
     advanced: 'Advanced',
     advancedHint: 'Declarations only, no selectors and no braces; the typeface and size still follow the paper',
     duplicate: 'Duplicate',
+    copySuffix: 'copy',
     delete: 'Delete',
     done: 'Done',
     preloadRange: 'How far ahead to translate',

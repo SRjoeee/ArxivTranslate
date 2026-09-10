@@ -10,7 +10,7 @@ import {
   applyStyle,
   clearPairMargins, createModeController, createPrep, installAnchorFallback,
   clearImageEverywhere, restore, setImageModes, startSentenceHighlight,
-  type Mode, type ModeController, type SentenceHighlight,
+  type Mode, type ModeController, type SentenceHighlight, relabelFailed,
 } from '@/core/renderer'
 import { escapeText, unescapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
@@ -95,7 +95,9 @@ export default defineContentScript({
         setImageModes(document, [])
         if (config.image.enabled) startImages(current.session, config, current.context, current.renderPath)
       }
+      // 语言变了：已经画出来的失败控件把词抄进了自己的 shadow root，要重新写一遍（Codex 在 #161 指出）
       applyLocaleFrom(config.uiLanguage)
+      relabelFailed(document)
       const next = lookOf(config)
       if (JSON.stringify(next) === JSON.stringify(look)) return
       look = next

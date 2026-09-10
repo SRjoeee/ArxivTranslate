@@ -12,7 +12,7 @@ import { bandTile, styleTile } from '@/ui/appearance/tiles'
 import { Row } from '@/ui/Field'
 import { Segmented } from '@/ui/Segmented'
 import { Switch } from '@/ui/Switch'
-import { O, S } from '@/ui/strings'
+import { O, copyName, S } from '@/ui/strings'
 import type { OptionsData } from '../data'
 
 /** The preload margin as screens rather than pixels: a number of pixels means nothing to a reader */
@@ -115,7 +115,7 @@ export function Reading({ data }: { data: OptionsData }) {
           highlight={highlight}
           onChange={next => setAppearance(c => ({ ...c, styles: c.styles.map(s => (s.id === next.id ? next : s)) }))}
           onDuplicate={() => {
-            const copy = duplicateStyle(editingStyle)
+            const copy = duplicateStyle(editingStyle, copyName(editingStyle, 'styles'))
             setAppearance(c => ({ ...c, styles: [...c.styles, copy], activeStyle: copy.id }))
             setEditing({ list: 'style', id: copy.id })
           }}
@@ -129,7 +129,7 @@ export function Reading({ data }: { data: OptionsData }) {
           style={style}
           onChange={next => setAppearance(c => ({ ...c, highlights: c.highlights.map(h => (h.id === next.id ? next : h)) }))}
           onDuplicate={() => {
-            const copy = duplicateHighlight(editingBand)
+            const copy = duplicateHighlight(editingBand, copyName(editingBand, 'highlights'))
             setAppearance(c => ({ ...c, highlights: [...c.highlights, copy], activeHighlight: copy.id }))
             setEditing({ list: 'highlight', id: copy.id })
           }}

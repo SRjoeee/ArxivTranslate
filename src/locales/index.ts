@@ -7,7 +7,6 @@
 // this table. English is the fallback — not because the readers are English speakers (a reader of
 // English needs no translator on arXiv) but because it is the one language a paper-reading audience
 // can be assumed to get by in when their own is not here yet.
-import { LANG_CODE_TO_EN_NAME, LANG_CODE_TO_ZH_NAME, type LangCode } from '@/config/languages'
 import { en } from './en'
 import { zh } from './zh-CN'
 
@@ -34,16 +33,6 @@ export const LOCALES = {
 export const LOCALE_NAMES: Record<LocaleCode, string> = {
   'zh-CN': '简体中文',
   en: 'English',
-}
-
-/**
- * Which set of language names each interface language uses for the target-language menu. A pack
- * does not carry its own copy of 179 language names — adding a language must stay one small file —
- * so it points at a table instead, and a language without one reads them in English
- */
-export const LOCALE_LANGUAGE_NAMES: Record<LocaleCode, Partial<Record<LangCode, string>>> = {
-  'zh-CN': LANG_CODE_TO_ZH_NAME,
-  en: LANG_CODE_TO_EN_NAME,
 }
 
 export const FALLBACK_LOCALE: LocaleCode = 'en'

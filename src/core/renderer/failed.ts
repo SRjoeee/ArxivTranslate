@@ -60,3 +60,17 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
   block.el.after(host)
   return host
 }
+
+/**
+ * Re-label the widgets already on the page. A widget copies the word into its shadow root when it
+ * is built, so a page holding failed blocks would keep the previous language until those blocks were
+ * retried (Codex on #161). Called when the interface's language changes under an open paper
+ */
+export function relabelFailed(doc: Document): number {
+  const buttons = doc.querySelectorAll<HTMLElement>(`.${ERROR_CLASS}`)
+  for (const host of buttons) {
+    const button = (host as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot?.querySelector('button')
+    if (button) button.textContent = S.page.retry
+  }
+  return buttons.length
+}
