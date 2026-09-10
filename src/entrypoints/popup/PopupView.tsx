@@ -9,16 +9,18 @@ import { BrandMark } from '@/ui/BrandMark'
 import { Button } from '@/ui/Button'
 import { Menu } from '@/ui/Menu'
 import { Segmented } from '@/ui/Segmented'
-import { S } from '@/ui/strings'
+import { MODE_ORDER, S } from '@/ui/strings'
 import { Switch } from '@/ui/Switch'
 import type { PopupActions } from './data'
 import type { MenuKind, PopupView as View } from './view-model'
 
-const MODES: { value: Mode; label: string; title: string; icon: ReactNode }[] = [
-  { value: 'stack', label: S.mode.stack, title: S.mode.stackTitle, icon: <StackIcon /> },
-  { value: 'side', label: S.mode.side, title: S.mode.sideTitle, icon: <SideIcon /> },
-  { value: 'only', label: S.mode.only, title: S.mode.onlyTitle, icon: <OnlyIcon /> },
-]
+const MODE_PARTS: Record<Mode, { label: string; title: string; icon: ReactNode }> = {
+  side: { label: S.mode.side, title: S.mode.sideTitle, icon: <SideIcon /> },
+  stack: { label: S.mode.stack, title: S.mode.stackTitle, icon: <StackIcon /> },
+  only: { label: S.mode.only, title: S.mode.onlyTitle, icon: <OnlyIcon /> },
+}
+// The bar follows MODE_ORDER, the one place the order is decided (UI.md S-P-70)
+const MODES = MODE_ORDER.map(value => ({ value, ...MODE_PARTS[value] }))
 
 const CARD = 'rounded-card bg-card shadow-[0_1px_2px_rgba(30,30,36,0.06)]'
 

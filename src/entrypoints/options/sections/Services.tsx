@@ -9,7 +9,7 @@ import { Button } from '@/ui/Button'
 import { MenuField } from '@/ui/MenuField'
 import { Row } from '@/ui/Field'
 import { Switch } from '@/ui/Switch'
-import { HELPER_GUIDE_URL, O, S, helperInstallCommand } from '@/ui/strings'
+import { HELPER_GUIDE_URL, MODE_ORDER, O, S, helperInstallCommand } from '@/ui/strings'
 import type { OptionsData } from '../data'
 import { ServiceDrawer } from './ServiceDrawer'
 
@@ -130,7 +130,7 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
         <fieldset className="border-0 border-t border-line p-0 py-3">
           <legend className="p-0 text-[12px] font-semibold text-fg-2">在这些模式下显示图片译文</legend>
           <span className="mt-2 flex gap-4">
-            {MODE_VALUES.map(mode => (
+            {MODE_ORDER.map(mode => (
               <label key={mode} className="flex cursor-pointer items-center gap-1.5 text-[12px]">
                 <input
                   type="checkbox"
