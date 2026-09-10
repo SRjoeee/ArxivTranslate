@@ -210,6 +210,11 @@ const O = {
       systemPrompt: 'System prompt（收发协议会自动追加在它后面，改不掉）',
       userPrompt: '用户提示词',
       insert: '插入变量：',
+      /** 随扩展一起发的两份提示词的说明，按 id 取（`BUILT_IN_PROMPT_DESCRIPTIONS` 的位置） */
+      builtIn: {
+        default: '通用学术翻译：术语用既定译法，人名、期刊名、代码与链接保留原文',
+        'precision-rewrite': '"翻译即改写"：摆脱原文句法、消除翻译腔，按目标语言的表达习惯重写，术语与格式照旧',
+      },
       tokens: {
         targetLanguage: '目标语言的英文名',
         input: '待翻译的 JSON 段落（用户消息里必须有）',

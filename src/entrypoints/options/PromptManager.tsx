@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { downloadPromptFile, readPromptFile } from '@/providers/prompt-file'
 import {
-  BUILT_IN_PROMPTS, BUILT_IN_PROMPT_DESCRIPTIONS, DEFAULT_PROMPT_ID, PROMPT_TOKENS, getTokenCellText,
+  BUILT_IN_PROMPTS, DEFAULT_PROMPT_ID, PROMPT_TOKENS, getTokenCellText,
   type PromptTemplate, type PromptsConfig,
 } from '@/providers/prompt-library'
 import { getRandomUUID as uuid } from '@/shared/uuid'
@@ -18,6 +18,8 @@ type Field = 'systemPrompt' | 'prompt'
 
 /** Read at render, not at import: this module is evaluated before the pack is chosen (ui/strings.ts) */
 const tokenHint = (token: (typeof PROMPT_TOKENS)[number]): string => O.prompts.manager.tokens[token]
+/** The shipped prompts' one-line descriptions, in the interface's language (Codex on #161) */
+const builtInDescription = (id: string): string => (O.prompts.manager.builtIn as Record<string, string>)[id] ?? ''
 
 /** 新建提示词的起点：点名目标语言并带上原文，只填名称也能用（Codex 在 #39 指出只有 {{input}} 的模板不知道译成哪种语言） */
 const NEW_SYSTEM_PROMPT = `You are a professional ${getTokenCellText('targetLanguage')} translator of academic papers.`
@@ -110,7 +112,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
             <input type="radio" name="axt-prompt" checked={value.promptId === template.id} onChange={() => select(template.id)} />
             <span>
               {template.name}
-              <small style={small}>{BUILT_IN_PROMPT_DESCRIPTIONS[template.id]}</small>
+              <small style={small}>{builtInDescription(template.id)}</small>
             </span>
           </label>
           <button type="button" style={button} onClick={() => open('view', template)}>{O.prompts.manager.view}</button>

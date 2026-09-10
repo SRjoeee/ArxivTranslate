@@ -24,6 +24,9 @@ export function MenuField({ label, value, items, search, searchPlaceholder, empt
       {open && (
         <Menu
           anchor={anchor}
+          // The settings page is an ordinary tab: a menu that hugs its list is right there, and
+          // three rows must not open a panel to the foot of the window (Codex on #161)
+          hug={compact}
           items={items}
           label={label}
           search={search}

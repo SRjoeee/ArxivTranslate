@@ -31,7 +31,11 @@ function declarations(css: string): CSSProperties {
     const at = part.indexOf(':')
     if (at < 0) continue
     const name = part.slice(0, at).trim()
-    const value = part.slice(at + 1).trim()
+    // `color: red !important` is legal here — the sanitiser only refuses braces, at-rules and `<` —
+    // and the injected sheet honours it. CSSOM refuses a priority inside a property value, so the
+    // sample would silently lose the declaration; drop the priority and keep the declaration
+    // (Codex on #161). A preview has nothing to lose a specificity war with
+    const value = part.slice(at + 1).replace(/!\s*important\s*$/i, '').trim()
     if (!name || !value) continue
     out[name.startsWith('--') ? name : name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())] = value
   }

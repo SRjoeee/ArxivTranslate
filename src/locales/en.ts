@@ -203,6 +203,10 @@ const O: Locale['O'] = {
       systemPrompt: 'System prompt (the wire format is appended to it and cannot be changed)',
       userPrompt: 'User prompt',
       insert: 'Insert a variable:',
+      builtIn: {
+        default: 'General academic translation: settled terms, and names, journals, code and links left as they are',
+        'precision-rewrite': 'Translation as rewriting: leaves the source syntax behind and writes the sentence the way the target language would, with terms and formatting unchanged',
+      },
       tokens: {
         targetLanguage: "The target language's English name",
         input: 'The JSON passages to translate (the user message must carry this)',

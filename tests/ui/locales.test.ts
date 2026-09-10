@@ -92,5 +92,9 @@ describe('style previews', () => {
     expect(styleTile({ id: 'v', name: 'v', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: '--x: 3px' })).toMatchObject({ '--x': '3px' })
     // 后写的赢，与页面里注入表的顺序一致
     expect(styleTile({ id: 'o', name: 'o', color: 'red', opacity: 1, underline: 'none', thickness: 1, blur: false, css: 'color: blue' }).color).toBe('blue')
+    // `!important` 过得了净化器、页面也认，但 CSSOM 不接受写在值里的优先级：
+    // 去掉优先级、留下声明，否则预览会把这条悄悄丢了（Codex 在 #161 指出）
+    expect(styleTile({ id: 'i', name: 'i', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: 'color: red !important' }).color).toBe('red')
+    expect(styleTile({ id: 'i2', name: 'i2', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: 'font-weight: 700 ! IMPORTANT' })).toMatchObject({ fontWeight: '700' })
   })
 })

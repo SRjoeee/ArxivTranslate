@@ -31,10 +31,19 @@ const MARGIN = 8
  * (the reader reported exactly that on the appearance row, 2026-09-11)
  */
 const MIN_BELOW = 180
+/** A hugging menu is at least this wide, whatever its row measures */
+const HUG_MIN_WIDTH = 180
 
-export function Menu({ anchor, trigger, items, label, search, searchPlaceholder, empty, onSelect, onAction, onClose }: {
+export function Menu({ anchor, trigger, hug = false, items, label, search, searchPlaceholder, empty, onSelect, onAction, onClose }: {
   /** The element the menu is measured against: its width, and the edge it opens from */
   anchor: RefObject<HTMLElement | null>
+  /**
+   * Hug the list instead of filling the room below the row. For a page that is a page — the settings
+   * page's own menus — where nothing resizes to fit it. The popup's menus keep the full-height
+   * layout: its window **does** size to the document, and a menu that grew the window was the
+   * defect that put this component on fixed positioning in the first place (Codex on #161)
+   */
+  hug?: boolean
   /**
    * The control that opened it, if that is not the anchor itself. Clicks on it are not "outside",
    * so pressing it again closes rather than reopens; a click anywhere else in the anchor — the two
@@ -54,7 +63,7 @@ export function Menu({ anchor, trigger, items, label, search, searchPlaceholder,
   const root = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   /** `up` carries a max height instead of a top edge: the panel then hugs the row it grew from */
-  const [box, setBox] = useState<{ left: number; width: number; top?: number; bottom: number; maxHeight?: number } | null>(null)
+  const [box, setBox] = useState<{ left: number; width: number; top?: number; bottom?: number; maxHeight?: number } | null>(null)
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return items
@@ -72,15 +81,21 @@ export function Menu({ anchor, trigger, items, label, search, searchPlaceholder,
     const r = el.getBoundingClientRect()
     let frame: HTMLElement | null = el.parentElement
     while (frame && getComputedStyle(frame).transform === 'none') frame = frame.parentElement
-    const f = frame?.getBoundingClientRect() ?? { top: 0, left: 0, height: window.innerHeight }
+    const f = frame?.getBoundingClientRect() ?? { top: 0, left: 0, height: window.innerHeight, width: window.innerWidth }
     const top = r.top - f.top
     const bottom = r.bottom - f.top
     const below = f.height - bottom
-    const common = { left: r.left - f.left, width: r.width }
+    // A hugging menu is as wide as its row **or** wide enough to read, whichever is more: the
+    // settings sidebar is 140px and "Follow the browser" has to fit. It is kept inside the frame
+    const width = hug ? Math.max(r.width, HUG_MIN_WIDTH) : r.width
+    const left = Math.max(MARGIN, Math.min(r.left - f.left, (f.width ?? width) - width - MARGIN))
+    const common = { left, width }
     setBox(below < MIN_BELOW && top > below
       ? { ...common, bottom: f.height - top + GAP, maxHeight: Math.max(0, top - GAP - MARGIN) }
-      : { ...common, top: bottom + GAP, bottom: MARGIN })
-  }, [anchor])
+      : hug
+        ? { ...common, top: bottom + GAP, maxHeight: Math.max(0, below - GAP - MARGIN) }
+        : { ...common, top: bottom + GAP, bottom: MARGIN })
+  }, [anchor, hug])
 
   useEffect(() => {
     const onDown = (e: PointerEvent) => {

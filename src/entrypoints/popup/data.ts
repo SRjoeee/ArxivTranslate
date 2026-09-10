@@ -205,7 +205,12 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
     // The page's config watcher redraws the translations in the new style; no session restarts
     chooseStyle: id => void guard(async () => {
       setMenu(null)
-      await patchConfig(latest => ({ ...latest, appearance: { ...latest.appearance, activeStyle: id } }))
+      // Same as the service menu: this list may have been built before another tab deleted the
+      // profile, and a dangling id leaves every profile unmarked while the page reads the first
+      // one (Codex on #161)
+      await patchConfig(latest => (
+        latest.appearance.styles.some(p => p.id === id) ? { ...latest, appearance: { ...latest.appearance, activeStyle: id } } : latest
+      ))
     }),
     // Both switches are applied live by the page's own config watcher; nothing to send
     setHighlight: on => void guard(async () => {
