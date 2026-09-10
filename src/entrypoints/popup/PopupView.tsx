@@ -5,6 +5,7 @@
 import type { ReactNode } from 'react'
 import { useRef } from 'react'
 import type { Mode } from '@/core/renderer'
+import { BrandMark } from '@/ui/BrandMark'
 import { Button } from '@/ui/Button'
 import { Menu } from '@/ui/Menu'
 import { Segmented } from '@/ui/Segmented'
@@ -26,8 +27,7 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
     <main className="flex w-[320px] flex-col gap-3 bg-bg p-4 font-ui text-[13px] text-fg">
       <header className="flex items-center justify-between px-1">
         <div className="flex items-center gap-2">
-          {/* The brand mark: a glyph used as an icon, not copy — the only Chinese literal outside strings.ts */}
-          <span aria-hidden="true" className="flex size-[26px] items-center justify-center rounded-[8px] bg-accent text-[12px] font-bold text-white">译</span>
+          <BrandMark />
           <span className="text-[14px] font-bold">{S.brand}</span>
         </div>
         <button type="button" aria-label={S.settings} title={S.settings} onClick={actions.openOptions} className="cursor-pointer text-fg-2 hover:text-fg">

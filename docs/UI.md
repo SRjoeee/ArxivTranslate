@@ -65,7 +65,7 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 
 | 编号 | 位置 / 何时 | 文案 | 备注 |
 |---|---|---|---|
-| S-P-01 | 品牌行 | Readarxiv | [定] 2026-09-10 更名；扩展 manifest `name` 已同步，商店名与 readarxiv.org 待办 |
+| S-P-01 | 品牌行 | Readarxiv | [定] 2026-09-10 更名；扩展 manifest `name` 已同步，商店名与 readarxiv.org 待办。品牌标记见 §5.1 |
 | S-P-02 | 品牌行齿轮 `aria-label`；每条说明旁的按钮 | 设置 | The one button of every note; opens the options page |
 | S-P-03 | 非 arXiv 页 / 页面加载中（P0） | 打开 arXiv 论文的 HTML 页面后即可翻译 | Same sentence for both cases; never "后台未响应" |
 | S-P-10 | 服务行标签 | 翻译服务 | The row opens the service menu (S-P-40…46) under itself |
@@ -258,6 +258,23 @@ Rules:
 | `--axt-font` | system-ui, PingFang SC, Noto Sans SC | | 实装为 Tailwind 的 `--font-ui`（`@theme inline`）；先用系统字体栈，是否内置 Manrope 见 §8；页内组件不用，跟随论文 |
 
 深色值是从苹果系统灰起的初稿，实装时对着真 popup 调。页内组件的深色是否跟随 arXiv 页面自身的深色样式：[待验证]。
+
+### 5.1 The brand mark [定，2026-09-11]
+
+An open book: the left page dark grey with an `A`, the right page arXiv red with a `文`. One vector,
+`public/icon/logo.svg`, is the source for everything else.
+
+| Where | What | Who reads it |
+|---|---|---|
+| `public/icon/{16,32,48,96,128}.png` | rendered from the vector by `pnpm icons` | WXT fills the manifest's `icons` from the file names; Chrome uses them for the toolbar, the extensions page and the install dialog |
+| `public/icon/logo.svg` | the vector, shipped | the popup's brand row and the settings sidebar draw it through `src/ui/BrandMark.tsx`; the three extension pages point their `<link rel="icon">` at the 32 |
+| `docs/brand/store-icon-128.png` | 96 of artwork inset in a 128 canvas | uploaded by hand to the store listing, which wants the inset rather than a full-bleed icon. Never shipped inside the extension |
+
+The mark is decorative wherever it appears: the name sits beside it as text, so it carries `alt=""`.
+
+At 16 px the two glyphs lose their strokes. It is shipped at that size anyway: a retina toolbar picks
+the 32, the shape and the two colours still identify it, and one mark at every size beats two marks
+that differ. A simplified 16 is the fallback if it ever reads badly in the wild.
 
 ## 6. 需要改 DESIGN.md 的条目
 

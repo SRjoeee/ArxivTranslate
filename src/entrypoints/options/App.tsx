@@ -3,6 +3,7 @@
 // with one button (docs/UI.md §3.2, rebuilt 2026-09-10).
 import { useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
+import { BrandMark } from '@/ui/BrandMark'
 import { O } from '@/ui/strings'
 import { useOptionsData } from './data'
 import { Data } from './sections/Data'
@@ -27,7 +28,10 @@ export function App() {
     <div className="min-h-screen bg-bg font-ui text-[13px] text-fg">
       <div className="mx-auto flex max-w-[900px] gap-8 px-6 py-8">
         <nav aria-label={O.title} className="w-[140px] shrink-0">
-          <h1 className="mb-4 px-3 text-[15px] font-bold">{O.title}</h1>
+          <h1 className="mb-4 flex items-center gap-2 px-3 text-[15px] font-bold">
+            <BrandMark size={20} />
+            {O.title}
+          </h1>
           {SECTIONS.map(id => (
             <button
               key={id}
