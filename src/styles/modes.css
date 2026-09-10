@@ -385,8 +385,10 @@ html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer:has(
    (reported 2026-09-10): the translation's grid item was 1321px for 54px of text, leaving both
    columns 1300px blank. Zero height with visible overflow is ar5iv's own device for notes inside
    list items; the cost is that two adjacent long notes may overlap in the margin, which beats a
-   1300px blank row */
-html[data-axt-mode="side"] .ltx_note_outer {
+   1300px blank row. Body footnotes only: a frontmatter note with a translation is put back into
+   the article's flow as a two-column grid by the rules above, and must keep its height (Codex on
+   #154; `e2e:layout` checks that pairing) */
+html[data-axt-mode="side"] .ltx_note:not(.ltx_note_frontmatter) > .ltx_note_outer {
   height: 0;
   overflow: visible;
 }
