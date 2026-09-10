@@ -125,6 +125,13 @@ export function restoreLeadingLabel(fragment: DocumentFragment, spans: WireSpan[
   }
   // Something visible has to go in: a label whose translation vanished is not a label any more
   if (!wrapped.some(n => (n.nodeType === TEXT_NODE ? /\S/.test((n as Text).data) : true))) return false
+  // The label's placeholders must all be in front of the cut. A separator the engine put among a
+  // label's formulas — `Step 2: We next prove that Ξ…` cut after its first formula — passes the
+  // length bound, since the label itself is long; the placeholder count is what catches it
+  // (replay, 2026-09-10). Under markers every element at the fragment's top level is a placeholder
+  let inLabel = 0
+  for (const slot of block.slots.values()) if (label.el.contains(slot)) inLabel++
+  if (wrapped.filter(n => n.nodeType !== TEXT_NODE).length !== inLabel) return false
   const shell = cloneWithoutIds(doc, label.el, false) as Element
   fragment.insertBefore(shell, wrapped[0]!)
   for (const n of wrapped) shell.append(n)

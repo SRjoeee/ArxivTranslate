@@ -134,6 +134,19 @@ describe('leading label under markers (#150)', () => {
     expect(rehydrate('v1.2。变更。', version.block, document).querySelector('.ltx_font_bold')?.textContent).toBe('v1.2。')
   })
 
+  it('the prefix must carry every placeholder of the label', () => {
+    // The engine put the separator among the label's formulas: a cut after the first one would
+    // italicise a fragment of the statement
+    const { block } = markers('<p class="ltx_p"><span class="ltx_text ltx_font_italic">Let <math><mi>p</mi></math> and <math><mi>q</mi></math> be primes.</span> Then it holds.</p>')
+    expect(block.text).toBe('Let @a# and @b# be primes. Then it holds.')
+    const f = rehydrate('设@a#。且@b#为素数。那么成立。', block, document)
+    expect(f.querySelector('.ltx_font_italic')).toBeNull()
+    // With both in front of the separator, the label is restored
+    const g = rehydrate('设@a#和@b#为素数。那么成立。', block, document)
+    expect(g.querySelector('.ltx_font_italic')?.textContent).toBe('设p和q为素数。')
+    expect(g.querySelectorAll('math')).toHaveLength(2)
+  })
+
   it('a label longer than eight words is not a label', () => {
     const { block } = markers('<p class="ltx_p"><span class="ltx_text ltx_font_italic">For each integer k we have the following bound on the quantity:</span> proof.</p>')
     const f = rehydrate('对于每个整数 k，我们有以下关于该量的界：证明。', block, document)
