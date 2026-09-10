@@ -11,7 +11,7 @@ import { derivePopupView } from '@/entrypoints/popup/view-model'
 const log = (name: string) => (...args: unknown[]) => console.log(`[gallery] ${name}`, ...args)
 const actions: PopupActions = {
   translate: log('translate'), retranslate: log('retranslate'), restore: log('restore'), chooseMode: log('chooseMode'), retryFailed: log('retryFailed'),
-  openMenu: log('openMenu'), closeMenu: log('closeMenu'), chooseService: log('chooseService'), chooseLanguage: log('chooseLanguage'), choosePrompt: log('choosePrompt'),
+  openMenu: log('openMenu'), closeMenu: log('closeMenu'), chooseService: log('chooseService'), chooseLanguage: log('chooseLanguage'), choosePrompt: log('choosePrompt'), chooseStyle: log('chooseStyle'),
   setHighlight: log('setHighlight'), setImages: log('setImages'), downloadPack: log('downloadPack'),
   copyInstallCommand: log('copyInstallCommand'), openGuide: log('openGuide'), openOptions: log('openOptions'),
 }

@@ -14,6 +14,8 @@ const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chro
 const PROFILE = `${HERE}.profile`
 const SHOTS = `${HERE}.shots`
 const PAPER = process.env.AXT_PAPER ?? '2410.00260'
+/** popup 里那一行的名字（S-P-86）；与设置页「译文样式」同名 */
+const S_STYLE = '译文样式'
 const PAPER2 = process.env.AXT_PAPER2 ?? '2312.17527'
 /** 第三篇：前面的用例都没碰过它，缓存是冷的——导航那条要靠真实积压才测得出东西 */
 const PAPER3 = process.env.AXT_PAPER3 ?? '2312.17141'
@@ -333,6 +335,28 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   }, REAL)
   check('译文外观「淡一档」：译文透明度降下来，原文不受影响', styled.opacity > 0 && styled.opacity < 1 && styled.sourceOpacity === 1, JSON.stringify(styled))
   await page.screenshot({ path: `${SHOTS}/style-muted.png` })
+
+  // popup 也能换样式（S-P-86）：走的是「popup 写配置 → 页面的配置监听重画」，与设置页那条不同，
+  // 而且**页面正开着**，所以它同时证明了换样式不需要重开会话
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await page.bringToFront()
+  await popup.getByRole('button', { name: S_STYLE, exact: false }).click()
+  await popup.getByRole('option', { name: '绿色', exact: true }).click()
+  await popup.close()
+  await page.bringToFront()
+  const green = await page.evaluate(async real => {
+    const el = () => document.querySelector(`.axt-t:not([data-axt-inline])${real}`)
+    for (let i = 0; i < 40; i++) {
+      const color = el() ? getComputedStyle(el()).color : ''
+      // 与原文相同时译文用页面的正文色；绿色预设把它换掉
+      if (color && color !== getComputedStyle(document.querySelector('.ltx_p:not(.axt-t)')).color) return color
+      await new Promise(r => setTimeout(r, 250))
+    }
+    return el() ? getComputedStyle(el()).color : 'no translation'
+  }, REAL)
+  const sourceColor = await page.evaluate(() => getComputedStyle(document.querySelector('.ltx_p:not(.axt-t)')).color)
+  check('popup 的译文样式：选「绿色」后开着的页面立刻换色，不重开会话', green !== sourceColor && green !== 'no translation', `译文 ${green}，原文 ${sourceColor}`)
   await page.close()
 
   // 下划线要画到公式上：text-decoration 不传播到 math 这类原子行内盒，用户反馈过公式处虚线断掉。

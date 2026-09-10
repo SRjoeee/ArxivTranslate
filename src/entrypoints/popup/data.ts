@@ -35,6 +35,8 @@ export interface PopupActions {
   chooseService(id: string): void
   chooseLanguage(code: Config['targetLanguage']): void
   choosePrompt(id: string): void
+  /** An appearance style id; the page's own config watcher applies it, so no restart */
+  chooseStyle(id: string): void
   setHighlight(on: boolean): void
   setImages(on: boolean): void
   downloadPack(): void
@@ -199,6 +201,11 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
       // Any of the reader's services is an LLM, and each is chosen through its own id — comparing
       // against 'openai-compat' was never true after v12, so the page kept the old prompt (Codex on #157)
       if (isLlmChosen(next)) await restartIfOn(next, pack, s => s.promptId === id)
+    }),
+    // The page's config watcher redraws the translations in the new style; no session restarts
+    chooseStyle: id => void guard(async () => {
+      setMenu(null)
+      await patchConfig(latest => ({ ...latest, appearance: { ...latest.appearance, activeStyle: id } }))
     }),
     // Both switches are applied live by the page's own config watcher; nothing to send
     setHighlight: on => void guard(async () => {

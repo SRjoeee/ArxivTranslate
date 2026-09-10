@@ -61,4 +61,5 @@ export const POPUP_FIXTURES: { id: string; name: string; when: string; input: Po
   { id: 'P13', name: '改选了跑不起来的服务', when: 'on ∧ running ≠ settings ∧ !runnable', input: { ...base, config: llmNoKey, provider: llmProvider({ available: false, fallback: { id: 'microsoft', displayName: 'Microsoft' } }), page: page({ state: 'on', requested: 31, done: 24 }) } },
   { id: 'P14', name: '识别助手未安装', when: 'images.enabled ∧ !helper.available', input: { ...base, helper: { available: false, reason: 'host not registered' } } },
   { id: 'P15', name: '提示词菜单', when: 'llm ∧ menu = prompt', input: { ...base, config: llm, provider: llmProvider(), menu: 'prompt' } },
+  { id: 'P16', name: '译文样式菜单', when: 'menu = style', input: { ...base, menu: 'style' } },
 ]

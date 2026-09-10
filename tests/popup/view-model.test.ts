@@ -125,6 +125,15 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(derivePopupView({ ...input('P14'), platform: 'other' }).helper).toEqual({ text: '图片翻译目前仅支持 macOS' })
     expect(derivePopupView({ ...input('P14'), config: { ...input('P14').config!, image: { enabled: false, modes: [] } } }).helper).toBeNull()
   })
+  it('P16 the style menu is what the settings page holds, in its order, with the chosen one marked', () => {
+    const v = view('P16')
+    const c = input('P16').config!
+    expect(v.style.value).toBe('与原文相同')
+    expect(v.menu!.kind).toBe('style')
+    expect(v.menu!.search).toBe(false)
+    expect(v.menu!.items.map(i => i.id)).toEqual(c.appearance.styles.map(p => p.id))
+    expect(v.menu!.items.filter(i => i.selected).map(i => i.id)).toEqual([c.appearance.activeStyle])
+  })
   it('P15 prompt menu lists the built-ins and the reader\'s own', () => {
     const m = view('P15').menu!
     expect(m.kind).toBe('prompt')

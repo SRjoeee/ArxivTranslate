@@ -104,6 +104,7 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 | S-P-80 | 对照高亮行 | 对照高亮 | Switch in the card (`reading.sentenceHighlight`); saved at once, live on the page |
 | S-P-81 | 对照高亮 `title` | 悬停时高亮对应句子；仅译文模式下停留可查看原文 | |
 | S-P-85 | 图片翻译行 | 图片翻译 | Switch in the card (`image.enabled`, v11); saved at once, live on the page; the per-mode list stays on the options page |
+| S-P-86 | 译文样式行 | 译文样式 | [定，2026-09-11] A bare row under the two switches: label left, the chosen style's name right, a menu of `appearance.styles` under it. Same name as the settings page's 阅读 · 译文样式, and the same list in the same order — one thing, two entry points. The page's config watcher redraws in the new style, so nothing restarts |
 | S-P-86 | 图片翻译行下 · 助手未安装（macOS） | 图片翻译需要安装识别助手 | Only while the switch is on and the helper is not detected |
 | S-P-87 | 图片翻译行下 · 非 macOS | 图片翻译目前仅支持 macOS | |
 | S-P-88 | 助手提示动作 | 复制安装命令 / 已复制 | Copies the one-line install `curl -fsSL …/helper/install-remote.sh \| bash -s -- <extension id>` (helper/README.md) |

@@ -93,6 +93,10 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
             <Switch small checked={view.highlight} onChange={actions.setHighlight} label={S.rows.highlight} text={S.rows.highlight} title={S.rows.highlightTitle} />
             <Switch small checked={view.images} onChange={actions.setImages} label={S.rows.images} text={S.rows.images} />
           </div>
+
+          {/* How the translation looks, beside the two switches rather than in the card above: that
+              card is what translates, this is how it reads (S-P-86) */}
+          <StyleRow view={view} actions={actions} />
         </>
       )}
 
@@ -158,6 +162,44 @@ function MenuRow({ kind, label, row, view, actions, compact = false, last = fals
             else actions.choosePrompt(id)
           }}
           onAction={() => actions.downloadPack()}
+          onClose={actions.closeMenu}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * The translation's style, on a bare row beside the two switches rather than in the card above:
+ * that card is what translates, this is how it reads (S-P-86). Its own component rather than another
+ * `MenuRow` variant — no card, no divider, and the same 12px scale the switches sit on
+ */
+function StyleRow({ view, actions }: { view: View; actions: PopupActions }) {
+  const open = view.menu?.kind === 'style'
+  const anchor = useRef<HTMLDivElement>(null)
+  return (
+    <div ref={anchor} className="px-1">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => (open ? actions.closeMenu() : actions.openMenu('style'))}
+        className="flex w-full cursor-pointer items-center justify-between text-left text-[12px] font-semibold text-fg-2"
+      >
+        {S.rows.style}
+        <span className="flex min-w-0 items-center gap-1.5 text-fg">
+          <span className="truncate">{view.style.value}</span>
+          <Chevron up={open} />
+        </span>
+      </button>
+      {open && view.menu && (
+        <Menu
+          anchor={anchor}
+          items={view.menu.items}
+          label={view.menu.label}
+          search={false}
+          empty={S.menu.noMatch}
+          onSelect={actions.chooseStyle}
           onClose={actions.closeMenu}
         />
       )}

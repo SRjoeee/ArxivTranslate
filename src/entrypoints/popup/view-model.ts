@@ -7,6 +7,7 @@
 // note at a time (paused > replaced > images paused > the chosen service cannot run); the menus
 // open at any time, a change while the page is on restarts it in place (data.ts), and only a
 // choice that cannot run leaves the page behind the settings.
+import { activeStyle } from '@/config/appearance'
 import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_LOCALE_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { type Service, chosenService, isBuiltInService, isLlmChosen } from '@/config/services'
@@ -23,7 +24,7 @@ import { HELPER_GUIDE_URL, S, helperInstallCommand, parseFatal, reasonText, serv
 export type { PackState }
 /** The last row of the service menu: not a service, it opens the settings page */
 export const MANAGE_SERVICES = '__manage'
-export type MenuKind = 'service' | 'language' | 'prompt'
+export type MenuKind = 'service' | 'language' | 'prompt' | 'style'
 
 export interface PopupInput {
   page: PageStatus | null
@@ -51,6 +52,8 @@ export interface PopupView {
   language: Row
   /** Only while the LLM is the chosen service */
   prompt: Row | null
+  /** The chosen translation style (S-P-86); the menu lists what the settings page holds */
+  style: Row
   highlight: boolean
   images: boolean
   menu: { kind: MenuKind; label: string; items: MenuItem[]; search: boolean } | null
@@ -68,6 +71,7 @@ const EMPTY: PopupView = {
   service: { value: '' },
   language: { value: '' },
   prompt: null,
+  style: { value: '' },
   highlight: true,
   images: true,
   menu: null,
@@ -151,6 +155,8 @@ export function derivePopupView(input: PopupInput): PopupView {
   const language: Row = { value: label(config.targetLanguage) }
   // The prompt decides how an LLM translates; the free services do not read it
   const prompt: Row | null = isLlmChosen(config) ? { value: promptName(config) } : null
+  // How the translation looks. The page applies a change straight away, so this needs no restart
+  const style: Row = { value: activeStyle(config.appearance).name }
 
   const note: Note | null = paused ? { text: S.note.paused(reasonText(parseFatal(progress.fatal ?? '').kind)), settings: true }
     : demoted && provider ? { text: S.note.replaced(named(demoted.id), reasonText(demoted.kind), named(provider.engine.id)), settings: true }
@@ -183,6 +189,7 @@ export function derivePopupView(input: PopupInput): PopupView {
     service,
     language,
     prompt,
+    style,
     highlight: config.reading.sentenceHighlight,
     images: config.image.enabled,
     menu: menu === null ? null : menuOf(menu, config, pack),
@@ -222,6 +229,15 @@ function menuOf(kind: MenuKind, config: Config, pack: PackState | null): NonNull
         label: S.rows.prompt,
         search: false,
         items: [...Object.values(BUILT_IN_PROMPTS), ...config.prompts.patterns].map(p => ({ id: p.id, name: p.name, selected: p.id === config.prompts.promptId })),
+      }
+    case 'style':
+      // Whatever the settings page holds, in its order: the reader's own profiles sit among the
+      // built-in ones there, and a second order here would make the same list read as two lists
+      return {
+        kind,
+        label: S.rows.style,
+        search: false,
+        items: config.appearance.styles.map(p => ({ id: p.id, name: p.name, selected: p.id === config.appearance.activeStyle })),
       }
   }
 }

@@ -14,6 +14,7 @@ export const S = {
     highlight: '对照高亮', // S-P-80
     highlightTitle: '悬停时高亮对应句子；仅译文模式下停留可查看原文', // S-P-81
     images: '图片翻译', // S-P-85
+    style: '译文样式', // S-P-86；与设置页「阅读 · 译文样式」同名，两处是同一件事
   },
   service: {
     microsoft: 'Microsoft 翻译',
