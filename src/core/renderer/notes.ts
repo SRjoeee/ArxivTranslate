@@ -20,6 +20,7 @@
 import { ID_ATTR } from '@/core/extractor'
 import { T_CLASS, isInjected } from '@/core/marks'
 import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
+import { PENDING_CLASS } from './pending'
 import { mirrorPair } from './sentences'
 
 /** 原件上的标记：译文已复制进副本，这份边注由样式隐藏 */
@@ -64,10 +65,11 @@ function wrapSource(copy: Element): Element | null {
   const wrapper = doc.createElement('span')
   wrapper.className = NOTE_S_CLASS
   // The wrapper takes the contiguous run **after the last mark**, not "every node that is not a
-  // mark": ar5iv's note content is `<sup>1</sup> <span.ltx_tag>1</span> text…`, and picking up the
-  // whitespace between the marks too would move the marks behind the wrapper — a changed document
-  // order, and the two trees no longer pair up when the sentence registration is mirrored
-  // (measured on 2609.09360v1)
+  // mark": ar5iv's note content is `<sup>1</sup> <span.ltx_tag>1</span> text…` in 54 of the 58
+  // fixture notes, and picking up the whitespace between the marks too would put the wrapper in
+  // front of the tag — the note's number would render after the English (Codex on #153), and the
+  // changed document order would keep the two trees from pairing up when the sentence
+  // registration is mirrored (measured on 2609.09360v1)
   const children = Array.from(copy.childNodes)
   let start = 0
   children.forEach((n, i) => { if (n.nodeType === 1 && (n as Element).matches(NOTE.marks)) start = i + 1 })
@@ -130,6 +132,9 @@ function mirrorNote(source: Element, translated: Element, wrapper: Element, fres
   mirrorPair(translated, { source: wrapper, target: fresh }, { source: node => sourceTwins.get(node), target: node => targetTwins.get(node) })
 }
 
+/** A translation that has actually arrived: not the spinner, not the failure widget, which are `.axt-t` siblings too */
+const arrived = (el: Element | null): el is Element => !!el && el.classList.contains(T_CLASS) && !el.classList.contains(PENDING_CLASS) && !el.classList.contains('axt-error')
+
 /**
  * 把脚注的译文复制进译文块里重建出来的副本，并标记原件。
  * 幂等：副本里已有同样内容就不动；内容变了就换。返回本轮改动的数量。
@@ -148,8 +153,11 @@ export function localizeNotes(root: Document | Element): number {
     if (sources.length !== copies.length) continue
     copies.forEach((copy, i) => {
       const source = sources[i]
-      const translated = source?.nextElementSibling
-      if (!translated?.classList.contains(T_CLASS)) return // 这条脚注还没翻到，下一轮再说
+      // Only a translation that has arrived: the spinner and the failure widget are `.axt-t` siblings
+      // as well, and copying one of them would count as a translation — in only mode the English
+      // would be hidden behind a spinner, or gone for good after a failure (Codex on #153)
+      const translated = source?.nextElementSibling ?? null
+      if (!arrived(translated)) return
       const fresh = localizedCopy(translated)
       const existing = copy.querySelector(`:scope > .${NOTE_T_CLASS}`)
       if (existing?.textContent === fresh.textContent) return // 已归位且内容没变

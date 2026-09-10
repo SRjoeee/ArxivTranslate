@@ -58,6 +58,37 @@ describe('localizeNotes', () => {
     expect(c.textContent).toBe('1English note1中文脚注')
   })
 
+  it('keeps the marks in front: the wrapper starts after the last mark, tag and whitespace included', () => {
+    // ar5iv: `<sup class="ltx_note_mark">1</sup> <span class="ltx_tag ltx_tag_note">1</span> text` (54 of 58 fixture notes)
+    const doc = docOf(`
+      <p class="ltx_p">body<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup
+        ><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup> <span class="ltx_tag ltx_tag_note">1</span> English note</span
+        ><span class="ltx_note_content ${T_CLASS}" data-axt-for="n1"><sup class="ltx_note_mark">1</sup>中文脚注</span></span></span></p>
+      <p class="ltx_p ${T_CLASS}" data-axt-for="p1">正文<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup
+        ><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup> <span class="ltx_tag ltx_tag_note">1</span> English note</span
+        ></span></span></p>`)
+    localizeNotes(doc)
+    const c = copy(doc)
+    const order = Array.from(c.childNodes).map(n => (n.nodeType === 1 ? ((n as Element).classList.contains('axt-note-t') ? 'axt-note-t' : (n as Element).className.split(' ')[0]) : '#')).join(' ')
+    expect(order).toBe('ltx_note_mark # ltx_tag axt-note-s axt-note-t')
+    expect(c.querySelector('.axt-note-s')!.textContent).toBe(' English note')
+  })
+
+  it('does not localise a spinner or a failure widget: they are .axt-t siblings too', () => {
+    for (const cls of ['axt-pending', 'axt-error']) {
+      const doc = docOf(`
+        <p class="ltx_p">body<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup
+          ><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup>English note</span
+          ><span class="ltx_note_content ${T_CLASS} ${cls}" data-axt-for="n1">…</span></span></span></p>
+        <p class="ltx_p ${T_CLASS}" data-axt-for="p1">正文<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup
+          ><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup>English note</span
+          ></span></span></p>`)
+      expect(localizeNotes(doc)).toBe(0)
+      expect(copy(doc).querySelector('.axt-note-t, .axt-note-s')).toBeNull()
+      expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
+    }
+  })
+
   it('does not wrap before the translation arrives: the stylesheet hides an original only beside a translation, so nothing is lost', () => {
     const doc = withNote(false)
     localizeNotes(doc)
