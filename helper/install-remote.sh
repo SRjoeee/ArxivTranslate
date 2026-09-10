@@ -50,13 +50,21 @@ BIN="$DIR/.build/release/axt-helper"
 for dir in "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts" \
            "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"; do
   mkdir -p "$dir"
-  cat > "$dir/$NAME.json" <<JSON
+  manifest="$dir/$NAME.json"
+  # Keep the ids an earlier run allowed (another profile, a dev build): union, not overwrite
+  origins="\"chrome-extension://$id/\""
+  if [ -f "$manifest" ]; then
+    while read -r existing; do
+      [ -n "$existing" ] && [ "$existing" != "chrome-extension://$id/" ] && origins="$origins, \"$existing\""
+    done < <(grep -o 'chrome-extension://[a-p]\{32\}/' "$manifest" | sort -u)
+  fi
+  cat > "$manifest" <<JSON
 {
   "name": "$NAME",
   "description": "Readarxiv 的图片识别助手（Apple Vision）",
   "path": "$BIN",
   "type": "stdio",
-  "allowed_origins": ["chrome-extension://$id/"]
+  "allowed_origins": [$origins]
 }
 JSON
 done
