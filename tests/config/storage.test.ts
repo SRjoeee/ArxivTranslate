@@ -3,6 +3,9 @@ import { fakeBrowser } from 'wxt/testing/fake-browser'
 import { CONFIG_VERSION, DEFAULT_CONFIG, GLOSSARY_LIMITS, normalizeGlossary } from '@/config/schema'
 import { configItem, getConfig, setConfig } from '@/config/storage'
 
+/** A reader-added service, the shape v12 stores (spec §2.1) */
+const SVC = { id: 'svc-abcd1234', kind: 'openai-compat' as const, name: 'Mine', baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-x', model: 'x/y', thinking: 'disabled' as const }
+
 describe('config storage', () => {
   beforeEach(() => {
     fakeBrowser.reset()
@@ -10,15 +13,15 @@ describe('config storage', () => {
 
   it('空存储返回默认配置', async () => {
     expect(await getConfig()).toEqual(DEFAULT_CONFIG)
-    expect(DEFAULT_CONFIG.openaiCompat.apiKey).toBe('')
-    expect(DEFAULT_CONFIG.openaiCompat.baseURL).toBe('https://openrouter.ai/api/v1')
+    expect(DEFAULT_CONFIG.services).toEqual([])
+    expect(DEFAULT_CONFIG.provider).toBe('microsoft')
   })
 
   it('写入后读回', async () => {
-    await setConfig({ ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-test', model: 'x/y' }, targetLanguage: 'jpn' })
+    await setConfig({ ...DEFAULT_CONFIG, provider: SVC.id, services: [{ ...SVC, apiKey: 'sk-test' }], targetLanguage: 'jpn' })
     const c = await getConfig()
-    expect(c.openaiCompat.apiKey).toBe('sk-test')
-    expect(c.openaiCompat.model).toBe('x/y')
+    expect(c.services[0]?.apiKey).toBe('sk-test')
+    expect(c.services[0]?.model).toBe('x/y')
     expect(c.targetLanguage).toBe('jpn')
   })
 
@@ -43,8 +46,8 @@ describe('config storage', () => {
   it('配置正常时不留回退原因：不能对着好配置报警', async () => {
     vi.resetModules()
     const fresh = await import('@/config/storage')
-    await fresh.setConfig({ ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-ok' } })
-    expect((await fresh.getConfig()).openaiCompat.apiKey).toBe('sk-ok')
+    await fresh.setConfig({ ...DEFAULT_CONFIG, services: [{ ...SVC, apiKey: 'sk-ok' }] })
+    expect((await fresh.getConfig()).services[0]?.apiKey).toBe('sk-ok')
     expect(fresh.configFallbackReason()).toBeNull()
   })
 
@@ -61,17 +64,22 @@ describe('config storage', () => {
   })
 
   it('setConfig 拒绝非法值', async () => {
-    await expect(setConfig({ ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, model: '' } })).rejects.toThrow()
-    await expect(setConfig({ ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, baseURL: 'not a url' } })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, services: [{ ...SVC, model: '' }] })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, services: [{ ...SVC, baseURL: 'not a url' }] })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, provider: 'svc-nope' })).rejects.toThrow()
   })
 })
 
 describe('provider 选择', () => {
   it('两个 provider 都能存取，getProvider 返回对应实现', async () => {
     const { getProvider } = await import('@/providers')
-    const llm = getProvider({ ...DEFAULT_CONFIG, provider: 'openai-compat' })
-    expect(llm.id).toBe('openai-compat')
+    // A reader's service becomes an engine carrying that service's id and name
+    const llm = getProvider({ ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC] })
+    expect(llm.id).toBe(SVC.id)
+    expect(llm.displayName).toBe(SVC.name)
     expect(llm.kind).toBe('llm')
+    // A service the reader deleted while it was chosen: the shipped default, not a crash
+    expect(getProvider({ ...DEFAULT_CONFIG, provider: 'svc-gone0000', services: [] }).id).toBe('microsoft')
 
     const free = getProvider({ ...DEFAULT_CONFIG, provider: 'google-web' })
     expect(free.id).toBe('google-web')
@@ -99,7 +107,7 @@ describe('provider 选择', () => {
     const fresh = await import('@/config/storage')
     const c = await fresh.getConfig()
     expect(c.version).toBe(CONFIG_VERSION)
-    expect(c.openaiCompat.apiKey).toBe('sk-keep')
+    expect(c.services[0]?.apiKey).toBe('sk-keep')
     expect(c.targetLanguage).toBe('jpn')
     expect(c.prompts).toEqual({ promptId: 'default', patterns: [] })
     expect(c.preload).toEqual({ margin: 1000, threshold: 0 })
@@ -120,7 +128,7 @@ describe('provider 选择', () => {
     expect(c.preload).toEqual({ margin: 1000, threshold: 0 })
     expect(c.prompts.promptId).toBe('precision-rewrite')
     expect(c.mode).toBe('only')
-    expect(c.openaiCompat.thinking).toBe('enabled')
+    expect(c.services[0]?.thinking).toBe('enabled')
   })
 
   it('v3 配置升级到最新：zh-CN 变 cmn，认不出的语言码回退 cmn', async () => {
@@ -137,7 +145,7 @@ describe('provider 选择', () => {
       const c = await fresh.getConfig()
       expect(c.version).toBe(CONFIG_VERSION)
       expect(c.targetLanguage).toBe(expected)
-      expect(c.openaiCompat.apiKey).toBe('sk-keep')
+      expect(c.services[0]?.apiKey).toBe('sk-keep')
       expect(c.preload).toEqual({ margin: 300, threshold: 0.5 })
     }
   })
@@ -158,7 +166,7 @@ describe('provider 选择', () => {
     const c = await fresh.getConfig()
     expect(c.version).toBe(CONFIG_VERSION)
     expect(c.fallback).toEqual({ enabled: true })
-    expect(c.openaiCompat.apiKey).toBe('sk-keep')
+    expect(c.services[0]?.apiKey).toBe('sk-keep')
     expect(c.targetLanguage).toBe('jpn')
   })
 
@@ -176,7 +184,7 @@ describe('provider 选择', () => {
     expect(c.version).toBe(CONFIG_VERSION)
     expect(c.glossary).toEqual([])
     expect(c.fallback).toEqual({ enabled: false })
-    expect(c.openaiCompat.apiKey).toBe('sk-keep')
+    expect(c.services[0]?.apiKey).toBe('sk-keep')
   })
 
   it('v6 配置升级到 v7：补上默认样式（none，与实现之前的外观一致）', async () => {
@@ -191,7 +199,7 @@ describe('provider 选择', () => {
     const fresh = await import('@/config/storage')
     const c = await fresh.getConfig()
     expect(c.version).toBe(CONFIG_VERSION)
-    expect(c.style).toEqual({ preset: 'none', customCss: '', color: '', opacity: 1, accent: '' })
+    expect(c.appearance.activeStyle).toBe('follow')
     expect(c.glossary).toEqual([{ term: 'weights', translation: '权重' }])
   })
 
@@ -211,7 +219,7 @@ describe('provider 选择', () => {
     await fakeBrowser.storage.local.set({ config: v6, config$: { v: 6 } })
     vi.resetModules()
     const c = await (await import('@/config/storage')).getConfig()
-    expect(c.openaiCompat.apiKey).toBe('sk-keep')
+    expect(c.services[0]?.apiKey).toBe('sk-keep')
     expect(c.glossary).toEqual([{ term: 'weights', translation: '权重' }])
   })
 
@@ -241,8 +249,46 @@ describe('provider 选择', () => {
     const c = await fresh.getConfig()
     expect(c.version).toBe(CONFIG_VERSION)
     expect(c.image).toEqual({ enabled: true, modes: ['stack', 'side', 'only'] })
-    expect(c.style).toEqual({ preset: 'quote', customCss: '', color: '', opacity: 1, accent: '' })
-    expect(c.openaiCompat.apiKey).toBe('sk-keep')
+    // `quote` is one of the effects v12 dropped: the colour and opacity survive on 与原文相同
+    expect(c.appearance.activeStyle).toBe('follow')
+    expect(c.services[0]?.apiKey).toBe('sk-keep')
+  })
+
+  it('v11 to v12: the single endpoint becomes a service and is chosen; presets map to profiles', async () => {
+    const v11 = (over: object) => ({
+      version: 11, provider: 'openai-compat',
+      openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-keep', model: 'deepseek/deepseek-v4-flash', thinking: 'disabled' },
+      targetLanguage: 'cmn', mode: 'side', prompts: { promptId: 'default', patterns: [] },
+      preload: { margin: 1000, threshold: 0 }, fallback: { enabled: true }, glossary: [],
+      style: { preset: 'none', customCss: '', color: '', opacity: 1, accent: '' }, reading: { sentenceHighlight: true }, image: { enabled: true, modes: ['stack', 'side', 'only'] },
+      ...over,
+    })
+    const load = async (stored: object) => {
+      await fakeBrowser.storage.local.set({ config: stored, config$: { v: 11 } })
+      vi.resetModules()
+      return (await import('@/config/storage')).getConfig()
+    }
+    const c = await load(v11({}))
+    expect(c.version).toBe(CONFIG_VERSION)
+    expect(c.services).toHaveLength(1)
+    expect(c.services[0]).toMatchObject({ kind: 'openai-compat', name: 'deepseek-v4-flash', apiKey: 'sk-keep', model: 'deepseek/deepseek-v4-flash' })
+    expect(c.provider).toBe(c.services[0]!.id)
+    expect(c.appearance.activeStyle).toBe('follow')
+    expect(c.appearance.activeHighlight).toBe('soft-green')
+    // Another provider with the endpoint untouched: no service
+    const free = await load(v11({ provider: 'microsoft', openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: '', model: 'deepseek/deepseek-v4-flash', thinking: 'disabled' } }))
+    expect(free.services).toEqual([])
+    expect(free.provider).toBe('microsoft')
+    // Presets
+    const dashed = await load(v11({ style: { preset: 'dashed-bold', customCss: '', color: '#112233', opacity: 0.8, accent: '' } }))
+    expect(dashed.appearance.styles.find(s => s.id === dashed.appearance.activeStyle)).toMatchObject({ underline: 'dashed', thickness: 2, color: '#112233', opacity: 0.8 })
+    const blur = await load(v11({ style: { preset: 'blur', customCss: '', color: '', opacity: 1, accent: '' } }))
+    expect(blur.appearance.activeStyle).toBe('blur')
+    const custom = await load(v11({ style: { preset: 'custom', customCss: 'font-style: italic', color: '', opacity: 1, accent: '' } }))
+    expect(custom.appearance.styles.find(s => s.id === custom.appearance.activeStyle)).toMatchObject({ name: '自定义', css: 'font-style: italic' })
+    const marker = await load(v11({ style: { preset: 'marker', customCss: '', color: '', opacity: 1, accent: '#ff8800' } }))
+    expect(marker.appearance.activeStyle).toBe('follow')
+    expect(marker.appearance.highlights.find(h => h.id === marker.appearance.activeHighlight)).toMatchObject({ color: '#ff8800', opacity: 0.22 })
   })
 
   it('图片翻译的模式只认三种，空数组合法（= 关闭）', async () => {
@@ -266,13 +312,14 @@ describe('provider 选择', () => {
       const c = await fresh.getConfig()
       expect(c.version).toBe(CONFIG_VERSION)
       expect(c.image).toEqual({ enabled, modes })
-      expect(c.openaiCompat.apiKey).toBe('sk-keep')
+      expect(c.services[0]?.apiKey).toBe('sk-keep')
     }
   })
 
   it('样式预设只认清单里的 id，自定义 CSS 有长度上限', async () => {
-    await expect(setConfig({ ...DEFAULT_CONFIG, style: { ...DEFAULT_CONFIG.style, preset: 'rainbow' as never } })).rejects.toThrow()
-    await expect(setConfig({ ...DEFAULT_CONFIG, style: { ...DEFAULT_CONFIG.style, preset: 'custom', customCss: 'x'.repeat(2001) } })).rejects.toThrow()
+    const a = DEFAULT_CONFIG.appearance
+    await expect(setConfig({ ...DEFAULT_CONFIG, appearance: { ...a, styles: [{ ...a.styles[0]!, underline: 'rainbow' as never }] } })).rejects.toThrow()
+    await expect(setConfig({ ...DEFAULT_CONFIG, appearance: { ...a, styles: [{ ...a.styles[0]!, css: 'x'.repeat(2001) }] } })).rejects.toThrow()
   })
 
   it('术语表超过 200 条被 schema 拒绝，条目缺字段也拒绝', async () => {
@@ -293,30 +340,30 @@ describe('provider 选择', () => {
 
   it('降级链：配置引擎在前，免费引擎兜底；关掉开关时只剩配置的那个', async () => {
     const { buildChain } = await import('@/providers')
-    const withKey = { ...DEFAULT_CONFIG, provider: 'openai-compat' as const, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-x' } }
+    const withKey = { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC] }
     // 没有内置翻译 API 的环境（happy-dom、旧 Chrome）：内置引擎被 isAvailable 过滤掉
-    expect((await buildChain(withKey)).chain.map(p => p.id)).toEqual(['openai-compat', 'google-web'])
-    expect((await buildChain({ ...withKey, fallback: { enabled: false } })).chain.map(p => p.id)).toEqual(['openai-compat'])
+    expect((await buildChain(withKey)).chain.map(p => p.id)).toEqual([SVC.id, 'google-web'])
+    expect((await buildChain({ ...withKey, fallback: { enabled: false } })).chain.map(p => p.id)).toEqual([SVC.id])
     // 免费引擎自己当首选时不重复出现
     expect((await buildChain({ ...withKey, provider: 'google-web' })).chain.map(p => p.id)).toEqual(['google-web'])
     // 首选没配 key 也留在链首：popup 要据此提示去设置页，而不是悄悄换引擎
-    expect((await buildChain({ ...DEFAULT_CONFIG, provider: 'openai-compat' })).chain.map(p => p.id)).toEqual(['openai-compat', 'google-web'])
+    expect((await buildChain({ ...DEFAULT_CONFIG, provider: SVC.id, services: [{ ...SVC, apiKey: '' }] })).chain.map(p => p.id)).toEqual([SVC.id, 'google-web'])
     // The shipped default is the free service that needs no key (UI.md §2)
     expect((await buildChain(DEFAULT_CONFIG)).chain.map(p => p.id)).toEqual(['microsoft', 'google-web'])
   })
 
   it('语言包就绪时内置引擎排在 google-web 之前；未就绪时被跳过', async () => {
     const { buildChain } = await import('@/providers')
-    const withKey = { ...DEFAULT_CONFIG, provider: 'openai-compat' as const, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-x' } }
+    const withKey = { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC] }
     const stub = (availability: string) => ({ availability: async () => availability, create: async () => ({ translate: async () => '' }) })
 
     vi.stubGlobal('Translator', stub('available'))
-    expect((await buildChain(withKey)).chain.map(p => p.id)).toEqual(['openai-compat', 'chrome-builtin', 'google-web'])
+    expect((await buildChain(withKey)).chain.map(p => p.id)).toEqual([SVC.id, 'chrome-builtin', 'google-web'])
     // 内置当首选时不在兜底里重复出现
     expect((await buildChain({ ...withKey, provider: 'chrome-builtin' })).chain.map(p => p.id)).toEqual(['chrome-builtin', 'google-web'])
 
     vi.stubGlobal('Translator', stub('downloadable'))
-    expect((await buildChain(withKey)).chain.map(p => p.id)).toEqual(['openai-compat', 'google-web'])
+    expect((await buildChain(withKey)).chain.map(p => p.id)).toEqual([SVC.id, 'google-web'])
     vi.unstubAllGlobals()
   })
 

@@ -27,6 +27,7 @@ export const S = {
     chrome_download: '下载', // S-P-40
     chrome_downloading: '语言包下载中', // S-P-41
     chrome_unavailable: '当前不可用', // S-P-42 / S-P-43
+    manage: '管理翻译服务…', // S-P-48: the last row of the menu, opens the settings page
   },
   menu: {
     searchLanguages: '搜索语言', // S-P-22
@@ -74,6 +75,86 @@ export const S = {
   actionFailed: (message: string) => message, // S-P-90
 } as const
 
+/** The settings page (docs/UI.md §3.2). Same register as `S`: nouns for states, verbs for buttons */
+export const O = {
+  title: '设置',
+  nav: { services: '翻译服务', reading: '阅读', prompts: '提示词与术语', data: '数据' },
+  fallbackNotice: '设置读取失败，当前使用默认设置；已保存的 API Key 与服务选择均未生效。请重新填写。',
+  services: {
+    builtIn: '内置服务',
+    mine: '我的服务',
+    empty: '还没有添加服务。添加后即可使用 LLM 翻译。',
+    add: '添加服务',
+    edit: '编辑',
+    autoFallback: '出问题时自动改用免费服务',
+    autoFallbackHint: 'API Key 失效、额度用尽或断网时，翻译不会停下',
+    name: '名称',
+    namePlaceholder: '例如 DeepSeek V4 Flash',
+    baseURL: '接口地址',
+    baseURLHint: 'OpenRouter、DeepSeek、Ollama 等 OpenAI 兼容接口',
+    apiKey: 'API Key',
+    apiKeyStored: '已保存',
+    apiKeyClear: '清除',
+    apiKeyLocalHint: '本机地址可以不填',
+    model: '模型',
+    more: '更多选项',
+    thinking: '深度思考',
+    thinkingHint: '翻译不需要推理，开启会明显变慢',
+    connect: '连接',
+    connecting: '连接中…',
+    connected: (ms: number) => `已连接 · ${ms} ms`,
+    delete: '删除',
+    deleteConfirm: '确认删除',
+    cancel: '取消',
+    newTitle: '添加服务',
+    editTitle: '编辑服务',
+  },
+  reading: {
+    styles: '译文样式',
+    stylesHint: '选中的样式立即生效',
+    highlights: '背景高亮',
+    highlightsHint: '悬停时用来标出对应句子的底色',
+    add: '添加配置',
+    reset: '重置',
+    resetHint: '把内置配置恢复原样，自己添加的保留',
+    editTitle: '编辑配置',
+    name: '名称',
+    color: '文字颜色',
+    bandColor: '底色',
+    followText: '跟随原文',
+    custom: '自定义',
+    opacity: '透明度',
+    underline: '下划线',
+    thickness: '线宽',
+    blur: '悬停前模糊',
+    blurHint: '译文先糊着，鼠标停上去才清晰，适合自测',
+    advanced: '高级',
+    advancedHint: '只填声明，不写选择器和花括号；字体与字号仍随论文',
+    duplicate: '复制一份',
+    delete: '删除',
+    done: '完成',
+    preloadRange: '提前翻译的范围',
+    preloadRangeHint: '屏幕下方多远的段落先翻；越近越省费用',
+    preloadStops: ['半屏', '一屏', '两屏', '三屏'],
+    threshold: '开始翻译的时机',
+    thresholdHint: '段落露出多少才开始翻',
+    thresholdStops: ['刚露出', '露出一半', '完全露出'],
+    preview: '预览',
+    previewSource: 'The Fourier transform is bounded.',
+    previewTarget: '傅里叶变换是有界的。',
+  },
+  prompts: { title: '提示词', glossary: '术语表', glossaryHint: '每行「原文, 译文」，让同一篇里的译法一致', glossaryCount: (n: number) => `${n} 条`, onlyLlm: '只对 LLM 服务生效' },
+  data: {
+    cache: '已缓存的译文',
+    cacheHint: '换了服务、模型或提示词会自动分开存，通常不用清',
+    cacheLine: (entries: number, mb: string) => `${entries} 条 · ${mb} MB`,
+    cacheError: '没能读取缓存',
+    clear: '清空',
+    clearConfirm: '确认清空',
+    cleared: '已清空',
+  },
+} as const
+
 /** §3.4: ProviderErrorKind → a reader's sentence. `aborted` is the reader's own doing and shows nothing. */
 const REASON: Record<ProviderErrorKind, string> = {
   'no-key': '尚未配置 API Key',
@@ -103,11 +184,11 @@ export function parseFatal(fatal: string): { kind: ProviderErrorKind; message: s
   return { kind: 'unknown', message: fatal }
 }
 
-/** provider id → the name a reader sees (§2). The LLM shows the model's last segment (no `deepseek/` prefix). */
-export function serviceName(id: string, model?: string): string {
+/** service id → the name a reader sees (§2): built-ins by id, the reader's own by the name they gave */
+export function serviceName(id: string, services: readonly { id: string; name: string }[] = []): string {
   switch (id) {
     case 'openai-compat':
-      return model ? (model.split('/').pop() ?? model) : S.service.llm
+      return S.service.llm
     case 'google-web':
       return S.service.google
     case 'chrome-builtin':
@@ -115,7 +196,7 @@ export function serviceName(id: string, model?: string): string {
     case 'microsoft':
       return S.service.microsoft
     default:
-      return id
+      return services.find(s => s.id === id)?.name ?? id
   }
 }
 

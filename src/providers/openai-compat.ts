@@ -48,8 +48,8 @@ export function createOpenAICompatProvider(
 ): TranslationProvider {
   const hasKey = () => config.apiKey.trim().length > 0 || isLoopback(config.baseURL)
   return {
-    id: 'openai-compat',
-    displayName: 'OpenAI 兼容端点',
+    id: config.id ?? 'openai-compat',
+    displayName: config.name ?? 'LLM',
     kind: 'llm',
     // 只声明 tags：提示词里的协议块（prompt.ts 的 PROTOCOL_BLOCK）教的就是这套标签
     wireFormats: WIRE_FORMATS['openai-compat'],

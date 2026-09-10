@@ -3,7 +3,9 @@ import { storage } from 'wxt/utils/storage'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
 import { fromBcp47 } from './languages'
+import { type Appearance, BUILT_IN_HIGHLIGHTS, BUILT_IN_STYLES, DEFAULT_APPEARANCE, type StyleProfile, newProfileId } from './appearance'
 import { CONFIG_VERSION, DEFAULT_CONFIG, MODE_VALUES, configSchema, normalizeGlossary, type Config } from './schema'
+import { defaultServiceName, newServiceId } from './services'
 
 export const configItem = storage.defineItem<Config>('local:config', {
   fallback: DEFAULT_CONFIG,
@@ -31,7 +33,9 @@ export const configItem = storage.defineItem<Config>('local:config', {
     8: (v7: Omit<Config, 'version' | 'image'> & { version: 7 }) => ({ ...v7, version: 8 as const, image: { modes: [...MODE_VALUES] } }),
     // v8 -> v9：译文样式加三个可调参数（§7.5）。默认值必须让外观与实现之前逐像素相同——
     // 空颜色 = 跟随原文、opacity 1 = 不透明、空 accent = 用各预设自己的默认色
-    9: (v8: Omit<Config, 'version' | 'style'> & { version: 8; style: { preset: Config['style']['preset']; customCss: string } }) =>
+    // The shape is the one v9 stored, spelled out here: `Config` has moved on (v12 dropped `style`)
+    // and a migration must keep describing the version it came from
+    9: (v8: Omit<Config, 'version' | 'services' | 'appearance'> & { version: 8; style: { preset: string; customCss: string } }) =>
       ({ ...v8, version: 9 as const, style: { ...v8.style, color: '', opacity: 1, accent: '' } }),
     // v9 -> v10：`provider` 枚举加 'microsoft'。**字段一个没变，升版本号是为了降级**——
     // 不升的话，存了 microsoft 的用户装回旧版时版本仍是 9，下面那条 `version > CONFIG_VERSION`
@@ -42,8 +46,58 @@ export const configItem = storage.defineItem<Config>('local:config', {
     // had: any mode ticked means it was on, an empty list means it was off
     11: (v10: Omit<Config, 'version' | 'image'> & { version: 10; image: { modes: Config['image']['modes'] } }) =>
       ({ ...v10, version: 11 as const, image: { enabled: v10.image.modes.length > 0, modes: v10.image.modes } }),
+    // v11 -> v12: user-added services replace the single endpoint; appearance profiles replace the
+    // preset. Total: every v11 value maps somewhere (spec §5), so nothing falls back to defaults
+    12: (v11: Omit<Config, 'version' | 'services' | 'appearance'> & { version: 11; openaiCompat: V11Endpoint; style: V11Style }) => {
+      const { openaiCompat, style, ...rest } = v11
+      const edited = openaiCompat.apiKey !== '' || openaiCompat.baseURL !== 'https://openrouter.ai/api/v1' || openaiCompat.model !== 'deepseek/deepseek-v4-flash'
+      const wasLlm = v11.provider === 'openai-compat'
+      const services = wasLlm || edited
+        ? [{ id: newServiceId(), kind: 'openai-compat' as const, name: defaultServiceName(openaiCompat.model), baseURL: openaiCompat.baseURL, apiKey: openaiCompat.apiKey, model: openaiCompat.model, thinking: openaiCompat.thinking ?? 'disabled' }]
+        : []
+      const provider = wasLlm ? services[0]!.id : v11.provider
+      return { ...rest, version: 12 as const, provider, services, appearance: migrateStyle(style) }
+    },
   },
 })
+
+interface V11Endpoint { baseURL: string; apiKey: string; model: string; thinking?: 'enabled' | 'disabled' }
+interface V11Style { preset: string; customCss: string; color: string; opacity: number; accent: string }
+
+/**
+ * v11 `style` → the profile lists (spec §5). An underline preset becomes a copy of 与原文相同 with
+ * that underline; `custom` keeps its declarations; the removed effects keep their colour on the
+ * follow-original profile; an accent colour becomes the reader's own band profile
+ */
+function migrateStyle(style: V11Style): Appearance {
+  const a: Appearance = { ...DEFAULT_APPEARANCE, styles: [...BUILT_IN_STYLES], highlights: [...BUILT_IN_HIGHLIGHTS] }
+  const underline: Record<string, { underline: StyleProfile['underline']; thickness: 1 | 2 }> = {
+    underline: { underline: 'solid', thickness: 1 }, dotted: { underline: 'dotted', thickness: 1 }, dashed: { underline: 'dashed', thickness: 1 },
+    'dashed-bold': { underline: 'dashed', thickness: 2 }, wavy: { underline: 'wavy', thickness: 1 }, 'wavy-bold': { underline: 'wavy', thickness: 2 },
+  }
+  const vars = { color: style.color, opacity: style.opacity }
+  const own = (name: string, over: Partial<StyleProfile>): string => {
+    const id = newProfileId('style')
+    a.styles = [...a.styles, { ...BUILT_IN_STYLES[0]!, ...vars, ...over, id, name }]
+    return id
+  }
+  const kept = underline[style.preset]
+  if (kept) a.activeStyle = own('下划线', kept)
+  else if (style.preset === 'custom') a.activeStyle = own('自定义', { css: style.customCss })
+  else if (style.preset === 'blur' || style.preset === 'green' || style.preset === 'muted') {
+    a.activeStyle = style.preset
+    a.styles = a.styles.map(s => (s.id === style.preset ? { ...s, ...(style.color ? { color: style.color } : {}), opacity: style.opacity } : s))
+  } else {
+    a.activeStyle = 'follow'
+    a.styles = a.styles.map(s => (s.id === 'follow' ? { ...s, ...vars } : s))
+  }
+  if (style.accent) {
+    const id = newProfileId('hl')
+    a.highlights = [...a.highlights, { id, name: '自定义', color: style.accent, opacity: 0.22 }]
+    a.activeHighlight = id
+  }
+  return a
+}
 
 /**
  * 最近一次 `getConfig()` 的回退原因，`null` 表示配置正常。

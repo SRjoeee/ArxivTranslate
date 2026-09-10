@@ -18,9 +18,11 @@ function mockProvider(translate: TranslationProvider['translate'], extra: Partia
   }
 }
 
+/** The reader's own service; its id is the engine's id, so status and cache keys need no special case */
+const SVC = { id: 'svc-abcd1234', kind: 'openai-compat' as const, name: 'Mine', baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-x', model: 'x/y', thinking: 'disabled' as const }
 /** 链由测试直接给：不碰真的 buildChain，也就不需要真的 API key */
 const withChain = (chain: TranslationProvider[], extra: Parameters<typeof createLocalTransport>[1] = {}) =>
-  createLocalTransport({ ...DEFAULT_CONFIG, provider: 'openai-compat' }, { buildChain: async () => ({ chain, renderPath: 'tags' as const }), ...extra })
+  createLocalTransport({ ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC] }, { buildChain: async () => ({ chain, renderPath: 'tags' as const }), ...extra })
 
 const portOf = (cache: TranslationCache): CachePort => ({
   getMany: keys => Promise.all(keys.map(key => cache.get(key))),
@@ -35,7 +37,7 @@ afterEach(() => {
 describe('createLocalTransport：翻译', () => {
   it('成功响应形状', async () => {
     const t = await withChain([mockProvider(async r => ({ segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' }))])
-    // 模型名只对 openai-compat 引擎带上：换模型不该让免费引擎的缓存失效
+    // The model rides only on the chosen service's engine: changing it must not expire a free engine's cache
     expect(await t.translate({ request: req })).toEqual({ ok: true, result: { segments: [{ id: 'a', text: '译:x' }], provider: 'mock' }, cached: 0 })
   })
 
@@ -89,13 +91,13 @@ describe('createLocalTransport：翻译', () => {
   })
 
   it('指名引擎的调用不走降级链：设置页「测试连接」要如实报出这个端点的错', async () => {
-    const failing = { ...mockProvider(async () => { throw new ProviderError('auth', 'bad key') }), id: 'openai-compat' }
+    const failing = { ...mockProvider(async () => { throw new ProviderError('auth', 'bad key') }), id: SVC.id }
     const free = { ...mockProvider(async r => ({ segments: r.segments, provider: 'google-web' })), id: 'google-web' }
     const t = await withChain([failing, free])
     // 不指名：链照常兜底，整页翻译不停死
     expect(await t.translate({ request: req })).toMatchObject({ ok: true, result: { provider: 'google-web' } })
     // 指名：直接报错，不能因为链上有免费兜底就显示成成功
-    expect(await t.translate({ request: req, providerId: 'openai-compat' })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+    expect(await t.translate({ request: req, providerId: SVC.id })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
   })
 
   it('指名一个不在链上的引擎：如实说，不悄悄换成别的', async () => {
@@ -126,18 +128,18 @@ describe('createLocalTransport：状态', () => {
   })
 
   it('首选可用时不报降级，能力字段取首选引擎的', async () => {
-    const t = await withChain([engine('openai-compat', true), engine('google-web', true)])
+    const t = await withChain([engine(SVC.id, true), engine('google-web', true)])
     expect(await t.status()).toEqual({
-      providerId: 'openai-compat',
+      providerId: SVC.id,
       available: true,
-      model: DEFAULT_CONFIG.openaiCompat.model,
+      model: SVC.model,
       maxBatchChars: 1000,
       maxBatchItems: 4,
       renderPath: 'tags',
       targetLanguage: 'cmn',
       promptId: 'default',
-      chain: ['openai-compat', 'google-web'],
-      engine: { id: 'openai-compat', displayName: 'openai-compat' },
+      chain: [SVC.id, 'google-web'],
+      engine: { id: SVC.id, displayName: SVC.id },
     })
   })
 
@@ -149,29 +151,29 @@ describe('createLocalTransport：状态', () => {
   })
 
   it('整条链都不可用时不报降级：这时按钮该是灰的', async () => {
-    const t = await withChain([engine('openai-compat', false), engine('google-web', false)])
+    const t = await withChain([engine(SVC.id, false), engine('google-web', false)])
     expect((await t.status()).fallback).toBeUndefined()
   })
 
   it('只有一个引擎时也不报降级', async () => {
-    const t = await withChain([engine('openai-compat', false)])
+    const t = await withChain([engine(SVC.id, false)])
     const r = await t.status()
     expect(r.available).toBe(false)
     expect(r.fallback).toBeUndefined()
-    expect(r.chain).toEqual(['openai-compat'])
+    expect(r.chain).toEqual([SVC.id])
   })
 
   it('降级之后 status 报的是实际在用的引擎与原因（§8.5）', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const failing = { ...engine('openai-compat', true), translate: async () => { throw new ProviderError('auth', 'bad key') } }
+    const failing = { ...engine(SVC.id, true), translate: async () => { throw new ProviderError('auth', 'bad key') } }
     const ok = { ...engine('google-web', true), translate: async (r: TranslateRequest) => ({ segments: r.segments, provider: 'google-web' }) }
     const t = await withChain([failing, ok])
-    expect((await t.status()).engine).toEqual({ id: 'openai-compat', displayName: 'openai-compat' })
+    expect((await t.status()).engine).toEqual({ id: SVC.id, displayName: SVC.id })
     expect((await t.translate({ request: req })).ok).toBe(true)
     expect((await t.status()).engine).toEqual({
       id: 'google-web',
       displayName: 'Google 网页翻译（免费）',
-      demoted: { id: 'openai-compat', displayName: 'openai-compat', kind: 'auth', message: 'bad key' },
+      demoted: { id: SVC.id, displayName: SVC.id, kind: 'auth', message: 'bad key' },
     })
   })
 })
@@ -226,7 +228,7 @@ describe('chainConfigChanged：什么样的配置改动才重建链', () => {
   it('切换显示模式、样式、预加载、术语表不重建：那时页面往往正在翻，重建会清掉令牌桶与降级记录', () => {
     const base = DEFAULT_CONFIG
     expect(chainConfigChanged(base, { ...base, mode: 'side' })).toBe(false)
-    expect(chainConfigChanged(base, { ...base, style: { ...base.style, preset: 'quote' } })).toBe(false)
+    expect(chainConfigChanged(base, { ...base, appearance: { ...base.appearance, activeStyle: 'green' } })).toBe(false)
     expect(chainConfigChanged(base, { ...base, preload: { margin: 42, threshold: 0.5 } })).toBe(false)
     expect(chainConfigChanged(base, { ...base, glossary: [{ term: 'token', translation: '词元' }] })).toBe(false)
     // 图片翻译的模式闸（§15）只是显示闸，用户翻着页勾掉一个模式不该把队列清掉
@@ -237,10 +239,11 @@ describe('chainConfigChanged：什么样的配置改动才重建链', () => {
     const base = DEFAULT_CONFIG
     const cases: Config[] = [
       { ...base, provider: 'google-web' },
-      { ...base, openaiCompat: { ...base.openaiCompat, baseURL: 'https://other.example/v1' } },
-      { ...base, openaiCompat: { ...base.openaiCompat, model: 'other-model' } },
-      { ...base, openaiCompat: { ...base.openaiCompat, apiKey: 'sk-new' } },
-      { ...base, openaiCompat: { ...base.openaiCompat, thinking: 'enabled' } },
+      { ...base, services: [SVC] },
+      { ...base, provider: SVC.id, services: [{ ...SVC, baseURL: 'https://other.example/v1' }] },
+      { ...base, provider: SVC.id, services: [{ ...SVC, model: 'other-model' }] },
+      { ...base, provider: SVC.id, services: [{ ...SVC, apiKey: 'sk-new' }] },
+      { ...base, provider: SVC.id, services: [{ ...SVC, thinking: 'enabled' }] },
       { ...base, targetLanguage: 'jpn' },
       { ...base, prompts: { ...base.prompts, promptId: 'other' } },
       { ...base, prompts: { ...base.prompts, patterns: [{ id: 'p', name: 'p', systemPrompt: 's', prompt: 'u' }] } },

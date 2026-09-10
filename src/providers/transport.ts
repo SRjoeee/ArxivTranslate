@@ -4,6 +4,7 @@
 // - createMessageTransport（src/shared/transport.ts）：在 content / options 里把每个方法变成一条消息。
 // 两个实现分文件是为了包体积：本文件会拉进三个 provider 与 AI SDK，content script 每打开一篇论文都要解析它。
 import type { Config } from '@/config/schema'
+import { chosenService } from '@/config/services'
 import type { RenderPath } from '@/cache/key'
 import { buildChain } from '.'
 import { createFallbackService } from './fallback'
@@ -64,13 +65,14 @@ export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' |
 export async function createLocalTransport(config: Config, deps: LocalTransportDeps = {}): Promise<TranslationTransport> {
   const { chain, renderPath } = await (deps.buildChain ?? buildChain)(config)
   const primary = chain[0]!
-  const model = config.provider === 'openai-compat' ? config.openaiCompat.model : undefined
+  const chosen = chosenService(config)
+  const model = chosen?.model
   const steps = chain.map(engine => ({
     provider: engine,
     service: createTranslateService({
       getProvider: async () => engine,
       // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
-      getModel: async () => (engine.id === 'openai-compat' ? config.openaiCompat.model : undefined),
+      getModel: async () => (engine.id === chosen?.id ? chosen.model : undefined),
       ...(deps.cache ? { cache: deps.cache } : {}),
       ...(deps.queue ? { queue: deps.queue } : {}),
       ...(deps.batch ? { batch: deps.batch } : {}),
@@ -138,9 +140,9 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
  * content 每切一次显示模式就写一次配置，而那时页面往往正在翻，重建会把令牌桶和降级记录一起清掉。
  * `tests/providers/transport.test.ts` 守着这张表：新增配置字段必须显式归类。
  */
-export const CHAIN_CONFIG_FIELDS = ['provider', 'openaiCompat', 'prompts', 'targetLanguage', 'fallback'] as const
+export const CHAIN_CONFIG_FIELDS = ['provider', 'services', 'prompts', 'targetLanguage', 'fallback'] as const
 /** 与 CHAIN_CONFIG_FIELDS 互补，两者之和必须覆盖 Config 的全部字段 */
-export const VOLATILE_CONFIG_FIELDS = ['version', 'mode', 'glossary', 'style', 'preload', 'image', 'reading'] as const
+export const VOLATILE_CONFIG_FIELDS = ['version', 'mode', 'glossary', 'appearance', 'preload', 'image', 'reading'] as const
 
 export function chainConfigChanged(a: Config, b: Config): boolean {
   return CHAIN_CONFIG_FIELDS.some(field => !deepEqual(a[field], b[field]))

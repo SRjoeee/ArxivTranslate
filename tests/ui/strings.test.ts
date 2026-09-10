@@ -23,8 +23,8 @@ describe('parseFatal', () => {
 })
 
 describe('serviceName', () => {
-  it('shows the model for the LLM and the service name for the rest', () => {
-    expect(serviceName('openai-compat', 'deepseek/deepseek-v4-flash')).toBe('deepseek-v4-flash')
+  it("shows the reader's own name for a service and the built-in names for the rest", () => {
+    expect(serviceName('svc-abcd1234', [{ id: 'svc-abcd1234', name: 'DeepSeek V4 Flash' }])).toBe('DeepSeek V4 Flash')
     expect(serviceName('openai-compat')).toBe(S.service.llm)
     expect(serviceName('google-web')).toBe('Google 翻译')
     expect(serviceName('chrome-builtin')).toBe('Chrome 翻译')

@@ -7,8 +7,7 @@ import type { SentenceAlignment } from '@/providers/alignment'
 import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate, type WireSpan } from '@/core/protector'
 import {
-  clearAllPending, enable, markPartial, registerSentences, renderFailed, renderPending, renderTable, renderText, setState, type Mode,
-  type StylePreset,
+  clearAllPending, enable, markPartial, registerSentences, renderFailed, renderPending, renderTable, renderText, setState, type Look, type Mode,
 } from '@/core/renderer'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
 import { createWorkPacer, pauseIfBudgetSpent } from '@/core/scheduler/pacer'
@@ -39,8 +38,8 @@ export interface RunOptions {
   blocks: Block[]
   target: string
   mode: Mode
-  /** 译文样式预设（§7.5）；不传就沿用页面上已有的属性 */
-  style?: { preset: StylePreset; customCss?: string }
+  /** The reader's active appearance (§7.5); without it the page keeps whatever attributes it has */
+  appearance?: Look
   paper: string
   capabilities: { maxBatchChars: number; maxBatchItems: number; renderPath: RenderPath }
   transport: Transport
@@ -129,7 +128,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
 
   // 译文语言进 <html>，renderText 逐个写到译文节点上：页面的 lang 说的是原文（arXiv 上是 en），
   // 不标的话屏幕阅读器会用英文语音念中文
-  enable(doc, options.mode, options.style, toBcp47(options.target))
+  enable(doc, options.mode, options.appearance, toBcp47(options.target))
   const sectionOf = sectionTitles(blocks)
 
   // 块标记一次性写完，不切片（issue #67）：side prep 的两道闸都看 data-axt-id——
