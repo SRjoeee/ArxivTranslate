@@ -60,52 +60,57 @@
 
 ### 3.1 Popup
 
+Revised 2026-09-10 in review (see §4 for the states). Copy is the product's register: nouns for
+states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every note gets a real button.
+
 | 编号 | 位置 / 何时 | 文案 | 备注 |
 |---|---|---|---|
 | S-P-01 | 品牌行 | Readarxiv | [定] 2026-09-10 更名；商店名、扩展 `name`、网站 readarxiv.org 同步 |
-| S-P-02 | 品牌行齿轮 `aria-label` | 设置 | |
-| S-P-03 | 非 arXiv 页 / 页面加载中（P0） | 打开一篇 arXiv 论文的 HTML 版本，就可以翻译 | 两种情况同一句，不说「后台未响应」 |
-| S-P-10 | 服务行标签 | 翻译服务 | |
-| S-P-11 | 服务行值 | {模型名 / 服务名} | AI 模型显示模型名（`deepseek-v4-flash`），其他显示服务名 |
-| S-P-12 | 状态药丸 · 可用 | 就绪 | 绿 |
-| S-P-13 | 状态药丸 · 翻译进行中 | 翻译中 | 红 + 转环 |
-| S-P-14 | 状态药丸 · 已改用其他服务 | 已改用 | 红；卡内附 S-P-30 |
-| S-P-15 | 状态药丸 · 首选不可用但有兜底 | 将改用 | 琥珀；卡内附 S-P-31 |
-| S-P-16 | 状态药丸 · 不可用且无兜底 | 需要设置 | 灰；卡内附 S-P-32 |
-| S-P-17 | 状态药丸 · 致命错误后 | 已暂停 | 灰；卡内附 S-P-33 |
-| S-P-18 | 状态药丸 · 离线语言包下载中 | 下载中 | 灰 + 转环 |
-| S-P-20 | 语言行标签 | 翻译为 | |
-| S-P-21 | 语言行值 | {语言名} | `languages.ts` 的 label |
-| S-P-30 | 卡内说明 · 已改用 | {原服务}：{原因}。后面的段落改用 {新服务}，专业术语可能不准 | 「去修」→ 设置 · 翻译服务；原因按 S-E 表；新服务名按 §2 |
-| S-P-31 | 卡内说明 · 将改用 | 还没有填写 API Key，这次会用 Google 翻译 | 「去填」→ 设置 |
-| S-P-32 | 卡内说明 · 需要设置 | 还没有填写 API Key，填好就能翻译 | 「去填」→ 设置；离线包场景换成 S-P-40 |
-| S-P-33 | 卡内说明 · 已暂停 | {原因}。改好设置后点「重新翻译」 | 原因按 S-E 表 |
-| S-P-34 | 卡内说明 · 设置读取失败 | 设置没能读取，正在用默认设置 | 红；「去查看」→ 设置。最高优先级，压过其他说明 |
-| S-P-35 | 卡内说明 · 图片翻译已暂停 | 图片翻译已暂停：{原因}。显示原文、改好设置后再翻译 | `images.fatal`；文字翻译未暂停时也显示 |
-| S-P-40 | 服务列表 · 离线翻译行动作 | 下载 | 可下载时；点击即开始（必须是点击手势） |
-| S-P-41 | 服务列表 · 离线翻译行副标题 · 下载中 | 下载中，约需 1 分钟 | 没有进度事件，只能给估时 |
-| S-P-42 | 服务列表 · 离线翻译行副标题 · 不支持 | 这个语言暂不支持离线翻译 | `unavailable` |
-| S-P-43 | 服务列表 · 离线翻译行副标题 · Chrome 不支持 | 此版本 Chrome 没有离线翻译 | `unsupported`，整行禁用 |
-| S-P-44 | 服务列表 · AI 模型副标题 | 译文最准确 | |
-| S-P-45 | 服务列表 · Google 翻译副标题 | 免费，几秒翻完 | |
-| S-P-46 | 服务列表 · 离线翻译副标题 | 不联网，速度最快 | |
-| S-P-47 | 服务列表 · AI 模型子行 | 提示词 · {名称} | 只在选中 AI 模型时出现，点开是提示词列表；覆盖现有 popup 的提示词下拉 |
-| S-P-48 | 服务列表 · 免费 AI 翻译（候选 #97） | 免费 AI 翻译 / 不用配置，直接用 | 接入前隐藏 |
-| S-P-49 | 服务列表 · Microsoft 翻译 | Microsoft 翻译 / 免费，斜体等样式会丢 | [定] 已接入（#98）；第四项，永远显示；选它时不自动改用别的服务 |
-| S-P-50 | 主按钮 · 未翻译 | 翻译本页 | 附快捷键角标：显示 Chrome 实际绑定的键（manifest `commands` 的 `axt-toggle`，建议 Alt+T，与右键菜单同一开关）；只在可点的「翻译本页 / 重新翻译」上出现，未绑定时不显示 |
-| S-P-51 | 主按钮 · 翻译中 | 显示原文 | |
-| S-P-52 | 主按钮 · 已暂停 | 重新翻译 | 次按钮 S-P-53 同时出现 |
-| S-P-53 | 次按钮 · 已暂停 | 显示原文 | 文字按钮 |
-| S-P-60 | 失败行 | {n} 段没翻出来 / {m} 张图没翻出来 / {n} 段、{m} 张图没翻出来 | 只在 `progress.failed + images.failed > 0` 且两者都非致命时出现；三种写法按有无取用 |
+| S-P-02 | 品牌行齿轮 `aria-label`；每条说明旁的按钮 | 设置 | The one button of every note; opens the options page |
+| S-P-03 | 非 arXiv 页 / 页面加载中（P0） | 打开 arXiv 论文的 HTML 页面后即可翻译 | Same sentence for both cases; never "后台未响应" |
+| S-P-10 | 服务行标签 | 翻译服务 | The row opens the service menu (S-P-40…46) under itself |
+| S-P-11 | 服务行值 | {模型名 / 服务名} | LLM shows the model (`deepseek-v4-flash`), others their name; while replaced (S-P-30) the service in use with the one put aside struck through |
+| S-P-20 | 语言行标签 | 目标语言 | The row opens the language menu |
+| S-P-21 | 语言行值 | {语言名} | `languages.ts` label |
+| S-P-22 | 语言菜单搜索框 | 搜索语言 | Matches the Chinese name, the local name, the English name and the code |
+| S-P-23 | 语言菜单无结果 | 没有匹配的语言 | |
+| S-P-30 | 说明 · 已改用 | {原服务}：{原因}。本页已改用 {新服务} | A permanent hand-over restarts the whole page on the new service (DESIGN §8.5); reason per S-E |
+| S-P-31 | 说明 · 将改用 | {为何不能用}，本次将使用 {服务} | Idle, the chosen service cannot run, another takes over |
+| S-P-32 | 说明 · 不能翻译 | {为何不能用} | Idle with nothing to take over, or the page left behind by a choice that cannot run (P13) |
+| S-P-32a | {为何不能用} · LLM | LLM 尚未配置 API Key | |
+| S-P-32b | {为何不能用} · Chrome | Chrome 翻译的语言包尚未下载 / Chrome 翻译的语言包下载中，约需 1 分钟 | Reachable from the options page only: the popup's item is greyed |
+| S-P-32c | {为何不能用} · Microsoft | Microsoft 翻译不支持当前目标语言 | |
+| S-P-33 | 说明 · 已暂停 | {原因}。请检查设置后重新翻译 | Reason per S-E |
+| S-P-35 | 说明 · 图片翻译已暂停 | 图片翻译已暂停：{原因} | `images.fatal`; shown while text translation continues |
+| S-P-40 | 服务菜单 · Chrome 项动作 | 下载 | While `downloadable`; the item is greyed until the pack is there; the click itself starts the download (user gesture) |
+| S-P-41 | 服务菜单 · Chrome 项副标题 · 下载中 | 语言包下载中 | Spinner in place of the button; no progress events, so no bar |
+| S-P-42 | 服务菜单 · Chrome 项副标题 · 不可用 | 当前不可用 | `unavailable` / `unsupported`, greyed, no button |
+| S-P-43 | 服务菜单 · Chrome 项副标题 · 就绪 | 浏览器内置，无需联网 | |
+| S-P-44 | 服务菜单 · Microsoft / Google 副标题 | 免费 | Microsoft with an unsupported target: 不支持当前目标语言, greyed |
+| S-P-45 | 服务菜单 · LLM 副标题 | {模型名} / 尚未配置 API Key | Selectable without a key; the note S-P-31/32 and its 设置 button follow |
+| S-P-46 | 服务菜单 · 名称与顺序 | Microsoft 翻译 · Google 翻译 · LLM · Chrome 翻译 | [定] 2026-09-10; Microsoft is the shipped default |
+| S-P-47 | 提示词行 | 提示词 / {名称} | Only while the LLM is chosen; opens the prompt menu |
+| S-P-50 | 主按钮 · 未翻译 | 翻译本页 | Shortcut badge: the key Chrome reports for `axt-toggle` (suggested Alt+T); on an enabled 翻译本页 / 重新翻译 only |
+| S-P-51 | 主按钮 · 翻译中 | 显示原文 | The only sign that the page is on: no pill |
+| S-P-52 | 主按钮 · 已暂停 / 页面落后于设置 | 重新翻译 | Disabled while the saved service cannot run; S-P-53 alongside |
+| S-P-53 | 次按钮 | 显示原文 | Text button under S-P-52 |
+| S-P-60 | 失败行 | {n} 处翻译失败 | Paragraphs and figures counted together; only when `progress.failed + images.failed > 0` and nothing is fatal |
 | S-P-61 | 失败行动作 | 重试 | |
-| S-P-70 | 模式分段 | 上下 · 左右 · 仅译文 | `title` 分别为 S-P-71/72/73 |
+| S-P-70 | 模式分段 | 上下 · 左右 · 仅译文 | `title` S-P-71/72/73 |
 | S-P-71 | 模式 `title` · 上下 | 译文紧跟在原文下方 | |
 | S-P-72 | 模式 `title` · 左右 | 原文与译文并排；窗口较窄时按上下显示 | |
 | S-P-73 | 模式 `title` · 仅译文 | 隐藏原文，参考文献仍保留双语 | |
-| S-P-74 | 模式条下备注 · 窄窗口 | 窗口较窄，暂按上下显示 | 只在选了左右且实际为上下时出现 |
-| S-P-80 | 对照高亮行 | 对照高亮 | [定] 首页常驻开关（`reading.sentenceHighlight`），与模式条并列；即改即存，本页立即生效 |
-| S-P-81 | 对照高亮 `title` | 指到哪句亮哪句；仅译文时停留一下会浮出原文 | |
-| S-P-90 | 动作失败 | {原始信息} | 主按钮下一行红字（`role=alert`），下次动作前清掉 |
+| S-P-74 | 模式条下备注 · 窄窗口 | 窗口较窄，暂按上下显示 | Only when 左右 is chosen and the page shows 上下 |
+| S-P-80 | 对照高亮行 | 对照高亮 | Switch in the card (`reading.sentenceHighlight`); saved at once, live on the page |
+| S-P-81 | 对照高亮 `title` | 悬停时高亮对应句子；仅译文模式下停留可查看原文 | |
+| S-P-85 | 图片翻译行 | 图片翻译 | Switch in the card (`image.enabled`, v11); saved at once, live on the page; the per-mode list stays on the options page |
+| S-P-86 | 图片翻译行下 · 助手未安装（macOS） | 图片翻译需要安装识别助手 | Only while the switch is on and the helper is not detected |
+| S-P-87 | 图片翻译行下 · 非 macOS | 图片翻译目前仅支持 macOS | |
+| S-P-88 | 助手提示动作 | 复制安装命令 / 已复制 | Copies `helper/install.sh <extension id>`; one constant to change once a hosted installer exists |
+| S-P-89 | 助手提示动作 | 教程 | Opens helper/README.md |
+| S-P-90 | 动作失败 | {原始信息} | Red line under the primary button (`role=alert`), cleared before the next action |
+
+Removed 2026-09-10: the state pills (S-P-12…18) and the config-fallback note (S-P-34; the options page announces it).
 
 ### 3.2 设置页
 
@@ -194,37 +199,48 @@
 
 ---
 
-## 4. Popup 状态表 [定，2026-09-10 实现于 ui/phase-1]
+## 4. Popup 状态表 [定，2026-09-10 revised on ui/phase-1]
 
-列 = 元素；格 = 该状态下的呈现，「—」= 不出现。判定条件用代码里的字段写。
+Columns are elements, cells what they show, "—" absent. Conditions use the code's fields. The card
+holds the rows 翻译服务 / 目标语言 / 提示词 (LLM only) / 对照高亮 / 图片翻译 in every state but P0;
+the rows open at any time.
 
-| 编号 | 状态 | 判定 | 服务行 | 药丸 | 语言行 | 卡内说明 | 失败行 | 主按钮 | 次按钮 | 模式条 |
-|---|---|---|---|---|---|---|---|---|---|---|
-| P0 | 非 arXiv / 加载中 | `page === null` | — | — | — | S-P-03（独立卡） | — | — | — | — |
-| P1 | 就绪 | idle ∧ available ∧ !fallback | 值 + 箭头 | 就绪 | 值 + 原生 select | — | — | 翻译本页 | — | 可选 |
-| P2 | 服务列表展开 | P1/P5-/P6 下点服务行 | 列表（4 行 + 语言行） | — | 并入列表，仍是 select | — | — | 翻译本页 | — | 可选（被推到下方） |
-| P3 | 翻译中 | on ∧ failed = 0 ∧ !demoted | 值，**无箭头** | 翻译中 | 值，**无箭头** | — | — | 显示原文 | — | 可选 |
-| P4 | 翻译中，有失败 | on ∧ failed > 0 ∧ !fatal | 同 P3 | 翻译中 | 同 P3 | — | S-P-60 + 重试 | 显示原文 | — | 可选 |
-| P5 | 已改用其他服务 | `engine.demoted` | 新服务名，旧名划线 | 已改用 | — | S-P-30 + 去修 | 按 failed | 按 on | — | 可选 |
-| P6 | 将改用（首选不可用有兜底） | idle ∧ !available ∧ fallback | 首选名 | 将改用 | 值 + 箭头 | S-P-31 + 去填 | — | 翻译本页 | — | 可选 |
-| P7 | 需要设置（不可用无兜底） | !available ∧ !fallback | 首选名 | 需要设置 | 值 + 箭头 | S-P-32 / S-P-40 | — | 翻译本页 **禁用** | — | 可选 |
-| P8 | 已暂停 | stopped ∧ fatal | 值 | 已暂停 | 值 | S-P-33 | — | 重新翻译 | 显示原文 | 可选 |
-| P9 | 已停止（用户显示了原文） | stopped ∧ !fatal | 值 + 箭头 | 就绪 | 值 + 箭头 | — | — | 翻译本页 | — | 可选 |
-| P10 | 设置读取失败 | `configFallbackReason()` | 默认值 | 需要设置 | 默认值 | S-P-34 + 去查看 | — | 按 available | — | 可选 |
-| P11 | 离线语言包下载中 | pack = downloading | 值 | 下载中 | 值 | — | — | 翻译本页 禁用 | — | 可选 |
-| P12 | 图片翻译已暂停 | `images.fatal` | 按文字态 | 按文字态 | 按文字态 | S-P-35 | 只算文字 | 按文字态 | — | 可选 |
-| P13 | 图片翻译进行中 | `images.requested > 0` | 无变化 | 无变化 | — | — | 按 failed | 按 on | — | 可选 |
+| 编号 | 状态 | 判定 | 服务行值 | 说明 | 失败行 | 主按钮 | 次按钮 |
+|---|---|---|---|---|---|---|---|
+| P0 | 非 arXiv / 加载中 | `page === null` | — | S-P-03 (own card) | — | — | — |
+| P1 | 就绪 | idle ∧ runnable | 值 | — | — | 翻译本页 | — |
+| P2 | 翻译服务菜单 | menu = service | 值 | as the state | — | as the state | — |
+| P3 | 目标语言菜单 | menu = language | 值 | as the state | — | as the state | — |
+| P4 | 翻译中 | on | 值 | — | — | 显示原文 | — |
+| P5 | 翻译中，有失败 | on ∧ failed > 0 ∧ !fatal | 值 | — | S-P-60 + 重试 | 显示原文 | — |
+| P6 | 已改用其他服务 | on ∧ `engine.demoted` | 新服务名，旧名划线 | S-P-30 + 设置 | per failed | 显示原文 | — |
+| P7 | 所选服务不能用，有服务替代 | idle ∧ !runnable ∧ fallback | 值 | S-P-31 + 设置 | — | 翻译本页 | — |
+| P8 | 所选服务不能用，无替代 | idle ∧ !runnable ∧ !fallback | 值 | S-P-32 + 设置 | — | 翻译本页 **禁用** | — |
+| P9 | 已暂停 | stopped ∧ fatal | 值 | S-P-33 + 设置 | — | 重新翻译 | 显示原文 |
+| P10 | Chrome 语言包下载中 | chrome ∧ pack = downloading | 值 | S-P-31 (32b) + 设置 | — | per fallback | — |
+| P11 | 图片翻译已暂停 | `images.fatal` | per text state | S-P-35 + 设置 | text only | per text state | — |
+| P12 | 窄窗口 | `mode !== preference` | 值 | as the state | — | as the state | — |
+| P13 | 页面落后于设置 | on ∧ `running` ≠ settings ∧ !runnable | 值 (the saved one) | S-P-32 + 设置 | — | 重新翻译 **禁用** | 显示原文 |
+| P14 | 识别助手未安装 | `image.enabled` ∧ !helper.available | 值 | S-P-86/87 under the image row | — | as the state | — |
+| P15 | 提示词菜单 | llm ∧ menu = prompt | 值 | as the state | — | as the state | — |
 
-叠加规则：
-- 卡内说明一次只显示一条，优先级 S-P-34 > S-P-33 > S-P-30 > S-P-35 > S-P-31 / S-P-32。
-- P5 与 P4 可叠加：失败行照常出现在卡下方。
-- 翻译进行中（P3–P5）服务行与语言行不可点，箭头收起；要换服务先「显示原文」。
-- 语言行可点时就是原生 `<select>`（自带箭头，一步到位）；不可点时只显示值。列表展开态也一样。
-- 对照高亮行（S-P-80）在模式条下方，P0 之外每个状态都出现。
-- 窄窗口备注 S-P-74 独立于状态，只看 `mode !== preference`。
-- 主按钮禁用时不解释原因——原因已在卡内说明里。
-- 图片翻译在 popup 里**没有独立的进行中指示**（P13）：叠加层出现在页面上就是反馈；只有失败（S-P-60）和暂停（S-P-35）才露面。识别助手不可用时 popup 完全不提，只在设置页说。
-- 开发态信息（后台版本、块统计、`fatal` 原始文本）只在开发构建的样例页显示，正式 popup 不出现。
+Rules:
+- `runnable` is decided from the settings alone (LLM: a key; Chrome: the pack is `available`;
+  Microsoft: the target is supported; Google: always), never from a possibly stale chain.
+- One note at a time: S-P-33 > S-P-30 > S-P-35 > S-P-31 / S-P-32. Every note carries the 设置 button.
+- A change of service, language or prompt while the page is on **restarts it in place** once the
+  background reports the saved values (DESIGN §8.5): paragraphs are swapped as they are requested
+  again, cached ones at once. A choice that cannot run only saves → P13. The two switches are
+  applied by the page's config watcher, nothing restarts.
+- A permanent hand-over (missing or rejected key) restarts the page on the service that took over,
+  so P6 shows one service for the whole page, not "the rest of the paragraphs".
+- The primary button is the only sign that the page is on. No counts anywhere.
+- The failure line counts paragraphs and figures together (S-P-60).
+- S-P-74 depends on `mode !== preference` only.
+- A menu overlays the rows below it; the popup keeps that much room below the card so the window
+  grows and nothing is clipped. The list scrolls past about six rows.
+- Dev-only information (background version, block stats, raw `fatal` text) lives only in the
+  dev-build gallery.
 
 ## 5. 令牌 [议]
 
@@ -287,7 +303,8 @@
 | 分栏拖动 | #83 | 实验 | 页内手柄；设置里一个「恢复居中」 | S-I-05，S-O-48 |
 | 免费 AI 翻译（托管） | #97 | 候选 | 服务列表第四项 | S-P-48，S-O-15 |
 | Microsoft 翻译 | #98 | 已实现 | 服务列表第四项 | S-P-49，S-O-16 |
-| 对照高亮（悬停句子高亮 + 仅译文悬浮原文） | #105 / #141 | 已实现 | popup 首页开关；设置 · 阅读 | S-P-80…81 |
+| 对照高亮（悬停句子高亮 + 仅译文悬浮原文） | #105 / #141 | 已实现 | popup 卡内开关；设置 · 阅读 | S-P-80…81 |
+| 图片翻译开关 + 识别助手安装提示 | §15 | 已实现（2026-09-10） | popup 卡内开关与助手提示；设置 · 图片翻译 | S-P-85…89 |
 | 页内「已改用」提示 | 本文提案 | 待定 | 页内 | S-I-03 |
 | 阅读工具条 | 画布提案 | 待定 | 页内 | — |
 | 后台连通 / 块统计 | 现有 popup | 开发态 | 只在开发构建样例页 | — |

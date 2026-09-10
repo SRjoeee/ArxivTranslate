@@ -46,7 +46,10 @@ export default defineBackground(() => {
   /**
    * 会话与链的绑定（见 ./sessions.ts）：一次会话认准它开始时的那条链，标签页关掉就撤掉它的请求。
    * 代价是配置恰好在翻译中途变更时新旧两条链短暂并存、跨标签页的并发预算翻倍，直到旧会话结束；
-   * 这是有意的取舍——宁可短暂多一套队列，也不能让一轮译文中途换引擎或换语言（Codex 在 #59 指出）
+   * 这是有意的取舍——宁可短暂多一套队列，也不能让一轮译文中途换引擎或换语言（Codex 在 #59 指出）。
+   * A settings change while a page is on therefore starts a **new** session that replaces the
+   * old one in place (content `start(…, restart)`, DESIGN §8.5); the old session's requests are
+   * cancelled by its scope as before
    */
   /**
    * 图片翻译的本机 OCR helper（DESIGN §15）：懒连接，有请求在飞时定时调一个无害 API 保活——
