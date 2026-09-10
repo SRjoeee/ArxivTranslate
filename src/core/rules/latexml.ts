@@ -242,6 +242,14 @@ export function classify(el: Element): Classification | null {
  */
 export const FUNCTIONAL_INLINE = 'a[href]'
 
+/**
+ * Formatting-only inline elements, which the markers format flattens to text (§6.3). One that
+ * opens a block — `Keywords:`, `Note.`, an italic theorem statement — can be put back at rehydrate
+ * time along its separator (protector/label.ts, issue #150). Not `.ltx_font_typewriter`: that is
+ * kept whole as code and never flattened.
+ */
+export const LABEL_FORMATTING = '.ltx_font_bold, .ltx_font_italic, .ltx_font_smallcaps, .ltx_emph'
+
 /** 插图与图形（Phase 0 统计脚本用） */
 /**
  * 图目标（§15）。`graphics` 两种都收：位图走 OCR，SVG 直接读字形（§15.5）。

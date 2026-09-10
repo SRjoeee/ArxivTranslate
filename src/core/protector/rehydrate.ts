@@ -1,5 +1,6 @@
 // 回填（DESIGN §6.4）：译文 → DocumentFragment。占位符换成原节点的克隆，按译文顺序放置；原节点不动。
 import { cloneWithoutIds } from './clone'
+import { type Boundaries, restoreLeadingLabel } from './label'
 import { scanTokens, type WireSpan } from './offsets'
 import type { ProtectedBlock } from './serialize'
 import { PlaceholderIntegrityError, validate } from './validate'
@@ -26,7 +27,12 @@ import { PlaceholderIntegrityError, validate } from './validate'
  * want the nodes are untouched. They reference the nodes, not the fragment, so they stay valid
  * after the fragment has been appended and emptied.
  */
-export function rehydrate(translated: string, block: ProtectedBlock, doc: Document): DocumentFragment & { offsets: WireSpan[] } {
+/**
+ * `alignment` is the engine's sentence boundaries for this translation, when it reported them and
+ * they verified (`providers/alignment.ts`). The label restore needs them as evidence for a label
+ * that ends in a period (`label.ts`); the fragment itself does not.
+ */
+export function rehydrate(translated: string, block: ProtectedBlock, doc: Document, alignment?: Boundaries): DocumentFragment & { offsets: WireSpan[] } {
   const v = validate(translated, block)
   if (!v.ok) throw new PlaceholderIntegrityError(v.reason, v.detail)
 
@@ -34,6 +40,8 @@ export function rehydrate(translated: string, block: ProtectedBlock, doc: Docume
   const stack: (DocumentFragment | Element)[] = [fragment]
   const top = () => stack[stack.length - 1]!
   const spans: WireSpan[] = []
+  /** Which slot each clone stands for; the label restore checks identities, not just counts */
+  const ids = new Map<Node, number>()
 
   for (const t of scanTokens(translated, block.format)) {
     if (t.kind === 'text') {
@@ -44,6 +52,7 @@ export function rehydrate(translated: string, block: ProtectedBlock, doc: Docume
     } else if (t.kind === 'void') {
       const node = cloneWithoutIds(doc, block.slots.get(t.id)!, true)
       top().append(node)
+      ids.set(node, t.id)
       spans.push({ kind: 'slot', node, from: t.from, to: t.to, role: 'void' })
     } else if (t.kind === 'open') {
       const el = cloneWithoutIds(doc, block.slots.get(t.id)!, false) as Element
@@ -56,5 +65,8 @@ export function rehydrate(translated: string, block: ProtectedBlock, doc: Docume
       spans.push({ kind: 'slot', node: el, from: t.from, to: t.to, role: 'close' })
     }
   }
+  // Markers flattened the block's formatting; the one piece that can be put back safely is a
+  // label the block opened with (`label.ts`, issue #150). Splits a span where it splits a node
+  if (block.format === 'markers') restoreLeadingLabel(fragment, spans, block, doc, ids, alignment)
   return Object.assign(fragment, { offsets: spans })
 }

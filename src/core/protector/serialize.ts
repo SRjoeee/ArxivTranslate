@@ -26,6 +26,13 @@ export interface ProtectedBlock {
    * defensive branch that can never be exercised.
    */
   offsets: WireSpan[]
+  /**
+   * The element this block was serialised from. Untouched by translation (§7.1), so the rehydrate
+   * side can read what the wire text no longer says — which formatting element the block opened
+   * with, under a format that flattened it (`label.ts`, issue #150). The block lives with its
+   * segment in the content script and is never sent across the message boundary, like `slots`.
+   */
+  root: Element
 }
 
 export const VOID_DENSE_THRESHOLD = 40
@@ -164,5 +171,5 @@ export function serialize(root: Element, format: WireFormat = 'tags'): Protected
   }
   walk(root)
   // The tracker collapses whitespace as it writes, so the joined parts are already collapsed.
-  return { format, text: parts.join(''), slots, paired, voidCount, offsets: spans }
+  return { format, text: parts.join(''), slots, paired, voidCount, offsets: spans, root }
 }

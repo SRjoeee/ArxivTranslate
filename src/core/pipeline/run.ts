@@ -203,7 +203,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
     if (res.ok) {
       cached += res.cached
       const hit = res.result.segments[0]
-      if (hit !== undefined && validate(hit.text, segment.protected).ok) return { fragment: rehydrate(hit.text, segment.protected, doc), alignment: hit.alignment }
+      if (hit !== undefined && validate(hit.text, segment.protected).ok) return { fragment: rehydrate(hit.text, segment.protected, doc, hit.alignment), alignment: hit.alignment }
     } else {
       noteFatal(res)
     }
@@ -234,7 +234,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
     const byId = new Map(res.result.segments.map(s => [s.id, s]))
     for (const segment of segments) {
       const hit = byId.get(segment.id)
-      if (hit !== undefined && validate(hit.text, segment.protected).ok) out.set(segment, { fragment: rehydrate(hit.text, segment.protected, doc), alignment: hit.alignment })
+      if (hit !== undefined && validate(hit.text, segment.protected).ok) out.set(segment, { fragment: rehydrate(hit.text, segment.protected, doc, hit.alignment), alignment: hit.alignment })
       else out.set(segment, await retrySingle(segment, sectionTitle))
     }
   }
