@@ -173,6 +173,38 @@ export function mirrorSentences(target: Element, copy: Element, twin: (node: Nod
   remember(map.source.root, copy)
 }
 
+/** A span moved onto its twin, or left alone when the twin is missing or of the wrong kind. */
+function movedOnto(span: WireSpan, twin: (node: Node) => Node | undefined): WireSpan {
+  const node = twin(span.node)
+  if (!node) return span
+  // 分支写开而不是一把 spread：联合类型经过 spread 会被展宽，`kind` 的字面量类型就丢了
+  if (span.kind !== 'text') return { ...span, node }
+  return node.nodeType === Node.TEXT_NODE ? { ...span, node: node as Text } : span
+}
+
+/**
+ * Registers a copy of a whole pair — both sides cloned — so the copy highlights on its own.
+ *
+ * `localizeNotes` puts a footnote's translation beside the copy of its original that the
+ * paragraph's translation carries (§7.2), and in side mode that copy is the only note on screen:
+ * the original's box is hidden. Both halves are clones, so neither is registered; a pointer on
+ * the copy walked up to the paragraph's translation and tinted the sentence the note hangs off,
+ * not the note (user, 2026-09-10). The node mappings come from the caller, which knows how the
+ * clones differ from what they were cloned from.
+ */
+export function mirrorPair(target: Element, copies: { source: Element; target: Element }, twin: { source: (node: Node) => Node | undefined; target: (node: Node) => Node | undefined }): void {
+  const map = maps.get(target)
+  if (!map) return
+  const source = map.source.spans.map(span => movedOnto(span, twin.source))
+  const moved = map.target.spans.map(span => movedOnto(span, twin.target))
+  maps.set(copies.target, {
+    pairs: map.pairs,
+    source: { root: copies.source, spans: source, index: indexSpans(source) },
+    target: { root: copies.target, spans: moved, index: indexSpans(moved) },
+  })
+  remember(copies.source, copies.target)
+}
+
 /**
  * 这个译文节点此刻的句子登记状况，给拆图的签名用。
  *

@@ -379,11 +379,13 @@ html[data-axt-mode="side"] .ltx_note.ltx_note_frontmatter > .ltx_note_outer:has(
    边注宽度按 96 / 109rem 写死 20 / 27rem——那是给 52rem 文章配的，我们的沟槽在 1600px 只有 19rem，照写会溢出视口。
    这些几何改成跟 --axt-side-w 走，显隐与 hover / focus 交互原样不动。盒子一律占 [文章右缘 + 1rem, 文章右缘 + side - 1rem]。
    96rem 以下 ar5iv 本来就不显示边注（折叠成 hover 弹出），沟槽只是对称的留白。 */
-/* 脚注框不参与网格行高（§7.2）：side 模式下每个段落都是网格项，网格项自带 BFC，会把 ar5iv 浮到
-   页面右缘的脚注框整个算进自己的高度——原版式里段落是普通块、不包含浮动，所以没有这块空白。
-   实测 2609.09360v1（用户 2026-09-10 反馈）：带脚注的译文段落网格项 1321px、正文只有 54px，
-   左右两栏一起空出 1300px。零高 + overflow: visible 是 ar5iv 自己给列表项里的脚注用的同一招；
-   代价是两条相邻的长脚注在边距里可能重叠，比整行空 1300px 好 */
+/* A note's box must not size the grid row (§7.2). In side mode every paragraph is a grid item and
+   so a BFC, which contains the box ar5iv floats to the page's edge — in the original layout the
+   paragraph is an ordinary block and contains no float, hence no blank. Measured on 2609.09360v1
+   (reported 2026-09-10): the translation's grid item was 1321px for 54px of text, leaving both
+   columns 1300px blank. Zero height with visible overflow is ar5iv's own device for notes inside
+   list items; the cost is that two adjacent long notes may overlap in the margin, which beats a
+   1300px blank row */
 html[data-axt-mode="side"] .ltx_note_outer {
   height: 0;
   overflow: visible;

@@ -53,7 +53,9 @@ describe('localizeNotes', () => {
     // 幂等：再跑一遍不会套第二层
     localizeNotes(doc)
     expect(c.querySelectorAll('.axt-note-s')).toHaveLength(1)
-    expect(c.textContent).toBe('1English note中文脚注')
+    // 放进去的译文里，标号藏着而不是删掉（镜像句子登记要两棵树同构），所以 textContent 里有第二个 1
+    expect(c.querySelector<HTMLElement>('.axt-note-t sup')?.hidden).toBe(true)
+    expect(c.textContent).toBe('1English note1中文脚注')
   })
 
   it('译文还没到时不包原文：样式只藏「有译文相伴」的原文，副本里的内容一个字不丢', () => {

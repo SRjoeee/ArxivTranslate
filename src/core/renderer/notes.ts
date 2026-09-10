@@ -18,8 +18,9 @@
 // 隐藏只认 data-axt-note 标记、且标记只在复制成功时才打：第一版用一条无条件的 CSS 藏原件译文，
 // JS 没跑到中文就凭空消失。现在没跑到时只是退回"原件里原文 + 译文并排"的旧样子，不丢内容。
 import { ID_ATTR } from '@/core/extractor'
-import { T_CLASS } from '@/core/marks'
+import { T_CLASS, isInjected } from '@/core/marks'
 import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
+import { mirrorPair } from './sentences'
 
 /** 原件上的标记：译文已复制进副本，这份边注由样式隐藏 */
 const LOCALIZED_ATTR = 'data-axt-note'
@@ -41,20 +42,90 @@ function localizedCopy(translated: Element): Element {
   clone.classList.remove(NOTE.contentClass)
   clone.classList.add(NOTE_T_CLASS)
   for (const name of clone.getAttributeNames()) if (name.startsWith('data-axt-')) clone.removeAttribute(name)
-  for (const mark of Array.from(clone.querySelectorAll(NOTE.marks))) mark.remove()
+  // The marks are hidden, not removed: in the translation's sentence registration a mark is a
+  // placeholder, and mirroring onto the copy needs a twin for every node — with one missing, that
+  // sentence's range would run from the hidden original all the way to the copy and enclose the
+  // document between. Without the class there is no ar5iv absolute positioning; `hidden` takes it
+  // out of layout; the subtree stays, so the two trees remain isomorphic
+  for (const mark of Array.from(clone.querySelectorAll(NOTE.marks))) {
+    mark.removeAttribute('class')
+    ;(mark as HTMLElement).hidden = true
+  }
   return clone
 }
 
-/** 副本里除标号与译文之外的一切——它自己的原文——收进 `.axt-note-s`；已经收过就不动（幂等） */
-function wrapSource(copy: Element): void {
-  if (copy.querySelector(`:scope > .${NOTE_S_CLASS}`)) return
+/** Gathers the copy's own original — everything after the marks, minus the translation — into `.axt-note-s`; idempotent. Returns the wrapper. */
+function wrapSource(copy: Element): Element | null {
+  const existing = copy.querySelector(`:scope > .${NOTE_S_CLASS}`)
+  if (existing) return existing
   const doc = copy.ownerDocument
   const wrapper = doc.createElement('span')
   wrapper.className = NOTE_S_CLASS
-  const loose = Array.from(copy.childNodes).filter(n => !(n.nodeType === 1 && ((n as Element).matches(NOTE.marks) || (n as Element).classList.contains(NOTE_T_CLASS))))
-  if (loose.length === 0) return
+  // The wrapper takes the contiguous run **after the last mark**, not "every node that is not a
+  // mark": ar5iv's note content is `<sup>1</sup> <span.ltx_tag>1</span> text…`, and picking up the
+  // whitespace between the marks too would move the marks behind the wrapper — a changed document
+  // order, and the two trees no longer pair up when the sentence registration is mirrored
+  // (measured on 2609.09360v1)
+  const children = Array.from(copy.childNodes)
+  let start = 0
+  children.forEach((n, i) => { if (n.nodeType === 1 && (n as Element).matches(NOTE.marks)) start = i + 1 })
+  const loose = children.slice(start).filter(n => !(n.nodeType === 1 && (n as Element).classList.contains(NOTE_T_CLASS)))
+  if (loose.length === 0 || !loose.some(n => /\S/.test(n.textContent ?? ''))) return null
   copy.insertBefore(wrapper, loose[0]!)
   for (const n of loose) wrapper.append(n)
+  return wrapper
+}
+
+/** A tree flattened in document order: a `through` node is not counted but its children are walked, a `skip` node is left out with its subtree */
+function flatten(root: Node, rule: (node: Node) => 'keep' | 'skip' | 'through'): Node[] {
+  const out: Node[] = []
+  const walk = (node: Node) => {
+    const r = rule(node)
+    if (r === 'skip') return
+    if (r === 'keep') out.push(node)
+    for (const child of Array.from(node.childNodes)) walk(child)
+  }
+  for (const child of Array.from(root.childNodes)) walk(child)
+  return out
+}
+
+/** Pairs two sequences node for node; gives up on a length or node-kind mismatch — better an unlit copy than offsets pointed at the wrong nodes */
+function pairUp(a: Node[], b: Node[]): Map<Node, Node> | undefined {
+  if (a.length !== b.length) return undefined
+  const out = new Map<Node, Node>()
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!
+    const y = b[i]!
+    if (x.nodeType !== y.nodeType || (x.nodeType === 1 && (x as Element).tagName !== (y as Element).tagName)) return undefined
+    out.set(x, y)
+  }
+  return out
+}
+
+/**
+ * Mirrors the note's sentence registration onto the copy (§7.7 — the idea of issue #139, but here
+ * both sides are clones): the source side onto the original text inside the copy, the target side
+ * onto the translation just placed beside it.
+ *
+ * The copy differs from what it was cloned from by the wrapper (walked through) and by our own
+ * nodes (left out). Flattened along those two differences the trees pair up node for node;
+ * when they do not, nothing is mirrored.
+ */
+function mirrorNote(source: Element, translated: Element, wrapper: Element, fresh: Element): void {
+  const original = flatten(source, node => (node.nodeType === 1 && isInjected(node as Element) ? 'skip' : 'keep'))
+  const copied = flatten(wrapper.parentElement!, node => {
+    if (node === wrapper) return 'through'
+    if (node.nodeType === 1 && ((node as Element).classList.contains(NOTE_T_CLASS) || isInjected(node as Element))) return 'skip'
+    return 'keep'
+  })
+  const sourceTwins = pairUp(original, copied)
+  // The placed translation is isomorphic to the original one: its marks are hidden, not removed (localizedCopy)
+  const targetTwins = pairUp(flatten(translated, () => 'keep'), flatten(fresh, () => 'keep'))
+  if (!sourceTwins || !targetTwins) return
+  // The source side's root is the wrapper: it is what only mode hides, which is how `checkVisibility`
+  // tells the peek that the counterpart is not rendered (§7.7). The marks are outside it, so
+  // pointing at one resolves to the paragraph's sentence — which it is on the line of anyway
+  mirrorPair(translated, { source: wrapper, target: fresh }, { source: node => sourceTwins.get(node), target: node => targetTwins.get(node) })
 }
 
 /**
@@ -83,8 +154,11 @@ export function localizeNotes(root: Document | Element): number {
       existing?.remove()
       // 副本保留自己的原文，译文接在后面：一份边注里英文在上、中文在下。原文先收进一层壳，
       // only 模式才藏得住它（标号留在壳外，边注的编号在所有模式下都要可见）
-      wrapSource(copy)
+      const wrapper = wrapSource(copy)
       copy.append(fresh)
+      // The copy is what is on screen: its sentence registration comes along, so pointing at the
+      // note tints the note's own sentence
+      if (wrapper) mirrorNote(source!, translated, wrapper, fresh)
       source?.closest(NOTE.root)?.setAttribute(LOCALIZED_ATTR, '')
       localized += 1
     })
