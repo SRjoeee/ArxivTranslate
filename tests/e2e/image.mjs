@@ -177,7 +177,7 @@ const visibleOnly = probe.filter(p => p.overlay?.visible)
 check('only：叠加层可见（跟着显示的那份走）', visibleOnly.length === expected && visibleOnly.every(p => coincide(p.overlay.rect, p.imgRect)), `可见 ${visibleOnly.length}，应为 ${expected}`)
 
 // ── 恢复原文：叠加层与属性一个不剩 ──────────────────────────────────────────
-await popup.getByRole('button', { name: '恢复原文', exact: true }).click()
+await popup.getByRole('button', { name: '显示原文', exact: true }).click()
 await sleep(800)
 const after = await page.evaluate(() => ({
   overlays: document.querySelectorAll('.axt-img').length,

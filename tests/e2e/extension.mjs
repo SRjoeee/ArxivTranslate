@@ -768,10 +768,10 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)
   await page.bringToFront() // popup 查的是当前窗口的活动标签页
-  await popup.getByRole('button', { name: '恢复原文' }).waitFor({ timeout: 10_000 })
+  await popup.getByRole('button', { name: '显示原文' }).waitFor({ timeout: 10_000 })
   const requestsBefore = requests.length
   const tCancel = Date.now()
-  await popup.getByRole('button', { name: '恢复原文' }).click()
+  await popup.getByRole('button', { name: '显示原文' }).click()
   await sleep(4_000)
   const after = await countDom(page)
   const late = requests.filter(r => r.t > tCancel + 500).length

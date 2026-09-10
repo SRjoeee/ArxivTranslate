@@ -67,7 +67,7 @@ async function openSide(id) {
   await popup.getByRole('button', { name: '左右', exact: true }).waitFor({ timeout: 10_000 })
   await popup.getByRole('button', { name: '左右', exact: true }).click()
   await sleep(300)
-  await popup.getByRole('button', { name: '翻译', exact: true }).click()
+  await popup.getByRole('button', { name: '翻译本页', exact: true }).click()
   await sleep(500)
   await popup.close()
   return page
