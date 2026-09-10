@@ -15,17 +15,27 @@ export const promptFileEntrySchema = z.object({
 export const promptFileSchema = z.array(promptFileEntrySchema)
 export type PromptFileEntry = z.infer<typeof promptFileEntrySchema>
 
-const FORMAT_HINT = '提示词文件格式不对：应是 [{ "name", "systemPrompt", "prompt" }] 数组，name 与 prompt 必填'
+/**
+ * 解析失败只报**是哪一种**，不报句子：句子在语言包里，而这个模块不认识界面语言（Codex 在 #161 指出）。
+ * `notJson` 与 `badShape` 对读者是两件不同的事——文件根本不是 JSON，还是 JSON 但不是这个格式
+ */
+export type PromptFileError = 'notJson' | 'badShape'
+export class PromptFileFormatError extends Error {
+  constructor(readonly kind: PromptFileError) {
+    super(kind)
+    this.name = 'PromptFileFormatError'
+  }
+}
 
 export function parsePromptFile(json: string): PromptFileEntry[] {
   let raw: unknown
   try {
     raw = JSON.parse(json)
   } catch {
-    throw new Error(`${FORMAT_HINT}（不是合法 JSON）`)
+    throw new PromptFileFormatError('notJson')
   }
   const parsed = promptFileSchema.safeParse(raw)
-  if (!parsed.success) throw new Error(FORMAT_HINT)
+  if (!parsed.success) throw new PromptFileFormatError('badShape')
   return parsed.data
 }
 

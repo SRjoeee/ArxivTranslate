@@ -11,6 +11,7 @@
 // half translated.
 import { BUILT_IN_HIGHLIGHTS, BUILT_IN_STYLES } from '@/config/appearance'
 import { LANG_CODE_TO_EN_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
+import type { FallbackReason } from '@/config/storage'
 import { FALLBACK_LOCALE, LOCALES, type Locale, type LocaleCode } from '@/locales'
 import type { ProviderErrorKind } from '@/providers/types'
 
@@ -61,6 +62,18 @@ export function languageName(code: LangCode): string {
  * interface's language; a profile the reader added, or a shipped one they **renamed**, keeps the
  * name they gave it — which is what "the stored name is still the one it shipped with" tests for
  */
+/** The second line of the settings page's fallback notice, in the reader's language (S-O-01) */
+export function fallbackText(reason: FallbackReason): string {
+  switch (reason.kind) {
+    case 'tooNew':
+      return O.fallbackWhy.tooNew(reason.stored, reason.supported)
+    case 'invalid':
+      return O.fallbackWhy.invalid(reason.where, reason.message)
+    default:
+      return O.fallbackWhy.unknown
+  }
+}
+
 /** What a duplicate is called: the name as displayed, plus the pack's suffix (clipped by the schema) */
 export function copyName(profile: { id: string; name: string }, kind: 'styles' | 'highlights' = 'styles'): string {
   return `${profileName(profile, kind)} ${O.reading.copySuffix}`

@@ -6,7 +6,7 @@ import { browser } from 'wxt/browser'
 import { LOCALE_CODES, LOCALE_NAMES, type LocaleCode } from '@/locales'
 import { BrandMark } from '@/ui/BrandMark'
 import { MenuField } from '@/ui/MenuField'
-import { O } from '@/ui/strings'
+import { O, fallbackText } from '@/ui/strings'
 import { useOptionsData } from './data'
 import { Data } from './sections/Data'
 import { Prompts } from './sections/Prompts'
@@ -74,7 +74,7 @@ export function App() {
           {data.fallbackReason && (
             <p className="mb-6 rounded-card bg-accent-soft px-3.5 py-3 text-[12px] leading-relaxed text-accent">
               {O.fallbackNotice}
-              <span className="mt-1 block text-fg-2">{data.fallbackReason}</span>
+              <span className="mt-1 block text-fg-2">{fallbackText(data.fallbackReason)}</span>
             </p>
           )}
           {section === 'services' && <Services data={data} extensionId={browser.runtime.id} />}

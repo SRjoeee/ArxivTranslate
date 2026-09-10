@@ -3,18 +3,19 @@
 // now — the popup and the page it is translating write the same object (Codex on #39).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { browser } from 'wxt/browser'
-import { configFallbackReason, getConfig, setConfig } from '@/config/storage'
+import { type FallbackReason, configFallbackReason, getConfig, setConfig } from '@/config/storage'
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { sendMessage } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
+import { S } from '@/ui/strings'
 
 export interface CacheStats { entries: number; bytes: number }
 
 export interface OptionsData {
   config: Config | null
-  /** Why the stored config fell back to defaults, if it did */
-  fallbackReason: string | null
+  /** Why the stored config fell back to defaults, if it did; worded by the page (ui/strings.ts) */
+  fallbackReason: FallbackReason | null
   patch(fn: (latest: Config) => Config): Promise<Config>
   pack: PackState | null
   /** Re-query the pack for a language the reader just chose (the Chrome card would otherwise show the old one) */
@@ -33,7 +34,7 @@ export interface OptionsData {
 
 export function useOptionsData(): OptionsData {
   const [config, setLocal] = useState<Config | null>(null)
-  const [fallbackReason, setFallbackReason] = useState<string | null>(null)
+  const [fallbackReason, setFallbackReason] = useState<FallbackReason | null>(null)
   const [pack, setPack] = useState<PackState | null>(null)
   const [helper, setHelper] = useState<HelperStatus | null>(null)
   const [platform, setPlatform] = useState<'mac' | 'other' | null>(null)
@@ -77,7 +78,7 @@ export function useOptionsData(): OptionsData {
     // `recheck` on every open of a page: the reader may have installed the helper since the worker
     // last looked, and it remembers a missing host for its whole life. Chrome fails a connect to an
     // absent host without spawning anything, so asking again costs nothing
-    sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ available: false, reason: '扩展后台未响应' }))
+    sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ available: false, reason: S.page.backendSilent }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
     void loadCache()
     // 翻译发生在别的标签页：切回设置页时重新读一次，否则显示的永远是打开那一刻的数字

@@ -159,7 +159,7 @@ export default defineContentScript({
       try {
         status = await backend.status()
       } catch (e) {
-        return { started: false, reason: `扩展后台未响应：${e instanceof Error ? e.message : String(e)}` }
+        return { started: false, reason: `${S.page.backendSilent}：${e instanceof Error ? e.message : String(e)}` }
       }
       // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上（§8.5）
       if (!status.available && !status.fallback) return { started: false, reason: S.page.noService }

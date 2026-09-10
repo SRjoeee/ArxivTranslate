@@ -101,6 +101,7 @@ const S = {
     notPaper: '不是 arXiv HTML 页面',
     nothingToTranslate: '这一页没有可翻译的内容',
     abstractLink: (brand: string) => `双语版本（${brand}）`, // 摘要页的入口（issue #146）
+    backendSilent: '扩展后台没有响应',
     noService: '未配置 API key，请先到设置页填写',
   },
 } as const
@@ -111,6 +112,12 @@ const O = {
   /** S-O-05：界面语言。与「目标语言」是两件事，所以放在导航下面，离得远一点 */
   uiLanguage: '界面语言',
   uiLanguageAuto: '跟随浏览器',
+  /** 配置读不出来时那条说明的下半句（config/storage.ts 只报成因，不写句子） */
+  fallbackWhy: {
+    tooNew: (stored: number, supported: number) => `存储里的配置是 v${stored}，这个版本只认到 v${supported}（可能装过更新的版本）`,
+    invalid: (where: string, message: string) => (where ? `${where}：${message}` : message),
+    unknown: '未知原因',
+  },
   fallbackNotice: '设置读取失败，当前使用默认设置；已保存的 API Key 与服务选择均未生效。请重新填写。',
   services: {
     builtIn: '内置服务',
@@ -203,6 +210,11 @@ const O = {
       removeConfirm: (name: string) => `删除提示词「${name}」？`,
       create: '新建',
       createTitle: '新建提示词',
+      /** 导入提示词文件失败的两种情形（providers/prompt-file.ts 只报是哪一种） */
+      importFailed: {
+        notJson: '这个文件不是合法的 JSON',
+        badShape: '文件格式不对：应是 [{ "name", "systemPrompt", "prompt" }] 这样的数组，name 与 prompt 必填',
+      },
       importFile: '导入 JSON',
       exportMine: '导出自定义',
       imported: (n: number) => `已导入 ${n} 条`,
@@ -232,6 +244,13 @@ const O = {
       },
     },
     title: '提示词', glossaryTooBig: '术语表太长，超出上限后没有保存；请减少条目或缩短内容', glossary: '术语表', glossaryHint: '每行「原文, 译文」，让同一篇里的译法一致', glossaryCount: (n: number) => `${n} 条`, onlyLlm: '只对 LLM 服务生效',
+    /** 术语表逐行的问题（providers/glossary.ts 只报是哪一种） */
+    glossaryIssue: {
+      line: (n: number) => `第 ${n} 行`,
+      noSeparator: '缺少分隔符，应写成「原文, 译文」',
+      emptySource: '原文为空',
+      emptyTarget: '译文为空',
+    },
     glossaryPlaceholder: 'token, 词元\nembedding, 嵌入' },
   close: '关闭',
   data: {

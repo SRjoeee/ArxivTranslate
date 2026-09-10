@@ -11,7 +11,8 @@ export interface GlossaryIssue {
   /** 从 1 开始，对应用户在文本框里看到的行号 */
   line: number
   text: string
-  reason: string
+  /** 是哪一种问题；句子在语言包里，这一层不认识界面语言（Codex 在 #161 指出同类问题） */
+  reason: 'noSeparator' | 'emptySource' | 'emptyTarget'
 }
 
 export interface ParsedGlossary {
@@ -41,17 +42,17 @@ export function parseGlossary(text: string): ParsedGlossary {
     if (line === '' || line.startsWith('#')) continue
     const match = SEPARATOR.exec(line)
     if (!match) {
-      issues.push({ line: lineNumber, text: line, reason: '缺少分隔符，应写成「原文, 译文」' })
+      issues.push({ line: lineNumber, text: line, reason: 'noSeparator' })
       continue
     }
     const term = line.slice(0, match.index).trim()
     const translation = line.slice(match.index + 1).trim()
     if (term === '') {
-      issues.push({ line: lineNumber, text: line, reason: '原文为空' })
+      issues.push({ line: lineNumber, text: line, reason: 'emptySource' })
       continue
     }
     if (translation === '') {
-      issues.push({ line: lineNumber, text: line, reason: '译文为空' })
+      issues.push({ line: lineNumber, text: line, reason: 'emptyTarget' })
       continue
     }
     const existing = index.get(term)

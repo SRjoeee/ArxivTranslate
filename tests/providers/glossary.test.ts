@@ -37,9 +37,9 @@ describe('parseGlossary', () => {
     const { entries, issues } = parseGlossary('weights, 权重\nbias\n, 偏置\nloss,   ')
     expect(entries).toEqual([{ term: 'weights', translation: '权重' }])
     expect(issues).toEqual([
-      { line: 2, text: 'bias', reason: '缺少分隔符，应写成「原文, 译文」' },
-      { line: 3, text: ', 偏置', reason: '原文为空' },
-      { line: 4, text: 'loss,', reason: '译文为空' },
+      { line: 2, text: 'bias', reason: 'noSeparator' },
+      { line: 3, text: ', 偏置', reason: 'emptySource' },
+      { line: 4, text: 'loss,', reason: 'emptyTarget' },
     ])
   })
 
@@ -52,7 +52,7 @@ describe('parseGlossary', () => {
 
   it('行号按原始行计', () => {
     const { issues } = parseGlossary('weights, 权重\nbias')
-    expect(issues).toEqual([{ line: 2, text: 'bias', reason: '缺少分隔符，应写成「原文, 译文」' }])
+    expect(issues).toEqual([{ line: 2, text: 'bias', reason: 'noSeparator' }])
   })
 
   it('空文本得到空表', () => {

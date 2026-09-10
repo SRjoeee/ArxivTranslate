@@ -42,7 +42,8 @@ describe('locale packs', () => {
   })
 
   it('中文包里不留占位的英文句子（品牌名、协议词与示例除外）', () => {
-    const allowed = /^(S\.brand|S\.service\.(llm|microsoft|google|chrome)|O\.services\.(apiKey|namePlaceholder|baseURLHint)|O\.reading\.previewSource|S\.setup\.step1|S\.setup\.step1Hint)/
+    // 只由参数拼起来的句子除外：拿占位符去调它们，结果自然全是英文
+    const allowed = /^(S\.brand|S\.service\.(llm|microsoft|google|chrome)|O\.services\.(apiKey|namePlaceholder|baseURLHint)|O\.reading\.previewSource|S\.setup\.step1|S\.setup\.step1Hint|O\.fallbackWhy\.invalid)/
     for (const [path, text] of leaves(LOCALES['zh-CN'])) {
       if (allowed.test(path) || text === '') continue
       // 一句纯 ASCII 的中文文案基本只可能是忘了翻

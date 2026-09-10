@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { downloadPromptFile, readPromptFile } from '@/providers/prompt-file'
+import { PromptFileFormatError, downloadPromptFile, readPromptFile } from '@/providers/prompt-file'
 import {
   BUILT_IN_PROMPTS, DEFAULT_PROMPT_ID, PROMPT_TOKENS, getTokenCellText,
   type PromptTemplate, type PromptsConfig,
@@ -77,7 +77,8 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
       onChange({ ...value, patterns: [...value.patterns, ...entries.map(entry => ({ ...entry, id: uuid() }))] })
       setMessage(O.prompts.manager.imported(entries.length))
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e))
+      // 解析器只说是哪一种，句子在语言包里（Codex 在 #161 指出）
+      setMessage(e instanceof PromptFileFormatError ? O.prompts.manager.importFailed[e.kind] : e instanceof Error ? e.message : String(e))
     } finally {
       if (fileInput.current) fileInput.current.value = ''
     }

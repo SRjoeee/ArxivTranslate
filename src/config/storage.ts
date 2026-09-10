@@ -106,27 +106,35 @@ function migrateStyle(style: V11Style): Appearance {
  * 每个执行上下文（popup / content / background）各存一份自己那次调用的结果——它们互不共享内存，
  * 而 popup 本来就自己调 `getConfig()`，读这个变量拿到的正是它自己那次的结论
  */
-let fallbackReason: string | null = null
+let fallbackReason: FallbackReason | null = null
 
-/** 供 UI 查询：配置是不是被回退成默认值了。回退时用户的 API key、引擎、模式全部不生效，必须让他看见 */
-export function configFallbackReason(): string | null {
+/**
+ * 供 UI 查询：配置是不是被回退成默认值了。回退时用户的 API key、引擎、模式全部不生效，必须让他看见。
+ * 回的是**说明的材料**不是句子——句子按界面语言写，而这一层不认识语言包（Codex 在 #161 指出）
+ */
+export function configFallbackReason(): FallbackReason | null {
   return fallbackReason
 }
+
+/** `tooNew`：存储里的版本比这个扩展新；`invalid`：结构不合 schema，`where` 是出问题的字段 */
+export type FallbackReason =
+  | { kind: 'tooNew'; stored: number; supported: number }
+  | { kind: 'invalid'; where: string; message: string }
+  | { kind: 'unknown' }
 
 /**
  * 说清楚为什么回退。两种已知成因：
  * (1) 存储里的版本比当前扩展新——装了更旧的构建，WXT 拒绝降级迁移（实测：v7 配置 + v6 扩展）；
  * (2) 结构不合 schema——手工改坏，或某个字段超出限额
  */
-function describeFallback(stored: unknown, issues: readonly { path: PropertyKey[]; message: string }[]): string {
+function describeFallback(stored: unknown, issues: readonly { path: PropertyKey[]; message: string }[]): FallbackReason {
   const version = (stored as { version?: unknown } | null)?.version
   if (typeof version === 'number' && version > CONFIG_VERSION) {
-    return `存储里的配置是 v${version}，当前扩展只支持到 v${CONFIG_VERSION}（可能装了更旧的版本）`
+    return { kind: 'tooNew', stored: version, supported: CONFIG_VERSION }
   }
   const issue = issues[0]
-  if (!issue) return '未知原因'
-  const where = issue.path.map(String).join('.')
-  return where ? `${where}：${issue.message}` : issue.message
+  if (!issue) return { kind: 'unknown' }
+  return { kind: 'invalid', where: issue.path.map(String).join('.'), message: issue.message }
 }
 
 /**

@@ -98,6 +98,7 @@ const S: Locale['S'] = {
     notPaper: 'Not an arXiv HTML page',
     nothingToTranslate: 'Nothing on this page to translate',
     abstractLink: brand => `Bilingual version (${brand})`,
+    backendSilent: 'The extension’s background did not answer',
     noService: 'No API key yet. Add one in the settings',
   },
 }
@@ -107,6 +108,11 @@ const O: Locale['O'] = {
   nav: { services: 'Services', reading: 'Reading', prompts: 'Prompts', data: 'Data' },
   uiLanguage: 'Interface language',
   uiLanguageAuto: 'Follow the browser',
+  fallbackWhy: {
+    tooNew: (stored, supported) => `The stored settings are v${stored}; this build reads up to v${supported} (a newer build may have been installed)`,
+    invalid: (where, message) => (where ? `${where}: ${message}` : message),
+    unknown: 'Reason unknown',
+  },
   fallbackNotice: 'The settings could not be read, so the defaults are in use. Your saved API key and service are not in effect. Please enter them again.',
   services: {
     builtIn: 'Built in',
@@ -194,6 +200,10 @@ const O: Locale['O'] = {
       removeConfirm: name => `Delete the prompt “${name}”?`,
       create: 'New',
       createTitle: 'New prompt',
+      importFailed: {
+        notJson: 'That file is not valid JSON',
+        badShape: 'Wrong shape: an array of [{ "name", "systemPrompt", "prompt" }], with name and prompt filled in',
+      },
       importFile: 'Import JSON',
       exportMine: 'Export yours',
       imported: n => (n === 1 ? 'Imported 1' : `Imported ${n}`),
@@ -227,6 +237,12 @@ const O: Locale['O'] = {
     glossaryHint: 'One "source, translation" per line, so a term reads the same throughout a paper',
     glossaryCount: n => (n === 1 ? '1 entry' : `${n} entries`),
     onlyLlm: 'Only an LLM service reads these',
+    glossaryIssue: {
+      line: n => `Line ${n}`,
+      noSeparator: 'No separator: write it as "source, translation"',
+      emptySource: 'The source is empty',
+      emptyTarget: 'The translation is empty',
+    },
     glossaryPlaceholder: 'token, jeton\nembedding, plongement',
   },
   close: 'Close',
