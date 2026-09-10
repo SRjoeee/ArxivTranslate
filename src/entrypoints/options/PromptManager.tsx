@@ -141,7 +141,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
         <div style={{ border: '1px solid var(--axt-line)', borderRadius: 4, padding: 12, marginTop: 4 }}>
           <strong>{titles[editor.mode]}</strong>
           <label style={{ display: 'block', marginTop: 8 }}>
-            名称
+            {O.prompts.manager.name}
             <input style={field} value={editor.draft.name} readOnly={readOnly} onChange={e => setEditor({ ...editor, draft: { ...editor.draft, name: e.target.value } })} />
           </label>
           {(['systemPrompt', 'prompt'] as Field[]).map(which => (

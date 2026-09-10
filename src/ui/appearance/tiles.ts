@@ -20,10 +20,17 @@ export function styleTile(profile: StyleProfile): CSSProperties {
 }
 
 /**
+ * Which declarations reach a preview. The configuration's sanitiser only refuses braces, at-rules
+ * and `<`, so a profile may legally carry `position: fixed; inset: 0; z-index: 9999` — on the paper
+ * that is the reader's own doing, but a **sample inside the popup** would then cover the popup
+ * (Codex on #161). A sample is one line of text, so it takes the properties that describe text and
+ * leaves the ones that place a box. The paper still gets the whole declaration list
+ */
+const TEXT_ONLY = /^(--|color$|opacity$|filter$|mix-blend-mode$|font-|letter-spacing$|word-spacing$|line-height$|text-|background|border-bottom|border-radius$|white-space$|font-variant)/
+
+/**
  * A sanitised declaration list — `font-weight: 600; letter-spacing: .02em` — as a style object.
- * The sanitiser has already refused braces, at-rules and `<` (core/renderer/style-values.ts), so
- * this only has to split. A custom property keeps its name; anything else becomes camelCase, which
- * is how React writes it
+ * A custom property keeps its name; anything else becomes camelCase, which is how React writes it
  */
 function declarations(css: string): CSSProperties {
   const out: Record<string, string> = {}
@@ -36,7 +43,7 @@ function declarations(css: string): CSSProperties {
     // sample would silently lose the declaration; drop the priority and keep the declaration
     // (Codex on #161). A preview has nothing to lose a specificity war with
     const value = part.slice(at + 1).replace(/!\s*important\s*$/i, '').trim()
-    if (!name || !value) continue
+    if (!name || !value || !TEXT_ONLY.test(name)) continue
     out[name.startsWith('--') ? name : name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())] = value
   }
   return out as CSSProperties

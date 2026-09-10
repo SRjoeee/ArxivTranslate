@@ -16,13 +16,24 @@ const COPIED_MS = 1500
 
 export function HelperSetup({ extensionId, onStatus }: { extensionId: string; onStatus: (status: HelperStatus) => void }) {
   const [copied, setCopied] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
   const [checking, setChecking] = useState(false)
   /** Set once a check has come back empty-handed; cleared when another one starts */
   const [notYet, setNotYet] = useState(false)
   const command = helperInstallCommand(extensionId)
 
-  const copy = () => {
-    void navigator.clipboard.writeText(command)
+  /**
+   * Only after the write lands. A blocked clipboard would otherwise say 已复制 while the reader has
+   * nothing to paste, and this is the one step the whole install hangs on (Codex on #161)
+   */
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(command)
+    } catch {
+      setCopyFailed(true)
+      return
+    }
+    setCopyFailed(false)
     setCopied(true)
     setTimeout(() => setCopied(false), COPIED_MS)
   }
@@ -50,14 +61,14 @@ export function HelperSetup({ extensionId, onStatus }: { extensionId: string; on
 
       <Step n={1} title={S.setup.step1} hint={S.setup.step1Hint} />
 
-      <Step n={2} title={S.setup.step2} hint={copied ? S.helper.copied : S.setup.step2Hint}>
+      <Step n={2} title={S.setup.step2} hint={copyFailed ? S.setup.copyFailed : copied ? S.helper.copied : S.setup.step2Hint}>
         {/* The command is a button: the whole block copies, which is what a reader reaches for
             first. It **wraps rather than scrolls** — this is a `curl | bash`, and a reader who
             cannot see the end of the line has no way to decide whether to run it. `select-all` so
             ⌘A inside it still picks only the command */}
         <button
           type="button"
-          onClick={copy}
+          onClick={() => void copy()}
           title={S.helper.copy}
           className="flex w-full cursor-pointer items-start gap-2 rounded-control bg-bg px-3 py-2.5 text-left font-mono text-[11px] leading-relaxed text-fg ring-1 ring-line"
         >

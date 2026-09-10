@@ -104,5 +104,10 @@ describe('style previews', () => {
     // 去掉优先级、留下声明，否则预览会把这条悄悄丢了（Codex 在 #161 指出）
     expect(styleTile({ id: 'i', name: 'i', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: 'color: red !important' }).color).toBe('red')
     expect(styleTile({ id: 'i2', name: 'i2', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: 'font-weight: 700 ! IMPORTANT' })).toMatchObject({ fontWeight: '700' })
+    // 排版属性不进预览：净化器放行 `position: fixed`，那在论文上是读者自己的事，
+    // 但样例是画在 popup 里的，会盖住 popup（Codex 在 #161 指出）
+    const escaping = styleTile({ id: 'e', name: 'e', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: 'position: fixed; inset: 0; z-index: 9999; width: 100vw; display: block; transform: scale(9); margin: 40px; color: teal' })
+    expect(escaping).toMatchObject({ color: 'teal' })
+    for (const gone of ['position', 'inset', 'zIndex', 'width', 'display', 'transform', 'margin']) expect(escaping, gone).not.toHaveProperty(gone)
   })
 })

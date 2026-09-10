@@ -67,6 +67,7 @@ const S = {
     step2Hint: '点命令即可复制',
     step3: '装完回到这里',
     step3Hint: '命令跑完会打印一行「已安装」',
+    copyFailed: '没能复制。请手动选中这行命令再复制',
     check: '我已经装好了',
     checking: '检测中…',
     notYet: '还没检测到。确认命令跑完没有报错，然后再试一次',
@@ -214,6 +215,7 @@ const O = {
       promptEmpty: '用户提示词不能为空',
       systemPrompt: 'System prompt（收发协议会自动追加在它后面，改不掉）',
       userPrompt: '用户提示词',
+      name: '名称',
       insert: '插入变量：',
       /** 随扩展一起发的两份提示词的说明，按 id 取（`BUILT_IN_PROMPT_DESCRIPTIONS` 的位置） */
       builtIn: {

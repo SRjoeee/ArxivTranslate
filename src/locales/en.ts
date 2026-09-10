@@ -65,6 +65,7 @@ const S: Locale['S'] = {
     step2Hint: 'Click the command to copy it',
     step3: 'Come back when it finishes',
     step3Hint: 'The command prints a line saying it is installed',
+    copyFailed: 'Could not copy. Select the command and copy it by hand',
     check: 'I have installed it',
     checking: 'Checking…',
     notYet: 'Not found yet. Check that the command finished without an error, then try again',
@@ -205,6 +206,7 @@ const O: Locale['O'] = {
       promptEmpty: 'The user prompt cannot be empty',
       systemPrompt: 'System prompt (the wire format is appended to it and cannot be changed)',
       userPrompt: 'User prompt',
+      name: 'Name',
       insert: 'Insert a variable:',
       builtIn: {
         default: 'General academic translation: settled terms, and names, journals, code and links left as they are',
