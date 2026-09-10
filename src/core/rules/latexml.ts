@@ -265,6 +265,8 @@ export const NOTE = {
   content: '.ltx_note_content',
   contentClass: 'ltx_note_content',
   marks: '.ltx_note_mark, .ltx_tag',
+  /** The note's box, which ar5iv floats to the page's edge; neither a sentence's ranges nor a grid row's height should include it */
+  outer: '.ltx_note_outer',
 } as const
 
 /** 插图整块拆分（§7.2）：没有译文、也翻不了的媒体——两栏各需要一份的正是这些 */
@@ -277,6 +279,12 @@ export const FIGURE_MEDIA = 'img, svg, object, math, canvas, video, .ltx_picture
  * 不镜像时它自然通栏，浮动内容落回页面右缘（实测 2084→2516，与原版式一致）。
  */
 export const MARGIN_ASIDE = '.ltx_pubnotes, .ltx_note'
+/**
+ * The boxes the page's margin content **actually paints**, for renderer/peek.ts to measure whether
+ * the margin is free. A `.ltx_note` root is an inline anchor a few pixels wide; what floats out is
+ * the box inside it, and in side mode that box is zero-height (modes.css), so the content is measured.
+ */
+export const MARGIN_ASIDE_BOXES = '.ltx_pubnotes, .ltx_note_content'
 
 /** 文档主标题：靠 text-align:center 居中，不能与译文同行（§7.3） */
 /**

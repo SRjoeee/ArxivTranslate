@@ -53,7 +53,9 @@ describe('localizeNotes', () => {
     // Idempotent: a second run adds no second wrapper
     localizeNotes(doc)
     expect(c.querySelectorAll('.axt-note-s')).toHaveLength(1)
-    expect(c.textContent).toBe('1English note中文脚注')
+    // 放进去的译文里，标号藏着而不是删掉（镜像句子登记要两棵树同构），所以 textContent 里有第二个 1
+    expect(c.querySelector<HTMLElement>('.axt-note-t sup')?.hidden).toBe(true)
+    expect(c.textContent).toBe('1English note1中文脚注')
   })
 
   it('keeps the marks in front: the wrapper starts after the last mark, tag and whitespace included', () => {

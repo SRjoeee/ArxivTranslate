@@ -275,6 +275,22 @@ describe('wire offsets to DOM (#105)', () => {
     ])
   })
 
+  it('carves a footnote\'s floated box out of its slot, keeping the mark on the line', () => {
+    // ar5iv floats `.ltx_note_outer` to the page's edge. A range over the whole note covers it, and
+    // Chrome reports every text box inside a range, so hovering the sentence tinted the entire note
+    // in the margin (user, 2026-09-10). The mark is on the line and stays in the sentence.
+    const root = el('<p class="ltx_p">The claim holds<span class="ltx_note"><sup class="ltx_note_mark">1</sup><span class="ltx_note_outer"><span class="ltx_note_content">note</span><span class="axt-t" data-axt-for="n">译</span></span></span></p>')
+    const block = serialize(root, 'tags')
+    expect(boundaryCalls(root, block.offsets, 0, block.text.length)).toEqual([
+      'start@text("The cl"):0',
+      'end@text("The cl"):15',
+      'startBefore:span', // the note, mark included …
+      'endBefore:span', // … up to its floated box
+      'startAfter:span', // after the box (the translation inside it is inside what was stepped over)
+      'endAfter:span',
+    ])
+  })
+
   it('leaves a slot without injected content as a single range', () => {
     const root = el('<p class="ltx_p">The claim holds<span class="ltx_note"><span class="ltx_note_content">note</span></span></p>')
     const block = serialize(root, 'tags')
