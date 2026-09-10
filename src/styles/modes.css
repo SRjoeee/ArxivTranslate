@@ -452,3 +452,13 @@ html[data-axt-mode="only"] [data-axt-state="translated"] {
 html[data-axt-mode="only"] .axt-t[data-axt-inline] {
   margin-inline-start: 0;
 }
+
+/* Margin notes (the localisation of §7.2): the copy rebuilt inside the paragraph's translation is
+   "original above, translation below". It is a clone from a placeholder with no block mark, so the
+   rule hiding originals never reaches it and its English stayed visible in only mode (reported
+   2026-09-10). localizeNotes gathers the original into .axt-note-s; it is hidden per mode here, and
+   **only next to a translation that actually arrived** — a copy without one holds nothing but the
+   original, and hiding it would lose content. The marks stay outside, so the number still shows */
+html[data-axt-mode="only"] .ltx_note_content:has(> .axt-note-t) > .axt-note-s {
+  display: none;
+}
