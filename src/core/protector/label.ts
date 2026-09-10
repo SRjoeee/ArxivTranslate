@@ -56,9 +56,13 @@ export function leadingLabel(root: Element, slots: ReadonlyMap<number, Node>): L
   for (let n = first.nextSibling; n; n = n.nextSibling) rest += n.textContent ?? ''
   const length = text.length
   if (!/\S/.test(rest)) return { el: first, separator: 'whole', inside: true, length }
-  if (/[:：]$/.test(text)) return { el: first, separator: 'colon', inside: true, length }
-  if (/^\s*[:：]/.test(rest)) return { el: first, separator: 'colon', inside: false, length }
-  if (/\.$/.test(text)) return { el: first, separator: 'period', inside: true, length }
+  // The separator must be the label's only one: the translation's *first* separator is what ends
+  // the label, and a label carrying one inside — `J. Symbolic Comput.`, a journal name set in
+  // italics — would be cut at that inner one, italicising `J.` alone (Codex on #151)
+  const body = text.slice(0, -1)
+  if (/[:：]$/.test(text)) return /[:：]/.test(body) ? undefined : { el: first, separator: 'colon', inside: true, length }
+  if (/^\s*[:：]/.test(rest)) return /[:：]/.test(text) ? undefined : { el: first, separator: 'colon', inside: false, length }
+  if (/\.$/.test(text)) return /\.\s/.test(body) ? undefined : { el: first, separator: 'period', inside: true, length }
   return undefined
 }
 

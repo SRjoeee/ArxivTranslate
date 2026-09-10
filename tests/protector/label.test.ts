@@ -118,6 +118,22 @@ describe('leading label under markers (#150)', () => {
     expect(f2.querySelector('.ltx_font_bold')).toBeNull()
   })
 
+  it('a label carrying its separator inside is not a label: J. Symbolic Comput.', () => {
+    // The translation's first separator would cut it at the abbreviation, italicising `J.` alone
+    const journal = markers('<p class="ltx_bibblock"><em class="ltx_emph">J. Symbolic Comput.</em>, 12(3):1–20, 1991.</p>')
+    const f1 = rehydrate('J. Symbolic Comput., 12(3):1–20, 1991.', journal.block, document)
+    expect(f1.querySelector('em')).toBeNull()
+    expect(f1.firstChild?.nodeType).toBe(3)
+    // A colon inside a colon label, or in a label followed by one, the same
+    const inner = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Step 1: setup:</span> do it.</p>')
+    expect(rehydrate('步骤 1：设置：做它。', inner.block, document).querySelector('.ltx_font_bold')).toBeNull()
+    const after = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Step 1: setup</span>: do it.</p>')
+    expect(rehydrate('步骤 1：设置：做它。', after.block, document).querySelector('.ltx_font_bold')).toBeNull()
+    // A period without a space after it is not an abbreviation: v1.2. stays a label
+    const version = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">v1.2.</span> Changes.</p>')
+    expect(rehydrate('v1.2。变更。', version.block, document).querySelector('.ltx_font_bold')?.textContent).toBe('v1.2。')
+  })
+
   it('a label longer than eight words is not a label', () => {
     const { block } = markers('<p class="ltx_p"><span class="ltx_text ltx_font_italic">For each integer k we have the following bound on the quantity:</span> proof.</p>')
     const f = rehydrate('对于每个整数 k，我们有以下关于该量的界：证明。', block, document)
