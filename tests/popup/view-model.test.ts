@@ -109,7 +109,7 @@ describe('derivePopupView (UI.md §4)', () => {
   })
   it('P14 helper missing on macOS: install text, a copyable command with the extension id, a guide link', () => {
     const v = view('P14')
-    expect(v.helper).toEqual({ text: '图片翻译需要安装识别助手', command: 'helper/install.sh abcdefghijklmnopabcdefghijklmnop', guide: expect.stringMatching(/helper\/README/) })
+    expect(v.helper).toEqual({ text: '图片翻译需要安装识别助手', command: expect.stringMatching(/^curl -fsSL .*install-remote\.sh \| bash -s -- abcdefghijklmnopabcdefghijklmnop$/), guide: expect.stringMatching(/helper\/README/) })
     expect(derivePopupView({ ...input('P14'), platform: 'other' }).helper).toEqual({ text: '图片翻译目前仅支持 macOS' })
     expect(derivePopupView({ ...input('P14'), config: { ...input('P14').config!, image: { enabled: false, modes: [] } } }).helper).toBeNull()
   })

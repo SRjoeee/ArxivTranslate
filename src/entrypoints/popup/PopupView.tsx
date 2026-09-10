@@ -1,7 +1,9 @@
 // Renders the view model's output and nothing else; every action goes through props, so the
-// gallery can feed the same component the fixtures. One card holds the rows (service, language,
-// prompt, the two switches); a menu opens under its row; notes and the buttons sit below the card.
+// gallery can feed the same component the fixtures. Layout (reviewed 2026-09-10): the service and
+// language card, the prompt row for the LLM, then bubbles for anything that needs attention, the
+// primary button, the mode bar, and the two small switches under it.
 import type { ReactNode } from 'react'
+import { useRef } from 'react'
 import type { Mode } from '@/core/renderer'
 import { Button } from '@/ui/Button'
 import { Menu } from '@/ui/Menu'
@@ -11,20 +13,17 @@ import { Switch } from '@/ui/Switch'
 import type { PopupActions } from './data'
 import type { MenuKind, PopupView as View } from './view-model'
 
-const MODES: { value: Mode; label: string; title: string }[] = [
-  { value: 'stack', label: S.mode.stack, title: S.mode.stackTitle },
-  { value: 'side', label: S.mode.side, title: S.mode.sideTitle },
-  { value: 'only', label: S.mode.only, title: S.mode.onlyTitle },
+const MODES: { value: Mode; label: string; title: string; icon: ReactNode }[] = [
+  { value: 'stack', label: S.mode.stack, title: S.mode.stackTitle, icon: <StackIcon /> },
+  { value: 'side', label: S.mode.side, title: S.mode.sideTitle, icon: <SideIcon /> },
+  { value: 'only', label: S.mode.only, title: S.mode.onlyTitle, icon: <OnlyIcon /> },
 ]
 
 const CARD = 'rounded-card bg-card shadow-[0_1px_2px_rgba(30,30,36,0.06)]'
 
 export function PopupView({ view, error, copied, actions }: { view: View; error: string | null; copied: boolean; actions: PopupActions }) {
-  // An open menu overlays the rows below it; the padding keeps that much document below the card
-  // in flow, so the popup window grows to fit and nothing is clipped
-  const room = view.menu ? 'pb-[280px]' : ''
   return (
-    <main className={`flex w-[320px] flex-col gap-3 bg-bg p-4 font-ui text-[13px] text-fg ${room}`}>
+    <main className="flex w-[320px] flex-col gap-3 bg-bg p-4 font-ui text-[13px] text-fg">
       <header className="flex items-center justify-between px-1">
         <div className="flex items-center gap-2">
           {/* The brand mark: a glyph used as an icon, not copy — the only Chinese literal outside strings.ts */}
@@ -42,34 +41,35 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
         <>
           <section className={CARD}>
             <MenuRow kind="service" label={S.rows.service} row={view.service} view={view} actions={actions} />
-            <MenuRow kind="language" label={S.rows.language} row={view.language} view={view} actions={actions} />
-            {view.prompt && <MenuRow kind="prompt" label={S.rows.prompt} row={view.prompt} view={view} actions={actions} />}
-            <SwitchRow label={S.rows.highlight} title={S.rows.highlightTitle} checked={view.highlight} onChange={actions.setHighlight} />
-            <SwitchRow label={S.rows.images} checked={view.images} onChange={actions.setImages} last={!view.helper} />
-            {view.helper && (
-              <div className="flex flex-col gap-2 px-3.5 pb-3 text-[12px] leading-relaxed text-fg-2">
-                <span>{view.helper.text}</span>
-                {view.helper.command && (
-                  <div className="flex items-center gap-2">
-                    <Button variant="chip" onClick={actions.copyInstallCommand}>{copied ? S.helper.copied : S.helper.copy}</Button>
-                    <Button variant="text" onClick={actions.openGuide}>{S.helper.guide}</Button>
-                  </div>
-                )}
-              </div>
-            )}
+            <MenuRow kind="language" label={S.rows.language} row={view.language} view={view} actions={actions} last />
           </section>
-
-          {view.note && (
-            <div className={`${CARD} flex items-center justify-between gap-3 px-3.5 py-2.5 text-[12px] leading-relaxed text-fg`}>
-              <span>{view.note.text}</span>
-              {view.note.settings && <Button variant="chip" onClick={actions.openOptions}>{S.settings}</Button>}
-            </div>
+          {view.prompt && (
+            <section className={CARD}>
+              <MenuRow kind="prompt" label={S.rows.prompt} row={view.prompt} view={view} actions={actions} compact last />
+            </section>
           )}
 
+          {view.note && (
+            <Bubble>
+              <span className="font-semibold text-accent">{view.note.text}</span>
+              {view.note.settings && <Button variant="solid" onClick={actions.openOptions}>{S.settings}</Button>}
+            </Bubble>
+          )}
           {view.failed && (
-            <div className={`${CARD} flex items-center justify-between px-3.5 py-2.5 text-[12px] font-semibold`}>
-              <span>{view.failed}</span>
-              <Button variant="chip" onClick={actions.retryFailed}>{S.failed.retry}</Button>
+            <Bubble>
+              <span className="font-bold text-accent">{view.failed}</span>
+              <Button variant="solid" onClick={actions.retryFailed}>{S.failed.retry}</Button>
+            </Bubble>
+          )}
+          {view.helper && (
+            <div className={`${CARD} flex flex-col gap-2 px-3.5 py-3 text-[12px] leading-relaxed`}>
+              <span className="text-fg-2">{view.helper.text}</span>
+              {view.helper.command && (
+                <span className="flex items-center gap-3">
+                  <Button variant="solid" onClick={actions.copyInstallCommand}>{copied ? S.helper.copied : S.helper.copy}</Button>
+                  <Button variant="text" onClick={actions.openGuide}>{S.helper.guide}</Button>
+                </span>
+              )}
             </div>
           )}
 
@@ -84,6 +84,11 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
 
           <Segmented value={view.mode.value} options={MODES} onChange={actions.chooseMode} />
           {view.mode.note && <p className="px-1 text-[11px] text-fg-2">{view.mode.note}</p>}
+
+          <div className="flex items-center justify-between px-1 text-[12px] font-semibold text-fg-2">
+            <Switch small checked={view.highlight} onChange={actions.setHighlight} label={S.rows.highlight} text={S.rows.highlight} title={S.rows.highlightTitle} />
+            <Switch small checked={view.images} onChange={actions.setImages} label={S.rows.images} text={S.rows.images} />
+          </div>
         </>
       )}
 
@@ -92,29 +97,52 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
   )
 }
 
-/** A row that opens a menu under itself: label above the value, chevron on the right */
-function MenuRow({ kind, label, row, view, actions }: { kind: MenuKind; label: string; row: { value: string; replaced?: string }; view: View; actions: PopupActions }) {
-  const open = view.menu?.kind === kind
+/** A separate rounded block for anything that needs attention: text on the left, its button on the right */
+function Bubble({ tone = 'alert', children }: { tone?: 'alert' | 'neutral'; children: ReactNode }) {
   return (
-    <div className="relative border-b border-line">
+    <div className={`flex items-center justify-between gap-3 rounded-card px-3.5 py-3 text-[12px] leading-relaxed ${tone === 'alert' ? 'bg-accent-soft' : CARD}`}>
+      {children}
+    </div>
+  )
+}
+
+/** A row that opens a menu under itself. Big: label above the value. Compact: label left, value right */
+function MenuRow({ kind, label, row, view, actions, compact = false, last = false }: { kind: MenuKind; label: string; row: { value: string; replaced?: string }; view: View; actions: PopupActions; compact?: boolean; last?: boolean }) {
+  const open = view.menu?.kind === kind
+  const anchor = useRef<HTMLDivElement>(null)
+  const value = (
+    <span className="truncate font-semibold">
+      {row.value}
+      {row.replaced && <span className="ml-1.5 font-medium text-fg-2 line-through">{row.replaced}</span>}
+    </span>
+  )
+  return (
+    <div ref={anchor} className={last ? '' : 'border-b border-line'}>
       <button
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => (open ? actions.closeMenu() : actions.openMenu(kind))}
-        className="flex w-full cursor-pointer items-center justify-between px-3.5 py-3 text-left"
+        className={`flex w-full cursor-pointer items-center justify-between px-3.5 text-left ${compact ? 'py-2.5' : 'py-3'}`}
       >
-        <span className="flex min-w-0 flex-col gap-px">
-          <span className="text-[11px] font-semibold text-fg-2">{label}</span>
-          <span className="truncate font-semibold">
-            {row.value}
-            {row.replaced && <span className="ml-1.5 font-medium text-fg-2 line-through">{row.replaced}</span>}
-          </span>
-        </span>
-        <Chevron up={open} />
+        {compact ? (
+          <>
+            <span className="text-[12px] font-semibold text-fg-2">{label}</span>
+            <span className="flex min-w-0 items-center gap-2">{value}<Chevron up={open} /></span>
+          </>
+        ) : (
+          <>
+            <span className="flex min-w-0 flex-col gap-px">
+              <span className="text-[11px] font-semibold text-fg-2">{label}</span>
+              {value}
+            </span>
+            <Chevron up={open} />
+          </>
+        )}
       </button>
       {open && view.menu && (
         <Menu
+          anchor={anchor}
           items={view.menu.items}
           label={view.menu.label}
           search={view.menu.search}
@@ -133,17 +161,17 @@ function MenuRow({ kind, label, row, view, actions }: { kind: MenuKind; label: s
   )
 }
 
-function SwitchRow({ label, title, checked, onChange, last = false }: { label: string; title?: string; checked: boolean; onChange: (on: boolean) => void; last?: boolean }) {
-  return (
-    <div className={`flex items-center justify-between px-3.5 py-3 ${last ? '' : 'border-b border-line'}`} title={title}>
-      <span className="font-semibold">{label}</span>
-      <Switch checked={checked} onChange={onChange} label={label} />
-    </div>
-  )
-}
-
 function Chevron({ up = false }: { up?: boolean }): ReactNode {
   return <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-fg-2/60"><path d={up ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'} /></svg>
+}
+function StackIcon() {
+  return <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="7" rx="1.5" /><rect x="3" y="13" width="18" height="7" rx="1.5" fill="currentColor" /></svg>
+}
+function SideIcon() {
+  return <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="8" height="16" rx="1.5" /><rect x="13" y="4" width="8" height="16" rx="1.5" fill="currentColor" /></svg>
+}
+function OnlyIcon() {
+  return <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9h10M7 13h10M7 17h6" /></svg>
 }
 function GearIcon() {
   return <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>

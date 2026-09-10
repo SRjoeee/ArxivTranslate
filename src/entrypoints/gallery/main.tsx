@@ -27,8 +27,9 @@ function Gallery() {
             <section key={f.id} className="flex flex-col gap-2">
               <h2 className="text-[12px] font-semibold text-fg-2"><span className="mr-2 rounded bg-control px-1.5 py-0.5 font-mono text-fg">{f.id}</span>{f.name}<span className="ml-3 font-mono font-normal">{f.when}</span></h2>
               <div className="flex items-start gap-8">
-                <div data-theme="light" className="rounded-[18px] shadow-[0_8px_24px_rgba(0,0,0,0.08)]"><PopupView view={view} error={null} copied={false} actions={actions} /></div>
-                <div data-theme="dark" className="rounded-[18px] shadow-[0_8px_24px_rgba(0,0,0,0.3)]"><PopupView view={view} error={null} copied={false} actions={actions} /></div>
+                {/* transform-gpu makes each frame the containing block of the popup's fixed menu, as the popup window is */}
+                <div data-theme="light" className="transform-gpu rounded-[18px] shadow-[0_8px_24px_rgba(0,0,0,0.08)]"><PopupView view={view} error={null} copied={false} actions={actions} /></div>
+                <div data-theme="dark" className="transform-gpu rounded-[18px] shadow-[0_8px_24px_rgba(0,0,0,0.3)]"><PopupView view={view} error={null} copied={false} actions={actions} /></div>
               </div>
             </section>
           )

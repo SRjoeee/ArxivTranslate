@@ -106,7 +106,7 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 | S-P-85 | 图片翻译行 | 图片翻译 | Switch in the card (`image.enabled`, v11); saved at once, live on the page; the per-mode list stays on the options page |
 | S-P-86 | 图片翻译行下 · 助手未安装（macOS） | 图片翻译需要安装识别助手 | Only while the switch is on and the helper is not detected |
 | S-P-87 | 图片翻译行下 · 非 macOS | 图片翻译目前仅支持 macOS | |
-| S-P-88 | 助手提示动作 | 复制安装命令 / 已复制 | Copies `helper/install.sh <extension id>`; one constant to change once a hosted installer exists |
+| S-P-88 | 助手提示动作 | 复制安装命令 / 已复制 | Copies the one-line install `curl -fsSL …/helper/install-remote.sh \| bash -s -- <extension id>` (helper/README.md) |
 | S-P-89 | 助手提示动作 | 教程 | Opens helper/README.md |
 | S-P-90 | 动作失败 | {原始信息} | Red line under the primary button (`role=alert`), cleared before the next action |
 
@@ -237,8 +237,12 @@ Rules:
 - The primary button is the only sign that the page is on. No counts anywhere.
 - The failure line counts paragraphs and figures together (S-P-60).
 - S-P-74 depends on `mode !== preference` only.
-- A menu overlays the rows below it; the popup keeps that much room below the card so the window
-  grows and nothing is clipped. The list scrolls past about six rows.
+- A menu is fixed-positioned under its row and pinned to the bottom of the popup window, so the
+  window keeps its size while it is open; the list scrolls inside that room. The row toggles it,
+  a click outside or Escape closes it.
+- Layout: the service/language card, the prompt row (LLM), then a separate bubble for anything
+  that needs attention (note with 设置, failures with 重试, the helper hint with 复制安装命令 / 教程),
+  the primary button, the mode bar, and the two small switches under it.
 - Dev-only information (background version, block stats, raw `fatal` text) lives only in the
   dev-build gallery.
 

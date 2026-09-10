@@ -119,8 +119,8 @@ export function serviceName(id: string, model?: string): string {
   }
 }
 
-/** The helper's install command for this extension (helper/README.md); one place to change when a hosted installer exists */
+/** The helper's one-line install for this extension (helper/install-remote.sh, documented in helper/README.md) */
 export const HELPER_GUIDE_URL = 'https://github.com/SRjoeee/ArxivTranslate/blob/main/helper/README.md'
 export function helperInstallCommand(extensionId: string): string {
-  return `helper/install.sh ${extensionId}`
+  return `curl -fsSL https://raw.githubusercontent.com/SRjoeee/ArxivTranslate/main/helper/install-remote.sh | bash -s -- ${extensionId}`
 }
