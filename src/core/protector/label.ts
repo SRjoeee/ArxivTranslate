@@ -40,11 +40,30 @@ const TEXT_NODE = 3
 type Separator = 'colon' | 'period' | 'whole'
 interface Label {
   el: Element
+  /** The label's own text, as the wire carries it */
+  text: string
   separator: Separator
   /** Whether the separator is part of the label (`<b>Keywords:</b>`) or follows it (`<b>MMLU</b>:`) */
   inside: boolean
   /** Characters of label text, the yardstick for the translation's prefix */
   length: number
+}
+
+/**
+ * The text of an element as the wire carries it: the text nodes outside any protected slot,
+ * whitespace collapsed. `textContent` would also count what a slot hides — a formula's
+ * `<annotation>` holds its whole TeX source, hundreds of characters that never go out, and a label
+ * measured with them would let the bound pass a separator deep in the body (Codex on #151).
+ */
+function wireText(el: Element, slots: ReadonlyMap<number, Node>): string {
+  const protectedNodes = Array.from(slots.values())
+  const doc = el.ownerDocument
+  const walker = doc.createTreeWalker(el, 4 /* NodeFilter.SHOW_TEXT */)
+  let out = ''
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!protectedNodes.some(slot => slot.contains(node))) out += (node as Text).data
+  }
+  return out.replace(/\s+/g, ' ').trim()
 }
 
 /**
@@ -57,19 +76,19 @@ export function leadingLabel(root: Element, slots: ReadonlyMap<number, Node>): L
   for (let n = root.firstChild; n && n !== first; n = n.nextSibling) if (/\S/.test(n.textContent ?? '')) return undefined
   // A label that went out as a placeholder — all maths, or code — comes back as one: nothing to wrap
   for (const slot of slots.values()) if (slot === first) return undefined
-  const text = (first.textContent ?? '').replace(/\s+/g, ' ').trim()
+  const text = wireText(first, slots)
   if (!text || text.split(' ').length > MAX_LABEL_WORDS) return undefined
   let rest = ''
   for (let n = first.nextSibling; n; n = n.nextSibling) rest += n.textContent ?? ''
   const length = text.length
-  if (!/\S/.test(rest)) return { el: first, separator: 'whole', inside: true, length }
+  if (!/\S/.test(rest)) return { el: first, text, separator: 'whole', inside: true, length }
   // The separator must be the label's only one: the translation's *first* separator is what ends
   // the label, and a label carrying one inside — `J. Symbolic Comput.`, a journal name set in
   // italics — would be cut at that inner one, italicising `J.` alone (Codex on #151)
   const body = text.slice(0, -1)
-  if (/[:：]$/.test(text)) return /[:：]/.test(body) ? undefined : { el: first, separator: 'colon', inside: true, length }
-  if (/^\s*[:：]/.test(rest)) return /[:：]/.test(text) ? undefined : { el: first, separator: 'colon', inside: false, length }
-  if (/\.$/.test(text)) return /\.\s/.test(body) ? undefined : { el: first, separator: 'period', inside: true, length }
+  if (/[:：]$/.test(text)) return /[:：]/.test(body) ? undefined : { el: first, text, separator: 'colon', inside: true, length }
+  if (/^\s*[:：]/.test(rest)) return /[:：]/.test(text) ? undefined : { el: first, text, separator: 'colon', inside: false, length }
+  if (/\.$/.test(text)) return /\.\s/.test(body) ? undefined : { el: first, text, separator: 'period', inside: true, length }
   return undefined
 }
 
@@ -85,7 +104,9 @@ function splitSpan(spans: WireSpan[], node: Text, at: number): void {
   const w = span ? wireOffsetAt(indexSpans([span]), node, at) : undefined
   const tailNode = node.splitText(at)
   if (!span || w === undefined) return
-  const head: WireSpan = { ...span, to: w, anchors: span.anchors.filter(([aw]) => aw < w) }
+  // An anchor exactly at `w` — the cut right after an entity — belongs to the head as well: it is
+  // what makes the head's last offset map back to the wire position after the entity (Codex on #151)
+  const head: WireSpan = { ...span, to: w, anchors: span.anchors.filter(([aw]) => aw <= w) }
   const shifted = span.anchors.filter(([aw]) => aw > w).map(([aw, an]) => [aw, an - at] as const)
   const tail: WireSpan = { kind: 'text', node: tailNode, from: w, to: span.to, anchors: [[w, 0] as const, ...shifted] }
   spans.splice(i, 1, head, tail)
@@ -104,8 +125,11 @@ export function restoreLeadingLabel(fragment: DocumentFragment, spans: WireSpan[
     wrapped.push(...nodes)
   } else {
     const SEP = label.separator === 'colon' ? /[:：]/ : /。|\.(?=\s|$)/
-    // A sentence ending before the separator means the separator is not the label's
-    const stop = label.separator === 'colon' ? TERMINATOR : /[！？!?]/
+    // Any other separator before the candidate means the engine changed the label's — `Note.`
+    // coming back as `注意：` — and the candidate is the body's; a sentence ending there says the
+    // same. Left alone rather than guessed (Codex on #151). A colon the label itself carries
+    // (`Step 3: Conclusion.`) is expected in the translation and is not a change
+    const stop = label.separator === 'colon' ? /[。！？!?]|\.(?=\s|$)/ : /[:：]/.test(label.text) ? /[！？!?]/ : /[！？!?:：]/
     let seen = ''
     let cut: { node: Text; at: number } | undefined
     for (const n of nodes) {

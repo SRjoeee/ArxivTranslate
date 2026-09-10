@@ -11,7 +11,11 @@ function markers(html: string, format: 'markers' | 'tags' = 'markers') {
 const label = (f: DocumentFragment) => f.firstChild as Element | null
 const text = (f: DocumentFragment) => Array.from(f.childNodes).map(n => n.textContent).join('')
 
-/** Every wire offset maps to a node offset and back to itself, and the spans tile the text in order. */
+/**
+ * Every wire offset maps to a node offset and back to itself, and the spans tile the text in order.
+ * Offsets inside an entity are skipped: `nodeOffsetAt` snaps them to the position after the
+ * character the entity encodes, by design, so they do not round-trip.
+ */
 function roundTrip(spans: WireSpan[], wire: string) {
   const index = indexSpans(spans)
   let last = 0
@@ -20,7 +24,10 @@ function roundTrip(spans: WireSpan[], wire: string) {
     last = s.to
   }
   expect(last).toBe(wire.length)
+  const inEntity = new Set<number>()
+  for (const m of wire.matchAll(/&[#\w]+;/g)) for (let i = m.index!; i < m.index! + m[0].length; i++) inEntity.add(i)
   for (let w = 0; w < wire.length; w++) {
+    if (inEntity.has(w)) continue
     const s = spanAt(spans, w)!
     if (s.kind !== 'text') continue
     const k = nodeOffsetAt(s, w)
@@ -108,10 +115,10 @@ describe('leading label under markers (#150)', () => {
     const maths = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold"><math><mi>x</mi></math></span>: a value.</p>')
     expect(maths.block.text).toBe('@a#: a value.')
     const f1 = rehydrate('@a#：一个值。', maths.block, document)
-    // The whole span was the placeholder and comes back as itself: one bold, holding the maths, no second shell
-    expect(f1.querySelectorAll('.ltx_font_bold')).toHaveLength(1)
-    expect(f1.querySelector('.ltx_font_bold math')).not.toBeNull()
-    expect(f1.querySelector('.ltx_font_bold')!.textContent).toBe('x')
+    // The span was flattened (its only text is inside the formula) and the formula is the
+    // placeholder: nothing comes back bold, and no shell is invented for a label with no text
+    expect(f1.querySelectorAll('.ltx_font_bold')).toHaveLength(0)
+    expect(f1.querySelector('math')).not.toBeNull()
 
     const later = markers('<p class="ltx_p">See <span class="ltx_text ltx_font_bold">Note:</span> the start.</p>')
     const f2 = rehydrate('见 注意：起点。', later.block, document)
@@ -164,6 +171,48 @@ describe('leading label under markers (#150)', () => {
     // Han still gets the tight bound: a separator that wandered off is left alone
     const far = rehydrate('警告，不要这样做，绝对不要：真的。', block, document)
     expect(far.querySelector('.ltx_font_bold')).toBeNull()
+  })
+
+  it('keeps the anchor that coincides with the cut, so the head\'s end still maps to the wire', () => {
+    // The separator itself is entity-encoded on the wire: the cut lands right after the entity
+    const { block } = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Note &amp; more:</span> body.</p>')
+    expect(block.text).toBe('Note &amp; more: body.')
+    const t = '注意 &amp; 更多：正文。'
+    const f = rehydrate(t, block, document)
+    expect(label(f)!.textContent).toBe('注意 & 更多：')
+    roundTrip(f.offsets, t)
+    // Every text span's end still maps back to its wire end — the split head included, whose last
+    // offset sits right after the entity
+    const index = indexSpans(f.offsets)
+    for (const s of f.offsets) if (s.kind === 'text') expect(wireOffsetAt(index, s.node, s.node.data.length)).toBe(s.to)
+  })
+
+  it('measures the label by what goes over the wire, not by a formula\'s hidden annotation', () => {
+    const tex = 'x'.repeat(200)
+    const { block } = markers(`<p class="ltx_p"><span class="ltx_text ltx_font_italic">Let <math><semantics><mi>p</mi><annotation encoding="application/x-tex">${tex}</annotation></semantics></math> be prime.</span> Then it holds. Or not.</p>`)
+    expect(block.text).toBe('Let @a# be prime. Then it holds. Or not.')
+    // The engine dropped the label's period: measured through the wire the label is 13 characters
+    // and the body's first period is far past the bound; measured with the TeX it would pass
+    const f = rehydrate('设@a#为素数 那么这个命题在所有情况下都成立。或者不。', block, document)
+    expect(f.querySelector('.ltx_font_italic')).toBeNull()
+    // With the period kept, the label is restored, formula included (its textContent carries the
+    // hidden annotation too, so the visible parts are checked around it)
+    const g = rehydrate('设@a#为素数。那么成立。', block, document)
+    const shell = g.querySelector('.ltx_font_italic')!
+    expect(shell.querySelector('math')).not.toBeNull()
+    expect(shell.textContent?.startsWith('设p')).toBe(true)
+    expect(shell.textContent?.endsWith('为素数。')).toBe(true)
+    expect(g.textContent?.endsWith('那么成立。')).toBe(true)
+  })
+
+  it('a separator of the other kind before the candidate means the engine changed it: left alone', () => {
+    const note = markers('<p class="ltx_p"><span class="ltx_text ltx_font_italic">Note.</span> Stop now. Later.</p>')
+    expect(rehydrate('注意：停止。后文。', note.block, document).querySelector('.ltx_font_italic')).toBeNull()
+    const warn = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Warning:</span> Stop. Why: unsafe.</p>')
+    expect(rehydrate('警告 停止。为何：不安全。', warn.block, document).querySelector('.ltx_font_bold')).toBeNull()
+    // A colon the label carries itself is expected, not a change of separator
+    const step = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Step 3: Conclusion.</span> We are done.</p>')
+    expect(rehydrate('第三步：结论。我们完成了。', step.block, document).querySelector('.ltx_font_bold')?.textContent).toBe('第三步：结论。')
   })
 
   it('a label longer than eight words is not a label', () => {
