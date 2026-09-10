@@ -117,8 +117,10 @@ function Bubble({ tone = 'alert', children }: { tone?: 'alert' | 'neutral'; chil
 function MenuRow({ kind, label, row, view, actions, compact = false, last = false }: { kind: MenuKind; label: string; row: { value: string; replaced?: string }; view: View; actions: PopupActions; compact?: boolean; last?: boolean }) {
   const open = view.menu?.kind === kind
   const anchor = useRef<HTMLDivElement>(null)
+  // The value is truncated when it is long — a language's full name runs to "Simplified Mandarin
+  // Chinese (简体中文)" — so the whole of it is on the row for a reader who needs to check
   const value = (
-    <span className="truncate font-semibold">
+    <span title={row.value} className="truncate font-semibold">
       {row.value}
       {row.replaced && <span className="ml-1.5 font-medium text-fg-2 line-through">{row.replaced}</span>}
     </span>

@@ -82,7 +82,7 @@ const S: Locale['S'] = {
   mode: {
     stack: 'Stacked',
     side: 'Side by side',
-    only: 'Only',
+    only: 'Translation',
     stackTitle: 'The translation sits under the original',
     sideTitle: 'Original and translation in two columns; a narrow window falls back to stacked',
     onlyTitle: 'Hides the original; references stay bilingual',
