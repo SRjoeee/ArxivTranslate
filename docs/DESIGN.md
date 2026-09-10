@@ -86,12 +86,13 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 8. `renderer` 把译文节点插为原块的下一个兄弟，写入缓存
 9. 模式切换、恢复原文，都不经过以上流程，纯 DOM/CSS 操作
 
-### 4.0b 四个入口 [决定，2026-09-10 实现，issue #146]
+### 4.0b 五个入口 [决定，2026-09-10 实现，issue #146；快捷键 2026-09-10]
 
-翻译从来只由用户发起（§4 第 1 步之前什么都不做），但「发起」有四条路，都落到同一对消息 `axt:translate-page` / `axt:restore-page` 上——**动作只有一份实现，入口是四个门**：
+翻译从来只由用户发起（§4 第 1 步之前什么都不做），但「发起」有五条路，都落到同一对消息 `axt:translate-page` / `axt:restore-page` 上——**动作只有一份实现，入口是五个门**：
 
 - **popup**：翻译 / 恢复、模式、引擎、进度。功能最全的那一个
-- **右键菜单**：一条 `翻译 / 恢复原文`，`documentUrlPatterns` 限定 `https://arxiv.org/html/*`。点它先问一次 `axt:page-status` 再决定发哪条消息。**标签不跟着状态变**：`contextMenus.update` 是全局的、不是按标签页的，跟着当前页改的话一切换标签页就说错了（沉浸式翻译的那条也是静态的）
+- **Keyboard command** `axt-toggle` (manifest `commands`, suggested Alt+T): the same toggle as the context menu, sharing `toggleTranslation()`. The popup's translate button shows the key as Chrome actually reports it (`commands.getAll()`), so a rebound or removed key is never advertised wrongly (UI.md S-P-50)
+- **右键菜单**：一条 `翻译本页 / 显示原文`（与 popup 主按钮同一套说法），`documentUrlPatterns` 限定 `https://arxiv.org/html/*`。点它先问一次 `axt:page-status` 再决定发哪条消息。**标签不跟着状态变**：`contextMenus.update` 是全局的、不是按标签页的，跟着当前页改的话一切换标签页就说错了（沉浸式翻译的那条也是静态的）
 - **URL 的 `#axt-translate`**：content script 一进页面看到它就开始翻。原本是调试与自动化用的口子，现在是产品接口
 - **摘要页的双语入口**：`arxiv.org/abs/*` 上一个独立的 content script，在「Access Paper」里 arXiv 自己的 HTML 链接后面插一条，指向**它给出的那个 href** 加上 `#axt-translate`。读一篇论文本来要「点 HTML → 等 → 开 popup → 点翻译」，现在一步。**href 取 arXiv 的、不自己拼**：它带着版本号（`/html/1706.03762v7`），自己拼会在多版本的论文上指错版本；**没有 HTML 版的论文（`#latexml-download-link` 不存在）什么都不插**。这个 content script 不加载翻译流水线的任何一部分
 
