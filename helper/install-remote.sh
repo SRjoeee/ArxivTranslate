@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One-line install of the recognition helper (macOS), the command the popup copies:
-#   curl -fsSL https://raw.githubusercontent.com/SRjoeee/ArxivTranslate/main/helper/install-remote.sh | bash -s -- <extension-id>
+#   curl -fsSL https://raw.githubusercontent.com/SRjoeee/ArxivTranslate/<ref>/helper/install-remote.sh | bash -s -- <extension-id> [<ref>]
+# <ref> is the branch the sources come from (default main; the popup passes the one it was built from).
 # Downloads this repository's helper/ into ~/Library/Application Support/Readarxiv/helper, builds it
 # with the Swift toolchain of the Xcode Command Line Tools, and registers the Native Messaging host
 # for Chrome and Chromium (DESIGN §15.4). Re-running updates in place. No sudo, nothing outside
@@ -8,13 +9,13 @@
 set -euo pipefail
 
 REPO=SRjoeee/ArxivTranslate
-REF="${AXT_HELPER_REF:-main}"
+REF="${2:-${AXT_HELPER_REF:-main}}"
 NAME=io.github.srjoeee.arxivtranslate
 DIR="$HOME/Library/Application Support/Readarxiv/helper"
 
 id="${1:-}"
 if [ -z "$id" ]; then
-  echo "用法：curl -fsSL https://raw.githubusercontent.com/$REPO/$REF/helper/install-remote.sh | bash -s -- <扩展 id>" >&2
+  echo "用法：curl -fsSL https://raw.githubusercontent.com/$REPO/$REF/helper/install-remote.sh | bash -s -- <扩展 id> [分支]" >&2
   echo "扩展 id：popup 里「复制安装命令」已经带上；或在 chrome://extensions 打开开发者模式后查看。" >&2
   exit 2
 fi

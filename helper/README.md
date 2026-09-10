@@ -12,6 +12,8 @@
 curl -fsSL https://raw.githubusercontent.com/SRjoeee/ArxivTranslate/main/helper/install-remote.sh | bash -s -- <扩展 id>
 ```
 
+第二个参数可以指定分支（默认 main），popup 复制的命令会带上它自己所在的分支。
+
 脚本会把 helper 的源码放到 `~/Library/Application Support/Readarxiv/helper`，用 Xcode Command Line Tools 编译（首次约 1 分钟；没装的话先运行 `xcode-select --install`），并注册 Chrome / Chromium 的 Native Messaging host。装完回到 Chrome 重新加载扩展即可。不需要 sudo。
 
 ## 要求
