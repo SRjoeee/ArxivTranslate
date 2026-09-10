@@ -5,7 +5,7 @@ import type { ProviderStatus } from '@/providers/transport'
 import type { PageStatus } from '@/shared/messages'
 import type { PopupInput } from './view-model'
 
-const config: Config = { ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'set' } }
+const config: Config = { ...DEFAULT_CONFIG, provider: 'openai-compat', openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'set' } }
 
 function page(over: Partial<PageStatus['progress']> = {}, extra: Partial<PageStatus> = {}): PageStatus {
   return {

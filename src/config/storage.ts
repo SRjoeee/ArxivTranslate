@@ -38,6 +38,10 @@ export const configItem = storage.defineItem<Config>('local:config', {
     // 的守卫不触发，zod 在枚举上解析失败，整份配置**静默重置成默认值**、设置全丢；
     // 升到 10 之后旧版会明确报「存储里的配置是 v10，当前扩展只支持到 v9」（Codex 在 #115 指出）
     10: (v9: Omit<Config, 'version'> & { version: 9 }) => ({ ...v9, version: 10 as const }),
+    // v10 -> v11: the image switch the popup shows (`image.enabled`). Derived from what the reader
+    // had: any mode ticked means it was on, an empty list means it was off
+    11: (v10: Omit<Config, 'version' | 'image'> & { version: 10; image: { modes: Config['image']['modes'] } }) =>
+      ({ ...v10, version: 11 as const, image: { enabled: v10.image.modes.length > 0, modes: v10.image.modes } }),
   },
 })
 

@@ -240,15 +240,34 @@ describe('provider 选择', () => {
     const fresh = await import('@/config/storage')
     const c = await fresh.getConfig()
     expect(c.version).toBe(CONFIG_VERSION)
-    expect(c.image).toEqual({ modes: ['stack', 'side', 'only'] })
+    expect(c.image).toEqual({ enabled: true, modes: ['stack', 'side', 'only'] })
     expect(c.style).toEqual({ preset: 'quote', customCss: '', color: '', opacity: 1, accent: '' })
     expect(c.openaiCompat.apiKey).toBe('sk-keep')
   })
 
   it('图片翻译的模式只认三种，空数组合法（= 关闭）', async () => {
-    await expect(setConfig({ ...DEFAULT_CONFIG, image: { modes: ['split' as never] } })).rejects.toThrow()
-    await setConfig({ ...DEFAULT_CONFIG, image: { modes: [] } })
+    await expect(setConfig({ ...DEFAULT_CONFIG, image: { enabled: true, modes: ['split' as never] } })).rejects.toThrow()
+    await setConfig({ ...DEFAULT_CONFIG, image: { enabled: true, modes: [] } })
     expect((await getConfig()).image.modes).toEqual([])
+  })
+
+  it('v10 to v11: the image switch is derived from the mode list, on when any mode was ticked, off when none', async () => {
+    const v10 = (modes: string[]) => ({
+      version: 10, provider: 'openai-compat',
+      openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-keep', model: 'x/y', thinking: 'disabled' },
+      targetLanguage: 'cmn', mode: 'side', prompts: { promptId: 'default', patterns: [] },
+      preload: { margin: 1000, threshold: 0 }, fallback: { enabled: true }, glossary: [],
+      style: { preset: 'quote', customCss: '', color: '', opacity: 1, accent: '' }, reading: { sentenceHighlight: true }, image: { modes },
+    })
+    for (const [modes, enabled] of [[['stack', 'only'], true], [[], false]] as const) {
+      await fakeBrowser.storage.local.set({ config: v10([...modes]), config$: { v: 10 } })
+      vi.resetModules()
+      const fresh = await import('@/config/storage')
+      const c = await fresh.getConfig()
+      expect(c.version).toBe(CONFIG_VERSION)
+      expect(c.image).toEqual({ enabled, modes })
+      expect(c.openaiCompat.apiKey).toBe('sk-keep')
+    }
   })
 
   it('样式预设只认清单里的 id，自定义 CSS 有长度上限', async () => {
@@ -274,19 +293,21 @@ describe('provider 选择', () => {
 
   it('降级链：配置引擎在前，免费引擎兜底；关掉开关时只剩配置的那个', async () => {
     const { buildChain } = await import('@/providers')
-    const withKey = { ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-x' } }
+    const withKey = { ...DEFAULT_CONFIG, provider: 'openai-compat' as const, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-x' } }
     // 没有内置翻译 API 的环境（happy-dom、旧 Chrome）：内置引擎被 isAvailable 过滤掉
     expect((await buildChain(withKey)).chain.map(p => p.id)).toEqual(['openai-compat', 'google-web'])
     expect((await buildChain({ ...withKey, fallback: { enabled: false } })).chain.map(p => p.id)).toEqual(['openai-compat'])
     // 免费引擎自己当首选时不重复出现
     expect((await buildChain({ ...withKey, provider: 'google-web' })).chain.map(p => p.id)).toEqual(['google-web'])
     // 首选没配 key 也留在链首：popup 要据此提示去设置页，而不是悄悄换引擎
-    expect((await buildChain(DEFAULT_CONFIG)).chain.map(p => p.id)).toEqual(['openai-compat', 'google-web'])
+    expect((await buildChain({ ...DEFAULT_CONFIG, provider: 'openai-compat' })).chain.map(p => p.id)).toEqual(['openai-compat', 'google-web'])
+    // The shipped default is the free service that needs no key (UI.md §2)
+    expect((await buildChain(DEFAULT_CONFIG)).chain.map(p => p.id)).toEqual(['microsoft', 'google-web'])
   })
 
   it('语言包就绪时内置引擎排在 google-web 之前；未就绪时被跳过', async () => {
     const { buildChain } = await import('@/providers')
-    const withKey = { ...DEFAULT_CONFIG, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-x' } }
+    const withKey = { ...DEFAULT_CONFIG, provider: 'openai-compat' as const, openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'sk-x' } }
     const stub = (availability: string) => ({ availability: async () => availability, create: async () => ({ translate: async () => '' }) })
 
     vi.stubGlobal('Translator', stub('available'))

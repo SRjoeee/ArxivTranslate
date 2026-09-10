@@ -20,7 +20,7 @@ function mockProvider(translate: TranslationProvider['translate'], extra: Partia
 
 /** 链由测试直接给：不碰真的 buildChain，也就不需要真的 API key */
 const withChain = (chain: TranslationProvider[], extra: Parameters<typeof createLocalTransport>[1] = {}) =>
-  createLocalTransport(DEFAULT_CONFIG, { buildChain: async () => ({ chain, renderPath: 'tags' as const }), ...extra })
+  createLocalTransport({ ...DEFAULT_CONFIG, provider: 'openai-compat' }, { buildChain: async () => ({ chain, renderPath: 'tags' as const }), ...extra })
 
 const portOf = (cache: TranslationCache): CachePort => ({
   getMany: keys => Promise.all(keys.map(key => cache.get(key))),
@@ -228,7 +228,7 @@ describe('chainConfigChanged：什么样的配置改动才重建链', () => {
     expect(chainConfigChanged(base, { ...base, preload: { margin: 42, threshold: 0.5 } })).toBe(false)
     expect(chainConfigChanged(base, { ...base, glossary: [{ term: 'token', translation: '词元' }] })).toBe(false)
     // 图片翻译的模式闸（§15）只是显示闸，用户翻着页勾掉一个模式不该把队列清掉
-    expect(chainConfigChanged(base, { ...base, image: { modes: ['side'] } })).toBe(false)
+    expect(chainConfigChanged(base, { ...base, image: { enabled: true, modes: ['side'] } })).toBe(false)
   })
 
   it('引擎、端点、模型、key、目标语言、提示词、降级开关改了就重建', () => {

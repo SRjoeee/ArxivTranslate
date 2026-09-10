@@ -391,7 +391,7 @@ export function App() {
             <input
               type="checkbox"
               checked={config.image.modes.includes(mode)}
-              onChange={e => setLocal(c => ({ ...c, image: { modes: MODE_VALUES.filter(m => (m === mode ? e.target.checked : c.image.modes.includes(m))) } }))}
+              onChange={e => setLocal(c => ({ ...c, image: { ...c.image, modes: MODE_VALUES.filter(m => (m === mode ? e.target.checked : c.image.modes.includes(m))) } }))}
             />
             {' '}{name}
           </label>

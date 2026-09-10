@@ -5,7 +5,7 @@ import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
 import { COLOR_MAX, OPACITY_MAX, OPACITY_MIN, STYLE_PRESETS, sanitizeColor } from '@/core/renderer/style-preset'
 import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
-export const CONFIG_VERSION = 10
+export const CONFIG_VERSION = 11
 
 /** 三种阅读模式（DESIGN §7）；`mode` 与图片翻译的模式闸共用 */
 export const MODE_VALUES = ['stack', 'side', 'only'] as const
@@ -95,17 +95,20 @@ export const configSchema = z.object({
    */
   reading: z.object({ sentenceHighlight: z.boolean() }).default({ sentenceHighlight: true }),
   /**
-   * 图片翻译（§15，v8 起）：在哪些模式下给位图叠译文。默认三种都开；空数组 = 关闭。
-   * 只是显示闸——切到没开的模式只隐藏叠加层，不重新请求；helper 没检测到时设置页灰掉、整条路径不跑
+   * Image translation (§15). `enabled` is the reader's switch (popup, v11); `modes` says in which
+   * display modes the overlays show, a detail kept on the options page. Both are display gates:
+   * switching to a mode that is off only hides the overlays, nothing is re-requested. Without the
+   * helper the bitmap path does not run; SVG figures need no helper
    */
-  image: z.object({ modes: z.array(modeSchema).max(3) }).default({ modes: [...MODE_VALUES] }),
+  image: z.object({ enabled: z.boolean(), modes: z.array(modeSchema).max(3) }).default({ enabled: true, modes: [...MODE_VALUES] }),
 })
 
 export type Config = z.infer<typeof configSchema>
 
 export const DEFAULT_CONFIG: Config = {
   version: CONFIG_VERSION,
-  provider: 'openai-compat',
+  // The free service that keeps formulas and links intact and needs no key (UI.md §2, 2026-09-10)
+  provider: 'microsoft',
   openaiCompat: {
     baseURL: 'https://openrouter.ai/api/v1',
     apiKey: '',
@@ -121,5 +124,5 @@ export const DEFAULT_CONFIG: Config = {
   prompts: DEFAULT_PROMPTS_CONFIG,
   preload: { ...DEFAULT_PRELOAD },
   reading: { sentenceHighlight: true },
-  image: { modes: [...MODE_VALUES] },
+  image: { enabled: true, modes: [...MODE_VALUES] },
 }
