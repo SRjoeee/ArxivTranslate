@@ -286,9 +286,10 @@ await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 
   const boxOf = name => options.getByRole('checkbox', { name, exact: true })
   // §15.5：helper 只决定位图，SVG 图不需要它，所以复选框任何时候都该可用
   const enabled = await boxOf('上下对照').isEnabled()
-  const hint = await options.getByText(/helper/).first().textContent()
+  // The hint names the helper the reader's way (识别助手); /helper/ would now hit the install command
+  const hint = await options.getByText(/识别助手/).first().textContent()
   check('设置页：图内文字翻译不因为没装 helper 而整节灰掉（§15.5）', enabled === true, `可用 ${enabled}`)
-  check('设置页：提示语说清楚 helper 只影响位图', /SVG/.test(hint ?? ''), (hint ?? '').slice(0, 90))
+  check('options: the helper hint says SVG figures translate without it (§15.5)', /SVG/.test(hint ?? ''), (hint ?? '').slice(0, 90))
 
   if (!process.env.AXT_E2E_IMAGES) {
     await boxOf('上下对照').check()
