@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
 import { LANG_CODES, label as languageLabel, type LangCode } from '@/config/languages'
 import { DEFAULT_CONFIG, MODE_VALUES, configSchema, type Config } from '@/config/schema'
-import { getConfig, setConfig } from '@/config/storage'
+import { configFallbackReason, getConfig, setConfig } from '@/config/storage'
 import { supportsTarget } from '@/providers/microsoft'
 import { wireFormatOfProvider } from '@/providers/wire-formats'
 import { THINKING_HOSTS } from '@/providers/thinking'
@@ -12,6 +12,8 @@ import { OPACITY_MAX, OPACITY_MIN, customStyleRule, sanitizeCustomCss, styleVars
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 import { sendMessage } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
+import { type PackState, downloadPack, packState } from '@/shared/pack'
+import { HELPER_GUIDE_URL, helperInstallCommand } from '@/ui/strings'
 import { PromptManager } from './PromptManager'
 
 /** 分组显示：整套照搬 KISS 的预设，加上 Read Frog 的绿与淡色底（§7.5） */
@@ -46,12 +48,21 @@ const sampleFor = (config: Config) => (wireFormatOfProvider(config.provider) ===
 /** 图片翻译的模式闸（§15）：与 popup 的模式按钮同一套叫法 */
 const IMAGE_MODES: [Config['mode'], string][] = [['side', '左右对照'], ['stack', '上下对照'], ['only', '仅译文']]
 
+/** The same order and names as the popup's service menu (UI.md §2) */
 const PROVIDERS: [Config['provider'], string, string][] = [
-  ['openai-compat', 'LLM（OpenAI 兼容端点）', '译文质量最好，需要 API key'],
-  ['google-web', 'Google 网页翻译（免费）', '不需要 key，整篇几秒翻完，术语准确度不如 LLM'],
-  ['chrome-builtin', 'Chrome 内置翻译（离线）', '不需要 key、不联网，单句十几毫秒；术语准确度不如 LLM，首次使用要在 popup 里下载语言包'],
-  ['microsoft', '微软翻译（免费）', '不需要 key；只保得住纯文本记号，所以内联样式（斜体等）会丢，公式与链接不受影响'],
+  ['microsoft', 'Microsoft 翻译', '免费，无需 API Key；公式与链接不受影响，不保留斜体等行内样式'],
+  ['google-web', 'Google 翻译', '免费，无需 API Key'],
+  ['openai-compat', 'LLM（OpenAI 兼容端点）', '译文质量最高，需要 API Key'],
+  ['chrome-builtin', 'Chrome 翻译', '浏览器内置，无需联网；需要先下载语言包'],
 ]
+
+const PACK_TEXT: Record<PackState, string> = {
+  available: '语言包已就绪',
+  downloadable: '语言包尚未下载',
+  downloading: '语言包下载中，约需 1 分钟',
+  unavailable: '当前语言不支持离线翻译',
+  unsupported: '当前 Chrome 版本不支持内置翻译',
+}
 
 // Phase 2：provider 配置 + 连接测试。样式预设、术语表、缓存管理在 Phase 3。
 /**
@@ -95,6 +106,10 @@ export function App() {
   const [cacheNote, setCacheNote] = useState('')
   /** 本机 OCR helper 的状态（§15.4）：没检测到就把图片翻译一节灰掉 */
   const [helper, setHelper] = useState<HelperStatus | null>(null)
+  /** The offline service's language pack; the download lives here as well as in the popup */
+  const [pack, setPack] = useState<PackState | null>(null)
+  /** Why the config fell back to defaults, if it did: the reader's key and choices are not in effect */
+  const [fallbackReason, setFallbackReason] = useState<string | null>(null)
 
   const loadCacheStats = useCallback(async () => {
     try {
@@ -115,8 +130,10 @@ export function App() {
   useEffect(() => {
     getConfig().then(c => {
       setLocal(c)
+      setFallbackReason(configFallbackReason())
       setHasStoredKey(c.openaiCompat.apiKey.length > 0)
       setGlossaryText(formatGlossaryText(c.glossary))
+      void packState(c.targetLanguage).then(setPack)
     })
     void loadCacheStats()
     // 翻译发生在别的标签页：切回设置页时重新读一次，否则显示的永远是打开那一刻的数字
@@ -131,6 +148,19 @@ export function App() {
 
   const patchOpenAI = (patch: Partial<Config['openaiCompat']>) =>
     setLocal(c => ({ ...c, openaiCompat: { ...c.openaiCompat, ...patch } }))
+
+  /** From the click itself (shared/pack.ts says why). Once the pack is there the service can be chosen */
+  async function fetchPack() {
+    setPack('downloading')
+    try {
+      await downloadPack(config.targetLanguage)
+      await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).catch(() => undefined)
+    } catch (e) {
+      setNotice(`语言包下载失败：${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setPack(await packState(config.targetLanguage))
+    }
+  }
 
   async function save() {
     setNotice('')
@@ -229,23 +259,34 @@ export function App() {
   return (
     <main style={{ maxWidth: 640, margin: '40px auto', font: '14px system-ui, sans-serif', lineHeight: 1.5 }}>
       <h1 style={{ fontSize: 18 }}>arXiv HTML Translator · 设置</h1>
+      {fallbackReason && (
+        <p style={{ padding: '8px 10px', borderRadius: 4, background: '#fdf0f0', color: '#b00' }}>
+          设置读取失败，当前使用默认设置；已保存的 API Key 与服务选择均未生效。请重新填写并保存。
+          <span style={{ display: 'block', marginTop: 4, color: '#666' }}>{fallbackReason}</span>
+        </p>
+      )}
 
-      <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译引擎</h2>
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>翻译服务</h2>
       <label style={label}>
-        引擎
+        服务
         <select style={field} value={config.provider} onChange={e => setLocal(c => ({ ...c, provider: e.target.value as Config['provider'] }))}>
-          {PROVIDERS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+          {PROVIDERS.map(([id, name]) => <option key={id} value={id} disabled={id === 'chrome-builtin' && pack !== 'available'}>{name}</option>)}
         </select>
         <small style={{ color: '#666' }}>{PROVIDERS.find(([id]) => id === config.provider)?.[2]}</small>
+        {/* The pack download sits here as well as in the popup: Chrome 翻译 is greyed until it is done */}
+        <small style={{ display: 'block', marginTop: 4, color: '#666' }}>
+          Chrome 翻译：{pack === null ? '正在检查语言包…' : PACK_TEXT[pack]}
+          {pack === 'downloadable' && <>{' '}<button type="button" style={{ font: 'inherit', fontSize: 12 }} onClick={fetchPack}>下载语言包</button></>}
+        </small>
         {/* 语言闸要在**选的时候**说清楚（#98）：isAvailable() 为假只会让链默默降级到 Google，
             popup 那句「不可用」讲不出「因为微软不支持这门语言」。179 个目标语言里它支持 108 个 */}
         {config.provider === 'microsoft' && !supportsTarget(config.targetLanguage) && (
           <small style={{ color: '#b00', display: 'block', marginTop: 4 }}>
-            微软翻译不支持当前的目标语言（{languageLabel(config.targetLanguage)}）。
+            Microsoft 翻译不支持当前的目标语言（{languageLabel(config.targetLanguage)}）。
             {config.fallback.enabled
-              ? '翻译时会自动改用降级链上的免费引擎。'
-              : '而且降级链是关掉的，翻译会直接失败。'}
-            换一种目标语言，或直接选别的引擎。
+              ? '翻译时将自动改用其他免费服务。'
+              : '而且已关闭自动改用，翻译会直接失败。'}
+            请更换目标语言或翻译服务。
           </small>
         )}
       </label>
@@ -377,15 +418,22 @@ export function App() {
 
       {/* 一节管两种图（§15.5）。**不再按 helper 灰掉**：helper 只决定位图，SVG 图的文字是读出来的、
           不需要本机识别，而 SVG 图占样本的 49.1%（880/1792）——整节灰掉等于把能用的功能也关了 */}
-      <h2 style={{ fontSize: 15, marginTop: 24 }}>图内文字翻译</h2>
+      <h2 style={{ fontSize: 15, marginTop: 24 }}>图片翻译</h2>
+      <label style={{ ...label, marginBottom: 8 }}>
+        <input type="checkbox" checked={config.image.enabled} onChange={e => setLocal(c => ({ ...c, image: { ...c.image, enabled: e.target.checked } }))} />
+        {' '}启用图片翻译
+        <small style={{ display: 'block', color: '#666' }}>译文叠在图上，鼠标悬停查看原文。与 popup 里的开关是同一项</small>
+      </label>
       <small style={{ display: 'block', color: '#666', marginBottom: 8 }}>
-        译文叠在图上，鼠标悬停看原文。
-        {helper === null ? ' 正在检测本机 OCR helper…'
-          : helper.available ? ` 已检测到 helper ${helper.version ?? ''}，位图与 SVG 图都能翻。`
-          : ` 未检测到 helper${helper.reason ? `（${helper.reason}）` : ''}：SVG 图照常翻，位图需要本机 helper，安装方法见仓库 helper/README.md。`}
+        {helper === null ? '正在检测识别助手…'
+          : helper.available ? `已检测到识别助手 ${helper.version ?? ''}，位图与 SVG 图均可翻译。`
+          : <>
+              未检测到识别助手{helper.reason ? `（${helper.reason}）` : ''}：SVG 图照常翻译，位图需要安装识别助手（macOS）。
+              安装命令：<code>{helperInstallCommand(browser.runtime.id)}</code>，见 <a href={HELPER_GUIDE_URL} target="_blank" rel="noreferrer">教程</a>。
+            </>}
       </small>
-      <fieldset style={{ border: 0, padding: 0, margin: '0 0 14px' }}>
-        <legend style={{ padding: 0 }}>在哪些模式下翻译图片</legend>
+      <fieldset style={{ border: 0, padding: 0, margin: '0 0 14px', opacity: config.image.enabled ? 1 : 0.5 }}>
+        <legend style={{ padding: 0 }}>在哪些模式下显示图片译文</legend>
         {IMAGE_MODES.map(([mode, name]) => (
           <label key={mode} style={{ marginRight: 16 }}>
             <input
