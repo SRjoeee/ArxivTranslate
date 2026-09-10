@@ -22,11 +22,18 @@ import type { ProtectedBlock } from './serialize'
 /** Longer than this is a sentence set in italics, not a label: past what the replay covered. */
 const MAX_LABEL_WORDS = 8
 /**
- * The label's translation may be this many characters longer than the label. Chinese runs shorter
- * than English, so this only has to cover a spaced separator; it is what turns a separator that
- * moved — an ellipsis for `..`, a colon the engine dropped — into "leave it alone".
+ * How much longer than the label its translation may be. This is what turns a separator that moved
+ * — an ellipsis for `..`, a colon the engine dropped — into "leave it alone". Han, kana and hangul
+ * run shorter than English, so for them a few characters cover a spaced separator; scripts that
+ * run longer (French `Avertissement :` for `Warning:`, German, Russian) get twice the label
+ * (Codex on #151). Decided from the prefix itself, so no target language has to be threaded in.
  */
 const SLACK = 4
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu
+const bound = (label: number, prefix: string): number => {
+  const cjk = (prefix.match(CJK) ?? []).length
+  return cjk * 2 >= prefix.replace(/\s/g, '').length ? label + SLACK : label * 2 + SLACK
+}
 const TERMINATOR = /[。！？!?]/
 const TEXT_NODE = 3
 
@@ -88,7 +95,7 @@ function splitSpan(spans: WireSpan[], node: Text, at: number): void {
  * Puts the label's element back around its translation, if the translation is shaped as the
  * original was. Returns whether it did. `spans` is updated in place where a text node is split.
  */
-export function restoreLeadingLabel(fragment: DocumentFragment, spans: WireSpan[], block: ProtectedBlock, doc: Document): boolean {
+export function restoreLeadingLabel(fragment: DocumentFragment, spans: WireSpan[], block: ProtectedBlock, doc: Document, ids: ReadonlyMap<Node, number>): boolean {
   const label = leadingLabel(block.root, block.slots)
   if (!label) return false
   const nodes = Array.from(fragment.childNodes)
@@ -99,7 +106,7 @@ export function restoreLeadingLabel(fragment: DocumentFragment, spans: WireSpan[
     const SEP = label.separator === 'colon' ? /[:：]/ : /。|\.(?=\s|$)/
     // A sentence ending before the separator means the separator is not the label's
     const stop = label.separator === 'colon' ? TERMINATOR : /[！？!?]/
-    let seen = 0
+    let seen = ''
     let cut: { node: Text; at: number } | undefined
     for (const n of nodes) {
       if (n.nodeType === TEXT_NODE) {
@@ -107,8 +114,8 @@ export function restoreLeadingLabel(fragment: DocumentFragment, spans: WireSpan[
         const m = SEP.exec(data)
         const head = m ? data.slice(0, m.index) : data
         if (stop.test(head)) return false
-        seen += head.length
-        if (seen > label.length + SLACK) return false
+        seen += head
+        if (seen.length > bound(label.length, seen)) return false
         if (m) {
           cut = { node: n as Text, at: label.inside ? m.index + m[0].length : m.index }
           break
@@ -125,13 +132,15 @@ export function restoreLeadingLabel(fragment: DocumentFragment, spans: WireSpan[
   }
   // Something visible has to go in: a label whose translation vanished is not a label any more
   if (!wrapped.some(n => (n.nodeType === TEXT_NODE ? /\S/.test((n as Text).data) : true))) return false
-  // The label's placeholders must all be in front of the cut. A separator the engine put among a
-  // label's formulas — `Step 2: We next prove that Ξ…` cut after its first formula — passes the
-  // length bound, since the label itself is long; the placeholder count is what catches it
-  // (replay, 2026-09-10). Under markers every element at the fragment's top level is a placeholder
-  let inLabel = 0
-  for (const slot of block.slots.values()) if (label.el.contains(slot)) inLabel++
-  if (wrapped.filter(n => n.nodeType !== TEXT_NODE).length !== inLabel) return false
+  // The label's placeholders must all be in front of the cut, and nothing else: a separator the
+  // engine put among a label's formulas — `Step 2: We next prove that Ξ…` cut after its first
+  // formula — passes the length bound, since the label itself is long (replay, 2026-09-10); and
+  // `validate()` allows the engine to reorder placeholders, so a body formula could stand where a
+  // label formula was (Codex on #151). Compared by identity, not by count
+  const inLabel = new Set<number>()
+  for (const [id, slot] of block.slots) if (label.el.contains(slot)) inLabel.add(id)
+  const inPrefix = wrapped.filter(n => n.nodeType !== TEXT_NODE).map(n => ids.get(n))
+  if (inPrefix.length !== inLabel.size || inPrefix.some(id => id === undefined || !inLabel.has(id))) return false
   const shell = cloneWithoutIds(doc, label.el, false) as Element
   fragment.insertBefore(shell, wrapped[0]!)
   for (const n of wrapped) shell.append(n)

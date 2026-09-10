@@ -42,15 +42,17 @@ describe('fixture 往返（markers）', () => {
         // 所以按同一口径两侧都折叠再比——少一个词、掉一处词间空格仍然会红
         const [gotText, wantText] = sameModuloWhitespace(fragment.textContent ?? '', target.textContent ?? '')
         expect(gotText, `${f} 文字对不上：${target.id || target.className}`).toBe(wantText)
-        // 占位符序列按回填记下的 slot 记录比（offsets 里 kind 为 slot 的就是它们，按线上顺序）。
-        // 以前直接数 fragment 根上的元素——markers 没有 open token，克隆都挂在根上——但 #150 起段首的
-        // 标签会被包回一层壳（`label.ts`），壳不是占位符、占位符也可能在壳里。
+        // The placeholder sequence is compared through the slot records rehydrate kept (the `slot`
+        // entries of `offsets`, in wire order). It used to count the fragment's root elements —
+        // markers has no open token, so every clone hung off the root — but since #150 a block's
+        // leading label is wrapped back in a shell (`label.ts`): the shell is no placeholder, and a
+        // placeholder can sit inside it.
         // 只比标签名——比 outerHTML 要给几万个公式各建一个几十 KB 的串，实测 4 GB 堆都不够。
         // 相邻同名节点被换位由上面那条 textContent 相等挡住（它们的文字不同），深克隆的保真度由 tags 那组覆盖
         const want = tokenize(block.text, 'markers').flatMap(t => (t.kind === 'void' ? [(block.slots.get(t.id) as Element).tagName] : []))
         const got = fragment.offsets.flatMap(s => (s.kind === 'slot' ? [(s.node as Element).tagName] : []))
         expect(got, `${f} 受保护节点对不上：${target.id || target.className}`).toEqual(want)
-        // 壳只会出现在段首、只会是原块开头那个格式元素的同款
+        // A shell only ever opens the fragment, and only as a copy of the element the block opens with
         const first = fragment.firstChild
         if (first?.nodeType === 1 && (first as Element).matches(LABEL_FORMATTING) && !fragment.offsets.some(s => s.node === first)) {
           labels++

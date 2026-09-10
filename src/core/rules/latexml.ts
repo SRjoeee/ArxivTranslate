@@ -243,9 +243,10 @@ export function classify(el: Element): Classification | null {
 export const FUNCTIONAL_INLINE = 'a[href]'
 
 /**
- * 纯格式的行内元素：markers 格式下会被拍平成文字（§6.3）。回填时段首的这类元素——`Keywords:`、
- * `Note.`、斜体的定理陈述——可以按分隔符包回去（protector/label.ts，issue #150）。
- * 不含 `.ltx_font_typewriter`：它按代码整块保留，本来就不会被拍平
+ * Formatting-only inline elements, which the markers format flattens to text (§6.3). One that
+ * opens a block — `Keywords:`, `Note.`, an italic theorem statement — can be put back at rehydrate
+ * time along its separator (protector/label.ts, issue #150). Not `.ltx_font_typewriter`: that is
+ * kept whole as code and never flattened.
  */
 export const LABEL_FORMATTING = '.ltx_font_bold, .ltx_font_italic, .ltx_font_smallcaps, .ltx_emph'
 

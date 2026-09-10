@@ -35,6 +35,8 @@ export function rehydrate(translated: string, block: ProtectedBlock, doc: Docume
   const stack: (DocumentFragment | Element)[] = [fragment]
   const top = () => stack[stack.length - 1]!
   const spans: WireSpan[] = []
+  /** Which slot each clone stands for; the label restore checks identities, not just counts */
+  const ids = new Map<Node, number>()
 
   for (const t of scanTokens(translated, block.format)) {
     if (t.kind === 'text') {
@@ -45,6 +47,7 @@ export function rehydrate(translated: string, block: ProtectedBlock, doc: Docume
     } else if (t.kind === 'void') {
       const node = cloneWithoutIds(doc, block.slots.get(t.id)!, true)
       top().append(node)
+      ids.set(node, t.id)
       spans.push({ kind: 'slot', node, from: t.from, to: t.to, role: 'void' })
     } else if (t.kind === 'open') {
       const el = cloneWithoutIds(doc, block.slots.get(t.id)!, false) as Element
@@ -59,6 +62,6 @@ export function rehydrate(translated: string, block: ProtectedBlock, doc: Docume
   }
   // Markers flattened the block's formatting; the one piece that can be put back safely is a
   // label the block opened with (`label.ts`, issue #150). Splits a span where it splits a node
-  if (block.format === 'markers') restoreLeadingLabel(fragment, spans, block, doc)
+  if (block.format === 'markers') restoreLeadingLabel(fragment, spans, block, doc, ids)
   return Object.assign(fragment, { offsets: spans })
 }

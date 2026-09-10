@@ -147,6 +147,25 @@ describe('leading label under markers (#150)', () => {
     expect(g.querySelectorAll('math')).toHaveLength(2)
   })
 
+  it('the placeholders in front of the cut must be the label\'s own, not merely as many', () => {
+    // validate() lets the engine reorder placeholders, so a body formula can stand where the label's was
+    const { block } = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Let <math><mi>p</mi></math>:</span> then <math><mi>q</mi></math> holds.</p>')
+    expect(block.text).toBe('Let @a#: then @b# holds.')
+    const swapped = rehydrate('设@b#：那么@a#成立。', block, document)
+    expect(swapped.querySelector('.ltx_font_bold')).toBeNull()
+    const kept = rehydrate('设@a#：那么@b#成立。', block, document)
+    expect(kept.querySelector('.ltx_font_bold')?.textContent).toBe('设p：')
+  })
+
+  it('a script that runs longer than English gets a wider bound: Avertissement :', () => {
+    const { block } = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Warning:</span> do not.</p>')
+    const fr = rehydrate('Avertissement : ne pas.', block, document)
+    expect(fr.querySelector('.ltx_font_bold')?.textContent).toBe('Avertissement :')
+    // Han still gets the tight bound: a separator that wandered off is left alone
+    const far = rehydrate('警告，不要这样做，绝对不要：真的。', block, document)
+    expect(far.querySelector('.ltx_font_bold')).toBeNull()
+  })
+
   it('a label longer than eight words is not a label', () => {
     const { block } = markers('<p class="ltx_p"><span class="ltx_text ltx_font_italic">For each integer k we have the following bound on the quantity:</span> proof.</p>')
     const f = rehydrate('对于每个整数 k，我们有以下关于该量的界：证明。', block, document)
