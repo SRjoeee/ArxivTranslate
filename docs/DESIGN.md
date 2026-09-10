@@ -86,12 +86,13 @@ arXiv HTML 由 LaTeXML 生成，DOM 高度规整，每个元素都带 `ltx_*` �
 8. `renderer` 把译文节点插为原块的下一个兄弟，写入缓存
 9. 模式切换、恢复原文，都不经过以上流程，纯 DOM/CSS 操作
 
-### 4.0b 四个入口 [决定，2026-09-10 实现，issue #146]
+### 4.0b 五个入口 [决定，2026-09-10 实现，issue #146；快捷键 2026-09-10]
 
-翻译从来只由用户发起（§4 第 1 步之前什么都不做），但「发起」有四条路，都落到同一对消息 `axt:translate-page` / `axt:restore-page` 上——**动作只有一份实现，入口是四个门**：
+翻译从来只由用户发起（§4 第 1 步之前什么都不做），但「发起」有五条路，都落到同一对消息 `axt:translate-page` / `axt:restore-page` 上——**动作只有一份实现，入口是五个门**：
 
 - **popup**：翻译 / 恢复、模式、引擎、进度。功能最全的那一个
-- **右键菜单**：一条 `翻译 / 恢复原文`，`documentUrlPatterns` 限定 `https://arxiv.org/html/*`。点它先问一次 `axt:page-status` 再决定发哪条消息。**标签不跟着状态变**：`contextMenus.update` 是全局的、不是按标签页的，跟着当前页改的话一切换标签页就说错了（沉浸式翻译的那条也是静态的）
+- **Keyboard command** `axt-toggle` (manifest `commands`, suggested Alt+T): the same toggle as the context menu, sharing `toggleTranslation()`. The popup's translate button shows the key as Chrome actually reports it (`commands.getAll()`), so a rebound or removed key is never advertised wrongly (UI.md S-P-50)
+- **右键菜单**：一条 `翻译本页 / 显示原文`（与 popup 主按钮同一套说法），`documentUrlPatterns` 限定 `https://arxiv.org/html/*`。点它先问一次 `axt:page-status` 再决定发哪条消息。**标签不跟着状态变**：`contextMenus.update` 是全局的、不是按标签页的，跟着当前页改的话一切换标签页就说错了（沉浸式翻译的那条也是静态的）
 - **URL 的 `#axt-translate`**：content script 一进页面看到它就开始翻。原本是调试与自动化用的口子，现在是产品接口
 - **摘要页的双语入口**：`arxiv.org/abs/*` 上一个独立的 content script，在「Access Paper」里 arXiv 自己的 HTML 链接后面插一条，指向**它给出的那个 href** 加上 `#axt-translate`。读一篇论文本来要「点 HTML → 等 → 开 popup → 点翻译」，现在一步。**href 取 arXiv 的、不自己拼**：它带着版本号（`/html/1706.03762v7`），自己拼会在多版本的论文上指错版本；**没有 HTML 版的论文（`#latexml-download-link` 不存在）什么都不插**。这个 content script 不加载翻译流水线的任何一部分
 
@@ -461,19 +462,25 @@ interface ProtectedBlock {
 
 2026-09-07 首次实测（2410.00260，Chrome 153）：基线 45 条 / 6 类（`empty-table-header`、`heading-order`、`landmark-*`、`region`），装扩展后 stack 56 条、side 544 条、only 399 条，**三种模式的差集都为空**。变异检查：给 `.axt-t` 压一条低对比度的 `color` 再构建，stack 新增 441 条、side 新增 569 条 `color-contrast`，全部标为 `translation`——映射没有把译文自己的问题误判成继承。
 
-### 7.5 译文样式 [决定，2026-09-05 实现]
+### 7.5 译文外观 [决定，2026-09-05 实现；2026-09-10 改为读者自己的配置列表]
+
+**v12 起外观是读者自己的一份配置，不是我们给的一组预设** [决定，2026-09-10，用户拍板；推翻同年 09-05 的「整套照搬 KISS 的 21 种预设」]。一份「译文样式」= 文字颜色 + 透明度 + 下划线（`none` / `solid` / `dotted` / `dashed` / `wavy`，线宽 1 或 2）+ 悬停前模糊 + 高级 CSS 声明；一份「背景高亮」= 颜色 + 浓淡。两份都是可增删改的列表，内置项（六种样式、三种高亮）以普通成员的身份躺在列表里，可以改、可以删，「重置」按 id 恢复内置的、保留读者自己加的。删掉的效果：边框（`quote` / `box` / `box-dashed`）、底色（`marker` / `marker-gradient` / `highlight` / `tint`）、文字特效（`gradient` / `colorful` / `glow` / `blink`）；`blur` 作为一个字段留下。理由是读者要的是「按自己的眼睛调一份」，21 个固定组合既盖不全又占满视觉空间。
+
+**渲染契约随之收窄**：`<html>` 上只剩两个开关属性 `data-axt-underline`（有线时才写，值是线型）与 `data-axt-blur`；其余全部走变量 `--axt-color` / `--axt-opacity` / `--axt-deco-thickness` / `--axt-hl-color` / `--axt-hl-mix`，由 `appearanceRule()` 写进注入表。`presets.css` 从二十条规则缩到三条：下划线的共享规则、模糊、以及默认变量。`data-axt-style` 与 `--axt-accent` 退役。下面两条纪律原样保留，它们与预设数量无关。
+
+原始记录（2026-09-05 的预设方案）：
 
 - 译文节点复制原块 class（§7.1），字体、字号、行高、对齐、grid 位置天然与原块一致，预设**只做叠加装饰**。注入的 `<style>` 排在站点样式之后，`.axt-t` 上**不要**写 `font: inherit` 这类会以同等特异度盖掉站点样式的属性（实测会把摘要标题的 1.4rem 和参考文献的字体覆盖成父级默认值）。`presets.test.ts` 用正则守着预设里不出现 `font` / `display` / `margin` / `line-height` / `width`
 - **整套照搬 KISS 的预设，用不上的以后再删** [决定，2026-09-05，用户拍板；推翻同日"只挑 4 种"的初版]：初版按"论文要读几十分钟、动效碍事"只留了 4 种，用户看过后要求先全搬、再按实际使用逐个删——与"搬不搬只看有无负面影响"的判据一致，这些预设互不干扰、每种就几行 CSS，没有额外负担。现有 20 种加一个自定义位，分五组：基础（`none` / `muted` / `green`）、下划线（`underline` / `dotted` / `dashed` / `dashed-bold` / `wavy` / `wavy-bold`）、边框（`quote` / `box` / `box-dashed`）、底色（`marker` / `marker-gradient` / `highlight` / `tint`）、特效（`gradient` / `colorful` / `glow` / `blink` / `blur`）。`green` 与 `tint` 来自 Read Frog 的 `custom-translation-node.css`（前者是它译文的默认配色 `oklch(0.693 0.17 162.48)`，对照阅读时最容易区分）；`blur` 是悬停才清晰，自测与背诵用。**只有走合成器的动画可以留** [决定，2026-09-05，实测；Codex 在 #52 指出]：600 个译文块下 4 秒内的主线程任务——`glow` 的 `text-shadow` 呼吸 **1028 ms**（样式重算 549、布局 144）、`gradient` 的 `background-position` 流动 **573 ms**，而静止是 2 ms。论文要读几十分钟，这种装饰不值持续烧四分之一个核，两者改为**静态**（渐变填充与发光都还在，只是不动），改后都回到 1 ms。`blink` 改的是 `opacity`，走合成器不触发样式重算，实测 3 ms，保留动画并仍然尊重 `prefers-reduced-motion: reduce`。注意帧率不是有效指标：改静态之前四种预设都稳在 60 fps，工作量塞得进每帧预算但 CPU 一直在烧，要用 CDP 的 `TaskDuration` 才看得出来
 - **下划线类必须显式画到原子行内元素上** [决定，2026-09-05，用户反馈的漏线]：CSS 规范里 `text-decoration` **不会传播到 inline-block、inline-table 与 MathML 这类原子行内盒**，于是公式与行内盒处的线会断掉（实测：`.axt-t math` 的 `text-decoration-line` 计算值是 `none`）。`text-decoration: inherit` 也不行——`text-decoration-line` 不是继承属性，中间隔一层普通 `span` 就断（实测同上）。做法是让下划线类只设 `--axt-deco` 变量，由一条共享规则同时作用于 `.axt-t` 与 `.axt-t :is(math, .ltx_inline-block, svg, img)`。这条共享规则**只列出下划线类的 id**，不能写成 `html[data-axt-style]` 通配：那样会给其他预设写上 `text-decoration: none`，把站点自己给链接、引用标记画的线抹掉。实测 2609.04056v1：51 个译文内公式全部拿到 `underline/dashed`
-- **样式与模式同层**：`data-axt-style` 写在 `<html>` 上（与 `data-axt-mode` 并列），切换只改一个属性、不动 DOM
+- **外观与模式同层**：开关属性写在 `<html>` 上（与 `data-axt-mode` 并列），切换只改属性、不动 DOM。v12 之前是 `data-axt-style="<预设 id>"`，现在是 `data-axt-underline` 与 `data-axt-blur`
 - **装饰参数可调** [决定，2026-09-08，用户把 #47 收窄到这个范围]：译文的**文字颜色、透明度、高亮色**三项由用户调，写进 config（v9）。**排版量（字号、行高、页面宽度、栏间距、段间距）不做**——探查表明那半边又贵又险：正文上限 `96rem` 硬编码在 `modes.css` 两处且被 `layout.mjs` 双向夹死；改字号会挤压栏宽，§7.2 记着正文 1536 → 1240 时 145 张公式里 25 张放不下；段间距默认值必须逐像素等于不装扩展时（`layout.mjs` 的 `after.gap === before` 是严格相等）。**粗细也不做**：译文节点复制原块 class，写 `font-weight` 会盖掉站点给标题的粗体，与本节记着的 `font: inherit` 是同一类 bug；透明度已经能达到「让译文不抢眼」的效果。
 
   实现上**不改 `modes.css` 与 `presets.css`**：`styleVarsRule()` 生成的规则用与预设相同的选择器形状、排在 `presetsCss` 之后，同特异度靠层叠顺序覆盖 `muted` / `green` 写的 `--axt-color` 与 `html[data-axt-on]` 上的 `--axt-accent`；自定义声明块仍排最后、有最终发言权。值**不写 `<html>` 的内联 style**——`restore()` 靠「删注入表 + 剥 `data-axt-*` 前缀属性」还原，内联 style 不带前缀会清不掉，破坏 §7.1 第 4 条的逐节点相等。颜色手填要过白名单（`sanitizeColor`），挡住 `red; opacity: 0` 这类会开出新声明的输入。
 
   **即时生效**：content script 订阅 `watchConfig`，`style` 变了就调 `applyStyle()`——只重算注入表的内容与 `data-axt-style`，一个译文节点都不碰、**不重新请求翻译**（`chainConfigChanged` 本来就忽略 `style`）。不用消息是因为设置页自己就是活动标签页、`sendToActiveTab` 发不到内容页，而订阅还能同时更新所有打开的论文。实测：改颜色与透明度后计算样式立刻变、译文节点数不变、**新增请求 0**
 - **装饰只落到真正的译文上**：`.axt-pending`（加载圆环）与 `.axt-error`（带「重试」按钮的失败控件）也带 `.axt-t`——它们长在译文的位置上，side 模式靠这个 class 配对——但它们不是译文。side 模式的结构性克隆 `.axt-mirror`（镜像的公式 / 插图）与 `.axt-split`（拆到右栏的整张图）同理——它们带 `.axt-t` 只是为了配对，`blur` 会把镜像的公式糊掉、其他预设会给包装层再画一遍。所有预设选择器都写成 `.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)`，克隆里嵌套的真译文仍然匹配；与 `split-figures.ts` 的 `REAL_TRANSLATION` 是同一条界线（2026-09-07 发现它漏了 `.axt-mirror` / `.axt-split`，已补齐——漏掉的后果见 §7.2「整理按变动区域增量进行」(c)）。不排除的话 `gradient` 的 `color: transparent` 会把重试按钮的字变透明，正好是用户最需要点它的时候（Codex 在 #52 指出）
-- **`custom` 只接受声明块，不接受完整规则**：选择器由扩展补（`html[data-axt-style="custom"] .axt-t { … }`），用户填的内容整段插进花括号中间，因此 `{` `}` `@` `<` 一律拒绝。这不是安全边界（用户本来就能装任何扩展），是防手滑——一个多余的花括号会把整篇论文的排版改掉，而且很难看出原因
+- **高级 CSS 只接受声明块，不接受完整规则**：选择器由扩展补（v12 起是 `html[data-axt-on] .axt-t:not(…) { … }`，与其他字段叠加，不再是一个独立的 `custom` 预设），用户填的内容整段插进花括号中间，因此 `{` `}` `@` `<` 一律拒绝。这不是安全边界（用户本来就能装任何扩展），是防手滑——一个多余的花括号会把整篇论文的排版改掉，而且很难看出原因
 
 - **文档标题与副标题不与译文同行** [决定，2026-09-06，Codex 在 #13 指出]：`.ltx_subtitle` 与 `.ltx_title_document` 同属居中的标题区，压成 `inline-block` 会缩到内容宽度并贴到左边——真实页面实测 2609.00246 的 `(Extended Version)`：原本 `block` + `text-align: center`、占满 800px 栏宽、文本居中在 x≈720，改成 `inline-block` 后盒子只剩 176px、落在 l=320（父元素 `<article>` 是 `text-align: start`）。章节的 run-in 短标题是 `.ltx_title_*`，不受影响
 
@@ -689,7 +696,9 @@ export interface TranslateResult {
 
 硬规则 4 要求"失败必须可恢复并触发 fallback 链，不能让扩展整体挂掉"。在这之前，key 过期、额度用尽或网络抖动会让 `run.ts` 命中 `no-key` / `auth` 后 `scheduler.disconnect()`，整页翻译停死、读者对着半篇译文干等。
 
+- **服务由读者添加，引擎按服务 id 认领** [决定，2026-09-10]：`config.services[]` 里每一项是「名称 + 接口地址 + API Key + 模型」，`getProvider` 见到 `provider` 是一个服务 id 就用那份配置造一个 OpenAI 兼容引擎，并把**服务 id 当引擎 id**——降级链、状态上报、缓存键因此不需要任何特判，`serviceName(id, services)` 负责把 id 翻成读者给的名字。选中的服务被删掉时落到内置的免费服务上，popup 照常提示。厂商模板（预置 OpenRouter / DeepSeek 等的地址与模型）不做，读者填三个字段就够
 - **链的形状**：配置里选的引擎在前，其后接不与它重复的免费引擎，顺序是 `chrome-builtin` → `google-web`（内置离线、单句 10–20 ms、不受限流，所以在前；语言包没下载时它的 `isAvailable()` 为假，自动被跳过）。组装在 `providers/index.ts` 的 `buildChain`，两道过滤：`isAvailable()` 为假的剔除（免得链里躺着必然失败的一环），但**首个引擎不可用时保留**——popup 要据此提示"未配置 API key"，而不是悄悄换成免费引擎
+- **A session is bound to the chain it started on, and a new session may replace it in place** [decided 2026-09-10, ui/phase-1]. A run never switches service or language mid-way (Codex on #59). What changed: `axt:translate-page { restart }` starts a new session over a running one without showing the original first; `renderPending` already removes a block's previous translation when it is requested again, so the page follows the new settings paragraph by paragraph, cached ones at once. The popup uses this for every service / language / prompt change while the page is on. The same path runs when the chain hands over **permanently** (`no-key` / `auth`): the run reports the serving service (`onProvider`), the content script asks the background why, and restarts the page on the service that took over, so a reader gets one service for the whole page instead of a mix. Temporary hand-overs keep going, they come back on their own
 - **不进 `translate-service`** [决定]：那里已经是"一个 provider 一套队列 + 缓存 + 批处理"的闭包，缓存键带 `providerId | model | promptKey`，不同引擎的译文天然分开存。链做成外面薄薄一层 `providers/fallback.ts`（约 110 行）：每个步骤一个完整服务，链只管在失败时把**同一个 call** 交给下一步。塞进服务内部会把队列、攒批、缓存三件事和引擎选择耦在一起
 - **降级期限分两档**：`no-key` / `auth` 是配置问题、不会自己好，本会话内永久降级；`network` / `timeout` / `rate-limit` / `invalid-response` / `unknown` 是瞬时的，降级 60s 冷却后自动恢复，该引擎一旦成功立即清空记录。队列自己的重试（retry-policy）跑完才会走到链上，所以链不叠加重试；冷却是为了避免持续故障时每次调用都白等一遍最长 120s 的批次超时。`aborted` 永不降级也永不记账——会话取消不是引擎的错，换个引擎重来只会再被取消一次
 - **全部降级后退回最后一步**：宁可再失败一次并把错误如实报给 `run.ts`（它据此停下并画失败小部件），也不能出现"无引擎可用"的状态
@@ -713,7 +722,7 @@ export interface TranslateResult {
 - **缓存读取有等待预算，读不到就继续翻** [决定，2026-09-05，issue #45]：服务是"先等缓存再发请求"的，读一旦挂住整页翻译就停在那里——MV3 的 service worker 冷启动、被挂起或消息丢失都会造成这种情况。闸设在服务层：2s 的 `CACHE_READ_BUDGET_MS`，换任何 `CachePort` 实现都兜得住。超时**或返回条数与请求不符**都按全部未命中处理，代价只是多花一次请求；2s 远大于实测的命中往返（36 ms 量级）。（2026-09-06 起缓存与翻译同在 background，content 侧那道 1.5s 的消息端口闸随 `cache-port.ts` 一起删掉）
 - **取消之后不再写缓存** [决定，2026-09-06，Codex 在 #33 指出]：一次调用会被拆到多个批次，先完成的那些可能在 `cancel(scope)` 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时照样把它们写进库，与「恢复原文之后不再渲染也不写缓存」的承诺不符。写之前再查一次 `cancelledScopes`
 - **坏译文不入库、重发不读库** [决定，2026-09-05；2026-09-06 改由请求文本反推]：`translate-service` 只把通过占位符校验的译文写进缓存（Codex 在 #30 指出）。原来靠调用方传 `accept` 回调，那是函数、过不了消息边界；现在校验期望由 `expectationsFromText(请求文本)` 反推——`serialize` 已经把原文里字面的 `<` `>` 转义掉（§6.1），所以请求文本里出现的每个 `<x>` / `<t>` 都必然是真占位符，扫一遍就能还原 `slots` 与 `paired`。零协议增长，而且这条不变量挪到了缓存写入的旁边，runs 路径也一并受保护（以前它不带 `accept`，什么都写）。占位符校验失败后的单块重发另带 `cache.bypass` 只写不读——老库里可能还有修复前写进去的坏条目，照常读只会原样拿回来、每次都退到 runs 路径（Codex 在 #9 指出），重发成功即覆盖
-- 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、v5 加 `fallback: { enabled }`（默认开，§8.5）、v6 加 `glossary`（默认空表，§8.2）、v7 加 `style`（默认 `none`，§7.5）、v8 加 `image`（图片翻译的模式闸，§15）、v9 给 `style` 加三个可调装饰参数（`color` / `opacity` / `accent`，默认值让外观与实现之前逐像素相同，§7.5）、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
+- 配置：WXT storage，zod schema 带 `version` 与迁移函数（移植 Read Frog `config/storage.ts` + `migration.ts` 的模式）。v1 形状：`{ version, provider: 'openai-compat' | …, openaiCompat: { baseURL, apiKey, model }, targetLanguage: 'zh-CN', mode: 'stack' | 'side' | 'only' }`；v2 加 `prompts`、v3 加 `preload`、v5 加 `fallback: { enabled }`（默认开，§8.5）、v6 加 `glossary`（默认空表，§8.2）、v7 加 `style`（默认 `none`，§7.5）、v8 加 `image`（图片翻译的模式闸，§15）、v9 给 `style` 加三个可调装饰参数（`color` / `opacity` / `accent`）、v11 加 `image.enabled`（popup 上的开关，模式多选留在设置页）、**v12 把 `openaiCompat` 换成 `services[]`（读者自己添加的服务，`provider` 变成内置 id 或服务 id，§8.5）、把 `style` 换成 `appearance`（两份配置列表，§7.5）**——迁移是全量映射，每个 v11 的值都落到某处，不让任何配置回退成默认、**v4 把 `targetLanguage` 换成 ISO 639-3 码**（`cmn` / `cmn-Hant` / `jpn`…，`config/languages.ts` 的 179 个码，与 Read Frog 一致；迁移按 BCP-47 反查：精确 → 主语言子标签 → 回退 `cmn`；LLM 填英文名、google-web 转回 BCP-47）。API key 只存本地，永不出现在缓存键、日志或测试 fixture 里
 
 - **配置回退必须让用户看见** [决定，2026-09-06，实测撞到]：`getConfig()` 校验失败时回退 `DEFAULT_CONFIG` 是对的（不能让扩展挂掉），但原来只打一行 `console.warn`——用户的 key 明明存着却不生效、翻译悄悄降级到免费引擎，界面上没有任何线索。实测触发过一次：Chrome 里存着 v7 配置，加载的却是 v6 的构建，WXT 按设计拒绝降级迁移（`Version downgrade detected`），整份配置连同 API key 被静默忽略。现在 `getConfig()` 记下回退原因（版本比扩展新 / 具体是哪个字段不合法），`configFallbackReason()` 供 UI 查询，popup 顶部挂一条红色警告说明「key 与引擎选择都没有生效」。回退原因按执行上下文各存一份——popup 本来就自己调 `getConfig()`，读到的正是它自己那次的结论。与 §8.2 术语表限额在迁移里规整是同一条原则的两面：能规整的在迁移里规整，规整不了的必须说出来
 

@@ -1,3 +1,4 @@
+import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'wxt'
 
 // WXT 工程配置。host_permissions 等到 Phase 3 接网络引擎时再加。
@@ -5,9 +6,19 @@ export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
   // 扩展页面里 <link rel="modulepreload" crossorigin> 会触发 Chrome 的 "cross-world extension resource mismatch" 告警（无害但刷屏），关掉预加载
-  vite: () => ({ build: { modulePreload: false } }),
+  vite: () => ({ build: { modulePreload: false }, plugins: [tailwindcss()] }),
+  // The gallery is for `wxt` (serve) only: a release must not ship a debug page anyone can open
+  hooks: {
+    'entrypoints:found': (wxt, infos) => {
+      if (wxt.config.command !== 'serve') {
+        const at = infos.findIndex(info => info.name === 'gallery')
+        if (at >= 0) infos.splice(at, 1)
+      }
+    },
+  },
   manifest: {
-    name: 'arXiv HTML Translator',
+    // UI.md S-P-01 requires the store listing, the manifest and the site to carry one name
+    name: 'Readarxiv',
     // 图片叠加层用 CSS 锚点定位，`anchor-scope` 要 Chrome 131（§15.2）。文档一直这么写，但没落到
     // manifest 上，低于这个版本的 Chrome 照样装得上、拿到一个错位的叠加层，而且滚动容器也不进
     // 顺序焦点（Codex 在 #99 指出）。声明出来，让文档写的下限真正生效
@@ -16,6 +27,9 @@ export default defineConfig({
     // nativeMessaging：Mac 上的图片翻译经本机 helper 做 OCR（DESIGN §15）；没装 helper 时这条权限闲着，不弹窗
     // contextMenus：右键菜单里的翻译开关（issue #146）。它不给页面内容的访问权，只是注册一个菜单项
     permissions: ['storage', 'nativeMessaging', 'contextMenus'],
+    // The keyboard entry (UI.md S-P-50): the same toggle as the context menu. The popup shows the
+    // binding Chrome reports, so a reader who rebinds or removes it sees the truth
+    commands: { 'axt-toggle': { suggested_key: { default: 'Alt+T' }, description: '翻译本页 / 显示原文' } },
     // background 向 LLM 端点 fetch 需要 host 权限；默认只给 OpenRouter，自定义 baseURL 在设置页保存时按 origin 申请。
     // google-web 的端点也列进来（Codex 在 #59 指出）：它眼下返 CORS 头，普通跨域就能过，
     // 但那正是这次搬迁想摆脱的依赖——对方哪天不发这个头，免费引擎就整个不可用了

@@ -1,21 +1,23 @@
 import type { RenderPath } from '@/cache/key'
 import type { Config } from '@/config/schema'
+import { serviceOf } from '@/config/services'
 import { createChromeBuiltinProvider } from './chrome-builtin'
 import { createGoogleWebProvider } from './google-web'
 import { createMicrosoftProvider } from './microsoft'
 import { createOpenAICompatProvider } from './openai-compat'
 import type { TranslationProvider } from './types'
 
-/** 按配置取 provider */
+/** The chosen service: one of the reader's (an OpenAI-compatible engine carrying the service's id) or a built-in */
 export function getProvider(config: Config): TranslationProvider {
+  const service = serviceOf(config, config.provider)
+  if (service) return createOpenAICompatProvider(service, { prompts: config.prompts })
   switch (config.provider) {
-    case 'openai-compat':
-      return createOpenAICompatProvider(config.openaiCompat, { prompts: config.prompts })
     case 'google-web':
       return createGoogleWebProvider()
     case 'chrome-builtin':
       return createChromeBuiltinProvider(config.targetLanguage)
-    case 'microsoft':
+    default:
+      // The shipped default; also where a deleted service's id lands
       return createMicrosoftProvider(config.targetLanguage)
   }
 }

@@ -8,7 +8,8 @@ import highlightCss from '@/styles/highlight.css?inline'
 import imageCss from '@/styles/image.css?inline'
 import modesCss from '@/styles/modes.css?inline'
 import presetsCss from '@/styles/presets.css?inline'
-import { STYLE_ATTR_NAME, customStyleRule, styleVarsRule, type StylePreset, type StyleVars } from './style-preset'
+import type { Look } from '@/config/appearance'
+import { BLUR_ATTR, UNDERLINE_ATTR, appearanceRule, customStyleRule } from './style-preset'
 import { clearSentenceHighlights } from './highlight'
 import { delocalizeNotes } from './notes'
 import { cancelSpinnersIn } from './spinner'
@@ -46,23 +47,23 @@ export const INLINE_TITLE_MAX_CHARS = 60
 export const STYLE_ATTR = 'data-axt-sheet'
 const STYLE_MARK = 'modes'
 
-/** 注入样式表所需的全部用户可调项（§7.5） */
-export interface StyleOptions extends StyleVars {
-  preset: StylePreset
-  customCss?: string
-}
+/** What the sheet needs: the reader's active style and band profiles (§7.5). `Look` lives with the profiles */
+export type { Look }
 
 /**
  * 注入表的内容。顺序即层叠顺序，两处**必须**保持：
- * - `styleVarsRule` 的 `base`（透明度）排在 presetsCss **之前**，让 blur / blink 能覆盖并与之复合；
- *   `overrides`（颜色三件套）排在**之后**，靠顺序赢过 `muted` / `green` 写的 `--axt-color`
+ * - `appearanceRule` 的 `base`（透明度）排在 presetsCss **之前**，让模糊规则能与它复合而不是顶掉它；
+ *   `overrides`（颜色与高亮变量）排在**之后**
  * - `customStyleRule` 排在最后：它是进阶逃生口，该有最后的发言权
  */
-function styleSheet(style?: StyleOptions): string {
-  const vars = style ? styleVarsRule(style) : { base: '', overrides: '' }
-  const custom = style ? customStyleRule(style.customCss ?? '') : ''
+function styleSheet(look?: Look): string {
+  const vars = look ? appearanceRule(look) : { base: '', overrides: '' }
+  const custom = look ? customStyleRule(look.style.css) : ''
   return `${modesCss}\n${vars.base}${presetsCss}\n${imageCss}\n${highlightCss}\n${vars.overrides}${custom}`
 }
+
+/** The same sheet the page gets, for the settings preview to put in its iframe */
+export const appearanceSheet = (look: Look): string => styleSheet(look)
 
 /**
  * Appearance only, no translation node touched (#47): write `data-axt-style` and recompute the
@@ -70,11 +71,11 @@ function styleSheet(style?: StyleOptions): string {
  * re-request anything** (§8.5's `chainConfigChanged` ignores `style` already). With translation off
  * there is no injected sheet and nothing to do — the next `enable` carries the new values.
  */
-export function applyStyle(doc: Document, style: StyleOptions): boolean {
+export function applyStyle(doc: Document, look: Look): boolean {
   const sheet = doc.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)
   if (!sheet) return false
-  setStylePreset(doc, style)
-  const css = styleSheet(style)
+  setAppearanceAttrs(doc, look)
+  const css = styleSheet(look)
   if (sheet.textContent !== css) {
     sheet.textContent = css
     // Font size, leading and weight can all change here, and then the line is no longer where the
@@ -86,18 +87,18 @@ export function applyStyle(doc: Document, style: StyleOptions): boolean {
 }
 
 /**
- * 打开翻译态：<html> 上写状态属性，注入模式与预设样式（幂等）。
- * 样式预设与模式一样只是 <html> 上的一个属性（§7.5），切换不动 DOM；自定义 CSS 每次注入时重算
+ * 打开翻译态：<html> 上写状态属性，注入模式与外观（幂等）。
+ * 外观与模式一样只是 <html> 上的属性（§7.5），换配置不动 DOM；高级 CSS 每次注入时重算
  */
-export function enable(doc: Document, mode: Mode, style?: StyleOptions, lang?: string): void {
+export function enable(doc: Document, mode: Mode, look?: Look, lang?: string): void {
   doc.documentElement.setAttribute(ON_ATTR, '')
   doc.documentElement.setAttribute(MODE_ATTR, mode)
   // 译文的语言记在 <html> 上（§7.1：全局状态只在这里），renderText 逐个写到译文节点的 lang 上。
   // 不能直接改 <html lang>：那会把原文也说成中文
   if (lang) doc.documentElement.setAttribute(LANG_ATTR, lang)
-  if (style) setStylePreset(doc, style)
+  if (look) setAppearanceAttrs(doc, look)
   const existing = doc.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)
-  const css = styleSheet(style)
+  const css = styleSheet(look)
   if (existing) {
     // 自定义 CSS 可能变了（设置页改完再翻一次）：内容不同才写，避免无谓的样式重算
     if (existing.textContent !== css) existing.textContent = css
@@ -109,9 +110,16 @@ export function enable(doc: Document, mode: Mode, style?: StyleOptions, lang?: s
   doc.head.append(el)
 }
 
-/** 只改属性的样式切换（§7.5）；custom 的声明块由 enable 注入 */
-export function setStylePreset(doc: Document, style: { preset: StylePreset }): void {
-  doc.documentElement.setAttribute(STYLE_ATTR_NAME, style.preset)
+/**
+ * The two switches of the active style, as attributes on `<html>` (§7.5). Everything else the
+ * profile carries arrives as a variable, so this is all that changes when the reader picks another
+ */
+export function setAppearanceAttrs(doc: Document, look: Look): void {
+  const html = doc.documentElement
+  if (look.style.underline === 'none') html.removeAttribute(UNDERLINE_ATTR)
+  else html.setAttribute(UNDERLINE_ATTR, look.style.underline)
+  if (look.style.blur) html.setAttribute(BLUR_ATTR, '')
+  else html.removeAttribute(BLUR_ATTR)
 }
 
 /** 模式切换只改一个属性，不经过翻译流程（§4 第 9 步） */

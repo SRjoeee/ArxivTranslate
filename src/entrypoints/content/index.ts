@@ -1,4 +1,5 @@
 import { type RenderPath, wireFormatOf } from '@/cache/key'
+import { type Look, lookOf } from '@/config/appearance'
 import { DEFAULT_CONFIG, type Config } from '@/config/schema'
 import { getConfig, setConfig, watchConfig } from '@/config/storage'
 import { extract, paperContext, type Block } from '@/core/extractor'
@@ -14,7 +15,7 @@ import {
 import { escapeText, unescapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { beginSession, endSession, getSessionId, translateTitle, type TitleTranslator } from '@/core/scheduler'
-import { isAxtMessage, sendMessage } from '@/shared/messages'
+import { isAxtMessage, type PageStatus, sendMessage } from '@/shared/messages'
 import type { ImageProgress } from '@/shared/ocr'
 import { createMessageTransport } from '@/shared/transport'
 import { enableDebug } from './debug'
@@ -43,8 +44,8 @@ export default defineContentScript({
     /** 悬停对照高亮（§7.7）：跟着一次翻译会话起停，配置关掉时根本不装监听 */
     let highlight: SentenceHighlight | null = null
     let savedMode: Mode = 'stack'
-    /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性 */
-    let style: Config['style'] = DEFAULT_CONFIG.style
+    /** 译文外观（§7.5）：读者选中的那一份样式与高亮配置，写成 <html> 上的属性与变量 */
+    let look: Look = lookOf(DEFAULT_CONFIG)
     /**
      * 外观有三个写入点：启动时的这次读、start() 里的那次读、以及下面的 watchConfig。
      * 前两个都是「发起时的快照」，watcher 拿到的才是最新值，所以 watcher 一旦写过，
@@ -53,10 +54,10 @@ export default defineContentScript({
      * 两个读点共用这一个闸，不各自判断
      */
     let styleFromWatcher = false
-    const adoptStyle = (next: Config['style']) => {
-      if (!styleFromWatcher) style = next
+    const adoptStyle = (next: Look) => {
+      if (!styleFromWatcher) look = next
     }
-    void getConfig().then(config => { savedMode = config.mode; adoptStyle(config.style) })
+    void getConfig().then(config => { savedMode = config.mode; adoptStyle(lookOf(config)) })
     // 设置页改完外观立刻生效（#47）：只重算注入表与 <html data-axt-style>，一个译文节点都不碰，
     // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
     // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
@@ -65,9 +66,36 @@ export default defineContentScript({
       // 否则「页面带着旧外观启动 + 用户点恢复默认」会走进等值快路径，闸没立起来，
       // 随后 getConfig() 那份旧快照又把非默认外观装回去（Codex 在 #106 指出）
       styleFromWatcher = true
-      if (JSON.stringify(config.style) === JSON.stringify(style)) return
-      style = config.style
-      applyStyle(document, style)
+      // The hover highlight is a front-page toggle (UI.md S-P-80), so it takes effect on this page
+      // at once: installed or torn down mid-session, no translation node touched. Outside a session
+      // there is nothing to pair, and start() reads the setting itself
+      if (run) {
+        if (config.reading.sentenceHighlight && !highlight) highlight = startSentenceHighlight(document) ?? null
+        else if (!config.reading.sentenceHighlight && highlight) {
+          highlight.stop()
+          highlight = null
+        }
+      }
+      // Image translation, both the switch (popup) and the per-mode list (settings): on starts the
+      // image run for this session, off stops it and hides every overlay through the display gate,
+      // and a change to the modes has to reach both the gate and the run that reads it — otherwise
+      // unticking the current mode leaves the overlays up and keeps requesting (Codex on #157).
+      // The text run is not touched either way
+      const imageChanged = run && current
+        && (config.image.enabled !== current.config.image.enabled
+          || config.image.modes.join(' ') !== current.config.image.modes.join(' '))
+      if (imageChanged && current) {
+        current = { ...current, config }
+        images?.stop()
+        images = null
+        imageProgress = null
+        setImageModes(document, [])
+        if (config.image.enabled) startImages(current.session, config, current.context, current.renderPath)
+      }
+      const next = lookOf(config)
+      if (JSON.stringify(next) === JSON.stringify(look)) return
+      look = next
+      applyStyle(document, look)
     })
     // 一次会话 = 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
     let run: TranslationRun | null = null
@@ -75,6 +103,17 @@ export default defineContentScript({
     /** 图片翻译（§15）：helper 可用且设置里至少勾了一种模式时才有 */
     let images: ImageRun | null = null
     let imageProgress: ImageProgress | null = null
+    /** What the session runs on (PageStatus.running); null outside a session */
+    let running: NonNullable<PageStatus['running']> | null = null
+    /** The session's start-time inputs, for the parts a settings change can restart on their own (images) */
+    let current: { session: string; config: Config; context: Parameters<typeof startTranslation>[0]['context']; renderPath: RenderPath } | null = null
+    /**
+     * Whether this session has already been restarted by a permanent hand-over. **One per session,
+     * and reset by every `start()`**: kept across sessions it would suppress the restart a later
+     * service needs when that one hands over to the same engine (Codex on #157), and unbounded
+     * within a session it could chase a chain down step by step
+     */
+    let restarted = false
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
     let progress: Progress = idle()
 
@@ -94,8 +133,15 @@ export default defineContentScript({
       if (session) void backend.cancel(session)
     }
 
-    async function start(requested?: Mode): Promise<{ started: boolean; reason?: string }> {
-      if (progress.state === 'on') return { started: false, reason: '翻译已开启，滚动会继续翻' }
+    /**
+     * `from` is the session an **automatic** restart was decided in (a permanent hand-over). The
+     * reads below are awaited, and the reader may press 显示原文 during them; without this check the
+     * stale continuation would translate the page again, undoing an explicit restore and spending
+     * more requests (Codex on #157). A restart the reader asked for passes no session and always runs
+     */
+    async function start(requested?: Mode, restart = false, from?: string): Promise<{ started: boolean; reason?: string }> {
+      if (progress.state === 'on' && !restart) return { started: false, reason: '翻译已开启，滚动会继续翻' }
+      if (from !== undefined && getSessionId() !== from) return { started: false, reason: '会话已结束' }
       if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
       if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
       const tStart = performance.now()
@@ -111,11 +157,13 @@ export default defineContentScript({
       }
       // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上（§8.5）
       if (!status.available && !status.fallback) return { started: false, reason: '未配置 API key，请先到设置页填写' }
+      // The reader may have restored the page while the two reads above were in flight
+      if (from !== undefined && getSessionId() !== from) return { started: false, reason: '会话已结束' }
       console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
       modes?.stop()
       modes = createModeController(document, requested ?? config.mode, { onChange: enterSide })
-      adoptStyle(config.style)
+      adoptStyle(lookOf(config))
       endRun() // 上一轮停下但没恢复原文的会话（致命错误后重试）
       // 页内锚点兜底（issue #44）：only 模式下目标块被隐藏，交叉引用点了不动窝
       uninstallAnchors?.()
@@ -124,6 +172,10 @@ export default defineContentScript({
       if (config.reading.sentenceHighlight) highlight = startSentenceHighlight(document) ?? null
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
+      restarted = false
+      const startEngine = status.engine.id
+      running = { provider: config.provider, target: config.targetLanguage, engine: startEngine, revision: status.revision }
+      current = { session, config, context, renderPath: status.renderPath }
       prep.reset() // 新会话：镜像允许再跑一次、量宽缓存清空、栏宽重读
       enterSide(modes.effective())
       const t1 = performance.now()
@@ -133,7 +185,7 @@ export default defineContentScript({
         blocks,
         target: config.targetLanguage,
         mode: modes.effective(),
-        style,
+        appearance: look,
         paper,
         // 标题 + 摘要每批都带（DESIGN §8.2）
         context,
@@ -145,6 +197,27 @@ export default defineContentScript({
         onRendered: blocks => {
           if (getSessionId() !== session) return
           prep.touch(blocks)
+        },
+        onProvider: id => {
+          if (getSessionId() !== session) return
+          if (running) running.engine = id
+          if (id === startEngine || restarted) return
+          // A permanent hand-over (missing or rejected key) would leave the paragraphs already on
+          // screen from one service and the rest from another. Start over on the service that is
+          // actually available, so the whole page reads from one hand (UI.md, decided 2026-09-10).
+          // Temporary hand-overs (rate limits, timeouts) keep going: they come back on their own
+          void backend.status(session).then(s => {
+            if (getSessionId() !== session) return
+            // Ask **this session's own chain** about **this session's own engine**: the page keeps
+            // the chain it started on while another tab changes the settings, and the most recent
+            // hand-over may belong to some intermediate free engine that failed transiently
+            // (Codex on #157)
+            const kind = s.demotions.find(d => d.id === startEngine)?.kind
+            if (kind !== 'no-key' && kind !== 'auth') return
+            restarted = true
+            console.debug(`[axt] hand-over to ${id} is permanent (${kind}); restarting the page on it`)
+            void start(undefined, true, session)
+          }).catch(() => undefined)
         },
         onProgress: p => {
           // 会话已结束（恢复原文 / 重开）：旧运行的回调一律忽略
@@ -183,7 +256,7 @@ export default defineContentScript({
       // 上一轮（致命错误后没恢复原文就重开）留下的叠加层与模式闸先摘掉：helper 没了、图片翻译关了、
       // 目标语言换了，旧的都不该再显示；新一轮处理到那张图时会替换它（Codex 在 #89 指出）
       setImageModes(document, [])
-      if (config.image.modes.length === 0) return
+      if (!config.image.enabled || config.image.modes.length === 0) return
       if (!paper) return
       const targets = collectImageTargets(document)
       if (targets.length === 0) return
@@ -210,7 +283,7 @@ export default defineContentScript({
         ocr: call => sendMessage({ type: 'axt:ocr', ...call }),
         translate: request => backend.translate(request),
         // 模式闸对两种图一样；位图额外要等 helper（§15.5）
-      isEnabled: t => config.image.modes.includes(modes?.effective() ?? config.mode) && (t.kind === 'svg' || helperReady),
+      isEnabled: t => config.image.enabled && config.image.modes.includes(modes?.effective() ?? config.mode) && (t.kind === 'svg' || helperReady),
         isCurrent: () => getSessionId() === session,
         onProgress: p => {
           if (getSessionId() !== session) return
@@ -308,6 +381,9 @@ export default defineContentScript({
       uninstallAnchors = null
       const result = restore(document)
       progress = idle()
+      running = null
+      current = null
+      restarted = false
       console.debug(`[axt] translation stopped: ${result.removedNodes} nodes removed`)
       return { removedNodes: result.removedNodes }
     }
@@ -319,7 +395,7 @@ export default defineContentScript({
           sendResponse(statsOf(blocks))
           return true
         case 'axt:translate-page':
-          start(message.mode).then(sendResponse)
+          start(message.mode, message.restart === true).then(sendResponse)
           return true
         case 'axt:restore-page':
           sendResponse(restorePage())
@@ -336,7 +412,7 @@ export default defineContentScript({
           return true
         }
         case 'axt:page-status':
-          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, session: getSessionId(), ...(imageProgress ? { images: imageProgress } : {}) })
+          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, session: getSessionId(), ...(imageProgress ? { images: imageProgress } : {}), ...(running ? { running } : {}) })
           return true
       }
     })

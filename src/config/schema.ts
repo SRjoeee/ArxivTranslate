@@ -2,10 +2,11 @@
 import { z } from 'zod'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
-import { COLOR_MAX, OPACITY_MAX, OPACITY_MIN, STYLE_PRESETS, sanitizeColor } from '@/core/renderer/style-preset'
+import { DEFAULT_APPEARANCE, appearanceSchema } from './appearance'
+import { BUILT_IN_SERVICES, SERVICE_ID_RE, serviceSchema } from './services'
 import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
-export const CONFIG_VERSION = 10
+export const CONFIG_VERSION = 12
 
 /** 三种阅读模式（DESIGN §7）；`mode` 与图片翻译的模式闸共用 */
 export const MODE_VALUES = ['stack', 'side', 'only'] as const
@@ -40,15 +41,10 @@ export function normalizeGlossary(value: unknown): { term: string; translation: 
 
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
-  provider: z.enum(['openai-compat', 'google-web', 'chrome-builtin', 'microsoft']),
-  openaiCompat: z.object({
-    baseURL: z.url(),
-    /** 只存本地，永不进日志、缓存键或 fixture */
-    apiKey: z.string(),
-    model: z.string().min(1),
-    // 用 default 让旧版本存储（没有这个字段）仍能通过校验
-    thinking: z.enum(['enabled', 'disabled']).default('disabled'),
-  }),
+  /** A built-in id or the id of one of `services` (spec §2, v12) */
+  provider: z.string().refine(v => (BUILT_IN_SERVICES as readonly string[]).includes(v) || SERVICE_ID_RE.test(v), '不是有效的翻译服务'),
+  /** The reader's own services (v12); keys stay local (CLAUDE.md rule 7) */
+  services: z.array(serviceSchema).max(20).default([]),
   /** ISO 639-3（v4 起；languages.ts），LLM 填英文名、Google 转 BCP-47 */
   targetLanguage: langCodeSchema,
   mode: modeSchema,
@@ -70,17 +66,8 @@ export const configSchema = z.object({
     entries => glossaryChars(entries) <= GLOSSARY_LIMITS.totalChars,
     { message: `术语表总长超过 ${GLOSSARY_LIMITS.totalChars} 字，会显著增加每一批的 token` },
   ).default([]),
-  /** 译文样式（§7.5）：预设只做叠加装饰，custom 只填声明块、选择器由扩展补 */
-  style: z.object({
-    preset: z.enum(STYLE_PRESETS),
-    customCss: z.string().max(2000),
-    /** 译文文字颜色；空串 = 跟随原文。手填的值由 sanitizeColor 白名单挡一道 */
-    color: z.string().max(COLOR_MAX).refine(v => sanitizeColor(v).ok, '不是有效的颜色值'),
-    /** 译文透明度。下限 0.3 是防手滑调到看不见 */
-    opacity: z.number().min(OPACITY_MIN).max(OPACITY_MAX),
-    /** 高亮 / 下划线等装饰的颜色；空串 = 各预设自己的默认色（下划线族跟随正文，marker / highlight / glow 是固定的绿） */
-    accent: z.string().max(COLOR_MAX).refine(v => sanitizeColor(v).ok, '不是有效的颜色值'),
-  }).default({ preset: 'none', customCss: '', color: '', opacity: OPACITY_MAX, accent: '' }),
+  /** Appearance profiles (§7.5, v12): the reader's style list and band list, and which of each is active */
+  appearance: appearanceSchema.default(DEFAULT_APPEARANCE),
   /** 引擎降级链（§8.5）：首选引擎失败时自动切到免费引擎，别让整页翻译停死 */
   fallback: z.object({ enabled: z.boolean() }).default({ enabled: true }),
   /** 按视口翻译的范围（§10，Read Frog 的 preload）：视口下方多少像素算临近（0–10000）、露出多少比例算进入（0–1） */
@@ -95,31 +82,28 @@ export const configSchema = z.object({
    */
   reading: z.object({ sentenceHighlight: z.boolean() }).default({ sentenceHighlight: true }),
   /**
-   * 图片翻译（§15，v8 起）：在哪些模式下给位图叠译文。默认三种都开；空数组 = 关闭。
-   * 只是显示闸——切到没开的模式只隐藏叠加层，不重新请求；helper 没检测到时设置页灰掉、整条路径不跑
+   * Image translation (§15). `enabled` is the reader's switch (popup, v11); `modes` says in which
+   * display modes the overlays show, a detail kept on the options page. Both are display gates:
+   * switching to a mode that is off only hides the overlays, nothing is re-requested. Without the
+   * helper the bitmap path does not run; SVG figures need no helper
    */
-  image: z.object({ modes: z.array(modeSchema).max(3) }).default({ modes: [...MODE_VALUES] }),
+  image: z.object({ enabled: z.boolean(), modes: z.array(modeSchema).max(3) }).default({ enabled: true, modes: [...MODE_VALUES] }),
 })
 
 export type Config = z.infer<typeof configSchema>
 
 export const DEFAULT_CONFIG: Config = {
   version: CONFIG_VERSION,
-  provider: 'openai-compat',
-  openaiCompat: {
-    baseURL: 'https://openrouter.ai/api/v1',
-    apiKey: '',
-    // 便宜快速档；设置页可改
-    model: 'deepseek/deepseek-v4-flash',
-    thinking: 'disabled',
-  },
+  // The free service that keeps formulas and links intact and needs no key (UI.md §2, 2026-09-10)
+  provider: 'microsoft',
+  services: [],
   targetLanguage: DEFAULT_LANG_CODE,
   mode: 'stack',
   glossary: [],
-  style: { preset: 'none', customCss: '', color: '', opacity: OPACITY_MAX, accent: '' },
+  appearance: DEFAULT_APPEARANCE,
   fallback: { enabled: true },
   prompts: DEFAULT_PROMPTS_CONFIG,
   preload: { ...DEFAULT_PRELOAD },
   reading: { sentenceHighlight: true },
-  image: { modes: [...MODE_VALUES] },
+  image: { enabled: true, modes: [...MODE_VALUES] },
 }

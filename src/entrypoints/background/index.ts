@@ -8,7 +8,7 @@ import { HELPER_HOST } from '@/shared/ocr'
 import { createHelperClient } from './helper'
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
-import { installContextMenu } from './context-menu'
+import { installContextMenu, installToggleCommand } from './context-menu'
 import { handlePing } from '@/shared/ping'
 
 // background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
@@ -46,7 +46,10 @@ export default defineBackground(() => {
   /**
    * 会话与链的绑定（见 ./sessions.ts）：一次会话认准它开始时的那条链，标签页关掉就撤掉它的请求。
    * 代价是配置恰好在翻译中途变更时新旧两条链短暂并存、跨标签页的并发预算翻倍，直到旧会话结束；
-   * 这是有意的取舍——宁可短暂多一套队列，也不能让一轮译文中途换引擎或换语言（Codex 在 #59 指出）
+   * 这是有意的取舍——宁可短暂多一套队列，也不能让一轮译文中途换引擎或换语言（Codex 在 #59 指出）。
+   * A settings change while a page is on therefore starts a **new** session that replaces the
+   * old one in place (content `start(…, restart)`, DESIGN §8.5); the old session's requests are
+   * cancelled by its scope as before
    */
   /**
    * 图片翻译的本机 OCR helper（DESIGN §15）：懒连接，有请求在飞时定时调一个无害 API 保活——
@@ -101,6 +104,12 @@ export default defineBackground(() => {
     onClicked: handler => browser.contextMenus.onClicked.addListener(handler),
     send: (tabId, message) => browser.tabs.sendMessage(tabId, message),
   })
+  // The keyboard shortcut (UI.md S-P-50): same toggle, third entry
+  installToggleCommand({
+    onCommand: handler => browser.commands.onCommand.addListener(handler),
+    activeTab: async () => (await browser.tabs.query({ active: true, currentWindow: true }))[0],
+    send: (tabId, message) => browser.tabs.sendMessage(tabId, message),
+  })
 
   browser.tabs.onRemoved.addListener(tabId => dropTab(tabId, '关闭'))
   /**
@@ -140,7 +149,8 @@ export default defineBackground(() => {
           .then(cancelled => sendResponse({ cancelled }))
         return true
       case 'axt:provider-status':
-        transportOf()
+        // A page asking about its own session gets its own chain; everyone else gets the current one
+        Promise.resolve((message.scope && router.transportFor(message.scope)) || transportOf())
           .then(t => t.status())
           .then(sendResponse)
           .catch((e: unknown) => console.error('[axt] provider-status 失败', e))
@@ -148,12 +158,15 @@ export default defineBackground(() => {
       case 'axt:engine-ready':
         // 语言包下载完之前建的链里没有这个引擎（buildChain 会把 isAvailable 为假的剔掉），
         // 或者它已被永久降级。重建一条新链，让它重新参与（§8.5，Codex 在 #50 指出）。
-        // **进行中的会话也要迁过去**（Codex 在 #59 指出）：popup 明说「接下来的段落会用离线引擎」，
-        // 不迁的话那一页会一直用着旧的兜底链，承诺落空。这是用户显式动作，与被动的配置变更不同——
-        // 后者故意不迁（见 sessions.ts）
+        // **迁哪些会话由发起方决定**（Codex 在 #59 / #157 指出）：popup 的语言包下载只对它打开的那个
+        // 标签页说过「接下来的段落会用离线翻译」，就只迁那一个；删掉的服务必须处处停用，才迁全部；
+        // 其余只重建链，正在翻的页面保留它开始时的那条。被动的配置变更一律不迁（见 sessions.ts）
         activate()
           .then(async a => {
-            router.rebindAll(a.transport)
+            // Cancelling first is what makes a deleted service stop: re-pointing alone leaves its
+            // queued and in-flight work running on the transport being replaced (Codex on #157)
+            if (message.rebindAll) await router.dropAndRebindAll(a.transport)
+            else if (message.scope) router.rebind(message.scope, a.transport)
             return a.transport.status()
           })
           .then(status => sendResponse({ reset: status.chain.includes(message.id) }))

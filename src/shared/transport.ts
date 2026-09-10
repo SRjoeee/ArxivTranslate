@@ -27,6 +27,6 @@ export function createMessageTransport(send: Send = sendMessage): TranslationTra
         return 0
       }
     },
-    status: () => send({ type: 'axt:provider-status' }),
+    status: (scope?: string) => send({ type: 'axt:provider-status', ...(scope ? { scope } : {}) }),
   }
 }

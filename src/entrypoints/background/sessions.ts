@@ -36,6 +36,17 @@ export interface SessionRouter {
    * 被动的配置变更故意不迁，见本文件开头
    */
   rebindAll(transport: TranslationTransport): void
+  /** Move one session onto a new chain; the rest keep the one they started on */
+  rebind(scope: string, transport: TranslationTransport): void
+  /**
+   * Every session onto a new chain, **with the work on the old one cancelled first**. Re-pointing
+   * alone leaves whatever was queued or in flight running on the transport being replaced, so a
+   * deleted service would go on spending its key and writing its results into the live page
+   * (Codex on #157). Returns how many requests were cancelled
+   */
+  dropAndRebindAll(transport: TranslationTransport): Promise<number>
+  /** The transport a session is bound to, without binding one; for answering questions about it */
+  transportFor(scope: string): TranslationTransport | undefined
   /** 当前还绑着的 scope，按绑定顺序 */
   bound(): string[]
 }
@@ -204,6 +215,21 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
     rebindAll(transport) {
       for (const [scope, session] of sessions) sessions.set(scope, { ...session, transport })
     },
+    rebind(scope, transport) {
+      const session = sessions.get(scope)
+      if (session) sessions.set(scope, { ...session, transport })
+    },
+    async dropAndRebindAll(transport) {
+      let cancelled = 0
+      for (const [scope, session] of [...sessions]) {
+        // `remember: false`: the scope stays alive on the new chain, it is only being emptied of
+        // the work that belonged to the old one
+        if (session.transport && session.transport !== transport) cancelled += await session.transport.cancel(scope, { remember: false })
+        sessions.set(scope, { ...session, transport })
+      }
+      return cancelled
+    },
+    transportFor: scope => sessions.get(scope)?.transport,
     bound: () => [...sessions.keys()],
   }
 }

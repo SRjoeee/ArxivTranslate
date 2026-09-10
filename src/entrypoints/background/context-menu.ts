@@ -8,8 +8,10 @@ import type { PageStatus } from '@/shared/messages'
 
 /** 菜单项 id；重建时按它删旧的，worker 每次唤醒都会重新跑一遍 create */
 export const MENU_ID = 'axt-toggle'
-/** 与 popup 上那两个按钮同一套说法 */
-export const MENU_TITLE = '翻译 / 恢复原文'
+/** The same words as the popup's primary button (S-P-50 / S-P-51); also the command's description */
+export const MENU_TITLE = '翻译本页 / 显示原文'
+/** The keyboard command's id, as declared in the manifest (`commands` in wxt.config.ts) */
+export const COMMAND_ID = 'axt-toggle'
 /** 只在 arXiv 的 HTML 全文页上出现——别的页面上它什么也做不了 */
 export const MENU_PATTERNS = ['https://arxiv.org/html/*']
 /**
@@ -28,6 +30,13 @@ export interface MenuDeps {
   send<T>(tabId: number, message: { type: string }): Promise<T>
 }
 
+export interface CommandDeps {
+  onCommand(handler: (command: string, tab?: { id?: number }) => void): void
+  /** The active tab of the current window, for the platforms that hand the command over without one */
+  activeTab(): Promise<{ id?: number } | undefined>
+  send<T>(tabId: number, message: { type: string }): Promise<T>
+}
+
 /**
  * 这个状态下该发哪条消息。
  *
@@ -43,7 +52,27 @@ export interface MenuDeps {
 export function actionFor(status: Pick<PageStatus, 'progress'> | undefined): 'axt:translate-page' | 'axt:restore-page' | undefined {
   const state = status?.progress?.state
   if (state === undefined) return undefined
+  // A paused session (a fatal error) retries, matching the popup's 重新翻译 — the shortcut badge sits
+  // on that very button, so restoring here would undo the translations the reader asked to retry
+  // (Codex on #157). Only a running one restores
+  if (state === 'stopped' && status?.progress?.fatal !== undefined) return 'axt:translate-page'
   return state === 'idle' ? 'axt:translate-page' : 'axt:restore-page'
+}
+
+/**
+ * The toggle itself, shared by the menu and the keyboard command: ask the page its state, then send
+ * the same message the popup's button would. A page without a content script yet (just navigated,
+ * or the extension updated and the page not reloaded) answers nothing and nothing happens, which
+ * is what the popup does in that situation too
+ */
+export async function toggleTranslation(send: MenuDeps['send'], tabId: number): Promise<void> {
+  try {
+    const status = await send<Pick<PageStatus, 'progress'>>(tabId, { type: 'axt:page-status' })
+    const action = actionFor(status)
+    if (action) await send(tabId, { type: action })
+  } catch {
+    // See above
+  }
 }
 
 /** 装上菜单项与它的点击处理。`removeAll` 在前：worker 每次唤醒都会再跑一遍，不删会撞 id */
@@ -53,16 +82,17 @@ export function installContextMenu(deps: MenuDeps): void {
   })
   deps.onClicked((info, tab) => {
     if (info.menuItemId !== MENU_ID || tab?.id === undefined) return
-    const tabId = tab.id
+    void toggleTranslation(deps.send, tab.id)
+  })
+}
+
+/** The keyboard command (manifest `commands`): the third entry, on the same toggle */
+export function installToggleCommand(deps: CommandDeps): void {
+  deps.onCommand((command, tab) => {
+    if (command !== COMMAND_ID) return
     void (async () => {
-      try {
-        const status = await deps.send<Pick<PageStatus, 'progress'>>(tabId, { type: 'axt:page-status' })
-        const action = actionFor(status)
-        if (action) await deps.send(tabId, { type: action })
-      } catch {
-        // 页面还没装上 content script（刚导航、或扩展刚更新还没刷新）：菜单点了没反应，
-        // 与 popup 在同样情况下的表现一致
-      }
+      const target = tab?.id !== undefined ? tab : await deps.activeTab().catch(() => undefined)
+      if (target?.id !== undefined) await toggleTranslation(deps.send, target.id)
     })()
   })
 }

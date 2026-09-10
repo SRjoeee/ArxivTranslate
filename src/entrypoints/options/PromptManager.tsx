@@ -6,9 +6,11 @@ import {
 } from '@/providers/prompt-library'
 import { getRandomUUID as uuid } from '@/shared/uuid'
 
-// 提示词管理：功能对应 Read Frog components/prompt-configurator/*（列表、查看内置、复制并自定义、新建 / 编辑 / 删除、导入 / 导出、
-// 变量按钮插到光标处）。它的实现是 base-ui + jotai + Tailwind，为一页十来个字段引整套 UI 栈不值，这里用设置页现有的朴素 React 重写。
-// 改动只写进父组件的本地配置，随设置页的"保存"按钮一起落盘。
+// The prompt library: the same features as Read Frog's components/prompt-configurator/* — the list,
+// reading a built-in one, copying it into an editable one, new / edit / delete, import / export, and
+// the variable buttons that insert at the caret. Read Frog builds it on base-ui + jotai + Tailwind;
+// a whole UI stack for a dozen fields is not worth it, so this is the settings page's plain React.
+// A change is handed to the parent, which writes it to storage straight away — the page has no save button.
 
 type EditorMode = 'view' | 'copy' | 'edit' | 'new'
 type Field = 'systemPrompt' | 'prompt'
@@ -27,8 +29,8 @@ const NEW_SYSTEM_PROMPT = `You are a professional ${getTokenCellText('targetLang
 const NEW_USER_PROMPT = `Translate the following into ${getTokenCellText('targetLanguage')}:\n\n${getTokenCellText('input')}`
 
 const field = { display: 'block', width: '100%', boxSizing: 'border-box' as const, padding: '6px 8px', font: 'inherit', marginTop: 4 }
-const small = { display: 'block', color: '#666', fontSize: 12 }
-const row = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #eee' }
+const small = { display: 'block', color: 'var(--axt-fg-2)', fontSize: 12 }
+const row = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--axt-line)' }
 const button = { font: 'inherit', fontSize: 12 }
 
 export function PromptManager({ value, onChange }: { value: PromptsConfig; onChange: (next: PromptsConfig) => void }) {
@@ -59,7 +61,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
     const patterns = mode === 'edit' ? value.patterns.map(p => (p.id === draft.id ? draft : p)) : [...value.patterns, draft]
     onChange({ patterns, promptId: mode === 'copy' ? draft.id : value.promptId })
     setEditor(null)
-    setMessage('已加入列表，记得点下方"保存"')
+    setMessage(mode === 'edit' ? '已保存' : '已加入列表')
   }
 
   function remove(template: PromptTemplate) {
@@ -76,7 +78,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
     try {
       const entries = await readPromptFile(file)
       onChange({ ...value, patterns: [...value.patterns, ...entries.map(entry => ({ ...entry, id: uuid() }))] })
-      setMessage(`已导入 ${entries.length} 条，记得点下方"保存"`)
+      setMessage(`已导入 ${entries.length} 条`)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
     } finally {
@@ -135,11 +137,11 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
         <button type="button" style={button} onClick={() => fileInput.current?.click()}>导入 JSON</button>
         <input ref={fileInput} type="file" accept=".json,application/json" hidden onChange={e => importFile(e.target.files?.[0])} />
         <button type="button" style={button} disabled={value.patterns.length === 0} onClick={() => downloadPromptFile(value.patterns)}>导出自定义</button>
-        <span style={{ color: '#666', fontSize: 12 }}>{message}</span>
+        <span style={{ color: 'var(--axt-fg-2)', fontSize: 12 }}>{message}</span>
       </p>
 
       {editor && (
-        <div style={{ border: '1px solid #ddd', borderRadius: 4, padding: 12, marginTop: 4 }}>
+        <div style={{ border: '1px solid var(--axt-line)', borderRadius: 4, padding: 12, marginTop: 4 }}>
           <strong>{titles[editor.mode]}</strong>
           <label style={{ display: 'block', marginTop: 8 }}>
             名称
@@ -160,7 +162,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
           ))}
           {!readOnly && (
             <p style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0' }}>
-              <span style={{ color: '#666', fontSize: 12 }}>插入变量：</span>
+              <span style={{ color: 'var(--axt-fg-2)', fontSize: 12 }}>插入变量：</span>
               {PROMPT_TOKENS.map(token => (
                 <button type="button" key={token} style={button} title={TOKEN_HINTS[token]} onClick={() => insertToken(token)}>{getTokenCellText(token)}</button>
               ))}

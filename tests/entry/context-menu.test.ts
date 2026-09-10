@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { MENU_CONTEXTS, MENU_ID, MENU_PATTERNS, MENU_TITLE, actionFor, installContextMenu } from '@/entrypoints/background/context-menu'
+import { COMMAND_ID, MENU_CONTEXTS, MENU_ID, MENU_PATTERNS, MENU_TITLE, actionFor, installContextMenu, installToggleCommand } from '@/entrypoints/background/context-menu'
 import type { Progress } from '@/core/pipeline/run'
 
 /** 真实形状的进度：第一版这里写的是随手编的 `{ state: 'off' }`，而 `Progress` 根本没有这个值，
@@ -47,6 +47,9 @@ describe('右键菜单的翻译开关（#146）', () => {
     expect(actionFor(progress('idle'))).toBe('axt:translate-page')
     expect(actionFor(progress('on'))).toBe('axt:restore-page')
     expect(actionFor(progress('stopped'))).toBe('axt:restore-page')
+    // 致命错误停下的那种「已停止」是要重试的：popup 的主按钮就写着「重新翻译」，快捷键角标贴在它上面，
+    // 这里若恢复原文就会把读者想重试的译文一起删掉（Codex 在 #157 指出）
+    expect(actionFor({ progress: { ...progress('stopped').progress, fatal: 'auth: bad key' } })).toBe('axt:translate-page')
     // 页面答不上状态：什么都不做，而不是瞎猜一个方向
     expect(actionFor(undefined)).toBeUndefined()
   })
@@ -63,5 +66,48 @@ describe('右键菜单的翻译开关（#146）', () => {
     menu.click(7)
     await vi.waitFor(() => expect(menu.sent).toHaveLength(1))
     expect(menu.sent).toEqual([{ tabId: 7, type: 'axt:page-status' }])
+  })
+})
+
+// The keyboard command (UI.md S-P-50): the third entry, on the same toggle as the menu
+function fakeCommand(status: { progress: Progress } | undefined, active: { id?: number } | undefined) {
+  const sent: { tabId: number; type: string }[] = []
+  let fire: ((command: string, tab?: { id?: number }) => void) | undefined
+  installToggleCommand({
+    onCommand: (h: (command: string, tab?: { id?: number }) => void) => { fire = h },
+    activeTab: async () => active,
+    send: vi.fn(async (tabId: number, message: { type: string }) => {
+      sent.push({ tabId, type: message.type })
+      if (message.type === 'axt:page-status') {
+        if (status === undefined) throw new Error('Receiving end does not exist')
+        return status
+      }
+      return {}
+    }),
+  } as never)
+  return { sent, fire: (command: string, tab?: { id?: number }) => fire?.(command, tab) }
+}
+
+describe('the keyboard command (S-P-50)', () => {
+  it('toggles the tab it was fired on, same messages as the menu', async () => {
+    const cmd = fakeCommand(progress('on'), undefined)
+    cmd.fire(COMMAND_ID, { id: 4 })
+    await vi.waitFor(() => expect(cmd.sent).toHaveLength(2))
+    expect(cmd.sent).toEqual([{ tabId: 4, type: 'axt:page-status' }, { tabId: 4, type: 'axt:restore-page' }])
+  })
+
+  it('falls back to the active tab when the event carries none', async () => {
+    const cmd = fakeCommand(progress('idle'), { id: 9 })
+    cmd.fire(COMMAND_ID)
+    await vi.waitFor(() => expect(cmd.sent).toHaveLength(2))
+    expect(cmd.sent.map(m => m.tabId)).toEqual([9, 9])
+  })
+
+  it('ignores other commands and a missing tab', async () => {
+    const cmd = fakeCommand(progress('idle'), undefined)
+    cmd.fire('something-else', { id: 4 })
+    cmd.fire(COMMAND_ID)
+    await new Promise(r => setTimeout(r, 20))
+    expect(cmd.sent).toEqual([])
   })
 })

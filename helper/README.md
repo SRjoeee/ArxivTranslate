@@ -4,6 +4,18 @@
 翻译与叠加层都在扩展里。它通过 Chrome 的 Native Messaging 与扩展通信（stdio、长度前缀 JSON），
 协议见 `docs/DESIGN.md` §15.3。核心移植自 [bytefer/macos-vision-ocr](https://github.com/bytefer/macos-vision-ocr)（MIT）。
 
+## 一键安装（macOS）
+
+在 popup 的「图片翻译」下点「复制安装命令」，把命令粘到终端里运行即可；它已经带上了你的扩展 id：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SRjoeee/ArxivTranslate/main/helper/install-remote.sh | bash -s -- <扩展 id>
+```
+
+第二个参数可以指定分支（默认 main），popup 复制的命令会带上它自己所在的分支。
+
+脚本会把 helper 的源码放到 `~/Library/Application Support/Readarxiv/helper`，用 Xcode Command Line Tools 编译（首次约 1 分钟；没装的话先运行 `xcode-select --install`），并注册 Chrome / Chromium 的 Native Messaging host。装完回到 Chrome 重新加载扩展即可。不需要 sudo。
+
 ## 要求
 
 - macOS 13+，Xcode Command Line Tools（`swift build` 能跑即可，不需要 Xcode）

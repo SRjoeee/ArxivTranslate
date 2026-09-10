@@ -5,6 +5,10 @@ import type { LanguageModel } from 'ai'
 import type { ThinkingMode } from './thinking'
 
 export interface OpenAICompatConfig {
+  /** The reader's service id (svc-…); absent in tests and for the legacy single endpoint */
+  id?: string
+  /** What the reader named the service; the engine's display name */
+  name?: string
   baseURL: string
   apiKey: string
   model: string

@@ -34,10 +34,9 @@
 
 .axt-hl > div {
   position: absolute;
-  /* Follows `--axt-green`, the same colour source as the highlighter presets, which `styleVarsRule`
-     rewrites from `config.style.accent`. One colour control, not two. 22% stays readable under body
-     text in both light and dark themes. */
-  background-color: color-mix(in oklab, var(--axt-green, currentColor) 22%, transparent);
+  /* The active band profile (config/appearance.ts): `appearanceRule` writes both variables, and the
+     defaults here are the shipped 柔和绿 — green at 22%, readable under body text in both themes. */
+  background-color: color-mix(in oklab, var(--axt-hl-color, var(--axt-green, currentColor)) var(--axt-hl-mix, 22%), transparent);
   /* A hair of rounding so the band reads as a wash rather than a table cell */
   border-radius: 2px;
 }

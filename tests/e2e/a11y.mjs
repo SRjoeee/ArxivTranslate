@@ -12,6 +12,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import AxeBuilder from '@axe-core/playwright'
 import { chromium } from 'playwright'
+import { chooseBuiltIn, openOptions } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
@@ -239,11 +240,8 @@ let [worker] = context.serviceWorkers()
 if (!worker) worker = await context.waitForEvent('serviceworker')
 const extId = worker.url().split('/')[2]
 
-const options = await context.newPage()
-await options.goto(`chrome-extension://${extId}/options.html`)
-await options.selectOption('select >> nth=0', 'google-web') // 免费引擎，不花钱
-await options.getByRole('button', { name: '保存', exact: true }).click()
-await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+const options = await openOptions(context, extId)
+await chooseBuiltIn(options, 'Google 翻译') // 免费服务，不花钱
 await options.close()
 
 const logs = []

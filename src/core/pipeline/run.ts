@@ -7,8 +7,7 @@ import type { SentenceAlignment } from '@/providers/alignment'
 import type { TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate, type WireSpan } from '@/core/protector'
 import {
-  clearAllPending, enable, markPartial, registerSentences, renderFailed, renderPending, renderTable, renderText, setState, type Mode,
-  type StylePreset,
+  clearAllPending, enable, markPartial, registerSentences, renderFailed, renderPending, renderTable, renderText, setState, type Look, type Mode,
 } from '@/core/renderer'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
 import { createWorkPacer, pauseIfBudgetSpent } from '@/core/scheduler/pacer'
@@ -39,8 +38,8 @@ export interface RunOptions {
   blocks: Block[]
   target: string
   mode: Mode
-  /** 译文样式预设（§7.5）；不传就沿用页面上已有的属性 */
-  style?: { preset: StylePreset; customCss?: string }
+  /** The reader's active appearance (§7.5); without it the page keeps whatever attributes it has */
+  appearance?: Look
   paper: string
   capabilities: { maxBatchChars: number; maxBatchItems: number; renderPath: RenderPath }
   transport: Transport
@@ -50,6 +49,11 @@ export interface RunOptions {
    * 单独一个回调而不塞进 Progress：Progress 要发给 popup，必须可序列化，Block 带着 DOM 节点
    */
   onRendered?: (blocks: Block[]) => void
+  /**
+   * The service that actually served a batch, reported when it changes (the first batch, then
+   * every hand-over down the chain). The caller decides what a hand-over means for the page
+   */
+  onProvider?: (id: string) => void
   /** 论文级上下文（标题、摘要、术语表），每批都带；章节标题由批次自己补 */
   context?: TranslateContext
   /** 取消范围 = 会话 id：每次调用都带，stop 时由调用方撤销排队与在飞的请求（§10） */
@@ -115,10 +119,16 @@ export function startTranslation(options: RunOptions): TranslationRun {
   // 第二次在 `if (stopped) return` 之后——那条 return 就是守卫，这里再判一次是测不到的死代码
   const rendered = (blocks: Block[]) => options.onRendered?.(blocks)
   const halted = () => stopped || fatal !== undefined
+  let lastProvider: string | undefined
+  const served = (id: string) => {
+    if (id === lastProvider) return
+    lastProvider = id
+    options.onProvider?.(id)
+  }
 
   // 译文语言进 <html>，renderText 逐个写到译文节点上：页面的 lang 说的是原文（arXiv 上是 en），
   // 不标的话屏幕阅读器会用英文语音念中文
-  enable(doc, options.mode, options.style, toBcp47(options.target))
+  enable(doc, options.mode, options.appearance, toBcp47(options.target))
   const sectionOf = sectionTitles(blocks)
 
   // 块标记一次性写完，不切片（issue #67）：side prep 的两道闸都看 data-axt-id——
@@ -183,6 +193,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
       return errorOf(res)
     }
     cached += res.cached
+    served(res.result.provider)
     const byId = new Map(res.result.segments.map(s => [s.id, s.text]))
     const texts = layout.runs.map((_, i) => byId.get(`${segment.id}#r${i}`))
     if (texts.some(t => t === undefined)) return { error: '译文条数与原文对不上' }
@@ -202,6 +213,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
     const res = await send([{ id: segment.id, text: segment.text, ...cutsFor(segment) }], options.capabilities.renderPath, sectionTitle, { bypassCache: true })
     if (res.ok) {
       cached += res.cached
+      served(res.result.provider)
       const hit = res.result.segments[0]
       if (hit !== undefined && validate(hit.text, segment.protected).ok) return { fragment: rehydrate(hit.text, segment.protected, doc, hit.alignment), alignment: hit.alignment }
     } else {
@@ -231,6 +243,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
       return
     }
     cached += res.cached
+    served(res.result.provider)
     const byId = new Map(res.result.segments.map(s => [s.id, s]))
     for (const segment of segments) {
       const hit = byId.get(segment.id)

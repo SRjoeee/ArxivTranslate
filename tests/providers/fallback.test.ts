@@ -41,7 +41,7 @@ describe('createFallbackService', () => {
     const res = await service.translate(call)
     expect(res.ok && res.result.provider).toBe('llm')
     expect(second.calls).toBe(0)
-    expect(service.status()).toEqual({ configuredId: 'llm', activeId: 'llm' })
+    expect(service.status()).toEqual({ configuredId: 'llm', activeId: 'llm', demotions: [] })
   })
 
   it('auth 是配置问题：切到下一个引擎，本会话内不再试首选', async () => {
@@ -51,10 +51,14 @@ describe('createFallbackService', () => {
 
     const res = await service.translate(call)
     expect(res.ok && res.result.provider).toBe('google-web')
+    const demoted = { id: 'llm', displayName: 'LLM', kind: 'auth' as const, message: 'User not found.' }
     expect(service.status()).toEqual({
       configuredId: 'llm',
       activeId: 'google-web',
-      demoted: { id: 'llm', displayName: 'LLM', kind: 'auth', message: 'User not found.' },
+      demoted,
+      // Every hand-over still in force, so a caller can ask about **its own** engine rather than
+      // about the most recent one (Codex on #157)
+      demotions: [demoted],
     })
 
     // 第二次调用直接走降级引擎，不再浪费一次请求
@@ -135,7 +139,7 @@ describe('createFallbackService', () => {
     const only = step('llm', [fail('auth', 'bad key')])
     const service = createFallbackService([only])
     expect(await service.translate(call)).toEqual(fail('auth', 'bad key'))
-    expect(service.status()).toEqual({ configuredId: 'llm', activeId: 'llm' })
+    expect(service.status()).toEqual({ configuredId: 'llm', activeId: 'llm', demotions: [] })
   })
 
   it('空链是编程错误，直接抛', () => {

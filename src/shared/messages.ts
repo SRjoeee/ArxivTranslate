@@ -25,12 +25,22 @@ export interface PageStatus {
    * 「目的地会不会再发请求」）
    */
   session?: string | null
+  /**
+   * What the current session runs on: the service chosen when it started, its target language,
+   * and the service actually serving right now (a hand-over down the chain changes it). The popup
+   * compares it with the saved settings to know when the page is behind them
+   */
+  running?: { provider: string; target: string; engine: string; revision: number }
 }
 
 /** 消息表：type → { request, response } */
 export interface AxtMessages {
-  /** popup → content：开始翻译当前页面 */
-  'axt:translate-page': { request: { mode?: Mode }; response: { started: boolean; reason?: string } }
+  /**
+   * popup → content: start translating the page. `restart` starts a new session over a running one
+   * without showing the original first: the settings changed and the page follows them paragraph
+   * by paragraph as each is requested again (cached ones at once)
+   */
+  'axt:translate-page': { request: { mode?: Mode; restart?: boolean }; response: { started: boolean; reason?: string } }
   /** popup → content：中止并恢复原文 */
   'axt:restore-page': { request: Record<never, never>; response: { removedNodes: number } }
   /** popup → content：切换模式（只改 <html> 上的属性，不重新翻译；§4 第 9 步） */
@@ -45,15 +55,37 @@ export interface AxtMessages {
   'axt:translate': { request: TranslateCall; response: TranslateMessageResponse }
   /** content → background：撤掉一次会话排队与在飞的请求（恢复原文、重开） */
   'axt:cancel-scope': { request: { scope: string }; response: { cancelled: number } }
-  /** popup / options / content → background：引擎链的能力与实时状态 */
-  'axt:provider-status': { request: Record<never, never>; response: ProviderStatus }
+  /**
+   * popup / options / content → background: what the chain can do and how it is doing.
+   *
+   * `scope` asks about **that session's own chain**. A page keeps the chain it started on while
+   * another tab changes the settings (see sessions.ts), so answering it from the current global
+   * chain would describe someone else's (Codex on #157). Without it the answer is the global one,
+   * which is what the popup and the settings page want
+   */
+  'axt:provider-status': { request: { scope?: string }; response: ProviderStatus }
   /** 清空缓存，或只清某篇论文 */
   'axt:cache-clear': { request: { paper?: string }; response: { ok: true; removed: number } | { ok: false; message: string } }
   'axt:cache-stats': { request: Record<never, never>; response: { ok: true; entries: number; bytes: number } | { ok: false; message: string } }
   /** popup → content：把翻失败的块再翻一遍（§7.6） */
   'axt:retry-failed': { request: Record<never, never>; response: { retried: number } }
-  /** popup → background：某个引擎刚被用户修好（语言包下载完）；重建引擎链，让它重新参与降级（§8.5） */
-  'axt:engine-ready': { request: { id: string }; response: { reset: boolean } }
+  /**
+   * popup / options → background: something the reader did changed which services can serve
+   * (a language pack finished downloading, a service was deleted). Rebuild the chain so later
+   * sessions see it.
+   *
+   * The response arrives **after** the chain has been rebuilt, so a caller that must act on the new
+   * configuration can await this instead of polling for a state that may look settled already.
+   *
+   * Which sessions move onto the new chain is the caller's to say, because only the caller knows
+   * what it promised (Codex on #157):
+   * - `scope` — that one session. The popup's pack download says "接下来的段落会用离线翻译" about
+   *   the tab it is open on, and about no other.
+   * - `rebindAll` — every session. Only for a service the reader deleted: it has to stop serving
+   *   everywhere, and that outweighs moving an unrelated tab onto another chain.
+   * - neither — rebuild only. Later sessions see the new chain; the ones translating keep theirs.
+   */
+  'axt:engine-ready': { request: { id: string; scope?: string; rebindAll?: boolean }; response: { reset: boolean } }
   /** options / content → background：本机 OCR helper 是否可用（DESIGN §15.4 的 ping 检测） */
   'axt:helper-status': { request: Record<never, never>; response: HelperStatus }
   /** content → background：给一张位图做 OCR；结果按 imageHash 缓存（§15.2） */

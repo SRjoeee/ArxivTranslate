@@ -7,6 +7,7 @@
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { chooseBuiltIn, openOptions, setSwitch } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
@@ -34,19 +35,11 @@ let [worker] = context.serviceWorkers()
 if (!worker) worker = await context.waitForEvent('serviceworker')
 const extId = worker.url().split('/')[2]
 
-const options = await context.newPage()
-await options.goto(`chrome-extension://${extId}/options.html`)
-await options.selectOption('select >> nth=0', 'google-web')
-// 图片翻译（DESIGN §15）默认三种模式都开；这台机器装了 helper 的话叠加层与拆图会扰动下面的布局 / 计数断言，
+const options = await openOptions(context, extId)
+await chooseBuiltIn(options, 'Google 翻译')
+// 图片翻译（DESIGN §15）默认开着；这台机器装了 helper 的话叠加层与拆图会扰动下面的布局 / 计数断言，
 // 这里关掉，专门的 e2e:image 再开（AXT_E2E_IMAGES=1 时保留）
-if (!process.env.AXT_E2E_IMAGES) {
-  for (const name of ['左右对照', '上下对照', '仅译文']) {
-    const box = options.getByRole('checkbox', { name, exact: true })
-    if (await box.isEnabled()) await box.uncheck()
-  }
-}
-await options.getByRole('button', { name: '保存', exact: true }).click()
-await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+if (!process.env.AXT_E2E_IMAGES) await setSwitch(options, '图片翻译', false)
 await options.close()
 
 /** 打开论文，经 popup 选左右模式并开始翻译 */
@@ -67,7 +60,7 @@ async function openSide(id) {
   await popup.getByRole('button', { name: '左右', exact: true }).waitFor({ timeout: 10_000 })
   await popup.getByRole('button', { name: '左右', exact: true }).click()
   await sleep(300)
-  await popup.getByRole('button', { name: '翻译', exact: true }).click()
+  await popup.getByRole('button', { name: '翻译本页', exact: true }).click()
   await sleep(500)
   await popup.close()
   return page
