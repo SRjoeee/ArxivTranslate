@@ -49,7 +49,9 @@ export const LOCALE_LANGUAGE_NAMES: Record<LocaleCode, Partial<Record<LangCode, 
 export const FALLBACK_LOCALE: LocaleCode = 'en'
 export const LOCALE_CODES = Object.keys(LOCALES) as LocaleCode[]
 
-export const isLocaleCode = (value: string): value is LocaleCode => value in LOCALES
+// `in` also finds `constructor` and `toString`: a stored value like that would pass, `LOCALES[value]`
+// would be a function, and the pages would render nothing instead of falling back (Codex on #161)
+export const isLocaleCode = (value: string): value is LocaleCode => Object.hasOwn(LOCALES, value)
 
 /**
  * Which pack to use, given what the reader chose and what the browser reports. `chosen` wins when

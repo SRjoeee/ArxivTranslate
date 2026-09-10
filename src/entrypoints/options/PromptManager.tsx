@@ -16,14 +16,8 @@ import { O } from '@/ui/strings'
 type EditorMode = 'view' | 'copy' | 'edit' | 'new'
 type Field = 'systemPrompt' | 'prompt'
 
-const TOKEN_HINTS: Record<(typeof PROMPT_TOKENS)[number], string> = {
-  targetLanguage: O.prompts.manager.tokens.targetLanguage,
-  input: O.prompts.manager.tokens.input,
-  paperTitle: O.prompts.manager.tokens.paperTitle,
-  abstract: O.prompts.manager.tokens.abstract,
-  sectionTitle: O.prompts.manager.tokens.sectionTitle,
-  glossary: O.prompts.manager.tokens.glossary,
-}
+/** Read at render, not at import: this module is evaluated before the pack is chosen (ui/strings.ts) */
+const tokenHint = (token: (typeof PROMPT_TOKENS)[number]): string => O.prompts.manager.tokens[token]
 
 /** 新建提示词的起点：点名目标语言并带上原文，只填名称也能用（Codex 在 #39 指出只有 {{input}} 的模板不知道译成哪种语言） */
 const NEW_SYSTEM_PROMPT = `You are a professional ${getTokenCellText('targetLanguage')} translator of academic papers.`
@@ -165,7 +159,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
             <p style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '8px 0' }}>
               <span style={{ color: 'var(--axt-fg-2)', fontSize: 12 }}>{O.prompts.manager.insert}</span>
               {PROMPT_TOKENS.map(token => (
-                <button type="button" key={token} style={button} title={TOKEN_HINTS[token]} onClick={() => insertToken(token)}>{getTokenCellText(token)}</button>
+                <button type="button" key={token} style={button} title={tokenHint(token)} onClick={() => insertToken(token)}>{getTokenCellText(token)}</button>
               ))}
             </p>
           )}

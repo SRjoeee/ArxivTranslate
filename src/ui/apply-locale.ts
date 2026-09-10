@@ -5,8 +5,8 @@
 // before any component runs. Every entry point awaits this, so nothing is ever half translated.
 import { browser } from 'wxt/browser'
 import { getConfig } from '@/config/storage'
-import { pickLocale } from '@/locales'
-import { setLocale } from './strings'
+import { type LocaleCode, pickLocale } from '@/locales'
+import { S, setLocale } from './strings'
 
 /**
  * What the browser is set to, most preferred first. `getUILanguage` is the browser's own interface
@@ -18,18 +18,38 @@ function browserLanguages(): string[] {
   return ui ? [ui] : (navigator.languages as string[] | undefined) ?? [navigator.language]
 }
 
-/** Read the stored choice and set the pack. Returns the code, for a page that wants to show it */
-export async function applyLocale(): Promise<void> {
+/**
+ * Read the stored choice and set the pack.
+ *
+ * `title` names the page, in the language just chosen — the tab of the settings page would otherwise
+ * keep the Chinese it was born with, whatever the interface says (Codex on #161)
+ */
+export async function applyLocale(title?: (brand: string) => string): Promise<LocaleCode> {
   let chosen: string | undefined
   try {
     chosen = (await getConfig()).uiLanguage
   } catch {
     // Unreadable settings must not leave the interface blank: the browser's language still applies
   }
-  setLocale(pickLocale(chosen, browserLanguages()))
+  const code = pickLocale(chosen, browserLanguages())
+  setLocale(code)
+  markDocument(code, title)
+  return code
 }
 
 /** The same choice from a configuration already in hand — the paper's script has just read it */
 export function applyLocaleFrom(uiLanguage: string): void {
   setLocale(pickLocale(uiLanguage, browserLanguages()))
+}
+
+/**
+ * The document says which language it is in. Ours are written in one language at a time, and the
+ * three pages ship with `lang="zh-CN"` in their markup: a screen reader would read the English
+ * interface aloud in Chinese (Codex on #161). The paper's own `lang` is arXiv's and is never touched
+ * — §7.1, and the translations carry their own `lang` per node
+ */
+function markDocument(code: LocaleCode, title?: (brand: string) => string): void {
+  if (typeof document === 'undefined') return
+  document.documentElement.lang = code
+  if (title) document.title = title(S.brand)
 }

@@ -53,6 +53,9 @@ const context = await chromium.launchPersistentContext(PROFILE, {
   args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--js-flags=--expose-gc'],
   viewport: { width: 1440, height: 900 },
 })
+// 真实论文的导航给足时间：Playwright 默认 30 s，而 arXiv 在连着跑几十轮之后会明显变慢
+// （实测同一篇 curl 要 26 s）。断言各自的等待没有放宽，放宽的只是「把页面拿到手」这一步
+context.setDefaultNavigationTimeout(90_000)
 let [worker] = context.serviceWorkers()
 if (!worker) worker = await context.waitForEvent('serviceworker')
 const extId = worker.url().split('/')[2]

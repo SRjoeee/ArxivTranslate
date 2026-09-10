@@ -12,7 +12,30 @@ export function styleTile(profile: StyleProfile): CSSProperties {
       ? {}
       : { textDecoration: `underline ${profile.underline} ${color === 'inherit' ? 'currentColor' : color}`, textUnderlineOffset: '0.25em', textDecorationThickness: `${profile.thickness}px` }),
     ...(profile.blur ? { filter: 'blur(2px)' } : {}),
+    // The advanced declarations last, as on the page: `customStyleRule` comes after the variables in
+    // the injected sheet. A profile whose whole effect is a `font-weight` there would otherwise look
+    // exactly like an unstyled one here, which defeats a preview (Codex on #161)
+    ...declarations(profile.css),
   }
+}
+
+/**
+ * A sanitised declaration list — `font-weight: 600; letter-spacing: .02em` — as a style object.
+ * The sanitiser has already refused braces, at-rules and `<` (core/renderer/style-values.ts), so
+ * this only has to split. A custom property keeps its name; anything else becomes camelCase, which
+ * is how React writes it
+ */
+function declarations(css: string): CSSProperties {
+  const out: Record<string, string> = {}
+  for (const part of css.split(';')) {
+    const at = part.indexOf(':')
+    if (at < 0) continue
+    const name = part.slice(0, at).trim()
+    const value = part.slice(at + 1).trim()
+    if (!name || !value) continue
+    out[name.startsWith('--') ? name : name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())] = value
+  }
+  return out as CSSProperties
 }
 
 export function bandTile(profile: HighlightProfile): CSSProperties {

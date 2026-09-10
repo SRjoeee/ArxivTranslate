@@ -41,6 +41,22 @@ describe('右键菜单的翻译开关（#146）', () => {
     for (const ctx of ['link', 'image', 'selection', 'page']) expect(MENU_CONTEXTS).toContain(ctx)
   })
 
+  it('点击处理同步注册：worker 被这次点击唤醒时，监听器必须已经在了（Codex 在 #161 指出）', () => {
+    let removed: () => void = () => undefined
+    const menu: { created: unknown[]; clicked: ((info: { menuItemId: string | number }, tab?: { id?: number }) => void) | null } = { created: [], clicked: null }
+    installContextMenu({
+      // removeAll 挂着不结算，模拟「读配置还没回来」
+      create: options => menu.created.push(options),
+      removeAll: () => new Promise(resolve => { removed = resolve }),
+      onClicked: handler => { menu.clicked = handler },
+      send: <T>() => Promise.resolve({} as T),
+    })
+    // 菜单还没建出来，但监听器已经在：这一次唤醒的点击不会掉地上
+    expect(menu.created).toHaveLength(0)
+    expect(menu.clicked).not.toBeNull()
+    removed()
+  })
+
   it('三个真实状态各自去哪：idle 去翻，其余去恢复', () => {
     // 分界与 popup 的按钮一致（`canRestore` 是 `state !== 'idle'`）。**只有这三个值存在**——
     // 第一版按一个不存在的 `'off'` 判断，菜单于是永远发恢复（Codex 在 #147 指出）

@@ -8,9 +8,9 @@ import { HELPER_HOST } from '@/shared/ocr'
 import { createHelperClient } from './helper'
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
-import { installContextMenu, installToggleCommand } from './context-menu'
+import { installContextMenu, refreshContextMenu, installToggleCommand } from './context-menu'
 import { handlePing } from '@/shared/ping'
-import { applyLocale } from '@/ui/apply-locale'
+import { applyLocale, applyLocaleFrom } from '@/ui/apply-locale'
 
 // background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
 // 异步响应必须用 sendResponse + return true。
@@ -31,12 +31,20 @@ export default defineBackground(() => {
     return active
   }
   const transportOf = () => (active ?? activate()).then(a => a.transport)
+  /** 这个 worker 当前用的界面语言，用来认出「读者改了它」（右键菜单的标题要跟着重画） */
+  let uiLanguage: string | null = null
 
   /**
    * 只有会换掉引擎链的配置字段才重建。content 每切一次显示模式就写一次配置，而那时页面往往正在翻——
    * 无差别重建会把令牌桶与降级记录一起清掉（chainConfigChanged 的注释里有归类表）
    */
   watchConfig(next => {
+    // 界面语言变了要重画菜单：worker 不会为此重启，不重画的话标题一直停在旧语言（Codex 在 #161 指出）
+    if (next.uiLanguage !== uiLanguage) {
+      uiLanguage = next.uiLanguage
+      applyLocaleFrom(next.uiLanguage)
+      refreshContextMenu(menuDeps)
+    }
     if (!active) return
     active = active.then(
       a => (chainConfigChanged(a.config, next) ? load(next) : { config: next, transport: a.transport }),
@@ -99,14 +107,20 @@ export default defineBackground(() => {
     })
   }
   // 右键菜单（issue #146）：第二个入口，动作与 popup 走同一条消息。
-  // The title is in the reader's language, so the pack is read first (UI.md §6); `installContextMenu`
-  // clears the menu before creating it, which is also what makes a later language change take
-  void applyLocale().then(() => installContextMenu({
-    create: options => browser.contextMenus.create(options as Parameters<typeof browser.contextMenus.create>[0]),
+  // **同步注册**，读语言包不等（context-menu.ts 说明为什么）：菜单先用兜底语言建出来，
+  // 语言包读到之后再重建一次，标题就跟着界面语言走了（UI.md §6）
+  const menuDeps = {
+    create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>
+      browser.contextMenus.create(options as Parameters<typeof browser.contextMenus.create>[0]),
     removeAll: () => browser.contextMenus.removeAll(),
-    onClicked: handler => browser.contextMenus.onClicked.addListener(handler),
-    send: (tabId, message) => browser.tabs.sendMessage(tabId, message),
-  }))
+    onClicked: (handler: Parameters<typeof browser.contextMenus.onClicked.addListener>[0]) => browser.contextMenus.onClicked.addListener(handler),
+    send: (tabId: number, message: unknown) => browser.tabs.sendMessage(tabId, message as never),
+  }
+  installContextMenu(menuDeps)
+  void applyLocale().then(code => {
+    uiLanguage = code
+    refreshContextMenu(menuDeps)
+  })
   // The keyboard shortcut (UI.md S-P-50): same toggle, third entry
   installToggleCommand({
     onCommand: handler => browser.commands.onCommand.addListener(handler),

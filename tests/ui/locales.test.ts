@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { LOCALES, LOCALE_CODES, LOCALE_NAMES, pickLocale } from '@/locales'
+import { LOCALES, LOCALE_CODES, LOCALE_NAMES, isLocaleCode, pickLocale } from '@/locales'
 import { POPUP_FIXTURES } from '@/entrypoints/popup/fixtures'
 import { derivePopupView } from '@/entrypoints/popup/view-model'
 import { S, localeInUse, setLocale } from '@/ui/strings'
+import { styleTile } from '@/ui/appearance/tiles'
 
 /** Every leaf of a pack, with the path that leads to it, so a failure names the key */
 function leaves(value: unknown, path = ''): [string, string][] {
@@ -58,6 +59,11 @@ describe('locale packs', () => {
     expect(pickLocale('auto', ['fr-FR'])).toBe('en')
     // 一个已经不存在的代码不该把界面卡住
     expect(pickLocale('kl-GL', ['fr'])).toBe('en')
+    // `in` 会认出 Object.prototype 上的名字：那样 LOCALES[value] 是个函数，整页都渲染不出来
+    for (const trap of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(isLocaleCode(trap), trap).toBe(false)
+      expect(pickLocale(trap, ['fr']), trap).toBe('en')
+    }
   })
 
   it('setLocale 之后 popup 的每个状态都跟着换语言，没有一句留在原来的包里', () => {
@@ -73,5 +79,18 @@ describe('locale packs', () => {
     }
     setLocale('zh-CN')
     expect(S.primary.translate).toBe('翻译本页')
+  })
+})
+
+describe('style previews', () => {
+  it('把高级声明也画进预览：只靠 css 生效的样式在菜单里不能看起来和没样式一样（Codex 在 #161 指出）', () => {
+    const plain = styleTile({ id: 'p', name: 'p', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: '' })
+    const bold = styleTile({ id: 'b', name: 'b', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: 'font-weight: 600; letter-spacing: .02em' })
+    expect(bold).not.toEqual(plain)
+    expect(bold).toMatchObject({ fontWeight: '600', letterSpacing: '.02em' })
+    // 自定义属性保持原名，React 就是这么写的
+    expect(styleTile({ id: 'v', name: 'v', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: '--x: 3px' })).toMatchObject({ '--x': '3px' })
+    // 后写的赢，与页面里注入表的顺序一致
+    expect(styleTile({ id: 'o', name: 'o', color: 'red', opacity: 1, underline: 'none', thickness: 1, blur: false, css: 'color: blue' }).color).toBe('blue')
   })
 })

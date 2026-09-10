@@ -9,6 +9,9 @@ import { PopupView } from '@/entrypoints/popup/PopupView'
 import { derivePopupView } from '@/entrypoints/popup/view-model'
 import { applyLocale } from '@/ui/apply-locale'
 
+/** Dev-only page, so its name is not part of any pack */
+const GALLERY_TITLE = 'Popup states'
+
 const log = (name: string) => (...args: unknown[]) => console.log(`[gallery] ${name}`, ...args)
 const actions: PopupActions = {
   translate: log('translate'), retranslate: log('retranslate'), restore: log('restore'), chooseMode: log('chooseMode'), retryFailed: log('retryFailed'),
@@ -18,7 +21,7 @@ const actions: PopupActions = {
 }
 
 // The gallery reviews the copy, so it reads the same pack the popup would
-await applyLocale()
+await applyLocale(brand => `${brand} · ${GALLERY_TITLE}`)
 
 function Gallery() {
   return (
