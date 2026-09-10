@@ -9,6 +9,16 @@ function markers(html: string, format: 'markers' | 'tags' = 'markers') {
   return { root, block: serialize(root, format) }
 }
 const label = (f: DocumentFragment) => f.firstChild as Element | null
+/** Sentence lengths as an engine reports them: the first sentence ends after `re` and its trailing spaces. */
+function two(str: string, re: RegExp): number[] {
+  const m = re.exec(str)
+  if (!m) return [str.length]
+  let end = m.index + m[0].length
+  while (str[end] === ' ') end++
+  return [end, str.length - end]
+}
+/** The evidence a period label needs: the engine ended its first sentence at the label and at the cut */
+const aligned = (wire: string, t: string, tgt = /[。．।]|\.(?=\s|$)/) => ({ source: two(wire, /\.(?=\s|$)/), target: two(t, tgt) })
 const text = (f: DocumentFragment) => Array.from(f.childNodes).map(n => n.textContent).join('')
 
 /**
@@ -80,7 +90,7 @@ describe('leading label under markers (#150)', () => {
   it('a label ending in a period: Note. → 注意。', () => {
     const { block } = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Note.</span> The start is our paper.</p>')
     const t = '注意。起点是我们的论文。'
-    const f = rehydrate(t, block, document)
+    const f = rehydrate(t, block, document, aligned(block.text, t))
     expect(label(f)!.textContent).toBe('注意。')
     expect(text(f)).toBe(t)
     roundTrip(f.offsets, t)
@@ -138,7 +148,7 @@ describe('leading label under markers (#150)', () => {
     expect(rehydrate('步骤 1：设置：做它。', after.block, document).querySelector('.ltx_font_bold')).toBeNull()
     // A period without a space after it is not an abbreviation: v1.2. stays a label
     const version = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">v1.2.</span> Changes.</p>')
-    expect(rehydrate('v1.2。变更。', version.block, document).querySelector('.ltx_font_bold')?.textContent).toBe('v1.2。')
+    expect(rehydrate('v1.2。变更。', version.block, document, aligned(version.block.text, 'v1.2。变更。')).querySelector('.ltx_font_bold')?.textContent).toBe('v1.2。')
   })
 
   it('the prefix must carry every placeholder of the label', () => {
@@ -149,7 +159,7 @@ describe('leading label under markers (#150)', () => {
     const f = rehydrate('设@a#。且@b#为素数。那么成立。', block, document)
     expect(f.querySelector('.ltx_font_italic')).toBeNull()
     // With both in front of the separator, the label is restored
-    const g = rehydrate('设@a#和@b#为素数。那么成立。', block, document)
+    const g = rehydrate('设@a#和@b#为素数。那么成立。', block, document, aligned(block.text, '设@a#和@b#为素数。那么成立。'))
     expect(g.querySelector('.ltx_font_italic')?.textContent).toBe('设p和q为素数。')
     expect(g.querySelectorAll('math')).toHaveLength(2)
   })
@@ -197,7 +207,7 @@ describe('leading label under markers (#150)', () => {
     expect(f.querySelector('.ltx_font_italic')).toBeNull()
     // With the period kept, the label is restored, formula included (its textContent carries the
     // hidden annotation too, so the visible parts are checked around it)
-    const g = rehydrate('设@a#为素数。那么成立。', block, document)
+    const g = rehydrate('设@a#为素数。那么成立。', block, document, aligned(block.text, '设@a#为素数。那么成立。'))
     const shell = g.querySelector('.ltx_font_italic')!
     expect(shell.querySelector('math')).not.toBeNull()
     expect(shell.textContent?.startsWith('设p')).toBe(true)
@@ -212,7 +222,35 @@ describe('leading label under markers (#150)', () => {
     expect(rehydrate('警告 停止。为何：不安全。', warn.block, document).querySelector('.ltx_font_bold')).toBeNull()
     // A colon the label carries itself is expected, not a change of separator
     const step = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Step 3: Conclusion.</span> We are done.</p>')
-    expect(rehydrate('第三步：结论。我们完成了。', step.block, document).querySelector('.ltx_font_bold')?.textContent).toBe('第三步：结论。')
+    expect(rehydrate('第三步：结论。我们完成了。', step.block, document, aligned(step.block.text, '第三步：结论。我们完成了。')).querySelector('.ltx_font_bold')?.textContent).toBe('第三步：结论。')
+  })
+
+  it('finds the target script\'s own full stop: Note. → नोट।', () => {
+    const { block } = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Note.</span> The start.</p>')
+    const hi = rehydrate('नोट। शुरुआत।', block, document, aligned(block.text, 'नोट। शुरुआत।'))
+    expect(hi.querySelector('.ltx_font_bold')?.textContent).toBe('नोट।')
+    // … and a full stop of that kind before a colon label's colon stops it, like `。` would
+    const warn = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Warning:</span> Stop. Why: unsafe.</p>')
+    expect(rehydrate('चेतावनी रुकें। क्यों: असुरक्षित।', warn.block, document).querySelector('.ltx_font_bold')).toBeNull()
+  })
+
+  it('a period label needs the engine\'s own sentence boundary at the label and at the cut', () => {
+    const { block } = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Note.</span> OK. Later.</p>')
+    expect(block.text).toBe('Note. OK. Later.')
+    // The engine dropped the label's period and the next sentence is short: `注意 好。` sits inside
+    // every other bound. Its boundaries say the first target sentence ended before the cut …
+    const dropped = '注意 好。后文。'
+    expect(rehydrate(dropped, block, document, { source: [6, 4, 6], target: [3, 3, 3] }).querySelector('.ltx_font_bold')).toBeNull()
+    // … or that the source's first sentence ran past the label
+    expect(rehydrate(dropped, block, document, { source: [10, 6], target: [5, 3] }).querySelector('.ltx_font_bold')).toBeNull()
+    // No alignment at all: no evidence, left alone
+    expect(rehydrate('注意。好。后文。', block, document).querySelector('.ltx_font_bold')).toBeNull()
+    // The label kept as its own sentence on both sides: restored
+    const kept = '注意。好。后文。'
+    expect(rehydrate(kept, block, document, { source: [6, 4, 6], target: [3, 2, 3] }).querySelector('.ltx_font_bold')?.textContent).toBe('注意。')
+    // A colon is not a sentence boundary, so a colon label asks for none
+    const colon = markers('<p class="ltx_p"><span class="ltx_text ltx_font_bold">Note:</span> OK.</p>')
+    expect(rehydrate('注意：好。', colon.block, document).querySelector('.ltx_font_bold')?.textContent).toBe('注意：')
   })
 
   it('a label longer than eight words is not a label', () => {
