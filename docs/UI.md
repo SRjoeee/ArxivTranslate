@@ -266,8 +266,8 @@ An open book: the left page dark grey with an `A`, the right page arXiv red with
 
 | Vector | Shape | Where it goes |
 |---|---|---|
-| `public/icon/tile.svg` | the book on a white rounded tile, the app-icon shape | `public/icon/{16,32,48,96,128}.png` (WXT fills the manifest's `icons` from those names) for the extensions page, the install dialog and the store, where the icon sits on a card of its own. Also the brand row of the popup and the settings sidebar, through `src/ui/BrandMark.tsx`, and the three pages' `<link rel="icon">` |
-| `public/icon/toolbar.svg` | the bare book with a white outline, no tile | `public/icon/toolbar-{16,32,48}.png`, declared as `action.default_icon` in `wxt.config.ts`, for the browser's own toolbar. A white tile up there reads as a sticker; the outline is what keeps the mark legible on a light and a dark toolbar alike |
+| `public/icon/mark.svg` | the bare book with a white outline, no tile: the identity itself | `public/icon/mark-{16,32,48}.png`, declared as `action.default_icon` in `wxt.config.ts` — the toolbar button, the three pages' `<link rel="icon">`, and the brand row of the popup and the settings sidebar through `src/ui/BrandMark.tsx`. Everywhere the mark stands on its own, in other words. A white tile in those places reads as a sticker; the outline is what keeps it legible on a light and a dark surface alike |
+| `public/icon/tile.svg` | the same book on a white rounded tile, the app-icon shape | `public/icon/{16,32,48,96,128}.png` (WXT fills the manifest's `icons` from those names) for the extensions page, the install dialog and the store — the places that frame an icon in a card of their own |
 | `docs/brand/store-icon-128.png` | 96 of tile artwork inset in a 128 canvas | uploaded by hand to the store listing, which wants the inset rather than a full-bleed icon. Never shipped inside the extension |
 
 `pnpm icons` renders every PNG from the two vectors; the PNGs are committed, so an ordinary build

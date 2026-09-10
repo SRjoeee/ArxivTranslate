@@ -4,10 +4,11 @@
 //   - public/icon/tile.svg — the book on a white rounded tile, the app-icon shape. It goes to
 //     public/icon/<size>.png, the naming WXT looks for, and fills the manifest's `icons`: the
 //     extensions page, the install dialog and the store, where an icon sits on a card of its own.
-//   - public/icon/toolbar.svg — the bare book with a white outline, no tile. It goes to
-//     public/icon/toolbar-<size>.png, declared as `action.default_icon` in wxt.config.ts, for the
-//     browser's own toolbar, where a white tile would read as a sticker and the outline is what
-//     keeps the mark legible on both a light and a dark toolbar.
+//   - public/icon/mark.svg — the bare book with a white outline, no tile: the identity itself. It
+//     goes to public/icon/mark-<size>.png, declared as `action.default_icon` in wxt.config.ts, and
+//     is what the toolbar, the page tabs and our own pages' brand rows draw. A white tile in those
+//     places would read as a sticker; the outline is what keeps the mark legible on a light and a
+//     dark surface alike.
 // Both are committed, so a normal build needs neither this script nor a browser; run it again
 // whenever a mark changes.
 //
@@ -20,8 +21,8 @@ import { chromium } from 'playwright'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SIZES = [16, 32, 48, 96, 128]
-/** The toolbar sizes Chrome actually asks the action for */
-const ACTION_SIZES = [16, 32, 48]
+/** The sizes the action and the page tabs ask for */
+const MARK_SIZES = [16, 32, 48]
 /**
  * The store listing wants the art inset in its canvas rather than bleeding to the edge, so it is a
  * separate file: 96 of artwork centred in 128. It is uploaded by hand and must not ship inside the
@@ -47,16 +48,16 @@ const page = await browser.newPage({ deviceScaleFactor: 1 })
 // The vectors ship too: the extension's own pages draw the tile from it at whatever size they need,
 // and it stays the one file its PNGs are derived from
 const tile = await readFile(resolve(root, 'public/icon/tile.svg'), 'utf8')
-const toolbar = await readFile(resolve(root, 'public/icon/toolbar.svg'), 'utf8')
+const mark = await readFile(resolve(root, 'public/icon/mark.svg'), 'utf8')
 
 await mkdir(resolve(root, 'public/icon'), { recursive: true })
 for (const size of SIZES) {
   await writeFile(resolve(root, `public/icon/${size}.png`), await shot(page, tile, size))
   console.log(`public/icon/${size}.png`)
 }
-for (const size of ACTION_SIZES) {
-  await writeFile(resolve(root, `public/icon/toolbar-${size}.png`), await shot(page, toolbar, size))
-  console.log(`public/icon/toolbar-${size}.png`)
+for (const size of MARK_SIZES) {
+  await writeFile(resolve(root, `public/icon/mark-${size}.png`), await shot(page, mark, size))
+  console.log(`public/icon/mark-${size}.png`)
 }
 
 await mkdir(resolve(root, dirname(STORE.out)), { recursive: true })
