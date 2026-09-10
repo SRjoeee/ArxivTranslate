@@ -79,12 +79,15 @@ export function useOptionsData(): OptionsData {
    * (Codex on #157)
    */
   const patch = useCallback((fn: (latest: Config) => Config): Promise<Config> => {
-    writes.current = writes.current.then(async () => {
+    // `then(run, run)`: a write that throws must not poison the chain — every later change would
+    // be skipped and the page would silently stop saving
+    const run = async () => {
       const next = fn(await getConfig())
       await setConfig(next)
       setLocal(next)
       return next
-    })
+    }
+    writes.current = writes.current.then(run, run)
     return writes.current
   }, [])
 

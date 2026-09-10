@@ -135,13 +135,16 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
    * same snapshot and the later write would drop the earlier change (Codex on #157)
    */
   const patchConfig = (patch: (latest: Config) => Config): Promise<Config> => {
-    writes.current = writes.current.then(async () => {
+    // `then(run, run)`: a write that throws must not poison the chain — every later change would
+    // be skipped and the page would silently stop saving
+    const run = async () => {
       const next = patch(await getConfig())
       await setConfig(next)
       setLocalConfig(next)
       loadProvider()
       return next
-    })
+    }
+    writes.current = writes.current.then(run, run)
     return writes.current
   }
 
