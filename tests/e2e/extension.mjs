@@ -97,21 +97,21 @@ async function openPaper(id, host) {
   // 插入与移除落在同一批里时，回调里 querySelectorAll 数到的已经是 0——峰值就永远是 0。
   // 记录被插入过的圆环节点数与时序无关
   await page.addInitScript(() => {
-    window.__axtSpinnersSeen = 0
+    window.__axtSkeletonsSeen = 0
     const count = node => {
       if (node.nodeType !== 1) return 0
       const el = node
-      return (el.classList?.contains('axt-spinner') ? 1 : 0) + (el.querySelectorAll?.('.axt-spinner').length ?? 0)
+      return (el.classList?.contains('axt-skel') ? 1 : 0) + (el.querySelectorAll?.('.axt-skel').length ?? 0)
     }
     const start = () => new MutationObserver(list => {
-      for (const m of list) for (const node of m.addedNodes) window.__axtSpinnersSeen += count(node)
+      for (const m of list) for (const node of m.addedNodes) window.__axtSkeletonsSeen += count(node)
     }).observe(document.documentElement, { childList: true, subtree: true })
     if (document.documentElement) start()
     else document.addEventListener('readystatechange', start, { once: true })
   })
   await page.goto(`https://arxiv.org/html/${id}#axt-translate`, { waitUntil: 'domcontentloaded' })
   const originalTitle = await page.title()
-  return { page, logs, requests, originalTitle, spinnersSeen: () => page.evaluate(() => window.__axtSpinnersSeen ?? 0).catch(() => 0) }
+  return { page, logs, requests, originalTitle, skeletonsSeen: () => page.evaluate(() => window.__axtSkeletonsSeen ?? 0).catch(() => 0) }
 }
 
 async function waitForLog(logs, pattern, timeoutMs, predicate = () => true) {
@@ -378,11 +378,11 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 
 // ── 论文 1：看到哪翻到哪（§10）：不滚动只翻首屏附近；逐屏滚到底其余跟上；标题翻译；速率 ────
 {
-  const { page, logs, requests, originalTitle, spinnersSeen } = await openPaper(PAPER, GOOGLE)
+  const { page, logs, requests, originalTitle, skeletonsSeen } = await openPaper(PAPER, GOOGLE)
   const first = idleOf(await waitForLog(logs, IDLE, 120_000))
   check(`论文 ${PAPER}：不滚动只翻首屏附近（google-web）`, !!first && first.requested > 0 && first.requested < first.total && first.done === first.requested && first.failed === 0, first?.text ?? '(no idle line)')
-  const spinners = await spinnersSeen()
-  check('请求期间插入过加载圆环（§7.6）', spinners > 0, `插入过 ${spinners} 个圆环`)
+  const skeletons = await skeletonsSeen()
+  check('请求期间插入过骨架屏（§7.6）', skeletons > 0, `插入过 ${skeletons} 块骨架屏`)
   const translated = await page.title()
   check('标签页标题被翻译', translated !== originalTitle && /[\u4e00-\u9fff]/.test(translated), `${originalTitle} → ${translated}`)
   await page.screenshot({ path: `${SHOTS}/paper-first-screen.png` })

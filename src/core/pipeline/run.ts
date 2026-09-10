@@ -140,7 +140,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
   // 同步写完还顺带解决了 halted() 的竞态——中间没有 await，restore 插不进来
   for (const block of blocks) block.el.setAttribute(ID_ATTR, block.id)
 
-  // 状态属性仍然切片：它带样式（pending 的 spinner），且不影响 side prep 的判定
+  // 状态属性仍然切片：它带样式（pending 的骨架屏），且不影响 side prep 的判定
   const ready = (async () => {
     const pacer = createWorkPacer()
     for (const block of blocks) {

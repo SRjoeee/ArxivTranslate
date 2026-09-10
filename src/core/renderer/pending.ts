@@ -1,9 +1,9 @@
-// 等待态的译文节点（DESIGN §7.6，照 Read Frog 的做法）：请求发出之前先插在原块后面，里面只有一个圆环；
+// 等待态的译文节点（DESIGN §7.6）：请求发出之前先插在原块后面，里面是一块骨架屏；
 // 译文到达后被真译文替换——renderText / renderTable 开头的 clearTranslation 会删掉同 data-axt-for 的兄弟。
 // 与 §7.1 一致：它只是原块的下一个兄弟，原节点不动。
 import type { Block, TextBlock } from '@/core/extractor'
 import { FOR_ATTR, INLINE_ATTR, clearTranslation, setState, shouldInline, translationClass } from './index'
-import { cancelSpinnersIn, createSpinnerInside } from './spinner'
+import { cancelSkeletonsIn, createSkeletonInside } from './skeleton'
 
 export const PENDING_CLASS = 'axt-pending'
 
@@ -14,15 +14,15 @@ function pendingOf(block: Block): Element | null {
 
 /**
  * 插 pending 节点：与原块同标签（表格块用 div——整表克隆到了才是 table）、沿用原块 class 加 axt-t axt-pending。
- * 幂等：已有就返回它。短标题按 §7.3 同行，圆环跟在标题后面，译文到达时版式不跳
+ * 幂等：已有就返回它。短标题按 §7.3 同行，骨架屏跟在标题后面，译文到达时版式不跳
  */
 export function renderPending(block: Block): Element {
   const existing = pendingOf(block)
   if (existing) return existing
   // 重试路径要**整块回到等待态**，上一轮留下的东西一样不能剩：
-  //   - 失败小部件（`.axt-error`）：`pendingOf` 认不出它，圆环会插在原块与它之间，
+  //   - 失败小部件（`.axt-error`）：`pendingOf` 认不出它，骨架屏会插在原块与它之间，
   //     读者同时看到"正在翻"和"！重试"，side 模式下右栏还多一项（Codex 在 #36 指出）；
-  //   - `data-axt-state="failed"`：modes.css 按它画红线，不清的话重试期间圆环在转、红线还在（#76）；
+  //   - `data-axt-state="failed"`：modes.css 按它画红线，不清的话重试期间骨架屏还在呼吸、红线还在（#76）；
   //   - **半翻的表格**：`cells.size > 0` 那条路走的是 `renderTable` + `markPartial`，
   //     **不建小部件**却把块记成 failed（run.ts:240-246）。所以重置不能挂在"删掉了小部件"上——
   //     那种块 `clearFailed` 返回 false，旧克隆、`data-axt-partial` 与 translated 状态会原样留着（#81）。
@@ -37,7 +37,8 @@ export function renderPending(block: Block): Element {
     block.el.setAttribute(INLINE_ATTR, '')
     node.setAttribute(INLINE_ATTR, '')
   }
-  createSpinnerInside(node as HTMLElement)
+  // 几条条按原文长度估（skeleton.ts 说明为什么不量）；同行的短标题只放一条
+  createSkeletonInside(node as HTMLElement, { chars: block.el.textContent?.length ?? 0, inline: node.hasAttribute(INLINE_ATTR) })
   block.el.after(node)
   return node
 }
@@ -46,7 +47,7 @@ export function renderPending(block: Block): Element {
 export function clearPending(block: Block): boolean {
   const node = pendingOf(block)
   if (!node) return false
-  cancelSpinnersIn(node)
+  cancelSkeletonsIn(node)
   node.remove()
   return true
 }
@@ -55,7 +56,7 @@ export function clearPending(block: Block): boolean {
 export function clearAllPending(doc: Document): number {
   const nodes = Array.from(doc.querySelectorAll(`.${PENDING_CLASS}`))
   for (const node of nodes) {
-    cancelSpinnersIn(node)
+    cancelSkeletonsIn(node)
     node.remove()
   }
   return nodes.length

@@ -12,7 +12,7 @@ import type { Look } from '@/config/appearance'
 import { BLUR_ATTR, UNDERLINE_ATTR, appearanceRule, customStyleRule } from './style-preset'
 import { clearSentenceHighlights } from './highlight'
 import { delocalizeNotes } from './notes'
-import { cancelSpinnersIn } from './spinner'
+import { cancelSkeletonsIn } from './skeleton'
 
 export type Mode = 'stack' | 'side' | 'only'
 export type BlockState = 'pending' | 'translated' | 'failed'
@@ -154,7 +154,7 @@ export function clearTranslation(block: Block): void {
   for (const sibling of Array.from(parent.children)) {
     if (sibling.classList.contains(T_CLASS) && sibling.getAttribute(FOR_ATTR) === block.id) {
       // pending 节点里有圆环：先取消动画再删（§7.6）
-      cancelSpinnersIn(sibling)
+      cancelSkeletonsIn(sibling)
       sibling.remove()
     }
   }
@@ -254,7 +254,7 @@ export function restore(doc: Document): { removedNodes: number; strippedAttrs: n
   let removedNodes = 0
   let strippedAttrs = 0
   for (const node of Array.from(doc.querySelectorAll(INJECTED_SELECTOR))) {
-    cancelSpinnersIn(node)
+    cancelSkeletonsIn(node)
     node.remove()
     removedNodes++
   }
@@ -282,7 +282,7 @@ export * from './anchors'
 export * from './prep'
 export * from './split-figures'
 export * from './responsive'
-export * from './spinner'
+export * from './skeleton'
 export * from './pending'
 export * from './failed'
 export * from './style-preset'

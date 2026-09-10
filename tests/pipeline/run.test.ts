@@ -97,7 +97,7 @@ describe('startTranslation', () => {
     expect(requests).toHaveLength(2)
   })
 
-  it('请求期间原块后面是带圆环的 pending 节点，进度里算 inFlight；译文到达后被替换', async () => {
+  it('请求期间原块后面是带骨架屏的 pending 节点，进度里算 inFlight；译文到达后被替换', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     let release!: () => void
@@ -111,13 +111,13 @@ describe('startTranslation', () => {
     const pending = run.translate([byId(blocks, 'p1')])
     const node = doc.getElementById('p1')!.nextElementSibling!
     expect(node.classList.contains(PENDING_CLASS)).toBe(true)
-    expect(node.querySelector('.axt-spinner')).not.toBeNull()
+    expect(node.querySelector('.axt-skel')).not.toBeNull()
     expect(run.progress()).toMatchObject({ requested: 1, inFlight: 1, done: 0 })
     expect(seen.at(-1)).toMatchObject({ inFlight: 1 })
     release()
     await pending
     expect(doc.getElementById('p1')!.nextElementSibling!.classList.contains(PENDING_CLASS)).toBe(false)
-    expect(doc.querySelectorAll('.axt-spinner')).toHaveLength(0)
+    expect(doc.querySelectorAll('.axt-skel')).toHaveLength(0)
     expect(seen.at(-1)).toMatchObject({ inFlight: 0, done: 1 })
   })
 
@@ -313,7 +313,7 @@ describe('startTranslation', () => {
 })
 
 describe('onRendered：每批交出刚动过 DOM 的块（issue #46）', () => {
-  it('每批两次：插圆环后一次、渲染结果后一次，两次都是这批的块', async () => {
+  it('每批两次：插骨架屏后一次、渲染结果后一次，两次都是这批的块', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport } = makeTransport()
@@ -339,7 +339,7 @@ describe('onRendered：每批交出刚动过 DOM 的块（issue #46）', () => {
     const seen: Block[][] = []
     const run = await start(doc, blocks, transport, { onRendered: b => seen.push(b) })
     const pending = run.translate([blocks[1]!])
-    expect(seen).toHaveLength(1) // 圆环那一次已经发出
+    expect(seen).toHaveLength(1) // 骨架屏那一次已经发出
     run.stop()
     release()
     await pending

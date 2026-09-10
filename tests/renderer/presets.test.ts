@@ -54,7 +54,7 @@ describe('译文外观（§7.5）', () => {
     expect(RULES).not.toMatch(/animation:\s*axt-/)
   })
 
-  it('装饰一律不落到加载圆环、失败控件与 side 模式的结构性克隆上：它们也带 .axt-t 但不是译文（Codex 在 #52 指出）', () => {
+  it('装饰一律不落到骨架屏、失败控件与 side 模式的结构性克隆上：它们也带 .axt-t 但不是译文（Codex 在 #52 指出）', () => {
     // 模糊会把镜像到右栏的公式糊掉；透明度会把「重试」按钮一起淡掉
     for (const line of RULES.split('\n')) {
       if (!line.includes('.axt-t')) continue

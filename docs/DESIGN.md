@@ -411,7 +411,7 @@ interface ProtectedBlock {
 
   **但这条路径在真实浏览器上够不着**（实测 2312.17141，Chromium）：切片标记 828 块只要 **2 ms**，第一趟 prep 在 **1140 ms** 后才跑（150 ms 去抖 + 进度回调节奏），窗口差 570 倍。所以这是把**隐含的时序假设**变成结构保证，不是修一个正在发生的 bug——不写下来，谁也不知道安全依赖着「标记比去抖快两个数量级」。
 
-  切片当初是防「几百个属性写入冻住页面」（Read Frog 的 #1881），那笔账不成立：循环里全是属性写入、不读布局，Chromium 实测 979 块写满 **1.2 ms**、随后强制布局 0 ms。同步写完顺带消掉了 `halted()` 的竞态窗口——中间没有 `await`，restore 插不进来。状态属性（`data-axt-state`，带 pending 的 spinner 样式）仍然切片，它不影响 prep 的判定。
+  切片当初是防「几百个属性写入冻住页面」（Read Frog 的 #1881），那笔账不成立：循环里全是属性写入、不读布局，Chromium 实测 979 块写满 **1.2 ms**、随后强制布局 0 ms。同步写完顺带消掉了 `halted()` 的竞态窗口——中间没有 `await`，restore 插不进来。状态属性（`data-axt-state`，带 pending 的骨架屏样式）仍然切片，它不影响 prep 的判定。
 
 - **可见比例阈值要真的生效，且不能把超大块锁死** [决定，2026-09-06，Codex 在 #32 / #36 指出]：`IntersectionObserver` 的 `isIntersecting` 定义是「相交比例 **> 0**」，不是「≥ threshold」；observe 之后浏览器立刻发一次初始通知，一个刚露出一成的块在 `threshold=0.5` 下照样报 `isIntersecting`，设置等于没配。回调因此要自己比 `intersectionRatio`。
 
@@ -449,7 +449,7 @@ interface ProtectedBlock {
 **属于我们、而且那次审计没查到的，是译文节点自己的属性**：
 
 - **译文必须标 `lang`**：页面的 `<html lang>` 说的是原文（arXiv 上是 `en`），而我们往里插中文。不标的话屏幕阅读器会用英文语音念中文——实测装扩展后 14 个译文节点全部继承 `lang="en"`。译文语言（BCP-47，由 `toBcp47(target)` 得到）在 `enable()` 时写进 `<html>` 的 `data-axt-lang`（§7.1：全局状态只在这里），`renderText` 逐个写到译文节点的 `lang` 上；**不能直接改 `<html lang>`**，那会把原文也说成中文
-- **纯装饰的副本对屏幕阅读器隐藏**：side 模式的镜像（`.axt-mirror`）是右栏的视觉配平副本，内容与左栏完全相同且没有译文，不隐藏就会被念两遍；加载圆环（`.axt-spinner`）同理，逐块的等待状态由 popup 的进度承担。两者都加 `aria-hidden="true"`**外加 `inert`** [补充，2026-09-07，A/B 审计在 2401.00596 上抓到]：`aria-hidden` 只挡屏幕阅读器，挡不住 Tab——参考文献条目的镜像里带着 DOI / arXiv 链接，键盘用户会跳进一个屏幕阅读器完全忽略的装饰副本，焦点落下去什么都不播报（axe 的 `aria-hidden-focus`）。`inert` 同时管住焦点与可访问性树，Chrome 102 起支持，远低于本项目 131 的下限。镜像与圆环都是**我们自己插的节点**，加属性不涉及 §7.1。真正的译文不隐藏——它是有信息的内容
+- **纯装饰的副本对屏幕阅读器隐藏**：side 模式的镜像（`.axt-mirror`）是右栏的视觉配平副本，内容与左栏完全相同且没有译文，不隐藏就会被念两遍；加载骨架屏（`.axt-skel`）同理，逐块的等待状态由 popup 的进度承担。两者都加 `aria-hidden="true"`**外加 `inert`** [补充，2026-09-07，A/B 审计在 2401.00596 上抓到]：`aria-hidden` 只挡屏幕阅读器，挡不住 Tab——参考文献条目的镜像里带着 DOI / arXiv 链接，键盘用户会跳进一个屏幕阅读器完全忽略的装饰副本，焦点落下去什么都不播报（axe 的 `aria-hidden-focus`）。`inert` 同时管住焦点与可访问性树，Chrome 102 起支持，远低于本项目 131 的下限。镜像与骨架屏都是**我们自己插的节点**，加属性不涉及 §7.1。真正的译文不隐藏——它是有信息的内容
 
 **归属判断已自动化** [决定，2026-09-07，issue #72]：手工对照「不装扩展的同一页面」这件事不该每次重做——审计任何注入型扩展都会重复那场误会。`tests/e2e/a11y.mjs`（`pnpm e2e:a11y`）同一篇论文跑两次 axe，基线是不装扩展的同一页，门槛只看差集。
 
@@ -484,13 +484,15 @@ interface ProtectedBlock {
 
 - **文档标题与副标题不与译文同行** [决定，2026-09-06，Codex 在 #13 指出]：`.ltx_subtitle` 与 `.ltx_title_document` 同属居中的标题区，压成 `inline-block` 会缩到内容宽度并贴到左边——真实页面实测 2609.00246 的 `(Extended Version)`：原本 `block` + `text-align: center`、占满 800px 栏宽、文本居中在 x≈720，改成 `inline-block` 后盒子只剩 176px、落在 l=320（父元素 `<article>` 是 `text-align: start`）。章节的 run-in 短标题是 `.ltx_title_*`，不受影响
 
-### 7.6 等待态：加载圆环 [决定，2026-09-05，照搬 Read Frog]
+### 7.6 等待态：骨架屏 [决定，2026-09-05 照搬 Read Frog 的圆环；2026-09-11 改为骨架屏]
 
-- 请求发出**之前**先在原块后面插一个 pending 译文节点（`.axt-t.axt-pending`，与原块同标签、同 class，`data-axt-for` 指向原块），里面只有一个 6px 的圆环 `<span class="axt-spinner">`。包裹先插、内容后填，与 §7.1 "译文只作为原块的下一个兄弟"完全一致；译文到达后**被真译文替换**（`renderText` / `renderTable` 开头的 `clearTranslation` 删掉同 `data-axt-for` 的兄弟，删前取消圆环动画）——与"填进同一个节点"效果相同、少一条路径。表格块的 pending 是 `div`，整表克隆到了才是 `table`。短标题的 pending 也按 §7.3 同行
-- 圆环照搬 Read Frog `utils/host/translate/ui/spinner.ts`：内联 `!important` 样式（不受站点 CSS 影响）、Web Animations API 转 600ms 一圈、颜色只用一个变量 `--axt-muted`；`prefers-reduced-motion` 时静止；**同时转动的圆环最多 60 个**，超出的是静止环（Read Frog 实测两千多个动画会拖垮主线程）；动画句柄存 WeakMap，删节点前先取消
-- 失败：圆环换成错误提示 + "重试"按钮（Shadow DOM 隔离，§技术栈），节点留着；用户取消（恢复原文 / 关闭翻译）：整个 pending 节点删除，不显示错误
-- side 模式的整理步骤（拆图、镜像、脚注归位、边距对齐）**只认真正的译文**（不带 `axt-pending` 的 `.axt-t`）：pending 节点的高度与译文无关，拿它算 `translationKey` 或复制脚注只会白做一遍。配对规则 `:has(+ .axt-t)` 对 pending 节点照常生效，原块与圆环各占一栏，译文到达时版式不再跳
-- only 模式下 pending 的原块照常可见（隐藏规则只认 `translated`，§7.4），圆环跟在后面
+- The pending translation node is inserted after the original **before** the request goes out (`.axt-t.axt-pending`, the original's tag and classes, `data-axt-for` pointing at it). The wrapper first, the content later, exactly as §7.1 requires. When the translation arrives it **replaces** the node (`clearTranslation` at the top of `renderText` / `renderTable` removes the sibling with the same `data-axt-for`, cancelling the animation first) — the same result as filling the node in, with one path fewer. A table's pending node is a `div`; it only becomes a `table` once the whole clone is there. A short heading's pending node sits on the same line, per §7.3
+- **What it holds is a skeleton, not a ring** (2026-09-11): one `<span class="axt-skel">` with one to three `<span class="axt-skel-line">` bars, sized in `em` so they follow the paper's type. How many bars comes from the original's `textContent.length` (under 120 characters one, under 320 two, otherwise three) — **an estimate, never a measurement**: reading layout here would force a reflow in the middle of rendering (§10). The last bar is short, so the block reads as text rather than as a box. A short heading's node keeps a single inline bar
+- **The bars carry the brand colour.** `--axt-skel` is arXiv red mixed into transparency (14% on light, 24% on dark), so the placeholder is recognisably ours and the paper's background still shows through. A 6px grey ring said "something is happening"; a skeleton the size of the coming translation also says **where** and **how much**, and the page settles less when it lands
+- **The pulse is one animation per block, and it is capped.** The skeleton breathes between full and 45% opacity over 1.4s (the shadcn/ui pulse, not a gradient sweep: opacity is composited, a moving gradient repaints every frame on every block). Web Animations API rather than a CSS keyframe, so the count stays countable: **at most 60 pulsing at once**, the rest are still — a page can hold hundreds of pending nodes at a time, and Read Frog measured two thousand concurrent animations taking the main thread down (#1881). `prefers-reduced-motion` means no animation at all, and the skeleton is still legible standing still. Handles live in a WeakMap and are cancelled before any node is removed, or a running animation pins a detached node in the renderer (#1831). The cap, the registry and the cancellation are Read Frog's, unchanged; only what is drawn is ours
+- 失败：骨架屏换成错误提示 + "重试"按钮（Shadow DOM 隔离，§技术栈），节点留着；用户取消（恢复原文 / 关闭翻译）：整个 pending 节点删除，不显示错误
+- side 模式的整理步骤（拆图、镜像、脚注归位、边距对齐）**只认真正的译文**（不带 `axt-pending` 的 `.axt-t`）：pending 节点的高度与译文无关，拿它算 `translationKey` 或复制脚注只会白做一遍。配对规则 `:has(+ .axt-t)` 对 pending 节点照常生效，原块与骨架屏各占一栏，译文到达时版式不再跳
+- only 模式下 pending 的原块照常可见（隐藏规则只认 `translated`，§7.4），骨架屏跟在后面
 - **失败态**（PR 2b，2026-09-05）：失败块旁插 `.axt-t.axt-error` 小部件——Shadow DOM 里一个"重试"按钮与带原因的"！"（宿主与"！"都带 `title`），原块标 `failed` 画红线。重试 = 把该块再交给 `run.translate`，先删小部件再插 pending；popup 的"重试失败的 N 块"（`axt:retry-failed`）走同一条路。原因由 pipeline 逐段记下（provider 的 kind + message、"译文的占位符与原文对不上"、"已取消"）。Read Frog 的 React + jotai + @tabler/icons + base-ui 版本不搬（§12 取舍）；side 模式下小部件落在右栏，与它的行内错误块位置相当
 
 ### 7.7 悬停对照高亮 [决定，2026-09-09 实现，issue #105]
@@ -736,7 +738,7 @@ export interface TranslateResult {
 - **播种与观察器用同一个可见阈值** [决定，2026-09-06，Codex 在 #35 指出]：启动时同步触发的那批锚点原来只判矩形相交，忽略 `threshold`；配了阈值的用户会看到「刚露出一像素的块立刻就翻」，而同一个块晚一点进视口反而要等够比例，两条路径不一致。现在播种按「相交高度 ÷ 元素高度 ≥ threshold」判，与 `IntersectionObserver` 的 `intersectionRatio` 同义。默认 threshold 为 0，行为不变
 - 块**第一次**进入视口加边距时才发请求，同时 `unobserve`——一次性；视口外的块永远不会被请求。没有"整篇翻完"的后台队列，想整篇就把预翻译距离调大（Read Frog 也是这么做的）
 - 同一次 IO 回调里进入的块**攒成一批**：一次滚动会让几十个块同时进入，按 §8.2 的 1000 字 / 4 条切批发出，表格整表一批不变；`planBatches` 只对"这一批进入视口的块"运行，不再预先规划整篇。IO 首次回调是异步的，创建时仍按 `getBoundingClientRect` 同步播种一次，首屏不等回调
-- 请求期间原块旁边先插带加载圆环的 pending 节点（§7.6），译文到达后填入；失败换错误提示与"重试"；取消则删除
+- 请求期间原块旁边先插带骨架屏的 pending 节点（§7.6），译文到达后填入；失败换错误提示与"重试"；取消则删除
 - **取消**：恢复原文或关闭翻译时带 session id 撤掉排队与在飞的请求（Read Frog `translation-session` + `cancelPageTranslationRequests` 的做法：进程内的 `AbortController` 一起中止，pending 节点连同圆环一起删）；被撤掉的请求的结果即使返回也不渲染、不写缓存
 - Read Frog 的 `MutationObserver`（动态页面新增内容）与巨型段落拆分（高于三屏的段落按子段落观察）**不搬**：arXiv 页面是静态的，段落也不会高过三屏；将来接其他站点再说
 - popup 的进度语义随之改变：翻译是一个"开着"的状态而不是一次会结束的任务。显示"已翻 / 已进入视口 / 失败"，`total` 只作参考；"翻译中"表示还有在飞的请求，没有在飞的请求即静止，滚动后再次进入"翻译中"

@@ -57,7 +57,7 @@ describe('appearanceRule', () => {
     expect(css).not.toContain('opacity:')
   })
 
-  it('颜色与透明度作用在“真正的译文”上，排除圆环、失败控件、镜像与拆图副本', () => {
+  it('颜色与透明度作用在“真正的译文”上，排除骨架屏、失败控件、镜像与拆图副本', () => {
     const css = all(lookWith({ color: '#1565c0', opacity: 0.8 }))
     expect(css).toContain(TRANSLATION_SELECTOR)
     expect(css).toContain('--axt-color: #1565c0;')

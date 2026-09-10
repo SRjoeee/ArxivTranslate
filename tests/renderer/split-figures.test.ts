@@ -128,17 +128,17 @@ describe('splitFigures', () => {
       .toBe(before.replace(new RegExp(`<figcaption class="ltx_caption ${T_CLASS}"[^>]*>[^<]*</figcaption>`), '').replace(/\s+/g, ' ').trim())
   })
 
-  it('等待态的 pending 节点不算译文：不拆；混着时副本里去掉圆环留原文，译文到了 key 变化再重建（§7.6）', () => {
+  it('等待态的 pending 节点不算译文：不拆；混着时副本里去掉骨架屏留原文，译文到了 key 变化再重建（§7.6）', () => {
     const pendingOnly = docOf(`<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">
-      <figcaption class="ltx_caption">cap</figcaption><figcaption class="ltx_caption ${T_CLASS} axt-pending" data-axt-for="c1"><span class="axt-spinner"></span></figcaption></figure>`)
+      <figcaption class="ltx_caption">cap</figcaption><figcaption class="ltx_caption ${T_CLASS} axt-pending" data-axt-for="c1"><span class="axt-skel"><span class="axt-skel-line" style="width: 62%;"></span></span></figcaption></figure>`)
     expect(splitFigures(pendingOnly)).toBe(0)
 
     const mixed = docOf(`<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">
       <figcaption class="ltx_caption">cap A</figcaption><figcaption class="ltx_caption ${T_CLASS}" data-axt-for="c1">说明 A</figcaption>
-      <figcaption class="ltx_caption">cap B</figcaption><figcaption class="ltx_caption ${T_CLASS} axt-pending" data-axt-for="c2"><span class="axt-spinner"></span></figcaption></figure>`)
+      <figcaption class="ltx_caption">cap B</figcaption><figcaption class="ltx_caption ${T_CLASS} axt-pending" data-axt-for="c2"><span class="axt-skel"><span class="axt-skel-line" style="width: 62%;"></span></span></figcaption></figure>`)
     expect(splitFigures(mixed)).toBe(1)
     const clone = mixed.querySelector(`.${SPLIT_CLASS}`)!
-    expect(clone.querySelector('.axt-pending, .axt-spinner')).toBeNull()
+    expect(clone.querySelector('.axt-pending, .axt-skel')).toBeNull()
     expect(clone.textContent).toContain('说明 A')
     expect(clone.textContent).toContain('cap B')
     // B 的译文到了：签名变了，重建

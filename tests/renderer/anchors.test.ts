@@ -72,13 +72,13 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     }
   })
 
-  it('圆环与失败小部件不当替身：滚过去只会看到一个空盒子', () => {
+  it('骨架屏与失败小部件不当替身：滚过去只会看到一个空盒子', () => {
     const doc = docOf(PAGE)
     const blocks = extract(doc)
     markBlocks(blocks)
     const target = doc.getElementById('tgt')!
     const block = blocks.find(b => b.el === target) as TextBlock
-    renderPending(block) // 只有圆环，还没有译文
+    renderPending(block) // 只有骨架屏，还没有译文
     layout(doc, [target])
     const scrolled: Element[] = []
     for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }

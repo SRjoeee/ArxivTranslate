@@ -99,7 +99,7 @@ const flatten = result => result.violations.flatMap(v =>
  * 排除注入的兄弟，正是让两次运行的序号对得上的关键。
  */
 const KEYED = items => {
-  const INJECTED = '.axt-t, .axt-img, .axt-note-t, .axt-spinner'
+  const INJECTED = '.axt-t, .axt-img, .axt-note-t, .axt-skel'
   const stable = el => {
     const parts = []
     let cur = el
