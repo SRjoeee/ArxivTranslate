@@ -9,7 +9,7 @@
 // choice that cannot run leaves the page behind the settings.
 import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_LOCALE_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
-import { type Service, chosenService, isLlmChosen } from '@/config/services'
+import { type Service, chosenService, isBuiltInService, isLlmChosen } from '@/config/services'
 import type { Mode } from '@/core/renderer'
 import { supportsTarget } from '@/providers/microsoft'
 import { BUILT_IN_PROMPTS } from '@/providers/prompt-library'
@@ -94,6 +94,10 @@ const serviceRuns = (service: Service): boolean => service.apiKey.trim() !== '' 
 export function runnable(config: Config, pack: PackState | null): boolean {
   const own = chosenService(config)
   if (own) return serviceRuns(own)
+  // A service id naming nothing: a popup left open while another tab deleted it. `getProvider`
+  // falls back to a built-in, so saying "usable" here would have the reader believe their LLM is
+  // translating while something else is (Codex on #157)
+  if (!isBuiltInService(config.provider)) return false
   switch (config.provider) {
     case 'chrome-builtin':
       return pack === 'available'
@@ -107,6 +111,7 @@ export function runnable(config: Config, pack: PackState | null): boolean {
 /** Why it cannot (S-P-31 / S-P-32) */
 function cannotRunWhy(config: Config, pack: PackState | null): string {
   if (chosenService(config)) return S.note.llmNoKey
+  if (!isBuiltInService(config.provider)) return S.note.serviceGone
   switch (config.provider) {
     case 'chrome-builtin':
       return pack === 'downloading' ? S.note.chromeDownloading : S.note.chromeNoPack
@@ -131,8 +136,13 @@ export function derivePopupView(input: PopupInput): PopupView {
   // once (data.ts), so this is what is left: a choice that cannot start, and a change made from
   // another tab, which leaves this page pinned to the session it began (Codex on #157). Either way
   // the reader is offered 重新翻译 — enabled when the saved settings can actually run
-  const behind = on && page.running !== undefined
-    && (page.running.provider !== config.provider || page.running.target !== config.targetLanguage)
+  // The chain's revision catches every change, including the ones that keep the service id and the
+  // target: a new key, model, endpoint, thinking mode or prompt (Codex on #157). The other two are
+  // kept for the case where the chain has not been rebuilt yet
+  const behind = on && page.running !== undefined && provider !== null
+    && (page.running.provider !== config.provider
+      || page.running.target !== config.targetLanguage
+      || page.running.revision !== provider.revision)
   const named = (id: string) => serviceName(id, config.services)
 
   const service: Row = demoted && provider

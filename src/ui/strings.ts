@@ -44,6 +44,7 @@ export const S = {
     chromeNoPack: 'Chrome 翻译的语言包尚未下载',
     chromeDownloading: 'Chrome 翻译的语言包下载中，约需 1 分钟',
     microsoftUnsupported: 'Microsoft 翻译不支持当前目标语言',
+    serviceGone: '选中的翻译服务已被删除，请重新选择', // S-P-32d
     paused: (reason: string) => `${reason}。请检查设置后重新翻译`, // S-P-33
     imagesPaused: (reason: string) => `图片翻译已暂停：${reason}`, // S-P-35
   },

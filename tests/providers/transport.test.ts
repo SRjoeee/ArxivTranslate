@@ -140,6 +140,7 @@ describe('createLocalTransport：状态', () => {
       promptId: 'default',
       chain: [SVC.id, 'google-web'],
       demotions: [],
+      revision: expect.any(Number),
       engine: { id: SVC.id, displayName: SVC.id },
     })
   })

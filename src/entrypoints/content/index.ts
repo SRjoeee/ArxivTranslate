@@ -174,7 +174,7 @@ export default defineContentScript({
       progress = { ...idle(), state: 'on' }
       restarted = false
       const startEngine = status.engine.id
-      running = { provider: config.provider, target: config.targetLanguage, engine: startEngine }
+      running = { provider: config.provider, target: config.targetLanguage, engine: startEngine, revision: status.revision }
       current = { session, config, context, renderPath: status.renderPath }
       prep.reset() // 新会话：镜像允许再跑一次、量宽缓存清空、栏宽重读
       enterSide(modes.effective())

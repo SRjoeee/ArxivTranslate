@@ -11,12 +11,14 @@ export function originPattern(url: string): string | null {
   }
 }
 
-export async function ensureHostPermission(baseURL: string): Promise<void> {
+/** Returns whether **this call** is what granted it, so a save that then fails can give it back */
+export async function ensureHostPermission(baseURL: string): Promise<boolean> {
   const origin = originPattern(baseURL)
   if (!origin) throw new Error('接口地址不合法')
-  if (await browser.permissions.contains({ origins: [origin] })) return
+  if (await browser.permissions.contains({ origins: [origin] })) return false
   const granted = await browser.permissions.request({ origins: [origin] })
   if (!granted) throw new Error(`未授予对 ${origin} 的访问权限`)
+  return true
 }
 
 /** Give back an origin no service uses any more; the ones the manifest asks for are not ours to remove */

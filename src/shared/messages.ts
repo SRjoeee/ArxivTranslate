@@ -30,7 +30,7 @@ export interface PageStatus {
    * and the service actually serving right now (a hand-over down the chain changes it). The popup
    * compares it with the saved settings to know when the page is behind them
    */
-  running?: { provider: string; target: string; engine: string }
+  running?: { provider: string; target: string; engine: string; revision: number }
 }
 
 /** 消息表：type → { request, response } */

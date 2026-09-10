@@ -38,6 +38,12 @@ export interface ProviderStatus {
   /** The config this chain was built from: the popup waits for these to match what it just saved before restarting a page */
   targetLanguage: string
   promptId: string
+  /**
+   * Which build of the chain this is. A page records it at session start, so the popup can say
+   * "this page is on an older chain" for **any** change — a new key, model, endpoint or prompt keeps
+   * the service id and the target, and comparing those alone missed all of them (Codex on #157)
+   */
+  revision: number
   engine: EngineStatus
   /** 链上引擎的 id，按优先级。popup 用它判断刚下好语言包的引擎有没有进链，e2e 用它断言降级 */
   chain: string[]
@@ -70,7 +76,11 @@ export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' |
  * 两个标签页各起一套队列，对同一端点的实际并发就是 2×8，正是招 429 的配方。共享之后两篇论文
  * 分享同一份并发预算，同时翻两篇的吞吐减半，但不会互相把对方打进限流。
  */
+/** Bumped by every build, so a session can tell whether the chain moved on without it */
+let revision = 0
+
 export async function createLocalTransport(config: Config, deps: LocalTransportDeps = {}): Promise<TranslationTransport> {
+  const built = ++revision
   const { chain, renderPath } = await (deps.buildChain ?? buildChain)(config)
   const primary = chain[0]!
   const chosen = chosenService(config)
@@ -125,6 +135,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
       renderPath,
       targetLanguage: config.targetLanguage,
       promptId: config.prompts.promptId,
+      revision: built,
       chain: chain.map(engine => engine.id),
       demotions: live.demotions.map(d => ({ id: d.id, kind: d.kind })),
       engine: {

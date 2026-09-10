@@ -136,6 +136,8 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(runnable({ ...c, provider: 'chrome-builtin' }, 'downloadable')).toBe(false)
     expect(runnable({ ...c, provider: 'chrome-builtin' }, 'available')).toBe(true)
     expect(runnable({ ...c, provider: 'google-web' }, null)).toBe(true)
+    // An id naming nothing: the reader's LLM was deleted from another tab while this popup was open
+    expect(runnable({ ...c, provider: 'svc-gone0000' }, null)).toBe(false)
     // A service needs a key, unless it is a local endpoint: Ollama and LM Studio answer without one
     expect(runnable({ ...c, provider: svc.id, services: [svc] }, null)).toBe(true)
     expect(runnable({ ...c, provider: svc.id, services: [{ ...svc, apiKey: '' }] }, null)).toBe(false)

@@ -12,7 +12,7 @@ import { getConfig, setConfig } from '@/config/storage'
 import type { Mode } from '@/core/renderer'
 import { COMMAND_ID } from '@/entrypoints/background/context-menu'
 import type { ProviderStatus } from '@/providers/transport'
-import { isLlmChosen } from '@/config/services'
+import { isBuiltInService, isLlmChosen } from '@/config/services'
 import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
 import { awaitChain } from '@/shared/chain'
@@ -66,8 +66,10 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
    * Service availability. Re-queried after a pack download and after every config change, or the
    * translate button stays in the state it had when the popup mounted
    */
-  const loadProvider = useCallback(() => {
-    sendMessage({ type: 'axt:provider-status' }).then(setProvider).catch(() => setProvider(null))
+  const loadProvider = useCallback((scope?: string | null) => {
+    // While a page is translating, ask **its** chain: it stays on the one it started with, so the
+    // global chain would describe someone else's hand-overs (Codex on #157)
+    sendMessage({ type: 'axt:provider-status', ...(scope ? { scope } : {}) }).then(setProvider).catch(() => setProvider(null))
   }, [])
   const checkPack = useCallback(async (target: string): Promise<PackState> => {
     const state = await packState(target)
@@ -107,14 +109,15 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
   // "finished" (§10). The replaced-service state lives in background and is queried alongside —
   // measured at millisecond round-trips (RESEARCH §6.7)
   const on = page?.progress.state === 'on'
+  const session = page?.session ?? null
   useEffect(() => {
     if (!on) return
     const id = setInterval(() => {
       refresh()
-      loadProvider()
+      loadProvider(session)
     }, 500)
     return () => clearInterval(id)
-  }, [on, refresh, loadProvider])
+  }, [on, session, refresh, loadProvider])
 
   const guard = async (run: () => Promise<void>) => {
     setError(null)
@@ -175,7 +178,12 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
       setMenu(null)
       // The last row of the menu is not a service: it opens the page where services are managed
       if (id === MANAGE_SERVICES) return void browser.runtime.openOptionsPage()
-      const next = await patchConfig(latest => ({ ...latest, provider: id }))
+      const next = await patchConfig(latest => (
+        // The menu may have been built before another tab deleted this service; storing an id that
+        // names nothing would leave the reader looking at a choice nothing honours (Codex on #157)
+        isBuiltInService(id) || latest.services.some(s => s.id === id) ? { ...latest, provider: id } : latest
+      ))
+      if (next.provider !== id) return
       const packState = id === 'chrome-builtin' ? await checkPack(next.targetLanguage) : pack
       await restartIfOn(next, packState, s => s.providerId === id)
     }),

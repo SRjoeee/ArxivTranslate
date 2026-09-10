@@ -64,25 +64,31 @@ export function ServiceDrawer({ service, patch, onClose }: {
     setBusy(true)
     setResult('')
     const t0 = performance.now()
+    /** Whether this attempt is what granted the origin, so a failure can give it back */
+    let granted = false
     try {
       const saving = id ?? newServiceId()
       const next: Service = { ...form, id: saving, name: form.name.trim() || defaultServiceName(form.model), apiKey: keyToSave() }
       const parsed = serviceSchema.safeParse(next)
       if (!parsed.success) throw new Error(parsed.error.issues.map(i => `${i.path.join('.')}：${i.message}`).join('；'))
+      const value = parsed.data
       // 先校验再申请权限：字段有错时不该先把 host 权限拿到手（Codex 在 #6 指出）
-      await ensureHostPermission(parsed.data.baseURL)
-      const previous = savedURL
+      granted = await ensureHostPermission(value.baseURL)
       const saved = await patch(latest => {
-        const services = latest.services.some(s => s.id === saving)
-          ? latest.services.map(s => (s.id === saving ? parsed.data : s))
-          : [...latest.services, parsed.data]
-        return { ...latest, services, provider: saving }
+        const known = latest.services.some(s => s.id === saving)
+        const services = known
+          ? latest.services.map(s => (s.id === saving ? value : s))
+          : [...latest.services, value]
+        // Adding one selects it; editing one does not. The radio beside each row is what chooses,
+        // and 连接 only promises to save and test the endpoint named here — editing a spare service
+        // must not quietly change what the next page translates with (Codex on #157)
+        return { ...latest, services, provider: known ? latest.provider : saving }
       })
+      granted = false // the save went through; the permission belongs to a stored service now
       setId(saving)
-      setSavedURL(parsed.data.baseURL)
-      if (previous) await releaseHostPermission(previous, saved.services.map(s => s.baseURL))
+      setSavedURL(value.baseURL)
       // The form now holds what storage holds, so a second 连接 saves the same thing
-      setForm(parsed.data)
+      setForm(value)
       setKeyInput('')
 
       // Name the engine: the question is whether *this* endpoint answers, and going down the chain
@@ -99,6 +105,9 @@ export function ServiceDrawer({ service, patch, onClose }: {
       })
       setResult(res.ok ? O.services.connected(Math.round(performance.now() - t0)) : reasonText(res.error.kind) || res.error.message)
     } catch (e) {
+      // Nothing was stored, so an origin this attempt asked for should not stay granted — the
+      // schema's service limit and any storage failure both land here (Codex on #157)
+      if (granted) await releaseHostPermission(form.baseURL, (await getConfig()).services.map(s => s.baseURL)).catch(() => undefined)
       setResult(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
@@ -114,6 +123,9 @@ export function ServiceDrawer({ service, patch, onClose }: {
       // A deleted service cannot stay chosen; the shipped free one takes over
       provider: latest.provider === gone ? 'microsoft' : latest.provider,
     }))
+    // Only deletion gives an origin back, and only after `dropAndRebindAll` above has taken every
+    // session off this service: an **edit** must keep it, because a page pinned to the old chain
+    // still fetches that endpoint and would fail mid-paper without it (Codex on #157)
     if (savedURL) await releaseHostPermission(savedURL, saved.services.map(s => s.baseURL))
     // A page translating in another tab is pinned to the chain it started on, so a deleted service
     // would go on spending its key whenever the reader scrolls (Codex on #157). This is the one
