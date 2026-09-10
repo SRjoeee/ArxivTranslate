@@ -265,6 +265,8 @@ export const NOTE = {
   content: '.ltx_note_content',
   contentClass: 'ltx_note_content',
   marks: '.ltx_note_mark, .ltx_tag',
+  /** 脚注的框：ar5iv 用 float + 负边距把它挂到页面右缘；句子的 Range 与网格行高都不该把它算进去 */
+  outer: '.ltx_note_outer',
 } as const
 
 /** 插图整块拆分（§7.2）：没有译文、也翻不了的媒体——两栏各需要一份的正是这些 */
@@ -277,6 +279,11 @@ export const FIGURE_MEDIA = 'img, svg, object, math, canvas, video, .ltx_picture
  * 不镜像时它自然通栏，浮动内容落回页面右缘（实测 2084→2516，与原版式一致）。
  */
 export const MARGIN_ASIDE = '.ltx_pubnotes, .ltx_note'
+/**
+ * 页面右缘那些东西**真正画出来的框**（renderer/peek.ts 量边距空不空用）。`.ltx_note` 根是个行内锚点，
+ * 只有几像素；浮出去的是它里面的框，而框在 side 模式下又被压成零高（modes.css），所以量内容元素
+ */
+export const MARGIN_ASIDE_BOXES = '.ltx_pubnotes, .ltx_note_content'
 
 /** 文档主标题：靠 text-align:center 居中，不能与译文同行（§7.3） */
 /**

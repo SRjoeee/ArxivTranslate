@@ -234,7 +234,8 @@ describe('source peek (#141)', () => {
 
   it('marginFree: the panel\'s footprint against every margin aside\'s box', () => {
     const d = doc()
-    d.body.innerHTML = '<span class="ltx_note" id="n1">1</span><span class="ltx_note" id="n2">2</span><span class="ltx_pubnotes" id="pub">p</span><p id="a">One.</p>'
+    // The painted boxes are measured — a note's content, not its inline root, which is a few pixels
+    d.body.innerHTML = '<span class="ltx_note"><span class="ltx_note_outer"><span class="ltx_note_content" id="n1">1</span></span></span><span class="ltx_note"><span class="ltx_note_content" id="n2">2</span></span><span class="ltx_pubnotes" id="pub">p</span><p id="a">One.</p>'
     const rect = (el: Element, left: number, top: number, width: number, height: number) =>
       Object.assign(el, { getBoundingClientRect: () => ({ left, top, right: left + width, bottom: top + height, width, height, x: left, y: top, toJSON: () => ({}) }) as DOMRect })
     const peek = createPeek(d)

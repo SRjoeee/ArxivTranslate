@@ -11,6 +11,7 @@
 // character; between anchors the mapping is addition.
 
 import { INJECTED_SELECTOR, isInjected } from '@/core/marks'
+import { NOTE } from '@/core/rules/latexml'
 import { decodeText, ENTITY_PATTERN } from './text'
 import { MARKER_RE, TAG_RE, fromAlpha, type WireFormat } from './tokens'
 
@@ -166,13 +167,24 @@ function oneRange(spans: readonly WireSpan[], from: number, to: number): Range |
 }
 
 /**
- * The node, minus the injected subtrees inside it, as one range per surviving stretch. Keeps the
- * parts a reader should see — a footnote marker, the original note text — while leaving our own
- * translation of it outside the highlight.
+ * What a sentence's ranges must not reach into, inside a placeholder: our own nodes, and a
+ * footnote's box.
+ *
+ * The box is out of the sentence's line — ar5iv floats it to the page's edge — but a range over
+ * the placeholder covers it, and Chrome reports every text box inside a range, so hovering the
+ * sentence tinted the whole note in the margin (user, 2026-09-10, on 2609.09360v1). The note's
+ * mark stays: it is on the line, and part of the sentence.
  */
-function carveInjected(node: Element): Range[] {
+const CARVED = `${INJECTED_SELECTOR}, ${NOTE.outer}`
+
+/**
+ * The node, minus the carved subtrees inside it, as one range per surviving stretch. Keeps the
+ * parts a reader should see on the line — a footnote marker — while leaving our own translation
+ * and the note's floated box outside the highlight.
+ */
+function carveOut(node: Element): Range[] {
   const doc = node.ownerDocument
-  const injected = Array.from(node.querySelectorAll(INJECTED_SELECTOR))
+  const injected = Array.from(node.querySelectorAll(CARVED))
   if (!doc || injected.length === 0) return []
   const out: Range[] = []
   let anchorNode: Node = node
@@ -305,10 +317,10 @@ export function rangesOf(spans: readonly WireSpan[], from: number, to: number): 
     // between, so carving on either half would cover the whole element however little of it the
     // interval asked for, and both halves would carve it again. Injected content inside a pair sits
     // between those text spans, where injectedBetween already finds it.
-    const holds = span.kind === 'slot' && span.role === 'void' && span.node.nodeType === 1 && (span.node as Element).querySelector(INJECTED_SELECTOR)
+    const holds = span.kind === 'slot' && span.role === 'void' && span.node.nodeType === 1 && (span.node as Element).querySelector(CARVED)
     if (holds) {
       flush(span.from)
-      out.push(...carveInjected(span.node as Element))
+      out.push(...carveOut(span.node as Element))
       segmentStart = span.to
       previous = span
       continue

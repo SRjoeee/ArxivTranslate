@@ -17,7 +17,7 @@
 // `z-index: -1`, and anything inside it would be painted under the page.
 
 import { INJECTED_SELECTOR, PEEK_CLASS, isInjected, stripInjected } from '@/core/marks'
-import { ANNOTATION_SELECTOR, MARGIN_ASIDE } from '@/core/rules/latexml'
+import { ANNOTATION_SELECTOR, MARGIN_ASIDE_BOXES } from '@/core/rules/latexml'
 
 /**
  * How long the pointer has to rest on one sentence before its counterpart is shown.
@@ -314,7 +314,9 @@ export function createPeek(doc: Document, current: (key: PeekKey) => boolean = (
       const right = left + Math.min(margin, MAX_MARGIN_REM * rem)
       const down = growsDown(top, bottom, viewport.height)
       const box = down ? { left, right, top, bottom: viewport.height - GAP_PX } : { left, right, top: GAP_PX, bottom }
-      for (const aside of Array.from(doc.querySelectorAll(MARGIN_ASIDE))) {
+      // The boxes that are painted, not the notes' inline anchors: a `.ltx_note` root is a few
+      // pixels on the line, its floated box is what sits in the gutter (measured 4×21 vs 192×1297)
+      for (const aside of Array.from(doc.querySelectorAll(MARGIN_ASIDE_BOXES))) {
         const r = aside.getBoundingClientRect()
         // Collapsed or in the article's own flow: no box, or one that never reaches the gutter
         if (r.width === 0 || r.height === 0) continue
