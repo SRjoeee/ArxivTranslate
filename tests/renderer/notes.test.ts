@@ -37,6 +37,31 @@ describe('localizeNotes', () => {
     expect(placed.getAttributeNames().some(n => n.startsWith('data-axt-'))).toBe(false)
   })
 
+  it('副本自己的原文收进 .axt-note-s，标号留在外面：only 模式才藏得住它（用户 2026-09-10 反馈）', () => {
+    // 副本是占位符回填出来的克隆，没有块标记，[data-axt-state="translated"] 的隐藏规则碰不到它；
+    // 裸文本节点没法用 CSS 藏，所以先收进一层壳
+    const doc = withNote()
+    localizeNotes(doc)
+    const c = copy(doc)
+    const wrapper = c.querySelector(':scope > .axt-note-s')!
+    expect(wrapper).not.toBeNull()
+    expect(wrapper.textContent).toBe('English note')
+    // 标号仍是副本的直接子节点，译文接在壳后面
+    expect(c.querySelector(':scope > .ltx_note_mark')).not.toBeNull()
+    expect(wrapper.querySelector('.ltx_note_mark')).toBeNull()
+    expect(c.lastElementChild!.classList.contains('axt-note-t')).toBe(true)
+    // 幂等：再跑一遍不会套第二层
+    localizeNotes(doc)
+    expect(c.querySelectorAll('.axt-note-s')).toHaveLength(1)
+    expect(c.textContent).toBe('1English note中文脚注')
+  })
+
+  it('译文还没到时不包原文：样式只藏「有译文相伴」的原文，副本里的内容一个字不丢', () => {
+    const doc = withNote(false)
+    localizeNotes(doc)
+    expect(copy(doc).querySelector('.axt-note-s')).toBeNull()
+  })
+
   it('原件那份标上 data-axt-note 由样式整框隐藏；副本那份不标', () => {
     const doc = withNote()
     localizeNotes(doc)

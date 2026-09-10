@@ -25,6 +25,13 @@ import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
 const LOCALIZED_ATTR = 'data-axt-note'
 /** 复制进副本的译文换上的 class：脱掉 ar5iv 的脚注框外壳（见下） */
 export const NOTE_T_CLASS = 'axt-note-t'
+/**
+ * 副本里**自己那份原文**的包裹：副本是占位符回填出来的克隆，没有块标记，only 模式的隐藏规则
+ * （`[data-axt-state="translated"]`）碰不到它，于是仅译文下边注里英文照样露着（用户 2026-09-10 在
+ * 2609.09360v1 上反馈）。裸文本节点没法用 CSS 藏，所以把标号之外的原文节点收进这一层，样式表按模式藏它；
+ * 只在译文确实复制进来时才藏（`:has(> .axt-note-t)`），没跑到的副本仍是原文，不丢内容
+ */
+export const NOTE_S_CLASS = 'axt-note-s'
 
 /** 副本里放进去的那份译文：脱掉脚注框外壳、去掉自带标号（副本外层已经有一个） */
 function localizedCopy(translated: Element): Element {
@@ -36,6 +43,18 @@ function localizedCopy(translated: Element): Element {
   for (const name of clone.getAttributeNames()) if (name.startsWith('data-axt-')) clone.removeAttribute(name)
   for (const mark of Array.from(clone.querySelectorAll(NOTE.marks))) mark.remove()
   return clone
+}
+
+/** 副本里除标号与译文之外的一切——它自己的原文——收进 `.axt-note-s`；已经收过就不动（幂等） */
+function wrapSource(copy: Element): void {
+  if (copy.querySelector(`:scope > .${NOTE_S_CLASS}`)) return
+  const doc = copy.ownerDocument
+  const wrapper = doc.createElement('span')
+  wrapper.className = NOTE_S_CLASS
+  const loose = Array.from(copy.childNodes).filter(n => !(n.nodeType === 1 && ((n as Element).matches(NOTE.marks) || (n as Element).classList.contains(NOTE_T_CLASS))))
+  if (loose.length === 0) return
+  copy.insertBefore(wrapper, loose[0]!)
+  for (const n of loose) wrapper.append(n)
 }
 
 /**
@@ -62,7 +81,9 @@ export function localizeNotes(root: Document | Element): number {
       const existing = copy.querySelector(`:scope > .${NOTE_T_CLASS}`)
       if (existing?.textContent === fresh.textContent) return // 已归位且内容没变
       existing?.remove()
-      // 副本保留自己的原文，译文接在后面：一份边注里英文在上、中文在下
+      // 副本保留自己的原文，译文接在后面：一份边注里英文在上、中文在下。原文先收进一层壳，
+      // only 模式才藏得住它（标号留在壳外，边注的编号在所有模式下都要可见）
+      wrapSource(copy)
       copy.append(fresh)
       source?.closest(NOTE.root)?.setAttribute(LOCALIZED_ATTR, '')
       localized += 1

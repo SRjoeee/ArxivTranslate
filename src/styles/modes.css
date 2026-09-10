@@ -462,3 +462,11 @@ html[data-axt-mode="only"] [data-axt-state="translated"] {
 html[data-axt-mode="only"] .axt-t[data-axt-inline] {
   margin-inline-start: 0;
 }
+
+/* 边注（§7.2 的归位）：译文段落里重建的那份副本是「原文 + 译文」上下排。它是占位符回填出来的克隆、
+   没有块标记，隐藏原块的规则碰不到它，仅译文模式下英文照样露着（用户 2026-09-10 反馈）。
+   原文被 localizeNotes 收进 .axt-note-s，这里按模式藏；**只在译文确实复制进来时才藏**——
+   没跑到的副本里只有原文，藏了就丢内容。标号在壳外，编号照常可见 */
+html[data-axt-mode="only"] .ltx_note_content:has(> .axt-note-t) > .axt-note-s {
+  display: none;
+}
