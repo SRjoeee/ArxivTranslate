@@ -105,7 +105,9 @@ export const DEFAULT_CONFIG: Config = {
   provider: 'microsoft',
   services: [],
   targetLanguage: DEFAULT_LANG_CODE,
-  mode: 'stack',
+  // 左右对照是宽屏下大多数人停留的读法（用户 2026-09-11）；窗口窄时页面自己退回上下（§7.2 / S-P-74），
+  // 所以这个默认在小屏上也不会读不成
+  mode: 'side',
   glossary: [],
   appearance: DEFAULT_APPEARANCE,
   fallback: { enabled: true },

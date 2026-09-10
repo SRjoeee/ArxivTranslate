@@ -16,6 +16,12 @@ const SHOTS = `${HERE}.shots`
 const PAPER = process.env.AXT_PAPER ?? '2410.00260'
 /** popup 里那一行的名字（S-P-82）；与设置页「译文样式」同名 */
 const S_STYLE = '译文样式'
+/**
+ * 「真正的译文」：加载骨架屏、失败控件，以及 side 模式的镜像与拆图副本都带 .axt-t，
+ * 但外观不装饰它们、几何也另有一套。默认模式是 side（2026-09-11），所以每一处按译文取样的
+ * 断言都要带上这个排除条件，否则取到的可能是结构性副本
+ */
+const REAL = ':not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
 const PAPER2 = process.env.AXT_PAPER2 ?? '2312.17527'
 /** 第三篇：前面的用例都没碰过它，缓存是冷的——导航那条要靠真实积压才测得出东西 */
 const PAPER3 = process.env.AXT_PAPER3 ?? '2312.17141'
@@ -321,7 +327,6 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
   // 只认真正的译文：加载圆环 / 失败控件 / 镜像与拆分克隆也带 .axt-t，但外观刻意不装饰它们，
   // 轮询撞上 pending 节点会把「透明度没生效」误报成配置坏了（Codex 在 #52 指出）
-  const REAL = ':not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
   await page.waitForFunction(sel => document.querySelector(sel) !== null, `.axt-t:not([data-axt-inline])${REAL}`, { timeout: 60_000 }).catch(() => undefined)
   await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')).opacity) < 1, null, { timeout: 30_000 }).catch(() => undefined)
   const styled = await page.evaluate(real => {
@@ -375,23 +380,24 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 可能还没写上——enable() 在 startTranslation 里写它，而 #axt-translate 触发的会话与设置页刚存的预设
   // 之间隔着一次配置读取。一次实测就撞到过：量到 22 个公式、块级 none/solid，重跑同一构建是 51 个 underline/dashed
   await dashedPage.waitForFunction(
-    () => document.documentElement.dataset.axtUnderline === 'dashed' && document.querySelectorAll('.axt-t math').length > 0,
-    null, { timeout: 60_000 },
+    real => document.documentElement.dataset.axtUnderline === 'dashed' && document.querySelectorAll(`.axt-t${real} math`).length > 0,
+    REAL, { timeout: 60_000 },
   ).catch(() => undefined)
   // 再等公式数稳定：翻译还在进行时读到的是半截状态
   let stableMaths = -1
   for (let i = 0; i < 40; i++) {
     await sleep(500)
-    const n = await dashedPage.evaluate(() => document.querySelectorAll('.axt-t math').length)
+    const n = await dashedPage.evaluate(real => document.querySelectorAll(`.axt-t${real} math`).length, REAL)
     if (n === stableMaths && n > 0) break
     stableMaths = n
   }
-  const dashed = await dashedPage.evaluate(() => {
+  const dashed = await dashedPage.evaluate(real => {
     const deco = el => { const cs = getComputedStyle(el); return `${cs.textDecorationLine}/${cs.textDecorationStyle}` }
-    const maths = [...document.querySelectorAll('.axt-t math')]
-    const block = document.querySelector('.axt-t:not([data-axt-inline])')
+    // 只认真正的译文：side 模式的镜像与拆图副本也带 .axt-t，外观刻意不装饰它们（同 §7.5 的排除条件）
+    const maths = [...document.querySelectorAll(`.axt-t${real} math`)]
+    const block = document.querySelector(`.axt-t:not([data-axt-inline])${real}`)
     return { count: maths.length, math: maths.slice(0, 3).map(deco), block: block ? deco(block) : null }
-  })
+  }, REAL)
   check('译文外观 · 虚线：线画到译文里的公式上（text-decoration 不传播到原子行内盒）',
     dashed.count > 0 && dashed.block === 'underline/dashed' && dashed.math.every(d => d === 'underline/dashed'),
     `${dashed.count} 个公式，块级 ${dashed.block}，公式 ${dashed.math.join(' ')}`)
@@ -481,7 +487,15 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     !!idle && idle.requested > 0 && idle.done === idle.requested && idle.failed === 0 && !/fatal/.test(idle.text),
     idle?.text ?? '(no idle line)')
 
-  // 记号方案的两条硬承诺：受保护节点一个不少，且没有记号漏进可见文字
+  // 记号方案的两条硬承诺：受保护节点一个不少，且没有记号漏进可见文字。
+  // 先往下滚两屏再取样：左右对照下首屏是标题与作者，一个公式都没有，取到的样本证明不了什么
+  for (let i = 0; i < 6; i++) {
+    const withMath = await page.evaluate(real => [...document.querySelectorAll(`.axt-t${real}`)]
+      .some(t => t.querySelector('math, .ltx_Math, img, a.ltx_ref') !== null), REAL)
+    if (withMath) break
+    await page.mouse.wheel(0, 900)
+    await sleep(1500)
+  }
   const shape = await page.evaluate(() => {
     const pairs = []
     for (const t of document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')) {
@@ -683,6 +697,9 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       if (!next?.classList.contains('axt-img')) continue
       out.overlays++
       out.sibling++
+      // side 下插图拆成两份，叠加层只显示在「只有译文」的那份上，原件那份 display:none
+      //（styles/image.css §7.2）。量看得见的那一份：藏起来的没有几何可言
+      if (getComputedStyle(next).display === 'none') { out.overlays--; out.sibling--; continue }
       const a = o.getBoundingClientRect()
       const b = next.getBoundingClientRect()
       // 锚点定位：叠加层的矩形应当与 <object> 的矩形重合

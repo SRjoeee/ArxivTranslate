@@ -96,7 +96,7 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 | S-P-53 | 次按钮 | 显示原文 | Text button under S-P-52 |
 | S-P-60 | 失败行 | {n} 处翻译失败 | Paragraphs and figures counted together; only when `progress.failed + images.failed > 0` and nothing is fatal |
 | S-P-61 | 失败行动作 | 重试 | |
-| S-P-70 | 模式分段 | 左右 · 上下 · 仅译文 | `title` S-P-71/72/73。2026-09-11 起 **左右在前**：宽屏下它是主要的读法，排第一位；`MODE_ORDER`（`src/ui/strings.ts`）是这条顺序的唯一出处，设置页的图片翻译模式也照它排 |
+| S-P-70 | 模式分段 | 左右 · 上下 · 仅译文 | `title` S-P-71/72/73。2026-09-11 起 **左右在前**：宽屏下它是主要的读法，排第一位；`MODE_ORDER`（`src/ui/strings.ts`）是这条顺序的唯一出处，设置页的图片翻译模式也照它排。**新装的默认也是左右**（用户 2026-09-11）：宽屏下它是主要读法，窗口窄时页面自己退回上下（S-P-74） |
 | S-P-71 | 模式 `title` · 上下 | 译文紧跟在原文下方 | |
 | S-P-72 | 模式 `title` · 左右 | 原文与译文并排；窗口较窄时按上下显示 | |
 | S-P-73 | 模式 `title` · 仅译文 | 隐藏原文，参考文献仍保留双语 | |
