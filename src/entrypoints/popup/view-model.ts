@@ -19,7 +19,8 @@ import type { PageStatus } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
 import type { PackState } from '@/shared/pack'
 import type { MenuItem } from '@/ui/Menu'
-import { HELPER_GUIDE_URL, S, helperInstallCommand, parseFatal, reasonText, serviceName } from '@/ui/strings'
+import { styleTile } from '@/ui/appearance/tiles'
+import { HELPER_GUIDE_URL, PREVIEW_TARGET, S, helperInstallCommand, parseFatal, reasonText, serviceName } from '@/ui/strings'
 
 export type { PackState }
 /** The last row of the service menu: not a service, it opens the settings page */
@@ -232,12 +233,20 @@ function menuOf(kind: MenuKind, config: Config, pack: PackState | null): NonNull
       }
     case 'style':
       // Whatever the settings page holds, in its order: the reader's own profiles sit among the
-      // built-in ones there, and a second order here would make the same list read as two lists
+      // built-in ones there, and a second order here would make the same list read as two lists.
+      // Each name carries the same sample sentence the settings tiles use, drawn in that style —
+      // the names alone ("淡一档", "模糊") do not show what they do
       return {
         kind,
         label: S.rows.style,
         search: false,
-        items: config.appearance.styles.map(p => ({ id: p.id, name: p.name, selected: p.id === config.appearance.activeStyle })),
+        items: config.appearance.styles.map(p => ({
+          id: p.id,
+          name: p.name,
+          hint: PREVIEW_TARGET,
+          preview: styleTile(p),
+          selected: p.id === config.appearance.activeStyle,
+        })),
       }
   }
 }

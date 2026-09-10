@@ -3,6 +3,13 @@
 // nouns for states, verbs for buttons, and an error says what happened and what to do.
 import type { ProviderErrorKind } from '@/providers/types'
 
+/**
+ * The sentence every appearance preview is drawn on — the settings tiles, the editor's preview and
+ * the popup's style menu. One sentence, so a reader comparing two of them compares the styles
+ */
+export const PREVIEW_SOURCE = 'The Fourier transform is bounded.'
+export const PREVIEW_TARGET = '傅里叶变换是有界的。'
+
 export const S = {
   brand: 'Read arXiv', // S-P-01
   settings: '设置', // S-P-02, and the button on every note
@@ -164,8 +171,8 @@ export const O = {
     thresholdHint: '段落露出多少才开始翻',
     thresholdStops: ['刚露出', '露出一半', '完全露出'],
     preview: '预览',
-    previewSource: 'The Fourier transform is bounded.',
-    previewTarget: '傅里叶变换是有界的。',
+    previewSource: PREVIEW_SOURCE,
+    previewTarget: PREVIEW_TARGET,
   },
   prompts: { title: '提示词', glossaryTooBig: '术语表太长，超出上限后没有保存；请减少条目或缩短内容', glossary: '术语表', glossaryHint: '每行「原文, 译文」，让同一篇里的译法一致', glossaryCount: (n: number) => `${n} 条`, onlyLlm: '只对 LLM 服务生效' },
   data: {

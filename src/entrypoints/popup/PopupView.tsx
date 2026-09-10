@@ -89,14 +89,10 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
           <Segmented value={view.mode.value} options={MODES} onChange={actions.chooseMode} />
           {view.mode.note && <p className="px-1 text-[11px] text-fg-2">{view.mode.note}</p>}
 
-          <div className="flex items-center justify-between px-1 text-[12px] font-semibold text-fg-2">
-            <Switch small checked={view.highlight} onChange={actions.setHighlight} label={S.rows.highlight} text={S.rows.highlight} title={S.rows.highlightTitle} />
-            <Switch small checked={view.images} onChange={actions.setImages} label={S.rows.images} text={S.rows.images} />
-          </div>
-
-          {/* How the translation looks, beside the two switches rather than in the card above: that
-              card is what translates, this is how it reads (S-P-82) */}
-          <StyleRow view={view} actions={actions} />
+          {/* The three reading choices on one row: two switches and the way in to the styles. The
+              row is what the menu is measured against — a menu the width of the 译文样式 button
+              alone would be a column of clipped names (S-P-82) */}
+          <ReadingRow view={view} actions={actions} />
         </>
       )}
 
@@ -170,31 +166,37 @@ function MenuRow({ kind, label, row, view, actions, compact = false, last = fals
 }
 
 /**
- * The translation's style, on a bare row beside the two switches rather than in the card above:
- * that card is what translates, this is how it reads (S-P-82). Its own component rather than another
- * `MenuRow` variant — no card, no divider, and the same 12px scale the switches sit on
+ * The last row of the popup: 对照高亮, 图片翻译 and the way in to 译文样式, side by side. All three
+ * are "how this reads", as against the card at the top, which is what translates (S-P-82).
+ *
+ * The **row** is the menu's anchor, not the button: the menu is then as wide as the card above it
+ * rather than as wide as four characters. The button is passed as the trigger, so pressing it again
+ * closes the menu while a click on either switch closes it and still toggles the switch.
  */
-function StyleRow({ view, actions }: { view: View; actions: PopupActions }) {
+function ReadingRow({ view, actions }: { view: View; actions: PopupActions }) {
   const open = view.menu?.kind === 'style'
   const anchor = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
   return (
-    <div ref={anchor} className="px-1">
+    <div ref={anchor} className="flex items-center justify-between gap-2 px-1 text-[12px] font-semibold text-fg-2">
+      <Switch small checked={view.highlight} onChange={actions.setHighlight} label={S.rows.highlight} text={S.rows.highlight} title={S.rows.highlightTitle} />
+      <Switch small checked={view.images} onChange={actions.setImages} label={S.rows.images} text={S.rows.images} />
       <button
+        ref={trigger}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={open}
+        title={view.style.value}
         onClick={() => (open ? actions.closeMenu() : actions.openMenu('style'))}
-        className="flex w-full cursor-pointer items-center justify-between text-left text-[12px] font-semibold text-fg-2"
+        className={`flex shrink-0 cursor-pointer items-center gap-1 ${open ? 'text-fg' : 'hover:text-fg'}`}
       >
         {S.rows.style}
-        <span className="flex min-w-0 items-center gap-1.5 text-fg">
-          <span className="truncate">{view.style.value}</span>
-          <Chevron up={open} />
-        </span>
+        <Chevron up={open} />
       </button>
       {open && view.menu && (
         <Menu
           anchor={anchor}
+          trigger={trigger}
           items={view.menu.items}
           label={view.menu.label}
           search={false}
