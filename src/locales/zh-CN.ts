@@ -192,6 +192,8 @@ const O = {
       view: '查看',
       viewTitle: '查看内置提示词',
       copy: '复制并自定义',
+      /** 复制内置提示词时新的那份叫什么（与外观配置的 copySuffix 是同一件事，标点各随各的语言） */
+      copyOf: (name: string) => `${name}（副本）`,
       copyTitle: '复制并自定义',
       custom: '自定义',
       edit: '编辑',

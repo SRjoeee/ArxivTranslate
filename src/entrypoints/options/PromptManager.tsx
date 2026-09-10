@@ -47,7 +47,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
 
   /** 内置只读；"复制并自定义"给一份新 id 的副本，保存后直接选用（Read Frog 的做法） */
   function copyBuiltIn(template: PromptTemplate) {
-    setEditor({ mode: 'copy', draft: { ...template, id: uuid(), name: `${template.name}（副本）` } })
+    setEditor({ mode: 'copy', draft: { ...template, id: uuid(), name: O.prompts.manager.copyOf(template.name) } })
   }
 
   function save() {

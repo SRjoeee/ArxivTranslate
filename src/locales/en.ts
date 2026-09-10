@@ -184,6 +184,7 @@ const O: Locale['O'] = {
       view: 'View',
       viewTitle: 'A prompt that ships with the extension',
       copy: 'Copy and edit',
+      copyOf: name => `${name} copy`,
       copyTitle: 'Copy and edit',
       custom: 'Yours',
       edit: 'Edit',
