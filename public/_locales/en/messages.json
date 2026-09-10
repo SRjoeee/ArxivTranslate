@@ -1,0 +1,10 @@
+{
+  "description": {
+    "message": "Bilingual translation for arxiv.org/html that keeps the paper's structure and can be undone",
+    "description": "The extensions page and the store listing"
+  },
+  "toggle": {
+    "message": "Translate this page / show the original",
+    "description": "The keyboard shortcut's description in chrome://extensions/shortcuts"
+  }
+}

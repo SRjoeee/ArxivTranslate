@@ -3,7 +3,9 @@
 // with one button (docs/UI.md §3.2, rebuilt 2026-09-10).
 import { useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
+import { LOCALE_CODES, LOCALE_NAMES, type LocaleCode } from '@/locales'
 import { BrandMark } from '@/ui/BrandMark'
+import { MenuField } from '@/ui/MenuField'
 import { O } from '@/ui/strings'
 import { useOptionsData } from './data'
 import { Data } from './sections/Data'
@@ -43,6 +45,29 @@ export function App() {
               {O.nav[id]}
             </button>
           ))}
+
+          {/* The interface's own language, under the nav rather than in a section: it belongs to
+              none of them, and it must not sit next to 目标语言, which is a different choice
+              (S-O-05). Changing it reloads the page — the words are read once, before the first
+              paint, so that nothing is ever half translated */}
+          {data.config && (
+            <div className="mt-6 px-3">
+              <p className="mb-1.5 text-[11px] font-semibold text-fg-2">{O.uiLanguage}</p>
+              <MenuField
+                label={O.uiLanguage}
+                value={data.config.uiLanguage === 'auto' ? O.uiLanguageAuto : LOCALE_NAMES[data.config.uiLanguage as LocaleCode] ?? O.uiLanguageAuto}
+                compact
+                items={[
+                  { id: 'auto', name: O.uiLanguageAuto, selected: data.config.uiLanguage === 'auto' },
+                  ...LOCALE_CODES.map(code => ({ id: code, name: LOCALE_NAMES[code], selected: data.config?.uiLanguage === code })),
+                ]}
+                onSelect={async code => {
+                  await data.patch(latest => ({ ...latest, uiLanguage: code }))
+                  location.reload()
+                }}
+              />
+            </div>
+          )}
         </nav>
 
         <main className="min-w-0 flex-1">

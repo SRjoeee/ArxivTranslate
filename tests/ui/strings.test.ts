@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { setLocale } from '@/ui/strings'
 import { S, parseFatal, reasonText, serviceName } from '@/ui/strings'
+
+// The copy tables of UI.md §3 are the Chinese ones; this file checks that pack
+setLocale('zh-CN')
 
 describe('reasonText', () => {
   it('has a reader-facing sentence for every kind, free of implementation words', () => {

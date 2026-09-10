@@ -1,0 +1,10 @@
+{
+  "description": {
+    "message": "面向 arxiv.org/html 的保结构、可逆双语翻译",
+    "description": "The extensions page and the store listing"
+  },
+  "toggle": {
+    "message": "翻译本页 / 显示原文",
+    "description": "The keyboard shortcut's description in chrome://extensions/shortcuts"
+  }
+}

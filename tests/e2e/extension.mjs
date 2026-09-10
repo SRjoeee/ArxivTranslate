@@ -7,7 +7,7 @@
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
-import { addService, chooseBuiltIn, chooseLanguage, chooseStyle, clearKeyAndReconnect, openOptions, openSection, pick, setImageMode, setPreload, setSwitch } from './options-page.mjs'
+import { addService, chooseBuiltIn, chooseLanguage, chooseStyle, chooseUiLanguage, clearKeyAndReconnect, openOptions, openSection, pick, setImageMode, setPreload, setSwitch } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
@@ -1217,6 +1217,30 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await options.bringToFront()
   const cleared = await clearKeyAndReconnect(options)
   check('设置页：清除 API Key 后连接报「尚未配置」，不是把旧 key 写回去', /尚未配置/.test(cleared ?? ''), cleared)
+}
+
+// ── 界面语言（UI.md §6）─────────────────────────────────────────────
+// 最后一段：它把设置页整页重载，也把配置里的 uiLanguage 留在英文，别的用例不必受这个影响
+{
+  await options.bringToFront()
+  await options.reload({ waitUntil: 'domcontentloaded' })
+  await chooseUiLanguage(options, '界面语言', 'English')
+  const nav = (await options.locator('nav').innerText()).replace(/\n+/g, ' ')
+  check('设置页跟着界面语言换成英文', /Services/.test(nav) && !/翻译服务/.test(nav), nav.slice(0, 60))
+
+  // popup 与论文页读的是同一份配置：三处都要跟着换，不是只有设置页
+  const enPopup = await context.newPage()
+  await enPopup.goto(`chrome-extension://${extId}/popup.html`)
+  await enPopup.waitForTimeout(600)
+  const popupText = await enPopup.locator('main').innerText()
+  check('popup 跟着界面语言换成英文', /Open the HTML version|Translate this page/.test(popupText) && !/翻译本页|打开 arXiv/.test(popupText), popupText.split('\n')[0] ?? '')
+  await enPopup.close()
+
+  // 换回中文，把配置留在这套测试的其余部分预期的样子
+  await options.bringToFront()
+  await chooseUiLanguage(options, 'Interface language', '简体中文')
+  const back = await options.locator('nav').innerText()
+  check('换回中文之后设置页也跟着回来', /翻译服务/.test(back), back.replace(/\n+/g, ' ').slice(0, 40))
 }
 
 await context.close()

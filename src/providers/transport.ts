@@ -177,7 +177,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
  */
 export const CHAIN_CONFIG_FIELDS = ['provider', 'services', 'prompts', 'targetLanguage', 'fallback'] as const
 /** 与 CHAIN_CONFIG_FIELDS 互补，两者之和必须覆盖 Config 的全部字段 */
-export const VOLATILE_CONFIG_FIELDS = ['version', 'mode', 'glossary', 'appearance', 'preload', 'image', 'reading'] as const
+export const VOLATILE_CONFIG_FIELDS = ['version', 'mode', 'glossary', 'appearance', 'preload', 'image', 'reading', 'uiLanguage'] as const
 
 export function chainConfigChanged(a: Config, b: Config): boolean {
   return CHAIN_CONFIG_FIELDS.some(field => !deepEqual(a[field], b[field]))

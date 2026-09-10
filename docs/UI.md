@@ -123,6 +123,7 @@ changes, and the two drawers commit with one button.
 |---|---|---|---|
 | S-O-01 | 导航 | 翻译服务 · 阅读 · 提示词与术语 · 数据 | The hash keeps the place (`#services` …) |
 | S-O-02 | 设置读取失败 | 设置读取失败，当前使用默认设置；已保存的 API Key 与服务选择均未生效。请重新填写。 | Top of every section, with the reason under it; the popup no longer carries this state |
+| S-O-05 | 侧栏 · 界面语言 | 界面语言 / 跟随浏览器 | [定，2026-09-11] 导航下面，离目标语言远一点：两者是两件事（§6）。改完整页重载 |
 | S-O-10 | 内置服务 | 内置服务 | Three cards with a radio each: Microsoft 翻译 · Google 翻译 · Chrome 翻译, the popup's names and hints (S-P-44…46) |
 | S-O-11 | Chrome 卡动作 | 下载 | While the pack is `downloadable`; the card cannot be chosen until it is there (S-P-40…43) |
 | S-O-12 | 我的服务 | 我的服务 | The reader's own, any number; each row is 名称 · 模型 · 主机名 |
@@ -284,7 +285,36 @@ At 16 px the two glyphs lose their strokes. Both shapes ship at that size anyway
 picks the 32, the silhouette and the two colours still identify it, and one mark at every size beats
 two that differ. A simplified 16 is the fallback if it ever reads badly in the wild.
 
-## 6. 需要改 DESIGN.md 的条目
+## 6. 界面语言 [定，2026-09-11]
+
+**界面语言与目标语言是两件事。** 目标语言是论文被译成什么，界面语言是按钮和说明用什么写。读者可能把论文
+译成日语、界面也要日语，也可能界面用英文而论文译成日语；哪一个都不该由另一个替他决定。所以两个控件离得远：
+目标语言在「翻译服务」里，界面语言在导航下面（S-O-05）。
+
+**用户是非英语读者。** 读英文的人在 arXiv 上不需要翻译器。英文只是兜底——某种语言还没写出来时，
+读论文的人多半能用英文顶一阵。所以加一种语言必须便宜：一个文件，`LOCALES` 里一行，别的都跟着走。
+
+| 位置 | 内容 |
+|---|---|
+| `src/locales/zh-CN.ts` | 简体中文，也是**类型的来源**：其余语言包按它的形状写，少一个键编译不过 |
+| `src/locales/en.ts` | 英文，兜底 |
+| `src/locales/index.ts` | 语言表、每种语言自己的名字、`pickLocale`（读者选定 → 浏览器精确码 → 同语言 → 英文） |
+| `src/ui/strings.ts` | 运行时：`S` / `O` 是**活绑定**，`setLocale` 换包 |
+| `src/ui/apply-locale.ts` | 三个页面与论文页在**首次渲染之前**各调一次 |
+| `public/_locales/` | 只有 Chrome 自己显示的两条：扩展管理页 / 商店的说明，与快捷键说明。它们只有浏览器读得到，也只能由浏览器挑语言 |
+
+- **配置 v13 加 `uiLanguage`**：`auto` 跟随浏览器（`browser.i18n.getUILanguage()`，不是 `accept-languages`——
+  读英文论文的人语言列表里有英文，不代表他要英文界面）。改这个值之后设置页整页重载：文案在首帧之前读一次，
+  半中半英的界面比慢半秒难看得多。
+- **`S` / `O` 是活绑定，不是常量。** 模块顶层算出来的值不跟着换（`const NAMES = { side: S.mode.side }` 会把
+  导入那一刻的语言冻住），这类表要放进组件里按渲染算。`tests/ui/locales.test.ts` 守着这条：换成英文之后
+  逐个 popup 状态检查有没有中文漏出来。
+- **随扩展一起发的样式与背景高亮，名字跟着界面语言走**；读者改过名字之后就用读者的（`profileName`）。
+  读者自己添加的配置永远用他自己写的名字。
+- **目标语言的名字也跟着界面语言写**：中文界面「日语（日本語）」，英文界面 "Japanese (日本語)"。括号跟着
+  外面那半句走，全角半角不混用。一种界面语言没有语言名表时读英文名——加语言不必先翻 179 个语言名。
+
+## 7. 需要改 DESIGN.md 的条目
 
 - §8.1 默认 provider 改为 `google-web`（首次打开即可用）
 - §8.4 语言包下载入口：popup 服务列表 + 设置页服务卡，两处都是点击手势
@@ -296,7 +326,7 @@ two that differ. A simplified 16 is the fallback if it ever reads badly in the w
 - §15.4 `nativeMessaging` 改可选权限时，设置页加 S-O-86 授权按钮（已决定，分发时做）
 - #47 排版设置进入 config schema（新字段，升版本），与 §7.5 译文样式分开存
 
-## 7. 功能覆盖清单
+## 8. 功能覆盖清单
 
 主线每加一个功能先在这里登记一行；没有落点的功能不算设计完成。
 
@@ -328,7 +358,7 @@ two that differ. A simplified 16 is the fallback if it ever reads badly in the w
 | 阅读工具条 | 画布提案 | 待定 | 页内 | — |
 | 后台连通 / 块统计 | 现有 popup | 开发态 | 只在开发构建样例页 | — |
 
-## 8. 待讨论
+## 9. 待讨论
 
 1. ~~产品名。~~ [定] Read arXiv（2026-09-10 定名，2026-09-11 改为分写）。
 2. 「AI 模型」这个叫法 vs 「AI 翻译」。

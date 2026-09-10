@@ -6,7 +6,7 @@ import { DEFAULT_APPEARANCE, appearanceSchema } from './appearance'
 import { BUILT_IN_SERVICES, SERVICE_ID_RE, serviceSchema } from './services'
 import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
-export const CONFIG_VERSION = 12
+export const CONFIG_VERSION = 13
 
 /** 三种阅读模式（DESIGN §7）；`mode` 与图片翻译的模式闸共用 */
 export const MODE_VALUES = ['stack', 'side', 'only'] as const
@@ -88,6 +88,13 @@ export const configSchema = z.object({
    * helper the bitmap path does not run; SVG figures need no helper
    */
   image: z.object({ enabled: z.boolean(), modes: z.array(modeSchema).max(3) }).default({ enabled: true, modes: [...MODE_VALUES] }),
+  /**
+   * The **interface's** language (v13), not the paper's: a reader may translate into Japanese and
+   * still want the buttons in Japanese, or in English, and neither choice implies the other.
+   * `auto` follows the browser. An unknown code falls back at read time rather than failing the
+   * whole configuration — a pack removed in a later version must not cost the reader their key
+   */
+  uiLanguage: z.string().default('auto'),
 })
 
 export type Config = z.infer<typeof configSchema>
@@ -106,4 +113,5 @@ export const DEFAULT_CONFIG: Config = {
   preload: { ...DEFAULT_PRELOAD },
   reading: { sentenceHighlight: true },
   image: { enabled: true, modes: [...MODE_VALUES] },
+  uiLanguage: 'auto',
 }

@@ -134,3 +134,15 @@ export async function setPreload(options, { range, threshold }) {
   if (threshold) await options.getByRole('button', { name: threshold, exact: true }).click()
   await sleep(150)
 }
+
+/**
+ * Switch the interface's language and wait for the page it reloads (UI.md §6). `name` is the
+ * language's own name, which is how the menu lists it
+ */
+export async function chooseUiLanguage(options, label, name) {
+  await options.getByRole('button', { name: new RegExp(label) }).click()
+  await sleep(200)
+  await options.getByRole('option', { name, exact: true }).click()
+  await options.waitForLoadState('domcontentloaded')
+  await sleep(600)
+}

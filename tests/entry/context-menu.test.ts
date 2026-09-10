@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { COMMAND_ID, MENU_CONTEXTS, MENU_ID, MENU_PATTERNS, MENU_TITLE, actionFor, installContextMenu, installToggleCommand } from '@/entrypoints/background/context-menu'
+import { COMMAND_ID, MENU_CONTEXTS, MENU_ID, MENU_PATTERNS, actionFor, installContextMenu, installToggleCommand, menuTitle } from '@/entrypoints/background/context-menu'
 import type { Progress } from '@/core/pipeline/run'
 
 /** 真实形状的进度：第一版这里写的是随手编的 `{ state: 'off' }`，而 `Progress` 根本没有这个值，
@@ -36,7 +36,7 @@ describe('右键菜单的翻译开关（#146）', () => {
     // 这两样到处都是，只注册 `page` 的话最容易点到的地方反而没有菜单（Codex 在 #147 指出）
     const menu = fakeMenu()
     await Promise.resolve()
-    expect(menu.created).toEqual([{ id: MENU_ID, title: MENU_TITLE, contexts: MENU_CONTEXTS, documentUrlPatterns: MENU_PATTERNS }])
+    expect(menu.created).toEqual([{ id: MENU_ID, title: menuTitle(), contexts: MENU_CONTEXTS, documentUrlPatterns: MENU_PATTERNS }])
     expect(MENU_PATTERNS).toEqual(['https://arxiv.org/html/*'])
     for (const ctx of ['link', 'image', 'selection', 'page']) expect(MENU_CONTEXTS).toContain(ctx)
   })

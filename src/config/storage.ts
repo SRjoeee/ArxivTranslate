@@ -58,6 +58,8 @@ export const configItem = storage.defineItem<Config>('local:config', {
       const provider = wasLlm ? services[0]!.id : v11.provider
       return { ...rest, version: 12 as const, provider, services, appearance: migrateStyle(style) }
     },
+    // v13: the interface's own language. `auto` is what every existing reader had in effect
+    13: (v12: Omit<Config, 'version' | 'uiLanguage'> & { version: 12 }) => ({ ...v12, version: 13 as const, uiLanguage: 'auto' }),
   },
 })
 

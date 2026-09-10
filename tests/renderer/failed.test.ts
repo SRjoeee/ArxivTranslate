@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { extract, type TableBlock, type TextBlock } from '@/core/extractor'
 import { ERROR_CLASS, FOR_ATTR, PARTIAL_ATTR, SPLIT_CLASS, STATE_ATTR, T_CLASS, clearTranslation, markPartial, renderFailed, renderPending, renderTable, restore, splitFigures } from '@/core/renderer'
 import { docOf, frag } from './helpers'
+import { S } from '@/ui/strings'
 
 const page = '<p class="ltx_p" id="p1">Text.</p>'
 
@@ -19,7 +20,7 @@ describe('renderFailed', () => {
     expect(host.getAttribute(FOR_ATTR)).toBe('p1')
     expect(host.getAttribute('title')).toBe('auth: bad key')
     const root = host.shadowRoot!
-    expect(root.querySelector('button')?.textContent).toBe('重试')
+    expect(root.querySelector('button')?.textContent).toBe(S.page.retry)
     expect(root.querySelector('.mark')?.getAttribute('title')).toBe('auth: bad key')
   })
 

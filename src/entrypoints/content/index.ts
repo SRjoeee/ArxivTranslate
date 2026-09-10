@@ -19,6 +19,8 @@ import { isAxtMessage, type PageStatus, sendMessage } from '@/shared/messages'
 import type { ImageProgress } from '@/shared/ocr'
 import { createMessageTransport } from '@/shared/transport'
 import { enableDebug } from './debug'
+import { applyLocaleFrom } from '@/ui/apply-locale'
+import { S } from '@/ui/strings'
 
 // 注入 arxiv.org/html/*。页面加载只 extract（不写 DOM），Block[] 留在内存里；
 // popup 发 axt:translate-page 才开始翻译（DESIGN §4.1）。URL 带 #axt-debug 描边、#axt-translate 自动开始，便于调试与自动化验证。
@@ -57,7 +59,8 @@ export default defineContentScript({
     const adoptStyle = (next: Look) => {
       if (!styleFromWatcher) look = next
     }
-    void getConfig().then(config => { savedMode = config.mode; adoptStyle(lookOf(config)) })
+    // The words this script puts on the page follow the interface's language too (UI.md §6)
+    void getConfig().then(config => { savedMode = config.mode; applyLocaleFrom(config.uiLanguage); adoptStyle(lookOf(config)) })
     // 设置页改完外观立刻生效（#47）：只重算注入表与 <html data-axt-style>，一个译文节点都不碰，
     // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
     // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
@@ -92,6 +95,7 @@ export default defineContentScript({
         setImageModes(document, [])
         if (config.image.enabled) startImages(current.session, config, current.context, current.renderPath)
       }
+      applyLocaleFrom(config.uiLanguage)
       const next = lookOf(config)
       if (JSON.stringify(next) === JSON.stringify(look)) return
       look = next
@@ -140,10 +144,10 @@ export default defineContentScript({
      * more requests (Codex on #157). A restart the reader asked for passes no session and always runs
      */
     async function start(requested?: Mode, restart = false, from?: string): Promise<{ started: boolean; reason?: string }> {
-      if (progress.state === 'on' && !restart) return { started: false, reason: '翻译已开启，滚动会继续翻' }
-      if (from !== undefined && getSessionId() !== from) return { started: false, reason: '会话已结束' }
-      if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
-      if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
+      if (progress.state === 'on' && !restart) return { started: false, reason: S.page.alreadyOn }
+      if (from !== undefined && getSessionId() !== from) return { started: false, reason: S.page.sessionOver }
+      if (!paper) return { started: false, reason: S.page.notPaper }
+      if (blocks.length === 0) return { started: false, reason: S.page.nothingToTranslate }
       const tStart = performance.now()
       const config = await getConfig()
       // 术语表随每批发出（§8.2）。**空表不带这个字段**：带上会让所有既有缓存键变一遍，一次性全失效
@@ -156,9 +160,9 @@ export default defineContentScript({
         return { started: false, reason: `扩展后台未响应：${e instanceof Error ? e.message : String(e)}` }
       }
       // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上（§8.5）
-      if (!status.available && !status.fallback) return { started: false, reason: '未配置 API key，请先到设置页填写' }
+      if (!status.available && !status.fallback) return { started: false, reason: S.page.noService }
       // The reader may have restored the page while the two reads above were in flight
-      if (from !== undefined && getSessionId() !== from) return { started: false, reason: '会话已结束' }
+      if (from !== undefined && getSessionId() !== from) return { started: false, reason: S.page.sessionOver }
       console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
       modes?.stop()

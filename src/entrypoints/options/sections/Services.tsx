@@ -1,7 +1,7 @@
 // 翻译服务: the three built-in services as cards, then the reader's own as a list, then the target
 // language and image translation. Choosing is one click and takes effect at once.
 import { useState } from 'react'
-import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_LOCALE_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
+import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_LOCALE_NAME, LANG_CODE_TO_ZH_NAME, type LangCode } from '@/config/languages'
 import { MODE_VALUES } from '@/config/schema'
 import type { Service } from '@/config/services'
 import { supportsTarget } from '@/providers/microsoft'
@@ -9,12 +9,13 @@ import { Button } from '@/ui/Button'
 import { MenuField } from '@/ui/MenuField'
 import { Row } from '@/ui/Field'
 import { Switch } from '@/ui/Switch'
-import { MODE_ORDER, O, S } from '@/ui/strings'
+import { MODE_ORDER, O, S, languageName } from '@/ui/strings'
 import type { OptionsData } from '../data'
 import { HelperSetup } from './HelperSetup'
 import { ServiceDrawer } from './ServiceDrawer'
 
-const MODE_NAMES: Record<(typeof MODE_VALUES)[number], string> = { stack: S.mode.stack, side: S.mode.side, only: S.mode.only }
+/** Read at render, not at import: the pack is chosen after this module loads (ui/strings.ts) */
+const modeName = (mode: (typeof MODE_VALUES)[number]): string => S.mode[mode]
 /** The radio's own look, so the control the reader clicks is the control itself */
 const RADIO = 'size-3.5 shrink-0 appearance-none rounded-full border-[1.5px] border-line checked:border-[5px] checked:border-accent disabled:opacity-40'
 
@@ -91,13 +92,13 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
       <h3 className="mb-2 mt-8 text-[14px] font-bold">{S.rows.language}</h3>
       <MenuField
         label={S.rows.language}
-        value={label(config.targetLanguage)}
+        value={languageName(config.targetLanguage)}
         search
         searchPlaceholder={S.menu.searchLanguages}
         empty={S.menu.noMatch}
         items={LANG_CODES.map(code => ({
           id: code,
-          name: label(code),
+          name: languageName(code),
           keywords: `${LANG_CODE_TO_EN_NAME[code]} ${LANG_CODE_TO_LOCALE_NAME[code]} ${LANG_CODE_TO_ZH_NAME[code]} ${code}`,
           selected: code === config.targetLanguage,
         }))}
@@ -106,13 +107,13 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
 
       <h3 className="mb-2 mt-8 text-[14px] font-bold">{S.rows.images}</h3>
       <div className="rounded-card border border-line bg-card px-3.5">
-        <Row label={S.rows.images} hint="译文叠在图上，鼠标悬停查看原文">
+        <Row label={S.rows.images} hint={O.services.imagesHint}>
           {/* A reader who had unticked every mode migrates with an empty list; switching image
               translation back on would show as enabled while no mode can run it (Codex on #157) */}
           <Switch checked={config.image.enabled} onChange={on => void patch(latest => ({ ...latest, image: { enabled: on, modes: on && latest.image.modes.length === 0 ? [...MODE_VALUES] : latest.image.modes } }))} label={S.rows.images} />
         </Row>
         <div className="border-t border-line py-3 text-[12px] leading-relaxed text-fg-2">
-          {helper === null || platform === null ? '正在检测识别助手…'
+          {helper === null || platform === null ? O.services.detecting
             : helper.available ? `${S.setup.done} ${helper.version ?? ''}`
             // The installer exits at once on anything but macOS, so offering it elsewhere would be
             // an actionable-looking path that cannot work (Codex on #157)
@@ -120,7 +121,7 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
             : <HelperSetup extensionId={extensionId} onStatus={setHelper} />}
         </div>
         <fieldset className="border-0 border-t border-line p-0 py-3">
-          <legend className="p-0 text-[12px] font-semibold text-fg-2">在这些模式下显示图片译文</legend>
+          <legend className="p-0 text-[12px] font-semibold text-fg-2">{O.services.imageModes}</legend>
           <span className="mt-2 flex gap-4">
             {MODE_ORDER.map(mode => (
               <label key={mode} className="flex cursor-pointer items-center gap-1.5 text-[12px]">
@@ -133,11 +134,11 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
                   // config it still holds and `e.target.checked` is the old value again
                   onChange={e => { const on = e.target.checked; void patch(latest => ({ ...latest, image: { ...latest.image, modes: MODE_VALUES.filter(m => (m === mode ? on : latest.image.modes.includes(m))) } })) }}
                 />
-                {MODE_NAMES[mode]}
+                {modeName(mode)}
               </label>
             ))}
           </span>
-          <span className="mt-2 block text-[11px] text-fg-2">只影响显示：切到没勾的模式时叠加层隐藏，切回来再显示，不重新识别</span>
+          <span className="mt-2 block text-[11px] text-fg-2">{O.services.imageModesHint}</span>
         </fieldset>
       </div>
 

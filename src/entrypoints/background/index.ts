@@ -10,6 +10,7 @@ import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { installContextMenu, installToggleCommand } from './context-menu'
 import { handlePing } from '@/shared/ping'
+import { applyLocale } from '@/ui/apply-locale'
 
 // background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
 // 异步响应必须用 sendResponse + return true。
@@ -97,13 +98,15 @@ export default defineBackground(() => {
       if (n > 0) console.debug(`[axt] 标签页 ${tabId} ${why}，撤掉 ${n} 个排队 / 在飞的请求`)
     })
   }
-  // 右键菜单（issue #146）：第二个入口，动作与 popup 走同一条消息
-  installContextMenu({
+  // 右键菜单（issue #146）：第二个入口，动作与 popup 走同一条消息。
+  // The title is in the reader's language, so the pack is read first (UI.md §6); `installContextMenu`
+  // clears the menu before creating it, which is also what makes a later language change take
+  void applyLocale().then(() => installContextMenu({
     create: options => browser.contextMenus.create(options as Parameters<typeof browser.contextMenus.create>[0]),
     removeAll: () => browser.contextMenus.removeAll(),
     onClicked: handler => browser.contextMenus.onClicked.addListener(handler),
     send: (tabId, message) => browser.tabs.sendMessage(tabId, message),
-  })
+  }))
   // The keyboard shortcut (UI.md S-P-50): same toggle, third entry
   installToggleCommand({
     onCommand: handler => browser.commands.onCommand.addListener(handler),

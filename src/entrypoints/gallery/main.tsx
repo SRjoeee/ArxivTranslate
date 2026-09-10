@@ -7,6 +7,7 @@ import type { PopupActions } from '@/entrypoints/popup/data'
 import { POPUP_FIXTURES } from '@/entrypoints/popup/fixtures'
 import { PopupView } from '@/entrypoints/popup/PopupView'
 import { derivePopupView } from '@/entrypoints/popup/view-model'
+import { applyLocale } from '@/ui/apply-locale'
 
 const log = (name: string) => (...args: unknown[]) => console.log(`[gallery] ${name}`, ...args)
 const actions: PopupActions = {
@@ -15,6 +16,9 @@ const actions: PopupActions = {
   setHighlight: log('setHighlight'), setImages: log('setImages'), downloadPack: log('downloadPack'),
   copyInstallCommand: log('copyInstallCommand'), openGuide: log('openGuide'), openOptions: log('openOptions'),
 }
+
+// The gallery reviews the copy, so it reads the same pack the popup would
+await applyLocale()
 
 function Gallery() {
   return (

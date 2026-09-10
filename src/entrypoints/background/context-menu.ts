@@ -5,11 +5,12 @@
 // 一切换标签页就说错了。沉浸式翻译的那一条也是静态的。
 
 import type { PageStatus } from '@/shared/messages'
+import { S } from '@/ui/strings'
 
 /** 菜单项 id；重建时按它删旧的，worker 每次唤醒都会重新跑一遍 create */
 export const MENU_ID = 'axt-toggle'
 /** The same words as the popup's primary button (S-P-50 / S-P-51); also the command's description */
-export const MENU_TITLE = '翻译本页 / 显示原文'
+export const menuTitle = (): string => S.page.menuToggle
 /** The keyboard command's id, as declared in the manifest (`commands` in wxt.config.ts) */
 export const COMMAND_ID = 'axt-toggle'
 /** 只在 arXiv 的 HTML 全文页上出现——别的页面上它什么也做不了 */
@@ -78,7 +79,7 @@ export async function toggleTranslation(send: MenuDeps['send'], tabId: number): 
 /** 装上菜单项与它的点击处理。`removeAll` 在前：worker 每次唤醒都会再跑一遍，不删会撞 id */
 export function installContextMenu(deps: MenuDeps): void {
   void Promise.resolve(deps.removeAll()).then(() => {
-    deps.create({ id: MENU_ID, title: MENU_TITLE, contexts: MENU_CONTEXTS, documentUrlPatterns: MENU_PATTERNS })
+    deps.create({ id: MENU_ID, title: menuTitle(), contexts: MENU_CONTEXTS, documentUrlPatterns: MENU_PATTERNS })
   })
   deps.onClicked((info, tab) => {
     if (info.menuItemId !== MENU_ID || tab?.id === undefined) return

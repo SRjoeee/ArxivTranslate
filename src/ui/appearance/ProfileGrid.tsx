@@ -3,9 +3,11 @@
 // toolbar, so the grid itself stays a row of choices.
 import type { ReactNode } from 'react'
 import { Button } from '@/ui/Button'
-import { O } from '@/ui/strings'
+import { O, profileName } from '@/ui/strings'
 
-export function ProfileGrid<T extends { id: string; name: string }>({ title, hint, items, activeId, onChoose, onEdit, onAdd, onReset, renderTile }: {
+export function ProfileGrid<T extends { id: string; name: string }>({ kind, title, hint, items, activeId, onChoose, onEdit, onAdd, onReset, renderTile }: {
+  /** Which list this is: the names of the ones that ship with the extension come from the pack */
+  kind: 'styles' | 'highlights'
   title: string
   hint?: string
   items: readonly T[]
@@ -33,12 +35,12 @@ export function ProfileGrid<T extends { id: string; name: string }>({ title, hin
           const active = item.id === activeId
           return (
             <div key={item.id} className={`relative rounded-card border bg-card p-3 ${active ? 'border-accent' : 'border-line'}`}>
-              <button type="button" aria-pressed={active} aria-label={item.name} onClick={() => onChoose(item.id)} className="block w-full cursor-pointer text-left">
+              <button type="button" aria-pressed={active} aria-label={profileName(item, kind)} onClick={() => onChoose(item.id)} className="block w-full cursor-pointer text-left">
                 <span className="block h-8 overflow-hidden">{renderTile(item)}</span>
-                <span className="mt-1.5 block truncate text-[12px] font-semibold">{item.name}</span>
+                <span className="mt-1.5 block truncate text-[12px] font-semibold">{profileName(item, kind)}</span>
               </button>
               {active && (
-                <button type="button" aria-label={`${O.reading.editTitle}：${item.name}`} onClick={() => onEdit(item.id)} className="absolute right-2 top-2 cursor-pointer text-fg-2 hover:text-fg">
+                <button type="button" aria-label={`${O.reading.editTitle}：${profileName(item, kind)}`} onClick={() => onEdit(item.id)} className="absolute right-2 top-2 cursor-pointer text-fg-2 hover:text-fg">
                   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
                 </button>
               )}

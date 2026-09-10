@@ -40,7 +40,7 @@ export function Prompts({ data }: { data: OptionsData }) {
         aria-label={O.prompts.glossary}
         value={text}
         rows={6}
-        placeholder={'token, 词元\nembedding, 嵌入'}
+        placeholder={O.prompts.glossaryPlaceholder}
         onChange={e => {
           setText(e.target.value)
           // Only a table that parses **and** fits the schema is written; the rest stays on screen

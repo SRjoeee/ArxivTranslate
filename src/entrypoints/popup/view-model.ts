@@ -8,7 +8,7 @@
 // open at any time, a change while the page is on restarts it in place (data.ts), and only a
 // choice that cannot run leaves the page behind the settings.
 import { activeStyle } from '@/config/appearance'
-import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_LOCALE_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
+import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_LOCALE_NAME, LANG_CODE_TO_ZH_NAME, type LangCode } from '@/config/languages'
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { type Service, chosenService, isBuiltInService, isLlmChosen } from '@/config/services'
 import type { Mode } from '@/core/renderer'
@@ -20,7 +20,7 @@ import type { HelperStatus } from '@/shared/ocr'
 import type { PackState } from '@/shared/pack'
 import type { MenuItem } from '@/ui/Menu'
 import { styleTile } from '@/ui/appearance/tiles'
-import { HELPER_GUIDE_URL, PREVIEW_TARGET, S, helperInstallCommand, parseFatal, reasonText, serviceName } from '@/ui/strings'
+import { HELPER_GUIDE_URL, PREVIEW_TARGET, S, helperInstallCommand, languageName, parseFatal, profileName, reasonText, serviceName } from '@/ui/strings'
 
 export type { PackState }
 /** The last row of the service menu: not a service, it opens the settings page */
@@ -153,11 +153,11 @@ export function derivePopupView(input: PopupInput): PopupView {
   const service: Row = demoted && provider
     ? { value: named(provider.engine.id), replaced: named(demoted.id) }
     : { value: named(config.provider) }
-  const language: Row = { value: label(config.targetLanguage) }
+  const language: Row = { value: languageName(config.targetLanguage) }
   // The prompt decides how an LLM translates; the free services do not read it
   const prompt: Row | null = isLlmChosen(config) ? { value: promptName(config) } : null
   // How the translation looks. The page applies a change straight away, so this needs no restart
-  const style: Row = { value: activeStyle(config.appearance).name }
+  const style: Row = { value: profileName(activeStyle(config.appearance)) }
 
   const note: Note | null = paused ? { text: S.note.paused(reasonText(parseFatal(progress.fatal ?? '').kind)), settings: true }
     : demoted && provider ? { text: S.note.replaced(named(demoted.id), reasonText(demoted.kind), named(provider.engine.id)), settings: true }
@@ -219,7 +219,7 @@ function menuOf(kind: MenuKind, config: Config, pack: PackState | null): NonNull
         search: true,
         items: LANG_CODES.map(code => ({
           id: code,
-          name: label(code),
+          name: languageName(code),
           keywords: `${LANG_CODE_TO_EN_NAME[code]} ${LANG_CODE_TO_LOCALE_NAME[code]} ${LANG_CODE_TO_ZH_NAME[code]} ${code}`,
           selected: code === config.targetLanguage,
         })),
@@ -242,7 +242,7 @@ function menuOf(kind: MenuKind, config: Config, pack: PackState | null): NonNull
         search: false,
         items: config.appearance.styles.map(p => ({
           id: p.id,
-          name: p.name,
+          name: profileName(p),
           hint: PREVIEW_TARGET,
           preview: styleTile(p),
           selected: p.id === config.appearance.activeStyle,

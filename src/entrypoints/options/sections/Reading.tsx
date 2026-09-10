@@ -33,12 +33,12 @@ export function Reading({ data }: { data: OptionsData }) {
   const editingBand = editing?.list === 'highlight' ? a.highlights.find(h => h.id === editing.id) : undefined
 
   const addStyle = () => {
-    const next: StyleProfile = { ...BUILT_IN_STYLES[0]!, id: newProfileId('style'), name: '新配置' }
+    const next: StyleProfile = { ...BUILT_IN_STYLES[0]!, id: newProfileId('style'), name: O.reading.newProfile }
     setAppearance(c => ({ ...c, styles: [...c.styles, next], activeStyle: next.id }))
     setEditing({ list: 'style', id: next.id })
   }
   const addBand = () => {
-    const next: HighlightProfile = { ...BUILT_IN_HIGHLIGHTS[0]!, id: newProfileId('hl'), name: '新配置' }
+    const next: HighlightProfile = { ...BUILT_IN_HIGHLIGHTS[0]!, id: newProfileId('hl'), name: O.reading.newProfile }
     setAppearance(c => ({ ...c, highlights: [...c.highlights, next], activeHighlight: next.id }))
     setEditing({ list: 'highlight', id: next.id })
   }
@@ -61,6 +61,7 @@ export function Reading({ data }: { data: OptionsData }) {
   return (
     <>
       <ProfileGrid
+        kind="styles"
         title={O.reading.styles}
         hint={O.reading.stylesHint}
         items={a.styles}
@@ -78,6 +79,7 @@ export function Reading({ data }: { data: OptionsData }) {
         </Row>
       </div>
       <ProfileGrid
+        kind="highlights"
         title={O.reading.highlights}
         hint={O.reading.highlightsHint}
         items={a.highlights}

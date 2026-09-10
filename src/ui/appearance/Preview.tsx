@@ -31,7 +31,7 @@ export function Preview({ style, highlight, band = false, height = 96 }: { style
   return (
     <div className="mb-4">
       <div className="mb-1 text-[11px] font-semibold text-fg-2">{O.reading.preview}</div>
-      <iframe title="预览" srcDoc={srcDoc} className="w-full rounded-control border border-line bg-white" style={{ height }} />
+      <iframe title={O.reading.preview} srcDoc={srcDoc} className="w-full rounded-control border border-line bg-white" style={{ height }} />
     </div>
   )
 }

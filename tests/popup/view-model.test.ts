@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { setLocale } from '@/ui/strings'
 import { POPUP_FIXTURES } from '@/entrypoints/popup/fixtures'
 import { derivePopupView, runnable } from '@/entrypoints/popup/view-model'
 
@@ -6,6 +7,9 @@ const input = (id: string) => POPUP_FIXTURES.find(f => f.id === id)!.input
 const view = (id: string) => derivePopupView(input(id))
 /** Every string a reader could see in a view (values only; keys are code) */
 const words = (v: unknown): string => typeof v === 'string' ? v : v && typeof v === 'object' ? Object.values(v).map(words).join(' ') : ''
+
+// The copy tables of UI.md §3 are the Chinese ones; this file checks that pack
+setLocale('zh-CN')
 
 describe('derivePopupView (UI.md §4)', () => {
   it('derives every fixture, with no developer words and no state pill in the output', () => {

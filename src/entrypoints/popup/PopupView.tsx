@@ -14,13 +14,16 @@ import { Switch } from '@/ui/Switch'
 import type { PopupActions } from './data'
 import type { MenuKind, PopupView as View } from './view-model'
 
-const MODE_PARTS: Record<Mode, { label: string; title: string; icon: ReactNode }> = {
-  side: { label: S.mode.side, title: S.mode.sideTitle, icon: <SideIcon /> },
-  stack: { label: S.mode.stack, title: S.mode.stackTitle, icon: <StackIcon /> },
-  only: { label: S.mode.only, title: S.mode.onlyTitle, icon: <OnlyIcon /> },
-}
+/** Only the marks are constant; the words come from the pack in use, which is chosen after this
+ *  module is imported (see the note at the top of ui/strings.ts) */
+const MODE_ICONS: Record<Mode, ReactNode> = { side: <SideIcon />, stack: <StackIcon />, only: <OnlyIcon /> }
 // The bar follows MODE_ORDER, the one place the order is decided (UI.md S-P-70)
-const MODES = MODE_ORDER.map(value => ({ value, ...MODE_PARTS[value] }))
+const modes = () => MODE_ORDER.map(value => ({
+  value,
+  label: S.mode[value],
+  title: S.mode[`${value}Title` as const],
+  icon: MODE_ICONS[value],
+}))
 
 const CARD = 'rounded-card bg-card shadow-[0_1px_2px_rgba(30,30,36,0.06)]'
 
@@ -86,7 +89,7 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
           </Button>
           {view.secondary && <Button variant="text" className="self-center" onClick={actions[view.secondary.action]}>{view.secondary.label}</Button>}
 
-          <Segmented value={view.mode.value} options={MODES} onChange={actions.chooseMode} />
+          <Segmented value={view.mode.value} options={modes()} onChange={actions.chooseMode} />
           {view.mode.note && <p className="px-1 text-[11px] text-fg-2">{view.mode.note}</p>}
 
           {/* The three reading choices on one row: two switches and the way in to the styles. The

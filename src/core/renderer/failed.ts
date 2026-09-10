@@ -5,6 +5,7 @@
 import type { Block } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
 import { FOR_ATTR, clearTranslation, setState } from './index'
+import { S } from '@/ui/strings'
 
 export const ERROR_CLASS = 'axt-error'
 
@@ -46,7 +47,7 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
   style.textContent = STYLE
   const button = doc.createElement('button')
   button.type = 'button'
-  button.textContent = '重试'
+  button.textContent = S.page.retry
   button.addEventListener('click', () => {
     button.disabled = true
     retry()
