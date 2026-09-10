@@ -169,7 +169,7 @@ describe('createLocalTransport：状态', () => {
     expect((await t.status()).engine).toEqual({
       id: 'google-web',
       displayName: 'Google 网页翻译（免费）',
-      demoted: { displayName: 'openai-compat', kind: 'auth', message: 'bad key' },
+      demoted: { id: 'openai-compat', displayName: 'openai-compat', kind: 'auth', message: 'bad key' },
     })
   })
 })

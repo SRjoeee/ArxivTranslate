@@ -14,7 +14,8 @@ import type { ProviderErrorKind, TranslationProvider } from './types'
 export interface EngineStatus {
   id: string
   displayName: string
-  demoted?: { displayName: string; kind: ProviderErrorKind; message: string }
+  /** The engine that was put aside for this one; `id` lets the popup name it the way it names services (UI.md §2) */
+  demoted?: { id: string; displayName: string; kind: ProviderErrorKind; message: string }
 }
 
 export interface ProviderStatus {
@@ -114,7 +115,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
         id: active.id,
         displayName: active.displayName,
         ...(live.activeId !== live.configuredId && live.demoted
-          ? { demoted: { displayName: live.demoted.displayName, kind: live.demoted.kind, message: live.demoted.message } }
+          ? { demoted: { id: live.demoted.id, displayName: live.demoted.displayName, kind: live.demoted.kind, message: live.demoted.message } }
           : {}),
       },
     }

@@ -39,7 +39,7 @@ export const POPUP_FIXTURES: { id: string; name: string; when: string; input: Po
   { id: 'P2', name: '服务列表展开', when: 'P1 下点服务行', input: { ...base, listOpen: true, pack: 'downloadable' } },
   { id: 'P3', name: '翻译中', when: 'on ∧ failed = 0', input: { ...base, page: page({ state: 'on', requested: 31, done: 24, inFlight: 3 }, { preference: 'side', mode: 'side' }) } },
   { id: 'P4', name: '翻译中，有失败', when: 'on ∧ failed > 0 ∧ !fatal', input: { ...base, page: page({ state: 'on', requested: 31, done: 24, failed: 2 }, { images: { total: 6, requested: 3, done: 2, failed: 1 } }) } },
-  { id: 'P5', name: '已改用其他服务', when: 'engine.demoted', input: { ...base, page: page({ state: 'on', requested: 20, done: 11 }), provider: provider({ engine: { id: 'google-web', displayName: 'Google', demoted: { displayName: 'DeepSeek', kind: 'auth', message: 'User not found.' } } }) } },
+  { id: 'P5', name: '已改用其他服务', when: 'engine.demoted', input: { ...base, page: page({ state: 'on', requested: 20, done: 11 }), provider: provider({ engine: { id: 'google-web', displayName: 'Google', demoted: { id: 'openai-compat', displayName: 'OpenAI 兼容端点', kind: 'auth', message: 'User not found.' } } }) } },
   { id: 'P6', name: '将改用（首选不可用有兜底）', when: 'idle ∧ !available ∧ fallback', input: { ...base, provider: provider({ available: false, fallback: { id: 'google-web', displayName: 'Google' } }) } },
   { id: 'P7', name: '需要设置（不可用无兜底）', when: '!available ∧ !fallback', input: { ...base, provider: provider({ available: false }) } },
   { id: 'P8', name: '已暂停', when: 'stopped ∧ fatal', input: { ...base, page: page({ state: 'stopped', requested: 8, done: 0, fatal: 'auth: User not found.' }) } },

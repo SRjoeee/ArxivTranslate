@@ -84,9 +84,12 @@ export function derivePopupView(input: PopupInput): PopupView {
   const downloading = providerId === 'chrome-builtin' && pack === 'downloading'
   const loading = provider === null || config === null
 
-  // The service row: while replaced, the service actually in use, with the preferred one struck
+  // The service row: while replaced, the service actually in use, with the one put aside struck.
+  // Both named the way the list names them (UI.md §2): the AI service by its model, never by the
+  // engine's own display name
+  const replaced = demoted ? serviceName(demoted.id, model) : undefined
   const service = demoted && provider
-    ? { name: serviceName(provider.engine.id, model), replaced: demoted.displayName }
+    ? { name: serviceName(provider.engine.id, model), replaced }
     : { name: serviceName(providerId, model) }
 
   // The pill carries every state in one place, and never a count
@@ -103,7 +106,7 @@ export function derivePopupView(input: PopupInput): PopupView {
   // The note inside the card: one at a time, by priority
   const note: Note | null = configFallback !== null ? { text: S.note.configFallback, tone: 'alert', link: S.note.linkView }
     : paused ? { text: S.note.paused(reasonText(parseFatal(progress.fatal ?? '').kind)), tone: 'alert' }
-    : demoted && provider ? { text: S.note.demoted(demoted.displayName, reasonText(demoted.kind), serviceName(provider.engine.id, model)), tone: 'alert', link: S.note.linkFix }
+    : demoted && provider && replaced ? { text: S.note.demoted(replaced, reasonText(demoted.kind), serviceName(provider.engine.id, model)), tone: 'alert', link: S.note.linkFix }
     : page.images?.fatal ? { text: S.note.imagesPaused(reasonText(parseFatal(page.images.fatal).kind)), tone: 'alert' }
     : !on && !loading && !available && fallback ? { text: S.note.willFallback(serviceName(fallback.id)), tone: 'warn', link: S.note.linkFill }
     : !on && !loading && !available && !downloading ? { text: providerId === 'chrome-builtin' ? S.note.needsPack : S.note.needsKey, tone: 'warn', link: S.note.linkFill }

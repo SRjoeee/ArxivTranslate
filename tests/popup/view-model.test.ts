@@ -47,9 +47,11 @@ describe('derivePopupView (UI.md §4)', () => {
   it('P5 replaced: new name, old name struck, note with the reason and a fix link', () => {
     const v = view('P5')
     expect(v.service.name).toBe('Google 翻译')
-    expect(v.service.replaced).toBe('DeepSeek')
+    // The one put aside is named like the list names it: the AI service by its model, not the
+    // engine's own "OpenAI 兼容端点"
+    expect(v.service.replaced).toBe('deepseek-v4-flash')
     expect(v.service.pill).toMatchObject({ text: '已改用', tone: 'alert' })
-    expect(v.note).toEqual({ text: 'DeepSeek：API Key 无效或已过期。后面的段落改用 Google 翻译，专业术语可能不准', tone: 'alert', link: '去修' })
+    expect(v.note).toEqual({ text: 'deepseek-v4-flash：API Key 无效或已过期。后面的段落改用 Google 翻译，专业术语可能不准', tone: 'alert', link: '去修' })
   })
   it('P6 will fall back: amber pill, button enabled', () => {
     const v = view('P6')
