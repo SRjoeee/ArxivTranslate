@@ -74,7 +74,7 @@ export function ServiceDrawer({ service, patch, onClose }: {
       const value = parsed.data
       // 先校验再申请权限：字段有错时不该先把 host 权限拿到手（Codex 在 #6 指出）
       granted = await ensureHostPermission(value.baseURL)
-      const saved = await patch(latest => {
+      await patch(latest => {
         const known = latest.services.some(s => s.id === saving)
         const services = known
           ? latest.services.map(s => (s.id === saving ? value : s))
@@ -123,15 +123,15 @@ export function ServiceDrawer({ service, patch, onClose }: {
       // A deleted service cannot stay chosen; the shipped free one takes over
       provider: latest.provider === gone ? 'microsoft' : latest.provider,
     }))
-    // Only deletion gives an origin back, and only after `dropAndRebindAll` above has taken every
-    // session off this service: an **edit** must keep it, because a page pinned to the old chain
-    // still fetches that endpoint and would fail mid-paper without it (Codex on #157)
-    if (savedURL) await releaseHostPermission(savedURL, saved.services.map(s => s.baseURL))
     // A page translating in another tab is pinned to the chain it started on, so a deleted service
     // would go on spending its key whenever the reader scrolls (Codex on #157). This is the one
     // action that moves every session: the service has to stop serving everywhere, which outweighs
     // moving an unrelated tab onto another chain
     await sendMessage({ type: 'axt:engine-ready', id: gone, rebindAll: true }).catch(() => undefined)
+    // Only deletion gives an origin back, and only **after** the rebind above has taken every
+    // session off this service: releasing it first would break the requests still in flight, and an
+    // **edit** must keep the origin, because a page pinned to the old chain still fetches it
+    if (savedURL) await releaseHostPermission(savedURL, saved.services.map(s => s.baseURL))
     onClose()
   }
 

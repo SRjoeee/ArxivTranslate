@@ -4,9 +4,10 @@
 // - createMessageTransport（src/shared/transport.ts）：在 content / options 里把每个方法变成一条消息。
 // 两个实现分文件是为了包体积：本文件会拉进三个 provider 与 AI SDK，content script 每打开一篇论文都要解析它。
 import type { Config } from '@/config/schema'
-import { chosenService } from '@/config/services'
+import { chosenService, serviceOf } from '@/config/services'
 import type { RenderPath } from '@/cache/key'
 import { buildChain } from '.'
+import { createOpenAICompatProvider } from './openai-compat'
 import { createFallbackService } from './fallback'
 import { createTranslateService, type CachePort, type CancelOptions, type TranslateCall, type TranslateMessageResponse, type TranslateServiceDeps } from './translate-service'
 import type { ProviderErrorKind, TranslationProvider } from './types'
@@ -100,13 +101,27 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
   const service = createFallbackService(steps)
 
   /**
+   * A service of the reader's that this chain is not built around: 连接 has to answer for the
+   * endpoint named in the drawer, and editing a service no longer makes it the chosen one, so the
+   * one being tested is usually **not** on the chain (Codex on #157). It gets a provider of its own,
+   * with no cache behind it — the question is whether the endpoint answers, and a cached sample
+   * would report success for one that no longer does
+   */
+  const offChain = (id: string) => {
+    const own = serviceOf(config, id)
+    if (!own) return undefined
+    const engine = createOpenAICompatProvider(own, { prompts: config.prompts })
+    return { provider: engine, service: createTranslateService({ getProvider: async () => engine, getModel: async () => own.model }) }
+  }
+
+  /**
    * 指名引擎的调用**不走降级链**：设置页的「测试连接」问的是「我配的这个端点通不通」，
    * 链上有免费兜底就把它显示成成功，等于把 issue #42 抱怨的「两条路径不一致」换个方向再犯一次——
    * 用户会以为端点没问题，实际整页都在用 Google 翻
    */
   const translate = (call: TranslateCall): Promise<TranslateMessageResponse> => {
     if (call.providerId === undefined) return service.translate(call)
-    const step = steps.find(s => s.provider.id === call.providerId)
+    const step = steps.find(s => s.provider.id === call.providerId) ?? offChain(call.providerId)
     if (!step) return Promise.resolve({ ok: false, error: { kind: 'unknown', message: `引擎 ${call.providerId} 不在当前链上` } })
     return step.service.translate(call)
   }

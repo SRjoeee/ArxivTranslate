@@ -100,6 +100,17 @@ describe('createLocalTransport：翻译', () => {
     expect(await t.translate({ request: req, providerId: SVC.id })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
   })
 
+  it('指名一个自己配的、不在链上的服务：直接问那个端点，不能报「不在当前链上」', async () => {
+    // 编辑一个没被选中的服务后点「连接」就是这个形状：链是围着选中的那个建的，被测的这个不在链上。
+    // key 清空后端点报的是 no-key，正是设置页要显示的原因（Codex 在 #157 指出）
+    const spare = { ...SVC, id: 'svc-99999999', apiKey: '' }
+    const t = await createLocalTransport(
+      { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC, spare] },
+      { buildChain: async () => ({ chain: [{ ...mockProvider(async r => ({ segments: r.segments, provider: 'mock' })), id: SVC.id }], renderPath: 'tags' as const }) },
+    )
+    expect(await t.translate({ request: req, providerId: spare.id })).toEqual({ ok: false, error: { kind: 'no-key', message: '未配置 API key' } })
+  })
+
   it('指名一个不在链上的引擎：如实说，不悄悄换成别的', async () => {
     const t = await withChain([mockProvider(async r => ({ segments: r.segments, provider: 'mock' }))])
     expect(await t.translate({ request: req, providerId: 'chrome-builtin' })).toEqual({ ok: false, error: { kind: 'unknown', message: '引擎 chrome-builtin 不在当前链上' } })

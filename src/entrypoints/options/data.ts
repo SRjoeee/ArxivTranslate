@@ -40,6 +40,19 @@ export function useOptionsData(): OptionsData {
   const [cacheCleared, setCacheCleared] = useState(false)
   /** Every config write queues behind the previous one; see `patch` */
   const writes = useRef<Promise<Config>>(Promise.resolve(DEFAULT_CONFIG))
+  /** The language the newest pack lookup was for; see `checkPack` */
+  const wanted = useRef<string | null>(null)
+
+  /**
+   * Only the answer for the language asked for **last** is kept: two selections whose lookups
+   * overlap can resolve out of order, and the Chrome card would then show another language's
+   * availability (Codex on #157)
+   */
+  const checkPack = useCallback(async (target: string) => {
+    wanted.current = target
+    const state = await packState(target)
+    if (wanted.current === target) setPack(state)
+  }, [])
 
   const loadCache = useCallback(async () => {
     try {
@@ -57,7 +70,7 @@ export function useOptionsData(): OptionsData {
     getConfig().then(c => {
       setLocal(c)
       setFallbackReason(configFallbackReason())
-      void packState(c.targetLanguage).then(setPack)
+      void checkPack(c.targetLanguage)
     })
     sendMessage({ type: 'axt:helper-status' }).then(setHelper).catch(() => setHelper({ available: false, reason: '扩展后台未响应' }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
@@ -70,7 +83,7 @@ export function useOptionsData(): OptionsData {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [loadCache])
+  }, [loadCache, checkPack])
 
   /**
    * **Serialized**: each call reads storage, applies one change and writes it back, so two controls
@@ -85,13 +98,14 @@ export function useOptionsData(): OptionsData {
       const next = fn(await getConfig())
       await setConfig(next)
       setLocal(next)
+      // A valid write **is** the repair: leaving the warning up would go on telling the reader that
+      // the key and service they just fixed are not in effect (Codex on #157)
+      setFallbackReason(null)
       return next
     }
     writes.current = writes.current.then(run, run)
     return writes.current
   }, [])
-
-  const checkPack = useCallback(async (target: string) => { setPack(await packState(target)) }, [])
 
   /** From the click itself (shared/pack.ts says why); the row shows an indeterminate state meanwhile */
   const fetchPack = useCallback(async () => {
