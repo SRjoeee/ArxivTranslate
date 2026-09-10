@@ -18,7 +18,7 @@ const MODE_NAMES: Record<(typeof MODE_VALUES)[number], string> = { stack: S.mode
 const RADIO = 'size-3.5 shrink-0 appearance-none rounded-full border-[1.5px] border-line checked:border-[5px] checked:border-accent disabled:opacity-40'
 
 export function Services({ data, extensionId }: { data: OptionsData; extensionId: string }) {
-  const { config, patch, pack, fetchPack, helper } = data
+  const { config, patch, pack, checkPack, fetchPack, helper, platform } = data
   /** null = closed, 'new' = the add form, otherwise the service being edited */
   const [editing, setEditing] = useState<'new' | string | null>(null)
   const [copied, setCopied] = useState(false)
@@ -101,17 +101,22 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
           keywords: `${LANG_CODE_TO_EN_NAME[code]} ${LANG_CODE_TO_LOCALE_NAME[code]} ${LANG_CODE_TO_ZH_NAME[code]} ${code}`,
           selected: code === config.targetLanguage,
         }))}
-        onSelect={id => void patch(latest => ({ ...latest, targetLanguage: id as LangCode }))}
+        onSelect={id => void patch(latest => ({ ...latest, targetLanguage: id as LangCode })).then(() => checkPack(id))}
       />
 
       <h3 className="mb-2 mt-8 text-[14px] font-bold">{S.rows.images}</h3>
       <div className="rounded-card border border-line bg-card px-3.5">
         <Row label={S.rows.images} hint="译文叠在图上，鼠标悬停查看原文">
-          <Switch checked={config.image.enabled} onChange={on => void patch(latest => ({ ...latest, image: { ...latest.image, enabled: on } }))} label={S.rows.images} />
+          {/* A reader who had unticked every mode migrates with an empty list; switching image
+              translation back on would show as enabled while no mode can run it (Codex on #157) */}
+          <Switch checked={config.image.enabled} onChange={on => void patch(latest => ({ ...latest, image: { enabled: on, modes: on && latest.image.modes.length === 0 ? [...MODE_VALUES] : latest.image.modes } }))} label={S.rows.images} />
         </Row>
         <div className="border-t border-line py-3 text-[12px] leading-relaxed text-fg-2">
-          {helper === null ? '正在检测识别助手…'
+          {helper === null || platform === null ? '正在检测识别助手…'
             : helper.available ? `识别助手已就绪 ${helper.version ?? ''}`
+            // The installer exits at once on anything but macOS, so offering it elsewhere would be
+            // an actionable-looking path that cannot work (Codex on #157)
+            : platform !== 'mac' ? S.helper.macOnly
             : (
               <span className="flex flex-col gap-2">
                 <span>{S.helper.install}</span>

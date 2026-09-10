@@ -5,15 +5,17 @@
 // A settings change while the page is on restarts it in place (axt:translate-page { restart })
 // once the background's chain reflects the save; a choice that cannot run only saves, and the view
 // shows the page as behind the settings.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { browser } from 'wxt/browser'
-import type { Config } from '@/config/schema'
+import { type Config, DEFAULT_CONFIG, MODE_VALUES } from '@/config/schema'
 import { getConfig, setConfig } from '@/config/storage'
 import type { Mode } from '@/core/renderer'
 import { COMMAND_ID } from '@/entrypoints/background/context-menu'
 import type { ProviderStatus } from '@/providers/transport'
+import { isLlmChosen } from '@/config/services'
 import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
+import { awaitChain } from '@/shared/chain'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
 import { HELPER_GUIDE_URL, helperInstallCommand } from '@/ui/strings'
 import { MANAGE_SERVICES, type MenuKind, type PopupInput, runnable } from './view-model'
@@ -54,6 +56,8 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
   const [shortcut, setShortcut] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  /** Every config write queues behind the previous one; see `patchConfig` */
+  const writes = useRef<Promise<Config>>(Promise.resolve(DEFAULT_CONFIG))
 
   const refresh = useCallback(() => {
     sendToActiveTab({ type: 'axt:page-status' }).then(setPage).catch(() => setPage(null))
@@ -125,30 +129,20 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
   /**
    * Change one field of the config on top of what storage holds **now**. The mounted snapshot is
    * stale as soon as the content script writes the mode or the options page saves: writing the
-   * whole snapshot back would revert those (Codex on #39)
+   * whole snapshot back would revert those (Codex on #39).
+   *
+   * **Serialized**: two controls changed before the first write lands would otherwise both read the
+   * same snapshot and the later write would drop the earlier change (Codex on #157)
    */
-  const patchConfig = async (patch: (latest: Config) => Config): Promise<Config> => {
-    const next = patch(await getConfig())
-    await setConfig(next)
-    setLocalConfig(next)
-    loadProvider()
-    return next
-  }
-
-  /**
-   * The background rebuilds its chain from a storage event, which races with the messages the
-   * popup sends right after saving. Wait until the chain reports the saved values before
-   * restarting the page on them (a second at most; then restart anyway)
-   */
-  const awaitChain = async (settled: (s: ProviderStatus) => boolean) => {
-    for (let i = 0; i < 10; i++) {
-      const s = await sendMessage({ type: 'axt:provider-status' }).catch(() => null)
-      if (s && settled(s)) {
-        setProvider(s)
-        return
-      }
-      await new Promise(r => setTimeout(r, 100))
-    }
+  const patchConfig = (patch: (latest: Config) => Config): Promise<Config> => {
+    writes.current = writes.current.then(async () => {
+      const next = patch(await getConfig())
+      await setConfig(next)
+      setLocalConfig(next)
+      loadProvider()
+      return next
+    })
+    return writes.current
   }
 
   /** After a settings change: restart the page on the new settings if it is on and they can run */
@@ -156,7 +150,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
     const status = await sendToActiveTab({ type: 'axt:page-status' }).catch(() => null)
     if (status?.progress.state !== 'on') return
     if (!runnable(next, packState)) return // the view shows the page as behind the settings
-    await awaitChain(settled)
+    setProvider(await awaitChain(settled))
     await sendToActiveTab({ type: 'axt:translate-page', restart: true })
   }
 
@@ -191,14 +185,18 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
     choosePrompt: id => void guard(async () => {
       setMenu(null)
       const next = await patchConfig(latest => ({ ...latest, prompts: { ...latest.prompts, promptId: id } }))
-      if (next.provider === 'openai-compat') await restartIfOn(next, pack, s => s.promptId === id)
+      // Any of the reader's services is an LLM, and each is chosen through its own id — comparing
+      // against 'openai-compat' was never true after v12, so the page kept the old prompt (Codex on #157)
+      if (isLlmChosen(next)) await restartIfOn(next, pack, s => s.promptId === id)
     }),
     // Both switches are applied live by the page's own config watcher; nothing to send
     setHighlight: on => void guard(async () => {
       await patchConfig(latest => ({ ...latest, reading: { ...latest.reading, sentenceHighlight: on } }))
     }),
     setImages: on => void guard(async () => {
-      await patchConfig(latest => ({ ...latest, image: { ...latest.image, enabled: on } }))
+      // A reader who had unticked every mode migrates with an empty list; switching image
+      // translation back on then shows as enabled while no mode can run it (Codex on #157)
+      await patchConfig(latest => ({ ...latest, image: { enabled: on, modes: on && latest.image.modes.length === 0 ? [...MODE_VALUES] : latest.image.modes } }))
     }),
     // From the click itself (shared/pack.ts says why); the menu shows a spinner meanwhile
     downloadPack: () => void guard(async () => {

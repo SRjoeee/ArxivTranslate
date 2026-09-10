@@ -1,9 +1,10 @@
 // The settings page's data layer: the stored config and the few statuses the page shows. Every
 // change is written straight away (there is no save button), always on top of what storage holds
 // now — the popup and the page it is translating write the same object (Codex on #39).
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { browser } from 'wxt/browser'
 import { configFallbackReason, getConfig, setConfig } from '@/config/storage'
-import type { Config } from '@/config/schema'
+import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { sendMessage } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
@@ -16,8 +17,12 @@ export interface OptionsData {
   fallbackReason: string | null
   patch(fn: (latest: Config) => Config): Promise<Config>
   pack: PackState | null
+  /** Re-query the pack for a language the reader just chose (the Chrome card would otherwise show the old one) */
+  checkPack(target: string): Promise<void>
   fetchPack(): Promise<void>
   helper: HelperStatus | null
+  /** Which platform this is; the installer only runs on macOS */
+  platform: 'mac' | 'other' | null
   cache: CacheStats | null
   cacheError: string
   clearCache(): Promise<void>
@@ -29,9 +34,12 @@ export function useOptionsData(): OptionsData {
   const [fallbackReason, setFallbackReason] = useState<string | null>(null)
   const [pack, setPack] = useState<PackState | null>(null)
   const [helper, setHelper] = useState<HelperStatus | null>(null)
+  const [platform, setPlatform] = useState<'mac' | 'other' | null>(null)
   const [cache, setCache] = useState<CacheStats | null>(null)
   const [cacheError, setCacheError] = useState('')
   const [cacheCleared, setCacheCleared] = useState(false)
+  /** Every config write queues behind the previous one; see `patch` */
+  const writes = useRef<Promise<Config>>(Promise.resolve(DEFAULT_CONFIG))
 
   const loadCache = useCallback(async () => {
     try {
@@ -52,6 +60,7 @@ export function useOptionsData(): OptionsData {
       void packState(c.targetLanguage).then(setPack)
     })
     sendMessage({ type: 'axt:helper-status' }).then(setHelper).catch(() => setHelper({ available: false, reason: '扩展后台未响应' }))
+    browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
     void loadCache()
     // 翻译发生在别的标签页：切回设置页时重新读一次，否则显示的永远是打开那一刻的数字
     const onVisible = () => { if (!document.hidden) void loadCache() }
@@ -63,12 +72,23 @@ export function useOptionsData(): OptionsData {
     }
   }, [loadCache])
 
-  const patch = useCallback(async (fn: (latest: Config) => Config) => {
-    const next = fn(await getConfig())
-    await setConfig(next)
-    setLocal(next)
-    return next
+  /**
+   * **Serialized**: each call reads storage, applies one change and writes it back, so two controls
+   * changed before the first write lands would otherwise both read the same snapshot and the later
+   * write would drop the earlier change — dragging a slider produces exactly that overlap
+   * (Codex on #157)
+   */
+  const patch = useCallback((fn: (latest: Config) => Config): Promise<Config> => {
+    writes.current = writes.current.then(async () => {
+      const next = fn(await getConfig())
+      await setConfig(next)
+      setLocal(next)
+      return next
+    })
+    return writes.current
   }, [])
+
+  const checkPack = useCallback(async (target: string) => { setPack(await packState(target)) }, [])
 
   /** From the click itself (shared/pack.ts says why); the row shows an indeterminate state meanwhile */
   const fetchPack = useCallback(async () => {
@@ -91,5 +111,5 @@ export function useOptionsData(): OptionsData {
     await loadCache()
   }, [loadCache])
 
-  return { config, fallbackReason, patch, pack, fetchPack, helper, cache, cacheError, clearCache, cacheCleared }
+  return { config, fallbackReason, patch, pack, checkPack, fetchPack, helper, platform, cache, cacheError, clearCache, cacheCleared }
 }

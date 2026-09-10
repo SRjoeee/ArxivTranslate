@@ -61,6 +61,27 @@ export async function addService(options, { name, baseURL, model, apiKey = '' })
   return result ?? ''
 }
 
+/**
+ * Open a service, clear its key, connect again. Returns what the drawer reported — with no key the
+ * endpoint answers `no-key`, so this proves 清除 actually cleared it rather than writing the old
+ * key back (the drawer opens with the stored key in its form, and reading that prop instead of the
+ * form is the mistake this guards).
+ */
+export async function clearKeyAndReconnect(options) {
+  await openSection(options, 'services')
+  await options.getByRole('button', { name: '编辑', exact: true }).last().click()
+  const drawer = options.getByRole('dialog')
+  await drawer.waitFor({ timeout: 5_000 })
+  await drawer.getByRole('button', { name: '清除', exact: true }).click()
+  await drawer.getByRole('button', { name: '连接', exact: true }).click()
+  await sleep(500)
+  for (let i = 0; i < 40 && await drawer.getByRole('button', { name: '连接中…' }).count() > 0; i++) await sleep(500)
+  const result = await drawer.locator('footer span').last().textContent().catch(() => '')
+  await options.keyboard.press('Escape')
+  await sleep(150)
+  return result ?? ''
+}
+
 /** Choose one of the reader's services by the name it was given */
 export async function chooseService(options, name) {
   await openSection(options, 'services')

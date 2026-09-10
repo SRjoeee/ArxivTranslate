@@ -7,7 +7,7 @@
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
-import { addService, chooseBuiltIn, chooseLanguage, chooseStyle, openOptions, openSection, pick, setImageMode, setPreload, setSwitch } from './options-page.mjs'
+import { addService, chooseBuiltIn, chooseLanguage, chooseStyle, clearKeyAndReconnect, openOptions, openSection, pick, setImageMode, setPreload, setSwitch } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
@@ -1179,6 +1179,18 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     (narrow.at === 'below' || narrow.at === 'above') && narrow.placed && Math.abs(narrow.width - narrow.blockWidth) <= 2 && narrow.srcHas,
     narrow.reason ?? `视口 ${narrow.viewport}，边距 ${narrow.margin}px，档位 ${narrow.at}，位置对 ${narrow.placed}，宽 ${narrow.width} vs 块 ${narrow.blockWidth}`)
   await page.close()
+}
+
+// ── 设置页：「清除 API Key」必须真的清掉 ────────────────────────────────────
+// 抽屉打开时表单里带着已存的 key，保存时读回那个 prop 就会把旧 key 原样写回（实测过的缺陷）。
+// 没有 key 时端点报的是「尚未配置」，与「无效或已过期」正好区分得开。
+// **放在最后**：它会多写两次服务配置、多发一次样本请求，而 background 的批次队列与令牌桶是全局的——
+// 夹在错 key 那两段之间时，实测把首波批次从 3 个变成 7 个，让「401 之后一个都不发」这条时序断言
+// 撞上「请求已派发但 401 还没回到扩展手里」的 2–3 ms 窗口而误报
+{
+  await options.bringToFront()
+  const cleared = await clearKeyAndReconnect(options)
+  check('设置页：清除 API Key 后连接报「尚未配置」，不是把旧 key 写回去', /尚未配置/.test(cleared ?? ''), cleared)
 }
 
 await context.close()

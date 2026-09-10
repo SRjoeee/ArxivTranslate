@@ -6,6 +6,7 @@ import { getConfig } from '@/config/storage'
 import type { Config } from '@/config/schema'
 import { type Service, defaultServiceName, newServiceId, serviceSchema } from '@/config/services'
 import { wireFormatOfProvider } from '@/providers/wire-formats'
+import { awaitChain } from '@/shared/chain'
 import { sendMessage } from '@/shared/messages'
 import { Button } from '@/ui/Button'
 import { Confirm } from '@/ui/Confirm'
@@ -37,12 +38,26 @@ export function ServiceDrawer({ service, patch, onClose }: {
   onClose: () => void
 }) {
   const [form, setForm] = useState<Omit<Service, 'id'>>(service ? { ...service } : BLANK)
+  /**
+   * The id this drawer is editing. A drawer opened with 添加服务 has none until the first 连接
+   * saves one — and it has to keep that id, or a second press would generate another and append a
+   * duplicate instead of updating what was just saved (Codex on #157)
+   */
+  const [id, setId] = useState<string | null>(service?.id ?? null)
+  /** The endpoint currently in storage for this service, so an origin can be given back when it changes */
+  const [savedURL, setSavedURL] = useState<string | null>(service?.baseURL ?? null)
   // An empty box means "leave the stored key alone"; a key is written, never read back
   const [keyInput, setKeyInput] = useState('')
   const [more, setMore] = useState(false)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState('')
-  const stored = service?.apiKey ?? ''
+  /**
+   * The key the form would save right now. An empty box means "leave the stored one alone", so the
+   * fallback has to be the **form's** key, not the one this drawer opened with: 清除 empties the
+   * form, and reading the prop instead would write the old key straight back (and after a save,
+   * a second 连接 would undo the new one).
+   */
+  const keyToSave = () => keyInput || form.apiKey
 
   const set = (over: Partial<Service>) => setForm(f => ({ ...f, ...over }))
 
@@ -51,28 +66,36 @@ export function ServiceDrawer({ service, patch, onClose }: {
     setResult('')
     const t0 = performance.now()
     try {
-      const id = service?.id ?? newServiceId()
-      const next: Service = { ...form, id, name: form.name.trim() || defaultServiceName(form.model), apiKey: keyInput || stored }
+      const saving = id ?? newServiceId()
+      const next: Service = { ...form, id: saving, name: form.name.trim() || defaultServiceName(form.model), apiKey: keyToSave() }
       const parsed = serviceSchema.safeParse(next)
       if (!parsed.success) throw new Error(parsed.error.issues.map(i => `${i.path.join('.')}：${i.message}`).join('；'))
       // 先校验再申请权限：字段有错时不该先把 host 权限拿到手（Codex 在 #6 指出）
       await ensureHostPermission(parsed.data.baseURL)
-      const previous = service?.baseURL
+      const previous = savedURL
       const saved = await patch(latest => {
-        const services = service ? latest.services.map(s => (s.id === id ? parsed.data : s)) : [...latest.services, parsed.data]
-        return { ...latest, services, provider: id }
+        const services = latest.services.some(s => s.id === saving)
+          ? latest.services.map(s => (s.id === saving ? parsed.data : s))
+          : [...latest.services, parsed.data]
+        return { ...latest, services, provider: saving }
       })
+      setId(saving)
+      setSavedURL(parsed.data.baseURL)
       if (previous) await releaseHostPermission(previous, saved.services.map(s => s.baseURL))
+      // The form now holds what storage holds, so a second 连接 saves the same thing
+      setForm(parsed.data)
       setKeyInput('')
 
       // Name the engine: the question is whether *this* endpoint answers, and going down the chain
-      // would report success for a broken one (Codex on #59). background reads storage, so this
-      // must run after the save
+      // would report success for a broken one (Codex on #59). background rebuilds its chain from a
+      // storage event, so wait for it to report this service — otherwise a new one comes back as
+      // "not on the current chain" and an edited one is tested at its old endpoint (Codex on #157)
+      await awaitChain(s => s.providerId === saving)
       const current = await getConfig()
       const res = await sendMessage({
         type: 'axt:translate',
-        providerId: id,
-        request: { segments: [{ id: 'sample', text: wireFormatOfProvider(id) === 'markers' ? SAMPLE_MARKERS : SAMPLE_TAGS }], source: 'en', target: current.targetLanguage, context: { sectionTitle: O.services.connect } },
+        providerId: saving,
+        request: { segments: [{ id: 'sample', text: wireFormatOfProvider(saving) === 'markers' ? SAMPLE_MARKERS : SAMPLE_TAGS }], source: 'en', target: current.targetLanguage, context: { sectionTitle: O.services.connect } },
       })
       setResult(res.ok ? O.services.connected(Math.round(performance.now() - t0)) : reasonText(res.error.kind) || res.error.message)
     } catch (e) {
@@ -83,14 +106,15 @@ export function ServiceDrawer({ service, patch, onClose }: {
   }
 
   async function remove() {
-    if (!service) return
+    if (!id) return
+    const gone = id
     const saved = await patch(latest => ({
       ...latest,
-      services: latest.services.filter(s => s.id !== service.id),
+      services: latest.services.filter(s => s.id !== gone),
       // A deleted service cannot stay chosen; the shipped free one takes over
-      provider: latest.provider === service.id ? 'microsoft' : latest.provider,
+      provider: latest.provider === gone ? 'microsoft' : latest.provider,
     }))
-    await releaseHostPermission(service.baseURL, saved.services.map(s => s.baseURL))
+    if (savedURL) await releaseHostPermission(savedURL, saved.services.map(s => s.baseURL))
     onClose()
   }
 
@@ -100,7 +124,7 @@ export function ServiceDrawer({ service, patch, onClose }: {
       onClose={onClose}
       footer={<>
         <Button variant="solid" disabled={busy} onClick={() => void connect()}>{busy ? O.services.connecting : O.services.connect}</Button>
-        {service && <Confirm label={O.services.delete} confirmLabel={O.services.deleteConfirm} cancelLabel={O.services.cancel} onConfirm={() => void remove()} />}
+        {id && <Confirm label={O.services.delete} confirmLabel={O.services.deleteConfirm} cancelLabel={O.services.cancel} onConfirm={() => void remove()} />}
         {result && <span className="min-w-0 flex-1 truncate text-right text-[12px] text-fg-2">{result}</span>}
       </>}
     >
@@ -112,8 +136,8 @@ export function ServiceDrawer({ service, patch, onClose }: {
       </Field>
       <Field label={O.services.apiKey} hint={isLoopback(form.baseURL) ? O.services.apiKeyLocalHint : undefined}>
         <span className="flex items-center gap-2">
-          <input className={inputClass} type="password" autoComplete="off" value={keyInput} placeholder={stored ? '••••••••' : 'sk-…'} onChange={e => setKeyInput(e.target.value)} />
-          {stored && <Button variant="text" onClick={() => { setKeyInput(''); set({ apiKey: '' }) }}>{O.services.apiKeyClear}</Button>}
+          <input className={inputClass} type="password" autoComplete="off" value={keyInput} placeholder={form.apiKey ? '••••••••' : 'sk-…'} onChange={e => setKeyInput(e.target.value)} />
+          {form.apiKey && <Button variant="text" onClick={() => { setKeyInput(''); set({ apiKey: '' }) }}>{O.services.apiKeyClear}</Button>}
         </span>
       </Field>
       <Field label={O.services.model}>

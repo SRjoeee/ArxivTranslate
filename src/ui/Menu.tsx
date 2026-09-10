@@ -72,6 +72,12 @@ export function Menu({ anchor, items, label, search, searchPlaceholder, empty, o
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [active])
+  // The search field takes focus by itself; without one nothing inside would have it, and the
+  // arrows, Enter and Escape below would never reach this element — the trigger is a sibling, not
+  // a descendant (Codex on #157)
+  useEffect(() => {
+    if (!search) root.current?.focus()
+  }, [search])
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') { e.preventDefault(); onClose(); return }
@@ -89,9 +95,10 @@ export function Menu({ anchor, items, label, search, searchPlaceholder, empty, o
       ref={root}
       role="listbox"
       aria-label={label}
+      tabIndex={-1}
       onKeyDown={onKey}
       style={box ? { top: box.top, left: box.left, width: box.width, bottom: MARGIN } : { visibility: 'hidden' }}
-      className="fixed z-10 flex flex-col overflow-hidden rounded-control border border-line bg-card shadow-[0_8px_24px_rgba(0,0,0,0.14)]"
+      className="fixed z-10 flex flex-col overflow-hidden rounded-control border border-line bg-card shadow-[0_8px_24px_rgba(0,0,0,0.14)] outline-none"
     >
       {search && (
         <input

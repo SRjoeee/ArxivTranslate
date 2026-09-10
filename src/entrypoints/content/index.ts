@@ -124,8 +124,15 @@ export default defineContentScript({
       if (session) void backend.cancel(session)
     }
 
-    async function start(requested?: Mode, restart = false): Promise<{ started: boolean; reason?: string }> {
+    /**
+     * `from` is the session an **automatic** restart was decided in (a permanent hand-over). The
+     * reads below are awaited, and the reader may press 显示原文 during them; without this check the
+     * stale continuation would translate the page again, undoing an explicit restore and spending
+     * more requests (Codex on #157). A restart the reader asked for passes no session and always runs
+     */
+    async function start(requested?: Mode, restart = false, from?: string): Promise<{ started: boolean; reason?: string }> {
       if (progress.state === 'on' && !restart) return { started: false, reason: '翻译已开启，滚动会继续翻' }
+      if (from !== undefined && getSessionId() !== from) return { started: false, reason: '会话已结束' }
       if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
       if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
       const tStart = performance.now()
@@ -141,6 +148,8 @@ export default defineContentScript({
       }
       // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上（§8.5）
       if (!status.available && !status.fallback) return { started: false, reason: '未配置 API key，请先到设置页填写' }
+      // The reader may have restored the page while the two reads above were in flight
+      if (from !== undefined && getSessionId() !== from) return { started: false, reason: '会话已结束' }
       console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
       modes?.stop()
@@ -193,7 +202,7 @@ export default defineContentScript({
             if (kind !== 'no-key' && kind !== 'auth') return
             restartedFor = id
             console.debug(`[axt] hand-over to ${id} is permanent (${kind}); restarting the page on it`)
-            void start(undefined, true)
+            void start(undefined, true, session)
           }).catch(() => undefined)
         },
         onProgress: p => {
