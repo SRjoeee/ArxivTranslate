@@ -14,6 +14,8 @@ import type { OptionsData } from '../data'
 import { ServiceDrawer } from './ServiceDrawer'
 
 const MODE_NAMES: Record<(typeof MODE_VALUES)[number], string> = { stack: S.mode.stack, side: S.mode.side, only: S.mode.only }
+/** The radio's own look, so the control the reader clicks is the control itself */
+const RADIO = 'size-3.5 shrink-0 appearance-none rounded-full border-[1.5px] border-line checked:border-[5px] checked:border-accent disabled:opacity-40'
 
 export function Services({ data, extensionId }: { data: OptionsData; extensionId: string }) {
   const { config, patch, pack, fetchPack, helper } = data
@@ -48,9 +50,14 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
         {cards.map(card => (
           <div key={card.id} className={`relative rounded-card border bg-card p-3 ${config.provider === card.id ? 'border-accent' : 'border-line'}`}>
             <label className="block cursor-pointer has-disabled:cursor-default">
-              <input type="radio" name="axt-service" className="sr-only" checked={config.provider === card.id} disabled={card.disabled} onChange={() => choose(card.id)} />
-              <span className="block text-[13px] font-semibold">{card.name}</span>
-              <span className="mt-0.5 block text-[11px] text-fg-2">{card.hint}</span>
+              <span className="flex items-center gap-2">
+                {/* A real radio, styled rather than hidden: visible controls are the ones a reader
+                    and a test can both click. The name alone is its accessible name — the label
+                    also carries the hint */}
+                <input type="radio" name="axt-service" aria-label={card.name} checked={config.provider === card.id} disabled={card.disabled} onChange={() => choose(card.id)} className={RADIO} />
+                <span className="text-[13px] font-semibold">{card.name}</span>
+              </span>
+              <span className="mt-0.5 block pl-[22px] text-[11px] text-fg-2">{card.hint}</span>
             </label>
             {'action' in card && card.action === 'download' && <Button variant="chip" className="mt-2" onClick={() => void fetchPack()}>{S.service.chrome_download}</Button>}
             {'action' in card && card.action === 'busy' && <span className="mt-2 block text-[11px] text-fg-2">{S.service.chrome_downloading}</span>}
@@ -67,8 +74,7 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
         {config.services.map((service, i) => (
           <div key={service.id} className={`flex items-center gap-2 ${i > 0 ? 'border-t border-line' : ''}`}>
             <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3.5 py-3">
-              <input type="radio" name="axt-service" className="sr-only" checked={config.provider === service.id} onChange={() => choose(service.id)} />
-              <span aria-hidden="true" className={`size-3.5 shrink-0 rounded-full border-[1.5px] ${config.provider === service.id ? 'border-[5px] border-accent' : 'border-line'}`} />
+              <input type="radio" name="axt-service" aria-label={service.name} checked={config.provider === service.id} onChange={() => choose(service.id)} className={RADIO} />
               <span className="flex min-w-0 flex-col">
                 <span className="truncate text-[13px] font-semibold">{service.name}</span>
                 <span className="truncate text-[11px] text-fg-2">{service.model} · {hostOf(service.baseURL)}</span>
@@ -125,7 +131,10 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
                   type="checkbox"
                   className="accent-accent"
                   checked={config.image.modes.includes(mode)}
-                  onChange={e => void patch(latest => ({ ...latest, image: { ...latest.image, modes: MODE_VALUES.filter(m => (m === mode ? e.target.checked : latest.image.modes.includes(m))) } }))}
+                  // The value has to be read here, not inside `patch`: that callback runs after a
+                  // round trip through storage, by which time React has repainted the box from the
+                  // config it still holds and `e.target.checked` is the old value again
+                  onChange={e => { const on = e.target.checked; void patch(latest => ({ ...latest, image: { ...latest.image, modes: MODE_VALUES.filter(m => (m === mode ? on : latest.image.modes.includes(m))) } })) }}
                 />
                 {MODE_NAMES[mode]}
               </label>

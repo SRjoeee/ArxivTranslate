@@ -7,6 +7,7 @@
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { addService, chooseBuiltIn, chooseLanguage, chooseStyle, openOptions, openSection, pick, setImageMode, setPreload, setSwitch } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
@@ -232,136 +233,117 @@ const countDom = page => page.evaluate(() => ({
   on: document.documentElement.hasAttribute('data-axt-on'),
 }))
 
-// ── 设置页：切到 google-web，保存，测试连接（background 路径）──────────
-const options = await context.newPage()
-await options.goto(`chrome-extension://${extId}/options.html`)
-await options.selectOption('select >> nth=0', 'google-web')
-// 图片翻译（DESIGN §15）默认三种模式都开；这台机器装了 helper 的话叠加层与拆图会扰动下面的布局 / 计数断言，
+// ── 设置页：选 Google 翻译，关掉图片翻译（改动即时生效，没有保存按钮）──────────
+const options = await openOptions(context, extId)
+await chooseBuiltIn(options, 'Google 翻译')
+// 图片翻译（DESIGN §15）默认开着；这台机器装了 helper 的话叠加层与拆图会扰动下面的布局 / 计数断言，
 // 这里关掉，专门的 e2e:image 再开（AXT_E2E_IMAGES=1 时保留）
-if (!process.env.AXT_E2E_IMAGES) {
-  for (const name of ['左右对照', '上下对照', '仅译文']) {
-    const box = options.getByRole('checkbox', { name, exact: true })
-    if (await box.isEnabled()) await box.uncheck()
-  }
-}
-await options.getByRole('button', { name: '保存', exact: true }).click()
-await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
-await options.getByRole('button', { name: /测试连接/ }).click()
-const testText = await (await options.waitForSelector('main p[style*="background"]', { timeout: 30_000 })).textContent()
-check('设置页测试连接（background 路径，google-web）', /ms/.test(testText) && !/失败/.test(testText), testText)
+if (!process.env.AXT_E2E_IMAGES) await setSwitch(options, '图片翻译', false)
 await options.screenshot({ path: `${SHOTS}/options.png` })
 
-// ── 设置页：预翻译距离（配置 v3 的 preload）保存后重载仍在 ─────────────
-const marginInput = 'input[type="number"] >> nth=0'
-await options.fill(marginInput, '300')
-await options.getByRole('button', { name: '保存', exact: true }).click()
-await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+// ── 设置页：改动即时生效且重载仍在（v12 起没有保存按钮，配置在控件变化时就写） ─────────────
+await setPreload(options, { range: '半屏' })
 await options.reload({ waitUntil: 'domcontentloaded' })
-await options.waitForFunction(() => document.querySelector('input[type="number"]')?.value === '300', null, { timeout: 5_000 }).catch(() => undefined)
-const marginBack = await options.inputValue(marginInput)
-check('设置页：预翻译距离保存后重载仍是 300', marginBack === '300', `读回 ${marginBack}`)
+await openSection(options, 'reading')
+const rangeBack = await options.getByRole('button', { name: '半屏', exact: true }).getAttribute('aria-pressed')
+check('设置页：提前翻译的范围改成半屏，重载后仍是半屏', rangeBack === 'true', `读回 aria-pressed=${rangeBack}`)
 
 // ── 设置页：悬停对照高亮的开关真的能改（#130：加了配置字段却没有 UI，用户关不掉） ────────
 {
-  const box = options.getByRole('checkbox', { name: /悬停时高亮对应的句子/ })
-  const wasOn = await box.isChecked()
-  await box.uncheck()
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  const stateOf = async () => options.getByRole('switch', { name: '对照高亮', exact: true }).getAttribute('aria-checked')
+  await openSection(options, 'reading')
+  const wasOn = await stateOf()
+  await setSwitch(options, '对照高亮', false)
   await options.reload({ waitUntil: 'domcontentloaded' })
-  const back = await options.getByRole('checkbox', { name: /悬停时高亮对应的句子/ }).isChecked()
-  check('设置页：悬停对照高亮开关默认开、关掉后重载仍是关（§7.7）', wasOn === true && back === false, `默认 ${wasOn}，关掉重载读回 ${back}`)
+  await openSection(options, 'reading')
+  const back = await stateOf()
+  check('设置页：悬停对照高亮开关默认开、关掉后重载仍是关（§7.7）', wasOn === 'true' && back === 'false', `默认 ${wasOn}，关掉重载读回 ${back}`)
   // 后面的检查要它开着
-  await options.getByRole('checkbox', { name: /悬停时高亮对应的句子/ }).check()
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  await setSwitch(options, '对照高亮', true)
 }
-await options.fill(marginInput, '1000')
-await options.getByRole('button', { name: '保存', exact: true }).click()
-await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+await setPreload(options, { range: '一屏' })
 
-// ── 设置页：图内文字翻译的模式闸（配置 v8，DESIGN §15）保存后重载仍在；**不再按 helper 灰掉** ──────
+// ── 设置页：图片翻译的模式闸（DESIGN §15）即时生效、重载仍在；**不因为没装助手而灰掉** ──────
 {
-  const names = ['左右对照', '上下对照', '仅译文']
+  const names = ['上下', '左右', '仅译文']
   const boxOf = name => options.getByRole('checkbox', { name, exact: true })
-  // §15.5：helper 只决定位图，SVG 图不需要它，所以复选框任何时候都该可用
-  const enabled = await boxOf('上下对照').isEnabled()
-  // The hint names the helper the reader's way (识别助手); /helper/ would now hit the install command
-  const hint = await options.getByText(/识别助手/).first().textContent()
-  check('设置页：图内文字翻译不因为没装 helper 而整节灰掉（§15.5）', enabled === true, `可用 ${enabled}`)
-  check('options: the helper hint says SVG figures translate without it (§15.5)', /SVG/.test(hint ?? ''), (hint ?? '').slice(0, 90))
+  await openSection(options, 'services')
+  // §15.5：识别助手只决定位图，SVG 图不需要它，所以复选框任何时候都该可用
+  const enabled = await boxOf('上下').isEnabled()
+  check('设置页：图片翻译不因为没装识别助手而整节灰掉（§15.5）', enabled === true, `可用 ${enabled}`)
 
   if (!process.env.AXT_E2E_IMAGES) {
-    await boxOf('上下对照').check()
-    await options.getByRole('button', { name: '保存', exact: true }).click()
-    await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+    await setImageMode(options, '上下', true)
+    await setImageMode(options, '左右', false)
+    await setImageMode(options, '仅译文', false)
     await options.reload({ waitUntil: 'domcontentloaded' })
-    await options.getByRole('checkbox', { name: '上下对照', exact: true }).waitFor({ timeout: 5_000 })
+    await openSection(options, 'services')
+    await boxOf('上下').waitFor({ timeout: 5_000 })
     const states = await Promise.all(names.map(n => boxOf(n).isChecked()))
-    check('设置页：图内文字翻译只勾「上下对照」保存后重载仍在', JSON.stringify(states) === JSON.stringify([false, true, false]), `读回 ${states.join(',')}`)
-    await boxOf('上下对照').uncheck()
-    await options.getByRole('button', { name: '保存', exact: true }).click()
-    await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+    check('设置页：图片翻译只勾「上下」，重载后仍是这一种', JSON.stringify(states) === JSON.stringify([true, false, false]), `读回 ${states.join(',')}`)
+    await setImageMode(options, '上下', false)
   }
 }
 
-// ── 设置页：目标语言（配置 v4 的 ISO 639-3 码）与自定义提示词保存后重载仍在 ──────
-const langSelect = options.getByRole('combobox', { name: /^目标语言/ })
-await langSelect.selectOption('jpn')
+// ── 设置页：目标语言（配置 v4 的 ISO 639-3 码）与自定义提示词即时生效、重载仍在 ──────
+await chooseLanguage(options, '日语', '日语')
+await openSection(options, 'prompts')
 await options.getByRole('button', { name: '新建', exact: true }).click()
 await options.getByLabel('名称').fill('e2e 提示词')
 await options.getByRole('button', { name: '加入列表', exact: true }).click()
-await options.getByRole('radio').last().check()
-await options.getByRole('button', { name: '保存', exact: true }).click()
-await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+await pick(options.getByRole('radio').last())
 await options.reload({ waitUntil: 'domcontentloaded' })
+await openSection(options, 'prompts')
 await options.getByText('e2e 提示词').waitFor({ timeout: 5_000 }).catch(() => undefined)
-const langBack = await options.getByRole('combobox', { name: /^目标语言/ }).inputValue()
+await openSection(options, 'services')
+const langBack = await options.getByRole('button', { name: '目标语言' }).textContent()
+await openSection(options, 'prompts')
 const promptRow = options.getByRole('radio').last()
 const promptBack = (await options.getByText('e2e 提示词').count()) === 1 && (await promptRow.isChecked())
-check('设置页：目标语言 jpn 与自定义提示词保存后重载仍在且被选中', langBack === 'jpn' && promptBack, `语言 ${langBack}，提示词 ${promptBack}`)
-// 删掉再存回默认：后面的错 key 段要走默认提示词
+check('设置页：目标语言与自定义提示词改完重载仍在且被选中', /日语/.test(langBack ?? '') && promptBack, `语言 ${langBack}，提示词 ${promptBack}`)
+// 删掉再选回默认：后面的错 key 段要走默认提示词
 options.once('dialog', d => d.accept())
 await options.getByRole('button', { name: '删除', exact: true }).click()
-await options.getByRole('combobox', { name: /^目标语言/ }).selectOption('cmn')
-await options.getByRole('button', { name: '保存', exact: true }).click()
-await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+await chooseLanguage(options, '简体中文', '简体中文')
+await openSection(options, 'prompts')
 const promptGone = (await options.getByText('e2e 提示词').count()) === 0
 check('设置页：删除自定义提示词后选回默认', promptGone, `残留 ${promptGone ? 0 : 1}`)
 
-// ── 设置页：译文样式预设与缓存管理（§7.5 / §9）──────────────────────────
+// ── 设置页：译文外观与缓存管理（§7.5 / §9）──────────────────────────
 {
+  // 内置的「淡一档」只调透明度：值走变量、由注入表写在真译文上，不碰任何节点
   await options.bringToFront()
-  await options.getByLabel('外观').selectOption('quote')
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  await chooseStyle(options, '淡一档')
 
   const page = await context.newPage()
   await page.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  // 只认真正的译文：加载圆环 / 失败控件 / 镜像与拆分克隆也带 .axt-t，但预设刻意不装饰它们，
-  // 轮询撞上 pending 节点会把「竖线为 0」误报成预设坏了（Codex 在 #52 指出）
+  // 只认真正的译文：加载圆环 / 失败控件 / 镜像与拆分克隆也带 .axt-t，但外观刻意不装饰它们，
+  // 轮询撞上 pending 节点会把「透明度没生效」误报成配置坏了（Codex 在 #52 指出）
   const REAL = ':not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
   await page.waitForFunction(sel => document.querySelector(sel) !== null, `.axt-t:not([data-axt-inline])${REAL}`, { timeout: 60_000 }).catch(() => undefined)
-  await page.waitForFunction(sel => document.querySelector(sel) !== null, `.axt-t[data-axt-inline]${REAL}`, { timeout: 30_000 }).catch(() => undefined)
+  await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')).opacity) < 1, null, { timeout: 30_000 }).catch(() => undefined)
   const styled = await page.evaluate(real => {
     const el = document.querySelector(`.axt-t:not([data-axt-inline])${real}`)
-    const inline = document.querySelector(`.axt-t[data-axt-inline]${real}`)
+    const source = document.querySelector('.ltx_p:not(.axt-t)')
     return {
-      attr: document.documentElement.dataset.axtStyle ?? null,
-      border: el ? Math.round(Number.parseFloat(getComputedStyle(el).borderInlineStartWidth)) : -1,
-      // 行内标题译文不该加线（会把「Abstract 摘要」挤歪）；没等到行内译文就如实报 null，不当作通过
-      inline: inline ? Math.round(Number.parseFloat(getComputedStyle(inline).borderInlineStartWidth)) : null,
+      opacity: el ? Number(getComputedStyle(el).opacity) : -1,
+      // 原文不受影响：外观只落在译文上
+      sourceOpacity: source ? Number(getComputedStyle(source).opacity) : null,
     }
   }, REAL)
-  check('样式预设 quote：<html> 带属性、块级译文有竖线、同行标题译文没有', styled.attr === 'quote' && styled.border > 0 && styled.inline === 0, JSON.stringify(styled))
-  await page.screenshot({ path: `${SHOTS}/style-quote.png` })
+  check('译文外观「淡一档」：译文透明度降下来，原文不受影响', styled.opacity > 0 && styled.opacity < 1 && styled.sourceOpacity === 1, JSON.stringify(styled))
+  await page.screenshot({ path: `${SHOTS}/style-muted.png` })
   await page.close()
 
-  // 下划线类要画到公式上：text-decoration 不传播到 math 这类原子行内盒，用户反馈过公式处虚线断掉
+  // 下划线要画到公式上：text-decoration 不传播到 math 这类原子行内盒，用户反馈过公式处虚线断掉。
+  // v12 起线型是配置里的一个字段，不是一个预设 id：新建一份带虚线的配置
   await options.bringToFront()
-  await options.getByLabel('外观').selectOption('dashed')
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  await openSection(options, 'reading')
+  await options.getByRole('button', { name: '添加配置', exact: true }).first().click()
+  const editor = options.getByRole('dialog')
+  await editor.waitFor({ timeout: 5_000 })
+  await editor.getByRole('button', { name: '虚线', exact: true }).click()
+  await editor.getByRole('button', { name: '完成', exact: true }).click()
   // 换一篇数学密集的：PAPER 首屏没有行内公式，检查会空跑
   const dashedPage = await context.newPage()
   await dashedPage.goto('https://arxiv.org/html/2609.04056v1#axt-translate', { waitUntil: 'domcontentloaded' })
@@ -369,7 +351,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 可能还没写上——enable() 在 startTranslation 里写它，而 #axt-translate 触发的会话与设置页刚存的预设
   // 之间隔着一次配置读取。一次实测就撞到过：量到 22 个公式、块级 none/solid，重跑同一构建是 51 个 underline/dashed
   await dashedPage.waitForFunction(
-    () => document.documentElement.dataset.axtStyle === 'dashed' && document.querySelectorAll('.axt-t math').length > 0,
+    () => document.documentElement.dataset.axtUnderline === 'dashed' && document.querySelectorAll('.axt-t math').length > 0,
     null, { timeout: 60_000 },
   ).catch(() => undefined)
   // 再等公式数稳定：翻译还在进行时读到的是半截状态
@@ -386,7 +368,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     const block = document.querySelector('.axt-t:not([data-axt-inline])')
     return { count: maths.length, math: maths.slice(0, 3).map(deco), block: block ? deco(block) : null }
   })
-  check('样式预设 dashed：虚线画到译文里的公式上（text-decoration 不传播到原子行内盒）',
+  check('译文外观 · 虚线：线画到译文里的公式上（text-decoration 不传播到原子行内盒）',
     dashed.count > 0 && dashed.block === 'underline/dashed' && dashed.math.every(d => d === 'underline/dashed'),
     `${dashed.count} 个公式，块级 ${dashed.block}，公式 ${dashed.math.join(' ')}`)
   await dashedPage.screenshot({ path: `${SHOTS}/style-dashed.png` })
@@ -462,16 +444,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 // 引擎自作主张改标点）只有这里能证。标签格式在这个端点上是 0%，所以它必须走 markers。
 {
   await options.bringToFront()
-  await options.selectOption('select >> nth=0', 'microsoft')
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
-
-  // 连接测试的样本要用这个引擎实际会收到的格式：微软只保得住 markers，
-  // 发标签给它会被 provider 本地挡下，测试永远失败而正常翻译其实是好的（Codex 在 #115 指出）
-  await options.getByRole('button', { name: /测试连接/ }).click()
-  const msTest = await (await options.waitForSelector('main p[style*="background"]', { timeout: 30_000 })).textContent()
-  check('微软引擎：设置页「测试连接」通过（样本按 markers 格式发，不是标签）',
-    !/失败/.test(msTest ?? '') && /ms/.test(msTest ?? ''), msTest)
+  await chooseBuiltIn(options, 'Microsoft 翻译')
 
   const { page, logs, requests } = await openPaper(PAPER, 'edge.microsoft.com')
   const idle = idleOf(await waitForLog(logs, IDLE, 120_000))
@@ -626,9 +599,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 
   // 切回 google-web，后面的检查沿用原来的引擎
   await options.bringToFront()
-  await options.selectOption('select >> nth=0', 'google-web')
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  await chooseBuiltIn(options, 'Google 翻译')
 }
 
 // ── SVG 图翻译（§15.5，#121）：不需要 helper，所以这里跑而不是在 e2e:image 里 ────────────
@@ -636,10 +607,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 // 单元测试把 <object> 的 contentDocument 打了桩，真实的嵌套文档只有真浏览器里有
 {
   await options.bringToFront()
-  const svgModeBox = options.getByRole('checkbox', { name: '上下对照', exact: true })
-  await svgModeBox.check()
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  await setSwitch(options, '图片翻译', true)
+  await setImageMode(options, '上下', true)
 
   const { page, logs } = await openPaper(SVG_PAPER, GOOGLE)
   await waitForLog(logs, IDLE, 120_000)
@@ -752,9 +721,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.close()
 
   await options.bringToFront()
-  await svgModeBox.uncheck()
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  await setSwitch(options, '图片翻译', false)
 }
 
 // ── 论文 2：翻译中途"恢复原文"，排队与在飞的请求一起撤 ────────────────
@@ -949,33 +916,26 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 {
   await options.bringToFront()
   await options.reload({ waitUntil: 'domcontentloaded' })
-  await options.getByLabel('外观').selectOption('none')
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  await chooseStyle(options, '与原文相同')
 
   // 前面两篇论文翻过，缓存里应当有条目；重载保证读到的是最新统计
-  await options.getByText(/已缓存 [1-9]\d* 条/).waitFor({ timeout: 15_000 }).catch(() => undefined)
-  const before = await options.getByText(/已缓存 \d+ 条/).textContent()
-  options.once('dialog', d => d.accept())
-  await options.getByRole('button', { name: '清空全部缓存' }).click()
-  await options.getByText(/已删除 \d+ 条/).waitFor({ timeout: 10_000 })
-  const after = await options.getByText(/已缓存 \d+ 条/).textContent()
-  check('缓存管理：显示条数，清空后归零', /已缓存 [1-9]/.test(before ?? '') && /已缓存 0 条/.test(after ?? ''), `清空前「${before}」，清空后「${after}」`)
+  await openSection(options, 'data')
+  await options.getByText(/^[1-9]\d* 条 · /).waitFor({ timeout: 15_000 }).catch(() => undefined)
+  const before = await options.getByText(/^\d+ 条 · /).textContent()
+  await options.getByRole('button', { name: '清空', exact: true }).click()
+  await options.getByRole('button', { name: '确认清空', exact: true }).click()
+  await options.getByText('已清空', { exact: true }).waitFor({ timeout: 10_000 })
+  const after = await options.getByText(/^\d+ 条 · /).textContent()
+  check('缓存管理：显示条数，清空后归零', /^[1-9]/.test(before ?? '') && /^0 条/.test(after ?? ''), `清空前「${before}」，清空后「${after}」`)
 }
 
 // ── 错 key + 降级链开启（§8.5）：LLM 报 auth 后自动切到 google-web，整页照常翻完 ──
 {
   await options.bringToFront()
-  await options.selectOption('select >> nth=0', 'openai-compat')
-  await options.fill('input[type="password"]', 'sk-or-v1-bogus-key-for-auth-test')
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
-
-  // 「测试连接」问的是配置的那个端点通不通，必须如实报 auth：走降级链的话免费引擎会把它显示成成功，
+  // 「连接」问的是这个服务的端点通不通，必须如实报 auth：走备用服务的话免费服务会把它显示成成功，
   // 用户以为 key 没问题、整页却都在用 Google 翻（issue #42 的同一类不一致，方向相反）
-  await options.getByRole('button', { name: /测试连接/ }).click()
-  const bogusTest = await (await options.waitForSelector('main p[style*="background"]', { timeout: 30_000 })).textContent()
-  check('错 key 时设置页测试连接如实报失败，不被降级链掩盖', /失败/.test(bogusTest ?? '') && /auth/.test(bogusTest ?? ''), bogusTest)
+  const bogusTest = await addService(options, { name: 'bogus key', baseURL: 'https://openrouter.ai/api/v1', model: 'deepseek/deepseek-v4-flash', apiKey: 'sk-or-v1-bogus-key-for-auth-test' })
+  check('错 key 时设置页的连接如实报失败，不被备用服务掩盖', /API Key/.test(bogusTest ?? '') && !/已连接/.test(bogusTest ?? ''), bogusTest)
 
   const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
   const done = await waitForLog(logs, IDLE, 90_000)
@@ -1003,9 +963,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 // ── 错 key + 降级链关闭：恢复"401 → auth → 整队排空"的行为 ──
 {
   await options.bringToFront()
-  await options.getByLabel('引擎失败时自动降级').uncheck()
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  await setSwitch(options, '出问题时自动改用免费服务', false)
 
   // 401 回来的时刻要记下来：断言"这之后不再有新请求"，而不是数首波有几个——
   // 首波个数取决于令牌桶的突发节奏，快一点慢一点都会让 ≤ 20 这条落空（issue #82）
@@ -1068,11 +1026,10 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 // 点「§7」（目标是隐藏的 p.ltx_p）scrollY 从 0 到 0，一动不动。12 篇 fixture 里
 // 3374 个页内锚点有 118 个（3.5%）的目标落在翻译块内
 {
-  // 前面的错 key 段把 provider 改成了带假 key 的 openai-compat 且关了降级：先切回免费引擎
+  // 前面的错 key 段选了一个带假 key 的服务且关了自动改用：先切回免费服务
   await options.bringToFront()
-  await options.selectOption('select >> nth=0', 'google-web')
-  await options.getByRole('button', { name: '保存', exact: true }).click()
-  await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+  await setSwitch(options, '出问题时自动改用免费服务', true)
+  await chooseBuiltIn(options, 'Google 翻译')
 
   const { page, logs } = await openPaper(PAPER4, 'translate-pa.googleapis.com')
   const popup = await context.newPage()

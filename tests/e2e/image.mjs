@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { chooseBuiltIn, openOptions, setImageMode, setSwitch } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
@@ -107,22 +108,18 @@ const near = (a, b, tol = 1.5) => Math.abs(a - b) <= tol
 const coincide = (a, b) => near(a.x, b.x) && near(a.y, b.y) && near(a.w, b.w) && near(a.h, b.h)
 
 // ── 设置页：google-web，图片翻译三种模式都勾上；helper 没检测到就退出 ────────────
-const options = await context.newPage()
-await options.goto(`chrome-extension://${extId}/options.html`)
-await options.selectOption('select >> nth=0', 'google-web')
-const stackBox = options.getByRole('checkbox', { name: '上下对照', exact: true })
-await stackBox.waitFor({ timeout: 10_000 })
-if (!(await stackBox.isEnabled())) {
-  const hint = await options.getByText(/helper/).first().textContent()
-  console.log(`SKIP 设置页说 helper 不可用：${hint}`)
+const options = await openOptions(context, extId)
+await chooseBuiltIn(options, 'Google 翻译')
+await setSwitch(options, '图片翻译', true)
+// The section says whether the recognition helper answered; without it only SVG figures translate
+const helperHint = await options.getByText(/识别助手/).first().textContent()
+if (!/已就绪/.test(helperHint ?? '')) {
+  console.log(`SKIP 设置页说识别助手不可用：${helperHint}`)
   await context.close()
   process.exit(0)
 }
-for (const name of ['左右对照', '上下对照', '仅译文']) await options.getByRole('checkbox', { name, exact: true }).check()
-await options.getByRole('button', { name: '保存', exact: true }).click()
-await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
-const helperHint = await options.getByText(/已检测到 helper/).first().textContent()
-check('设置页检测到 helper', /helper \d/.test(helperHint ?? ''), helperHint ?? '')
+for (const name of ['上下', '左右', '仅译文']) await setImageMode(options, name, true)
+check('设置页检测到识别助手', /已就绪/.test(helperHint ?? ''), helperHint ?? '')
 
 // ── stack：整页翻译，6 张图都叠上译文，叠加层与图重合 ─────────────────────────
 const page = await context.newPage()
@@ -189,10 +186,8 @@ await popup.close()
 
 // ── 模式闸：只勾 side，stack 下进入视口的图停着不请求；切到 side 才翻 ───────────
 await options.bringToFront()
-await options.getByRole('checkbox', { name: '上下对照', exact: true }).uncheck()
-await options.getByRole('checkbox', { name: '仅译文', exact: true }).uncheck()
-await options.getByRole('button', { name: '保存', exact: true }).click()
-await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
+await setImageMode(options, '上下', false)
+await setImageMode(options, '仅译文', false)
 const page2 = await context.newPage()
 const logs2 = []
 page2.on('console', m => { const text = m.text(); if (text.includes('[axt]')) logs2.push({ t: Date.now(), text }) })

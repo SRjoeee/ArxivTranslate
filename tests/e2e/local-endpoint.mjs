@@ -14,6 +14,7 @@ import { createServer } from 'node:http'
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { addService, openOptions } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const SRC = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
@@ -111,17 +112,11 @@ if (!worker) worker = await context.waitForEvent('serviceworker')
 const extId = worker.url().split('/')[2]
 console.log(`extension ${extId} loaded from ${EXT}`)
 
-// ── 设置页：指向本机端点，测试连接 ────────────────────────────────────────
-const options = await context.newPage()
-await options.goto(`chrome-extension://${extId}/options.html`)
-await options.selectOption('select >> nth=0', 'openai-compat')
-await options.getByLabel('Base URL').fill(BASE_URL)
-await options.getByLabel('模型').fill('local-echo')
-await options.getByRole('button', { name: '保存', exact: true }).click()
-await options.getByText('已保存', { exact: true }).waitFor({ timeout: 10_000 })
-await options.getByRole('button', { name: /测试连接/ }).click()
-const testText = await (await options.waitForSelector('main p[style*="background"]', { timeout: 30_000 })).textContent()
-check('设置页测试连接打到不返 CORS 头的 http 本机端点', /ms/.test(testText) && !/失败/.test(testText), testText)
+// ── 设置页：添加一个指向本机端点的服务，「连接」验证 ──────────────────────────
+const options = await openOptions(context, extId)
+// 「连接」本身就是保存 + 验证：它按名字指名这个服务，不走备用服务，端点坏了不会显示成功
+const testText = await addService(options, { name: 'local echo', baseURL: BASE_URL, model: 'local-echo' })
+check('设置页连接打到不返 CORS 头的 http 本机端点', /已连接/.test(testText), testText)
 await options.screenshot({ path: `${SHOTS}/local-endpoint-options.png` })
 
 // ── 真实论文页：译文必须带本机端点的前缀（降级到 google-web 就不会有）────────
