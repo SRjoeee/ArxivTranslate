@@ -31,7 +31,7 @@ function provider(over: Partial<ProviderStatus> = {}): ProviderStatus {
   }
 }
 
-const base: PopupInput = { page: page(), provider: provider(), config, configFallback: null, pack: 'available', listOpen: false }
+const base: PopupInput = { page: page(), provider: provider(), config, configFallback: null, pack: 'available', listOpen: false, shortcut: '⌥T' }
 
 export const POPUP_FIXTURES: { id: string; name: string; when: string; input: PopupInput }[] = [
   { id: 'P0', name: '非 arXiv / 加载中', when: 'page === null', input: { ...base, page: null } },

@@ -9,6 +9,7 @@ import type { Config } from '@/config/schema'
 import { configFallbackReason, getConfig, setConfig } from '@/config/storage'
 import type { Mode } from '@/core/renderer'
 import { BUILTIN_SOURCE_LANGUAGE } from '@/providers/chrome-builtin'
+import { COMMAND_ID } from '@/entrypoints/background/context-menu'
 import type { ProviderStatus } from '@/providers/transport'
 import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages'
 import type { PackState, PopupInput } from './view-model'
@@ -44,6 +45,8 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   /** The offline service's language pack (§8.4); `downloadable` needs a click to create() (user gesture) */
   const [pack, setPack] = useState<PackState | null>(null)
   const [listOpen, setListOpen] = useState(false)
+  /** The translate shortcut as bound right now; Chrome formats it for the platform (⌥T / Alt+T) */
+  const [shortcut, setShortcut] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(() => {
@@ -79,6 +82,9 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
       void checkPack(c.targetLanguage)
     }).catch(() => setLocalConfig(null))
     refresh()
+    browser.commands.getAll()
+      .then(all => setShortcut(all.find(c => c.name === COMMAND_ID)?.shortcut || null))
+      .catch(() => setShortcut(null))
   }, [refresh, checkPack, loadProvider])
 
   // While the page is still loading the content script is not injected yet (document_idle), so
@@ -177,5 +183,5 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     openOptions: () => void browser.runtime.openOptionsPage(),
   }
 
-  return { input: { page, provider, config, configFallback, pack, listOpen }, error, actions }
+  return { input: { page, provider, config, configFallback, pack, listOpen, shortcut }, error, actions }
 }

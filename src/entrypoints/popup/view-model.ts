@@ -22,6 +22,8 @@ export interface PopupInput {
   pack: PackState | null
   /** Whether the service list is open (the UI's own state) */
   listOpen: boolean
+  /** The translate shortcut as Chrome reports it (platform-formatted); null when unbound or unknown */
+  shortcut: string | null
 }
 
 export type Tone = 'ok' | 'busy' | 'warn' | 'alert' | 'muted'
@@ -44,7 +46,8 @@ export interface PopupView {
   language: { label: string; code: Config['targetLanguage']; canOpen: boolean }
   list: { options: ServiceOption[]; prompts: { id: string; name: string }[] | null; promptId: string } | null
   failed: string | null
-  primary: { label: string; action: 'translate' | 'restore'; disabled: boolean }
+  /** S-P-50: the shortcut badge rides only on an enabled translate button, and only when bound */
+  primary: { label: string; action: 'translate' | 'restore'; disabled: boolean; shortcut?: string }
   secondary: { label: string; action: 'restore' } | null
   mode: { value: Mode; note: string | null }
   /** S-P-80: the hover highlight, a front-page toggle that takes effect on the page at once */
@@ -67,7 +70,7 @@ const EMPTY: PopupView = {
 }
 
 export function derivePopupView(input: PopupInput): PopupView {
-  const { page, provider, config, configFallback, pack, listOpen } = input
+  const { page, provider, config, configFallback, pack, listOpen, shortcut } = input
   if (page === null) return EMPTY
 
   const progress = page.progress
@@ -131,6 +134,7 @@ export function derivePopupView(input: PopupInput): PopupView {
   const primary: PopupView['primary'] = on ? { label: S.primary.restore, action: 'restore', disabled: false }
     : paused ? { label: S.primary.retranslate, action: 'translate', disabled: false }
     : { label: S.primary.translate, action: 'translate', disabled: loading || downloading || !(available || fallback) }
+  if (primary.action === 'translate' && !primary.disabled && shortcut) primary.shortcut = shortcut
   const secondary = paused ? { label: S.primary.restore, action: 'restore' as const } : null
 
   return {

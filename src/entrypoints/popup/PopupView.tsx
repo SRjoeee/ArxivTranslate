@@ -59,10 +59,11 @@ export function PopupView({ view, error, actions }: { view: View; error: string 
             </div>
           )}
 
-          <Button variant={view.primary.action === 'translate' ? 'primary' : 'secondary'} disabled={view.primary.disabled} onClick={actions[view.primary.action]}>
+          {/* aria-label keeps the accessible name at the label alone, badge or not (the e2e suites find the button by name) */}
+          <Button variant={view.primary.action === 'translate' ? 'primary' : 'secondary'} disabled={view.primary.disabled} aria-label={view.primary.label} onClick={actions[view.primary.action]}>
             {view.primary.label}
-            {view.primary.action === 'translate' && !view.primary.disabled && (
-              <kbd className="rounded-[6px] bg-white/20 px-1.5 py-0.5 font-ui text-[11px] font-semibold">{S.primary.shortcut}</kbd>
+            {view.primary.shortcut && (
+              <kbd className="rounded-[6px] bg-white/20 px-1.5 py-0.5 font-ui text-[11px] font-semibold">{view.primary.shortcut}</kbd>
             )}
           </Button>
           {view.secondary && <Button variant="text" className="self-center" onClick={actions[view.secondary.action]}>{view.secondary.label}</Button>}

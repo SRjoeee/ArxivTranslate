@@ -18,7 +18,7 @@ describe('derivePopupView (UI.md §4)', () => {
   it('P1 ready: green pill, openable, translate', () => {
     const v = view('P1')
     expect(v.service).toMatchObject({ name: 'deepseek-v4-flash', pill: { text: '就绪', tone: 'ok' }, canOpen: true })
-    expect(v.primary).toEqual({ label: '翻译本页', action: 'translate', disabled: false })
+    expect(v.primary).toEqual({ label: '翻译本页', action: 'translate', disabled: false, shortcut: '⌥T' })
     expect(v.note).toBeNull()
     expect(v.failed).toBeNull()
     expect(v.list).toBeNull()
@@ -65,7 +65,7 @@ describe('derivePopupView (UI.md §4)', () => {
   it('P8 paused: retranslate plus restore', () => {
     const v = view('P8')
     expect(v.service.pill).toMatchObject({ text: '已暂停' })
-    expect(v.primary).toEqual({ label: '重新翻译', action: 'translate', disabled: false })
+    expect(v.primary).toEqual({ label: '重新翻译', action: 'translate', disabled: false, shortcut: '⌥T' })
     expect(v.secondary).toEqual({ label: '显示原文', action: 'restore' })
     expect(v.note?.text).toBe('API Key 无效或已过期。改好设置后点「重新翻译」')
   })
@@ -93,6 +93,13 @@ describe('derivePopupView (UI.md §4)', () => {
   it('P13 narrow-window note', () => {
     const v = view('P13')
     expect(v.mode).toEqual({ value: 'side', note: '窗口较窄，暂按上下显示' })
+  })
+  it('the shortcut badge rides only on an enabled translate button, and only when bound', () => {
+    expect(view('P3').primary.shortcut).toBeUndefined()
+    expect(view('P7').primary.shortcut).toBeUndefined()
+    expect(view('P8').primary.shortcut).toBe('⌥T')
+    const f = POPUP_FIXTURES.find(f => f.id === 'P1')!.input
+    expect(derivePopupView({ ...f, shortcut: null }).primary.shortcut).toBeUndefined()
   })
   it('the highlight toggle follows the config and is off when it says so', () => {
     const f = POPUP_FIXTURES.find(f => f.id === 'P1')!.input

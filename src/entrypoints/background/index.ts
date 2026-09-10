@@ -8,7 +8,7 @@ import { HELPER_HOST } from '@/shared/ocr'
 import { createHelperClient } from './helper'
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
-import { installContextMenu } from './context-menu'
+import { installContextMenu, installToggleCommand } from './context-menu'
 import { handlePing } from '@/shared/ping'
 
 // background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
@@ -99,6 +99,12 @@ export default defineBackground(() => {
     create: options => browser.contextMenus.create(options as Parameters<typeof browser.contextMenus.create>[0]),
     removeAll: () => browser.contextMenus.removeAll(),
     onClicked: handler => browser.contextMenus.onClicked.addListener(handler),
+    send: (tabId, message) => browser.tabs.sendMessage(tabId, message),
+  })
+  // The keyboard shortcut (UI.md S-P-50): same toggle, third entry
+  installToggleCommand({
+    onCommand: handler => browser.commands.onCommand.addListener(handler),
+    activeTab: async () => (await browser.tabs.query({ active: true, currentWindow: true }))[0],
     send: (tabId, message) => browser.tabs.sendMessage(tabId, message),
   })
 
