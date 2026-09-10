@@ -31,21 +31,31 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(v.highlight).toBe(true)
     expect(v.images).toBe(true)
   })
-  it('P2 service menu: Microsoft, Google, LLM, Chrome; Chrome greyed with a download button until the pack is there', () => {
+  it('P2 service menu: the three built-ins, the reader\'s own, then the way to the settings page', () => {
     const m = view('P2').menu!
     expect(m.kind).toBe('service')
     expect(m.search).toBe(false)
-    expect(m.items.map(i => i.id)).toEqual(['microsoft', 'google-web', 'openai-compat', 'chrome-builtin'])
+    expect(m.items.map(i => i.id)).toEqual(['microsoft', 'google-web', 'chrome-builtin', '__manage'])
     expect(m.items.map(i => i.selected)).toEqual([true, false, false, false])
-    expect(m.items[2]).toMatchObject({ name: 'LLM', hint: '尚未配置 API Key' })
-    expect(m.items[2]!.disabled).toBeFalsy()
-    expect(m.items[3]).toMatchObject({ name: 'Chrome 翻译', disabled: true, action: { label: '下载' } })
+    expect(m.items[2]).toMatchObject({ name: 'Chrome 翻译', disabled: true, action: { label: '下载' } })
+    expect(m.items[3]).toMatchObject({ name: '管理翻译服务…' })
     const ready = derivePopupView({ ...input('P2'), pack: 'available' }).menu!
-    expect(ready.items[3]).toMatchObject({ hint: '浏览器内置，无需联网' })
-    expect(ready.items[3]!.disabled).toBeFalsy()
-    expect(ready.items[3]!.action).toBeUndefined()
+    expect(ready.items[2]).toMatchObject({ hint: '浏览器内置，无需联网' })
+    expect(ready.items[2]!.disabled).toBeFalsy()
+    expect(ready.items[2]!.action).toBeUndefined()
     const busy = derivePopupView({ ...input('P2'), pack: 'downloading' }).menu!
-    expect(busy.items[3]).toMatchObject({ disabled: true, hint: '语言包下载中', action: { busy: true } })
+    expect(busy.items[2]).toMatchObject({ disabled: true, hint: '语言包下载中', action: { busy: true } })
+  })
+
+  it("a reader's services come after the built-ins, named the way they named them", () => {
+    const llm = input('P15')
+    const m = derivePopupView({ ...llm, menu: 'service' }).menu!
+    const own = m.items[3]!
+    expect(own).toMatchObject({ id: llm.config!.services[0]!.id, name: 'deepseek-v4-flash', hint: 'deepseek/deepseek-v4-flash', selected: true })
+    // Without a key the row still selects; the note under the card is what says it cannot run
+    const noKey = derivePopupView({ ...llm, config: { ...llm.config!, services: [{ ...llm.config!.services[0]!, apiKey: '' }] }, menu: 'service' }).menu!
+    expect(noKey.items[3]).toMatchObject({ hint: '尚未配置 API Key' })
+    expect(noKey.items[3]!.disabled).toBeFalsy()
   })
   it('P3 language menu: every language, searchable by any of its names or its code', () => {
     const m = view('P3').menu!
@@ -120,10 +130,14 @@ describe('derivePopupView (UI.md §4)', () => {
   })
   it('runnable follows the settings alone', () => {
     const c = input('P1').config!
+    const svc = input('P15').config!.services[0]!
     expect(runnable(c, null)).toBe(true)
-    expect(runnable({ ...c, provider: 'openai-compat' }, null)).toBe(false)
     expect(runnable({ ...c, provider: 'chrome-builtin' }, 'downloadable')).toBe(false)
     expect(runnable({ ...c, provider: 'chrome-builtin' }, 'available')).toBe(true)
     expect(runnable({ ...c, provider: 'google-web' }, null)).toBe(true)
+    // A service needs a key, unless it is a local endpoint: Ollama and LM Studio answer without one
+    expect(runnable({ ...c, provider: svc.id, services: [svc] }, null)).toBe(true)
+    expect(runnable({ ...c, provider: svc.id, services: [{ ...svc, apiKey: '' }] }, null)).toBe(false)
+    expect(runnable({ ...c, provider: svc.id, services: [{ ...svc, apiKey: '', baseURL: 'http://127.0.0.1:11434/v1' }] }, null)).toBe(true)
   })
 })

@@ -9,6 +9,7 @@
 // choice that cannot run leaves the page behind the settings.
 import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_LOCALE_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
+import { type Service, chosenService, isLlmChosen } from '@/config/services'
 import type { Mode } from '@/core/renderer'
 import { supportsTarget } from '@/providers/microsoft'
 import { BUILT_IN_PROMPTS } from '@/providers/prompt-library'
@@ -20,6 +21,8 @@ import type { MenuItem } from '@/ui/Menu'
 import { HELPER_GUIDE_URL, S, helperInstallCommand, parseFatal, reasonText, serviceName } from '@/ui/strings'
 
 export type { PackState }
+/** The last row of the service menu: not a service, it opens the settings page */
+export const MANAGE_SERVICES = '__manage'
 export type MenuKind = 'service' | 'language' | 'prompt'
 
 export interface PopupInput {
@@ -76,11 +79,22 @@ const EMPTY: PopupView = {
   mode: { value: 'stack', note: null },
 }
 
+/** A local endpoint needs no key: Ollama and LM Studio answer without one */
+const isLoopback = (baseURL: string): boolean => {
+  try {
+    const host = new URL(baseURL).hostname
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]'
+  } catch {
+    return false
+  }
+}
+const serviceRuns = (service: Service): boolean => service.apiKey.trim() !== '' || isLoopback(service.baseURL)
+
 /** Whether the chosen service can run on its own, decided from the settings (no round trip, no stale chain) */
 export function runnable(config: Config, pack: PackState | null): boolean {
+  const own = chosenService(config)
+  if (own) return serviceRuns(own)
   switch (config.provider) {
-    case 'openai-compat':
-      return config.openaiCompat.apiKey !== ''
     case 'chrome-builtin':
       return pack === 'available'
     case 'microsoft':
@@ -92,9 +106,8 @@ export function runnable(config: Config, pack: PackState | null): boolean {
 
 /** Why it cannot (S-P-31 / S-P-32) */
 function cannotRunWhy(config: Config, pack: PackState | null): string {
+  if (chosenService(config)) return S.note.llmNoKey
   switch (config.provider) {
-    case 'openai-compat':
-      return S.note.llmNoKey
     case 'chrome-builtin':
       return pack === 'downloading' ? S.note.chromeDownloading : S.note.chromeNoPack
     case 'microsoft':
@@ -103,8 +116,6 @@ function cannotRunWhy(config: Config, pack: PackState | null): string {
       return ''
   }
 }
-
-const modelName = (config: Config) => serviceName('openai-compat', config.openaiCompat.model)
 
 export function derivePopupView(input: PopupInput): PopupView {
   const { page, provider, config, pack, helper, platform, menu, shortcut, extensionId } = input
@@ -120,19 +131,20 @@ export function derivePopupView(input: PopupInput): PopupView {
   // case a change does not restart the page at once (data.ts), so the only case the reader sees it
   const behind = on && page.running !== undefined && !canRun
     && (page.running.provider !== config.provider || page.running.target !== config.targetLanguage)
-  const model = config.openaiCompat.model
+  const named = (id: string) => serviceName(id, config.services)
 
   const service: Row = demoted && provider
-    ? { value: serviceName(provider.engine.id, model), replaced: serviceName(demoted.id, model) }
-    : { value: serviceName(config.provider, model) }
+    ? { value: named(provider.engine.id), replaced: named(demoted.id) }
+    : { value: named(config.provider) }
   const language: Row = { value: label(config.targetLanguage) }
-  const prompt: Row | null = config.provider === 'openai-compat' ? { value: promptName(config) } : null
+  // The prompt decides how an LLM translates; the free services do not read it
+  const prompt: Row | null = isLlmChosen(config) ? { value: promptName(config) } : null
 
   const note: Note | null = paused ? { text: S.note.paused(reasonText(parseFatal(progress.fatal ?? '').kind)), settings: true }
-    : demoted && provider ? { text: S.note.replaced(serviceName(demoted.id, model), reasonText(demoted.kind), serviceName(provider.engine.id, model)), settings: true }
+    : demoted && provider ? { text: S.note.replaced(named(demoted.id), reasonText(demoted.kind), named(provider.engine.id)), settings: true }
     : page.images?.fatal ? { text: S.note.imagesPaused(reasonText(parseFatal(page.images.fatal).kind)), settings: true }
     : !canRun && (!on || behind)
-      ? { text: !on && provider?.fallback ? S.note.willFallback(cannotRunWhy(config, pack), serviceName(provider.fallback.id)) : S.note.cannotRun(cannotRunWhy(config, pack)), settings: true }
+      ? { text: !on && provider?.fallback ? S.note.willFallback(cannotRunWhy(config, pack), named(provider.fallback.id)) : S.note.cannotRun(cannotRunWhy(config, pack)), settings: true }
       : null
 
   const failedCount = progress.failed + (page.images?.failed ?? 0)
@@ -221,8 +233,10 @@ function serviceItems(config: Config, pack: PackState | null): MenuItem[] {
   return [
     { id: 'microsoft', name: S.service.microsoft, hint: microsoftOk ? S.service.free : S.service.microsoft_unsupported, selected: config.provider === 'microsoft', disabled: !microsoftOk },
     { id: 'google-web', name: S.service.google, hint: S.service.free, selected: config.provider === 'google-web' },
-    { id: 'openai-compat', name: S.service.llm, hint: config.openaiCompat.apiKey ? modelName(config) : S.service.llm_noKey, selected: config.provider === 'openai-compat' },
     chrome(),
+    // The reader's own, in the order the settings page lists them, then the way to that page
+    ...config.services.map(s => ({ id: s.id, name: s.name, hint: serviceRuns(s) ? s.model : S.service.llm_noKey, selected: config.provider === s.id })),
+    { id: MANAGE_SERVICES, name: S.service.manage, selected: false },
   ]
 }
 

@@ -1,4 +1,5 @@
 import { type RenderPath, wireFormatOf } from '@/cache/key'
+import { type Look, lookOf } from '@/config/appearance'
 import { DEFAULT_CONFIG, type Config } from '@/config/schema'
 import { getConfig, setConfig, watchConfig } from '@/config/storage'
 import { extract, paperContext, type Block } from '@/core/extractor'
@@ -43,8 +44,8 @@ export default defineContentScript({
     /** 悬停对照高亮（§7.7）：跟着一次翻译会话起停，配置关掉时根本不装监听 */
     let highlight: SentenceHighlight | null = null
     let savedMode: Mode = 'stack'
-    /** 译文样式（§7.5）：与模式一样只是 <html> 上的属性 */
-    let style: Config['style'] = DEFAULT_CONFIG.style
+    /** 译文外观（§7.5）：读者选中的那一份样式与高亮配置，写成 <html> 上的属性与变量 */
+    let look: Look = lookOf(DEFAULT_CONFIG)
     /**
      * 外观有三个写入点：启动时的这次读、start() 里的那次读、以及下面的 watchConfig。
      * 前两个都是「发起时的快照」，watcher 拿到的才是最新值，所以 watcher 一旦写过，
@@ -53,10 +54,10 @@ export default defineContentScript({
      * 两个读点共用这一个闸，不各自判断
      */
     let styleFromWatcher = false
-    const adoptStyle = (next: Config['style']) => {
-      if (!styleFromWatcher) style = next
+    const adoptStyle = (next: Look) => {
+      if (!styleFromWatcher) look = next
     }
-    void getConfig().then(config => { savedMode = config.mode; adoptStyle(config.style) })
+    void getConfig().then(config => { savedMode = config.mode; adoptStyle(lookOf(config)) })
     // 设置页改完外观立刻生效（#47）：只重算注入表与 <html data-axt-style>，一个译文节点都不碰，
     // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
     // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
@@ -87,9 +88,10 @@ export default defineContentScript({
           setImageModes(document, [])
         }
       }
-      if (JSON.stringify(config.style) === JSON.stringify(style)) return
-      style = config.style
-      applyStyle(document, style)
+      const next = lookOf(config)
+      if (JSON.stringify(next) === JSON.stringify(look)) return
+      look = next
+      applyStyle(document, look)
     })
     // 一次会话 = 一个运行（观察器与请求）+ 一个 session id 作取消范围（DESIGN §10）
     let run: TranslationRun | null = null
@@ -143,7 +145,7 @@ export default defineContentScript({
 
       modes?.stop()
       modes = createModeController(document, requested ?? config.mode, { onChange: enterSide })
-      adoptStyle(config.style)
+      adoptStyle(lookOf(config))
       endRun() // 上一轮停下但没恢复原文的会话（致命错误后重试）
       // 页内锚点兜底（issue #44）：only 模式下目标块被隐藏，交叉引用点了不动窝
       uninstallAnchors?.()
@@ -164,7 +166,7 @@ export default defineContentScript({
         blocks,
         target: config.targetLanguage,
         mode: modes.effective(),
-        style,
+        appearance: look,
         paper,
         // 标题 + 摘要每批都带（DESIGN §8.2）
         context,

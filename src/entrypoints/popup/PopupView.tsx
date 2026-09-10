@@ -149,7 +149,7 @@ function MenuRow({ kind, label, row, view, actions, compact = false, last = fals
           searchPlaceholder={S.menu.searchLanguages}
           empty={S.menu.noMatch}
           onSelect={id => {
-            if (kind === 'service') actions.chooseService(id as Parameters<PopupActions['chooseService']>[0])
+            if (kind === 'service') actions.chooseService(id)
             else if (kind === 'language') actions.chooseLanguage(id as Parameters<PopupActions['chooseLanguage']>[0])
             else actions.choosePrompt(id)
           }}

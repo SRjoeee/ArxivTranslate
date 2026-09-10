@@ -5,9 +5,10 @@ import type { ProviderStatus } from '@/providers/transport'
 import type { PageStatus } from '@/shared/messages'
 import type { PopupInput } from './view-model'
 
+const SVC = { id: 'svc-abcd1234', kind: 'openai-compat' as const, name: 'deepseek-v4-flash', baseURL: 'https://openrouter.ai/api/v1', apiKey: 'set', model: 'deepseek/deepseek-v4-flash', thinking: 'disabled' as const }
 const config: Config = DEFAULT_CONFIG
-const llm: Config = { ...DEFAULT_CONFIG, provider: 'openai-compat', openaiCompat: { ...DEFAULT_CONFIG.openaiCompat, apiKey: 'set' } }
-const llmNoKey: Config = { ...DEFAULT_CONFIG, provider: 'openai-compat' }
+const llm: Config = { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC] }
+const llmNoKey: Config = { ...DEFAULT_CONFIG, provider: SVC.id, services: [{ ...SVC, apiKey: '' }] }
 
 function page(over: Partial<PageStatus['progress']> = {}, extra: Partial<PageStatus> = {}): PageStatus {
   const state = over.state ?? 'idle'
@@ -35,7 +36,7 @@ function provider(over: Partial<ProviderStatus> = {}): ProviderStatus {
     ...over,
   }
 }
-const llmProvider = (over: Partial<ProviderStatus> = {}) => provider({ providerId: 'openai-compat', model: 'deepseek/deepseek-v4-flash', renderPath: 'tags', engine: { id: 'openai-compat', displayName: 'LLM' }, chain: ['openai-compat', 'microsoft', 'google-web'], ...over })
+const llmProvider = (over: Partial<ProviderStatus> = {}) => provider({ providerId: SVC.id, model: SVC.model, renderPath: 'tags', engine: { id: SVC.id, displayName: SVC.name }, chain: [SVC.id, 'microsoft', 'google-web'], ...over })
 
 const base: PopupInput = {
   page: page(), provider: provider(), config, pack: 'available', helper: { available: true, version: '1.0' }, platform: 'mac', menu: null, shortcut: '⌥T', extensionId: 'abcdefghijklmnopabcdefghijklmnop',
@@ -48,12 +49,12 @@ export const POPUP_FIXTURES: { id: string; name: string; when: string; input: Po
   { id: 'P3', name: '目标语言菜单', when: 'menu = language', input: { ...base, menu: 'language' } },
   { id: 'P4', name: '翻译中', when: 'on', input: { ...base, page: page({ state: 'on', requested: 31, done: 24, inFlight: 3 }, { preference: 'side', mode: 'side' }) } },
   { id: 'P5', name: '翻译中，有失败', when: 'on ∧ failed > 0 ∧ !fatal', input: { ...base, page: page({ state: 'on', requested: 31, done: 24, failed: 2 }, { images: { total: 6, requested: 3, done: 2, failed: 1 } }) } },
-  { id: 'P6', name: '已改用其他服务', when: 'on ∧ engine.demoted', input: { ...base, config: llm, page: page({ state: 'on', requested: 20, done: 11 }, { running: { provider: 'openai-compat', target: 'cmn', engine: 'google-web' } }), provider: llmProvider({ engine: { id: 'google-web', displayName: 'Google', demoted: { id: 'openai-compat', displayName: 'OpenAI 兼容端点', kind: 'auth', message: 'User not found.' } } }) } },
+  { id: 'P6', name: '已改用其他服务', when: 'on ∧ engine.demoted', input: { ...base, config: llm, page: page({ state: 'on', requested: 20, done: 11 }, { running: { provider: SVC.id, target: 'cmn', engine: 'google-web' } }), provider: llmProvider({ engine: { id: 'google-web', displayName: 'Google', demoted: { id: SVC.id, displayName: SVC.name, kind: 'auth', message: 'User not found.' } } }) } },
   { id: 'P7', name: 'LLM 未配置，有服务可替代', when: 'idle ∧ !runnable ∧ fallback', input: { ...base, config: llmNoKey, provider: llmProvider({ available: false, fallback: { id: 'microsoft', displayName: 'Microsoft' } }) } },
   { id: 'P8', name: 'LLM 未配置，无服务可替代', when: 'idle ∧ !runnable ∧ !fallback', input: { ...base, config: { ...llmNoKey, fallback: { enabled: false } }, provider: llmProvider({ available: false, chain: ['openai-compat'] }) } },
   { id: 'P9', name: '已暂停', when: 'stopped ∧ fatal', input: { ...base, config: llm, provider: llmProvider(), page: page({ state: 'stopped', requested: 8, done: 0, fatal: 'auth: User not found.' }) } },
   { id: 'P10', name: 'Chrome 翻译语言包下载中', when: 'chrome ∧ pack = downloading', input: { ...base, config: { ...config, provider: 'chrome-builtin' }, provider: provider({ providerId: 'chrome-builtin', available: false, fallback: { id: 'google-web', displayName: 'Google' }, engine: { id: 'chrome-builtin', displayName: 'Chrome' } }), pack: 'downloading' } },
-  { id: 'P11', name: '图片翻译已暂停', when: 'images.fatal', input: { ...base, config: llm, provider: llmProvider(), page: page({ state: 'on', requested: 20, done: 12 }, { running: { provider: 'openai-compat', target: 'cmn', engine: 'openai-compat' }, images: { total: 6, requested: 2, done: 0, failed: 0, fatal: 'auth: User not found.' } }) } },
+  { id: 'P11', name: '图片翻译已暂停', when: 'images.fatal', input: { ...base, config: llm, provider: llmProvider(), page: page({ state: 'on', requested: 20, done: 12 }, { running: { provider: SVC.id, target: 'cmn', engine: SVC.id }, images: { total: 6, requested: 2, done: 0, failed: 0, fatal: 'auth: User not found.' } }) } },
   { id: 'P12', name: '窄窗口按上下显示', when: 'mode !== preference', input: { ...base, page: page({ state: 'on', requested: 10, done: 10 }, { preference: 'side', mode: 'stack' }) } },
   { id: 'P13', name: '改选了跑不起来的服务', when: 'on ∧ running ≠ settings ∧ !runnable', input: { ...base, config: llmNoKey, provider: llmProvider({ available: false, fallback: { id: 'microsoft', displayName: 'Microsoft' } }), page: page({ state: 'on', requested: 31, done: 24 }) } },
   { id: 'P14', name: '识别助手未安装', when: 'images.enabled ∧ !helper.available', input: { ...base, helper: { available: false, reason: 'host not registered' } } },

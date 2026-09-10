@@ -16,7 +16,7 @@ import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages
 import type { HelperStatus } from '@/shared/ocr'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
 import { HELPER_GUIDE_URL, helperInstallCommand } from '@/ui/strings'
-import { type MenuKind, type PopupInput, runnable } from './view-model'
+import { MANAGE_SERVICES, type MenuKind, type PopupInput, runnable } from './view-model'
 
 const scriptStart = performance.now()
 
@@ -29,7 +29,8 @@ export interface PopupActions {
   retryFailed(): void
   openMenu(kind: MenuKind): void
   closeMenu(): void
-  chooseService(id: Config['provider']): void
+  /** A service id, a built-in id, or MANAGE_SERVICES */
+  chooseService(id: string): void
   chooseLanguage(code: Config['targetLanguage']): void
   choosePrompt(id: string): void
   setHighlight(on: boolean): void
@@ -175,6 +176,8 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
     closeMenu: () => setMenu(null),
     chooseService: id => void guard(async () => {
       setMenu(null)
+      // The last row of the menu is not a service: it opens the page where services are managed
+      if (id === MANAGE_SERVICES) return void browser.runtime.openOptionsPage()
       const next = await patchConfig(latest => ({ ...latest, provider: id }))
       const packState = id === 'chrome-builtin' ? await checkPack(next.targetLanguage) : pack
       await restartIfOn(next, packState, s => s.providerId === id)
