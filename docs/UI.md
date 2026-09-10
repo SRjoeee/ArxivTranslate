@@ -114,62 +114,50 @@ Removed 2026-09-10: the state pills (S-P-12…18) and the config-fallback note (
 
 ### 3.2 设置页
 
+Rebuilt 2026-09-10 (spec `docs/superpowers/specs/2026-09-10-settings-services-appearance-design.md`).
+Four sections behind a left navigation; there is no save button — every control writes as it
+changes, and the two drawers commit with one button.
+
 | 编号 | 位置 | 文案 | 备注 |
 |---|---|---|---|
-| S-O-01 | 导航 | 翻译服务 · 阅读 · 提示词与术语 · 数据 | |
-| S-O-02 | 导航 · 提示词与术语在非 AI 模型时的 `title` | 只对 AI 模型生效 | 项变灰仍可点 |
-| S-O-10 | 翻译服务页标题 / 副标题 | 翻译服务 / 选一个，改动即时生效 | |
-| S-O-11 | 翻译为 行 | 翻译为 | 三个服务共用 |
-| S-O-12 | 卡 · AI 模型 | AI 模型 / 译文最准确，术语跟着论文走；需要 API Key | |
-| S-O-13 | 卡 · Google 翻译 | Google 翻译 / 免费，几秒翻完一篇；专业术语可能不准 | 角标「免费」 |
-| S-O-14 | 卡 · Chrome 离线翻译 | Chrome 离线翻译 / 不联网，速度最快；先下载一次语言包 | 角标「离线」；卡内动作同 S-P-40…43 |
-| S-O-15 | 卡 · 免费 AI 翻译（候选 #97） | 免费 AI 翻译 / 不用配置，由 arXiv Translate 提供；有每日额度 | 接入前隐藏 |
-| S-O-16 | 卡 · Microsoft 翻译 | Microsoft 翻译 / 免费；斜体等行内样式会丢，链接与公式不受影响 | [定] 已接入（#98），走记号格式；不进自动改用的备用列表 |
-| S-O-20 | AI 模型表单 | 接口地址 · API Key · 模型 | |
-| S-O-21 | 接口地址占位 | https://openrouter.ai/api/v1 | |
-| S-O-22 | 接口地址说明 | OpenRouter、DeepSeek、Ollama 都可以 | 权限申请那句不预告，浏览器弹出时用户自然看到 |
-| S-O-23 | API Key · 已保存 | •••••••• 已保存 | 右侧「清除」 |
-| S-O-24 | API Key 说明 | 本机地址可以不填 | 只在接口地址是 localhost / 127.0.0.1 时出现 |
-| S-O-25 | 模型占位 | deepseek/deepseek-v4-flash | |
-| S-O-26 | 连接按钮 | 连接 | 只在字段改过后出现；点击 = 保存 + 验证 |
-| S-O-27 | 连接结果 · 成功 | 已连接 · {ms} ms | 悬停显示试译句 |
-| S-O-28 | 连接结果 · 失败 | {S-E 原因} | 红 |
-| S-O-29 | 更多选项（折叠行） | 更多选项 | 内含 S-O-30 |
-| S-O-30 | 深度思考 | 深度思考 / 翻译不需要推理，开着会慢很多；只对 OpenRouter、DeepSeek 生效 | 默认关 |
-| S-O-31 | 自动改用免费服务 | 出问题时自动改用免费服务 / API Key 失效、额度用尽或断网时，翻译不会停下 | 默认开 |
-| S-O-40 | 阅读页标题 / 副标题 | 阅读 / 译文长什么样、什么时候开始翻 | |
-| S-O-41 | 译文样式 | 译文样式 | 分组：基础 · 下划线 · 边框 · 底色 · 特效 · 自定义 |
-| S-O-42 | 样式格子名 | 与原文相同 · 淡一档 · 绿色 · 实线 · 点线 · 虚线 · 粗虚线 · 波浪线 · 粗波浪线 · 左侧竖线 · 细边框 · 虚线边框 · 荧光笔 · 渐变荧光笔 · 高亮底 · 淡色底 · 渐变文字 · 多彩底 · 发光 · 呼吸 · 模糊 | 沿用现有 |
-| S-O-43 | 样式说明（预览下方，仅个别样式有） | 模糊：悬停才看清，适合自测 / 左侧竖线：同行的短标题不加线 | 其余不写 |
-| S-O-44 | 自定义 CSS 说明 | 只写声明，不写选择器和花括号；字体、字号会跟随论文，别改 | 只在选「自定义」时出现 |
-| S-O-47 | 排版（#47） | 排版 / 原文和译文一起变，公式和代码不受影响 | 卡内：字号 · 行高 · 页面宽度 · 栏间距 · 段间距 · 文字颜色；顶部预设「默认 · 舒适 · 紧凑」；右上「恢复默认」；与译文样式共用同一段预览 |
-| S-O-48 | 分栏（#83，实验） | 左右对照的分栏位置 / 在页面上拖中缝调整，双击恢复居中 | 只有一个「恢复居中」按钮；实验期只在开发构建出现 |
-| S-O-45 | 提前翻译的范围 | 提前翻译的范围 / 屏幕下方多远的段落先翻；越近越省费用 | 刻度：半屏 · 一屏 · 两屏 · 三屏 |
-| S-O-46 | 开始翻译的时机 | 开始翻译的时机 / 段落露出多少才开始翻 | 刻度：刚露出 · 露出一半 · 完全露出 |
-| S-O-50 | 提示词页标题 / 副标题 | 提示词与术语 / 只对 AI 模型生效，决定「怎么翻」 | |
-| S-O-51 | 提示词列表 · 内置 | Default / 直译，保留段落结构 · Precision rewrite / 先译后润，读起来像中文论文 | 行尾「查看」 |
-| S-O-52 | 提示词列表 · 自定义 | {名称} / 自定义 | 行尾「编辑」 |
-| S-O-53 | 新建 | 新建提示词… | |
-| S-O-54 | 导入 / 导出 | 导入 · 导出 | 导出只在有自定义时出现 |
-| S-O-55 | 编辑抽屉 | 编辑提示词 / 名称 · System prompt · 用户提示词 / 完成 · 取消 · 删除 | 内置提示词的抽屉标题「查看提示词」，底部只有「复制一份来改」 |
-| S-O-56 | 抽屉说明 | 收发格式由扩展自动补在后面，改不掉 | System prompt 标签右侧 |
-| S-O-57 | 变量块 `title` | 目标语言 · 待翻译的段落（必须有）· 论文标题 · 摘要 · 当前章节 · 术语表 | |
-| S-O-58 | 删除确认 | 删除「{名称}」？ / 删除 · 取消 | `<dialog>` |
-| S-O-60 | 术语表 | 术语表 / 每行「原文, 译文」，让同一篇里的译法一致 | 右上「{n} 条」 |
-| S-O-61 | 术语表错误 | 第 {n} 行{原因} | 行内红字，不弹窗 |
-| S-O-80 | 图片翻译 节 | 图片翻译 / 图里的文字识别后，译文叠在原位；只翻位图，不翻 SVG | 在「翻译服务」页，服务卡之下 |
-| S-O-81 | 识别助手 · 检测中 | 正在检测识别助手… | 灰 + 转环 |
-| S-O-82 | 识别助手 · 就绪 | 识别助手已就绪 | 绿点；版本号放 `title` |
-| S-O-83 | 识别助手 · 未安装 | 需要安装识别助手（仅 Mac） | 「安装方法」→ helper/README；下方多选禁用 |
-| S-O-84 | 识别助手 · 需重装 | 识别助手版本不匹配，请重新安装 | 握手无版本 / 协议不符 |
-| S-O-85 | 识别助手 · 非 Mac | 图片翻译目前只支持 Mac | 整节折叠成一行 |
-| S-O-86 | 识别助手 · 未授权（分发后） | 允许与识别助手通信 | 按钮；`permissions.request` 需点击手势 |
-| S-O-87 | 图片翻译模式 | 在这些模式下显示图片译文 / 只影响显示，不会重新识别 | 多选：上下 · 左右 · 仅译文，默认全选 |
-| S-O-70 | 数据页标题 | 数据 | |
-| S-O-71 | 已缓存的译文 | 已缓存的译文 / {n} 条 · {size} MB · 换了服务、模型或提示词会自动分开存，通常不用清 | 右侧「清空」 |
-| S-O-72 | 读取失败 | 没能读取缓存 | 不显示成「0 条」 |
-| S-O-73 | 清空确认 | 清空所有已缓存的译文？之后再翻译会重新请求翻译服务 / 清空 · 取消 | |
-| S-O-74 | 清空结果 | 已清空 | 2 秒后消失 |
+| S-O-01 | 导航 | 翻译服务 · 阅读 · 提示词与术语 · 数据 | The hash keeps the place (`#services` …) |
+| S-O-02 | 设置读取失败 | 设置读取失败，当前使用默认设置；已保存的 API Key 与服务选择均未生效。请重新填写。 | Top of every section, with the reason under it; the popup no longer carries this state |
+| S-O-10 | 内置服务 | 内置服务 | Three cards with a radio each: Microsoft 翻译 · Google 翻译 · Chrome 翻译, the popup's names and hints (S-P-44…46) |
+| S-O-11 | Chrome 卡动作 | 下载 | While the pack is `downloadable`; the card cannot be chosen until it is there (S-P-40…43) |
+| S-O-12 | 我的服务 | 我的服务 | The reader's own, any number; each row is 名称 · 模型 · 主机名 |
+| S-O-13 | 我的服务 · 空 | 还没有添加服务。添加后即可使用 LLM 翻译。 | |
+| S-O-14 | 我的服务 · 动作 | 添加服务 / 编辑 | Both open the same drawer |
+| S-O-15 | 服务抽屉 | 添加服务 / 编辑服务 | 名称 · 接口地址 · API Key · 模型 · 更多选项 ▸ 深度思考 |
+| S-O-16 | 接口地址说明 | OpenRouter、DeepSeek、Ollama 等 OpenAI 兼容接口 | One kind of service; no vendor templates (owner, 2026-09-10) |
+| S-O-17 | API Key · 已保存 | •••••••• | 「清除」beside it; an empty box means "leave it alone" |
+| S-O-18 | API Key 说明 | 本机地址可以不填 | Only for localhost / 127.0.0.1 |
+| S-O-19 | 抽屉动作 | 连接 / 连接中… | Saves, requests the origin if needed, then translates one sample through this service by name |
+| S-O-20 | 连接结果 | 已连接 · {ms} ms | Failure shows the S-E reason |
+| S-O-21 | 抽屉动作 · 删除 | 删除 → 确认删除 · 取消 | Two clicks, no modal; a deleted service that was chosen falls back to Microsoft 翻译 |
+| S-O-22 | 自动改用 | 出问题时自动改用免费服务 / API Key 失效、额度用尽或断网时，翻译不会停下 | 默认开 |
+| S-O-23 | 目标语言 | 目标语言 | The popup's searchable menu (S-P-22/23) |
+| S-O-24 | 图片翻译 | 图片翻译 / 译文叠在图上，鼠标悬停查看原文 | The switch the popup shows (S-P-85) |
+| S-O-25 | 识别助手 | 正在检测识别助手… / 识别助手已就绪 {版本} / 图片翻译需要安装识别助手 | The install line carries 复制安装命令 and 教程 (S-P-86…89) |
+| S-O-26 | 图片模式 | 在这些模式下显示图片译文 / 只影响显示：切到没勾的模式时叠加层隐藏，切回来再显示，不重新识别 | 上下 · 左右 · 仅译文 |
+| S-O-40 | 译文样式 | 译文样式 / 选中的样式立即生效 | A grid of tiles; the chosen one carries a pencil |
+| S-O-41 | 列表动作 | 添加配置 / 重置 | 重置 restores the built-ins and keeps the reader's own |
+| S-O-42 | 内置样式 | 与原文相同 · 绿色 · 蓝色 · 琥珀 · 淡一档 · 模糊 | Ordinary entries: editable and deletable |
+| S-O-43 | 编辑抽屉 | 编辑配置 | 预览 · 名称 · 文字颜色 · 透明度 · 下划线（+ 线宽）· 悬停前模糊 · 高级 |
+| S-O-44 | 颜色控件 | 跟随原文 / 自定义 | Eight swatches plus the browser's picker |
+| S-O-45 | 下划线 | 无 · 实线 · 点线 · 虚线 · 波浪 | 线宽 1px · 2px appears once a line is chosen |
+| S-O-46 | 模糊 | 悬停前模糊 / 译文先糊着，鼠标停上去才清晰，适合自测 | |
+| S-O-47 | 高级 | 高级 / 只填声明，不写选择器和花括号；字体与字号仍随论文 | Folded; an invalid block says why on the spot |
+| S-O-48 | 抽屉动作 | 复制一份 · 删除 · 完成 | |
+| S-O-49 | 背景高亮 | 背景高亮 / 悬停时来标出对应句子的底色 | Same grid and editor, fields 底色 + 透明度; 内置：柔和绿 · 淡黄 · 淡蓝 |
+| S-O-50 | 提前翻译的范围 | 提前翻译的范围 / 屏幕下方多远的段落先翻；越近越省费用 | 半屏 · 一屏 · 两屏 · 三屏 |
+| S-O-51 | 开始翻译的时机 | 开始翻译的时机 / 段落露出多少才开始翻 | 刚露出 · 露出一半 · 完全露出 |
+| S-O-60 | 提示词与术语 · 非 LLM | 只对 LLM 服务生效 | A line at the top; the section stays usable |
+| S-O-61 | 提示词 | 提示词 | The existing prompt manager on the tokens |
+| S-O-62 | 术语表 | 术语表 / 每行「原文, 译文」，让同一篇里的译法一致 | 右上 {n} 条；saved as typed, but only when the whole table parses |
+| S-O-63 | 术语表错误 | 第 {n} 行{原因} | Under the box, per line |
+| S-O-70 | 数据 · 缓存 | 已缓存的译文 / {n} 条 · {size} MB | 换了服务、模型或提示词会自动分开存，通常不用清 |
+| S-O-71 | 读取失败 | 没能读取缓存 | Never shown as 「0 条」 |
+| S-O-72 | 清空 | 清空 → 确认清空 · 取消 / 已清空 | Two clicks; the result clears after 2 s |
 
 ### 3.3 页内组件
 
@@ -308,7 +296,9 @@ Rules:
 | 免费 AI 翻译（托管） | #97 | 候选 | 服务列表第四项 | S-P-48，S-O-15 |
 | Microsoft 翻译 | #98 | 已实现 | 服务列表第四项 | S-P-49，S-O-16 |
 | 对照高亮（悬停句子高亮 + 仅译文悬浮原文） | #105 / #141 | 已实现 | popup 卡内开关；设置 · 阅读 | S-P-80…81 |
-| 图片翻译开关 + 识别助手安装提示 | §15 | 已实现（2026-09-10） | popup 卡内开关与助手提示；设置 · 图片翻译 | S-P-85…89 |
+| 图片翻译开关 + 识别助手安装提示 | §15 | 已实现（2026-09-10） | popup 卡内开关与助手提示；设置 · 图片翻译 | S-P-85…89，S-O-24…26 |
+| 读者自己添加的翻译服务 | §8.5 | 已实现（2026-09-10，配置 v12） | 设置 · 翻译服务；popup 服务菜单 | S-O-12…22，S-P-46/48 |
+| 译文外观与背景高亮的配置列表 | §7.5 | 已实现（2026-09-10，配置 v12） | 设置 · 阅读 | S-O-40…49 |
 | 页内「已改用」提示 | 本文提案 | 待定 | 页内 | S-I-03 |
 | 阅读工具条 | 画布提案 | 待定 | 页内 | — |
 | 后台连通 / 块统计 | 现有 popup | 开发态 | 只在开发构建样例页 | — |
