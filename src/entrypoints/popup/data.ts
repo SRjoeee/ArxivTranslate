@@ -210,9 +210,10 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
       } finally {
         await checkPack(config.targetLanguage)
       }
-      // The service chain lives in background (§8.0): have it rebuild one so the now-usable
-      // offline service is back on the chain, then re-read availability
-      await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).catch(() => undefined)
+      // The service chain lives in background (§8.0): have it rebuild one so the now-usable offline
+      // service is back on it. The promise shown next to this button is about **this** tab, so only
+      // its session moves onto the new chain (Codex on #157)
+      await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin', ...(page?.session ? { scope: page.session } : {}) }).catch(() => undefined)
       loadProvider()
     }),
     copyInstallCommand: () => void guard(async () => {

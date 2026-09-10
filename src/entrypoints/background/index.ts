@@ -157,13 +157,13 @@ export default defineBackground(() => {
       case 'axt:engine-ready':
         // 语言包下载完之前建的链里没有这个引擎（buildChain 会把 isAvailable 为假的剔掉），
         // 或者它已被永久降级。重建一条新链，让它重新参与（§8.5，Codex 在 #50 指出）。
-        // **进行中的会话是否迁过去由发起方决定**（Codex 在 #59 / #157 指出）：popup 的语言包下载明说
-        // 「接下来的段落会用离线翻译」，不迁的话那一页会一直用着旧的兜底链、承诺落空；设置页没有这句
-        // 承诺，在那里迁会把一个正翻着某种语言的会话接到为另一种语言建的链上。被动的配置变更一律不迁
-        //（见 sessions.ts）
+        // **迁哪些会话由发起方决定**（Codex 在 #59 / #157 指出）：popup 的语言包下载只对它打开的那个
+        // 标签页说过「接下来的段落会用离线翻译」，就只迁那一个；删掉的服务必须处处停用，才迁全部；
+        // 其余只重建链，正在翻的页面保留它开始时的那条。被动的配置变更一律不迁（见 sessions.ts）
         activate()
           .then(async a => {
-            if (message.rebind !== false) router.rebindAll(a.transport)
+            if (message.rebindAll) router.rebindAll(a.transport)
+            else if (message.scope) router.rebind(message.scope, a.transport)
             return a.transport.status()
           })
           .then(status => sendResponse({ reset: status.chain.includes(message.id) }))

@@ -291,6 +291,25 @@ describe('provider 选择', () => {
     expect(marker.appearance.highlights.find(h => h.id === marker.appearance.activeHighlight)).toMatchObject({ color: '#ff8800', opacity: 0.22 })
   })
 
+  it('v11 to v12: a model name longer than the schema allows is clipped, not left to invalidate the config', async () => {
+    const long = `vendor/${'m'.repeat(80)}`
+    await fakeBrowser.storage.local.set({ config: {
+      version: 11, provider: 'openai-compat',
+      openaiCompat: { baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-keep', model: long, thinking: 'disabled' },
+      targetLanguage: 'cmn', mode: 'side', prompts: { promptId: 'default', patterns: [] },
+      preload: { margin: 1000, threshold: 0 }, fallback: { enabled: true }, glossary: [],
+      style: { preset: 'none', customCss: '', color: '', opacity: 1, accent: '' }, reading: { sentenceHighlight: true }, image: { enabled: true, modes: ['stack'] },
+    }, config$: { v: 11 } })
+    vi.resetModules()
+    const fresh = await import('@/config/storage')
+    const c = await fresh.getConfig()
+    // The reader's key and endpoint survive: the config did not fall back to defaults
+    expect(fresh.configFallbackReason()).toBeNull()
+    expect(c.services[0]?.apiKey).toBe('sk-keep')
+    expect(c.services[0]?.model).toBe(long)
+    expect(c.services[0]?.name.length).toBeLessThanOrEqual(40)
+  })
+
   it('图片翻译的模式只认三种，空数组合法（= 关闭）', async () => {
     await expect(setConfig({ ...DEFAULT_CONFIG, image: { enabled: true, modes: ['split' as never] } })).rejects.toThrow()
     await setConfig({ ...DEFAULT_CONFIG, image: { enabled: true, modes: [] } })

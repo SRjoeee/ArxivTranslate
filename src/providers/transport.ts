@@ -41,6 +41,13 @@ export interface ProviderStatus {
   engine: EngineStatus
   /** 链上引擎的 id，按优先级。popup 用它判断刚下好语言包的引擎有没有进链，e2e 用它断言降级 */
   chain: string[]
+  /**
+   * Every hand-over still in force, by engine. The page uses it to ask about **the engine its own
+   * session started on**: `engine.demoted` is only the most recent one, so an intermediate free
+   * engine failing transiently would hide the permanent one that displaced the reader's service
+   * (Codex on #157)
+   */
+  demotions: { id: string; kind: ProviderErrorKind }[]
 }
 
 export interface TranslationTransport {
@@ -118,6 +125,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
       targetLanguage: config.targetLanguage,
       promptId: config.prompts.promptId,
       chain: chain.map(engine => engine.id),
+      demotions: live.demotions.map(d => ({ id: d.id, kind: d.kind })),
       engine: {
         id: active.id,
         displayName: active.displayName,

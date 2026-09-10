@@ -76,17 +76,21 @@ export default defineContentScript({
           highlight = null
         }
       }
-      // The image switch (popup) too: on starts the image run for this session, off stops it and
-      // hides every overlay through the display gate; the text run is not touched
-      if (run && current && config.image.enabled !== current.config.image.enabled) {
+      // Image translation, both the switch (popup) and the per-mode list (settings): on starts the
+      // image run for this session, off stops it and hides every overlay through the display gate,
+      // and a change to the modes has to reach both the gate and the run that reads it — otherwise
+      // unticking the current mode leaves the overlays up and keeps requesting (Codex on #157).
+      // The text run is not touched either way
+      const imageChanged = run && current
+        && (config.image.enabled !== current.config.image.enabled
+          || config.image.modes.join(' ') !== current.config.image.modes.join(' '))
+      if (imageChanged && current) {
         current = { ...current, config }
+        images?.stop()
+        images = null
+        imageProgress = null
+        setImageModes(document, [])
         if (config.image.enabled) startImages(current.session, config, current.context, current.renderPath)
-        else {
-          images?.stop()
-          images = null
-          imageProgress = null
-          setImageModes(document, [])
-        }
       }
       const next = lookOf(config)
       if (JSON.stringify(next) === JSON.stringify(look)) return
@@ -104,11 +108,12 @@ export default defineContentScript({
     /** The session's start-time inputs, for the parts a settings change can restart on their own (images) */
     let current: { session: string; config: Config; context: Parameters<typeof startTranslation>[0]['context']; renderPath: RenderPath } | null = null
     /**
-     * The service a permanent hand-over already restarted this session for; one restart per
-     * hand-over. **Reset by every `start()`**: kept across sessions it would suppress the restart
-     * a later service needs, when that one hands over to the same engine (Codex on #157)
+     * Whether this session has already been restarted by a permanent hand-over. **One per session,
+     * and reset by every `start()`**: kept across sessions it would suppress the restart a later
+     * service needs when that one hands over to the same engine (Codex on #157), and unbounded
+     * within a session it could chase a chain down step by step
      */
-    let restartedFor: string | null = null
+    let restarted = false
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
     let progress: Progress = idle()
 
@@ -167,7 +172,7 @@ export default defineContentScript({
       if (config.reading.sentenceHighlight) highlight = startSentenceHighlight(document) ?? null
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
-      restartedFor = null
+      restarted = false
       const startEngine = status.engine.id
       running = { provider: config.provider, target: config.targetLanguage, engine: startEngine }
       current = { session, config, context, renderPath: status.renderPath }
@@ -196,16 +201,18 @@ export default defineContentScript({
         onProvider: id => {
           if (getSessionId() !== session) return
           if (running) running.engine = id
-          if (id === startEngine || restartedFor === id) return
+          if (id === startEngine || restarted) return
           // A permanent hand-over (missing or rejected key) would leave the paragraphs already on
           // screen from one service and the rest from another. Start over on the service that is
           // actually available, so the whole page reads from one hand (UI.md, decided 2026-09-10).
           // Temporary hand-overs (rate limits, timeouts) keep going: they come back on their own
           void backend.status().then(s => {
             if (getSessionId() !== session) return
-            const kind = s.engine.demoted?.kind
+            // Ask about **this session's own engine**: the most recent hand-over may belong to some
+            // intermediate free engine that failed transiently (Codex on #157)
+            const kind = s.demotions.find(d => d.id === startEngine)?.kind
             if (kind !== 'no-key' && kind !== 'auth') return
-            restartedFor = id
+            restarted = true
             console.debug(`[axt] hand-over to ${id} is permanent (${kind}); restarting the page on it`)
             void start(undefined, true, session)
           }).catch(() => undefined)
@@ -374,7 +381,7 @@ export default defineContentScript({
       progress = idle()
       running = null
       current = null
-      restartedFor = null
+      restarted = false
       console.debug(`[axt] translation stopped: ${result.removedNodes} nodes removed`)
       return { removedNodes: result.removedNodes }
     }

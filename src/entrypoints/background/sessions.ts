@@ -36,6 +36,8 @@ export interface SessionRouter {
    * 被动的配置变更故意不迁，见本文件开头
    */
   rebindAll(transport: TranslationTransport): void
+  /** Move one session onto a new chain; the rest keep the one they started on */
+  rebind(scope: string, transport: TranslationTransport): void
   /** 当前还绑着的 scope，按绑定顺序 */
   bound(): string[]
 }
@@ -203,6 +205,10 @@ export function createSessionRouter(current: () => Promise<TranslationTransport>
     },
     rebindAll(transport) {
       for (const [scope, session] of sessions) sessions.set(scope, { ...session, transport })
+    },
+    rebind(scope, transport) {
+      const session = sessions.get(scope)
+      if (session) sessions.set(scope, { ...session, transport })
     },
     bound: () => [...sessions.keys()],
   }

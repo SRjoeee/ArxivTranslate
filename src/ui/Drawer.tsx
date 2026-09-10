@@ -1,18 +1,39 @@
 // A right-side panel for editing one thing (a service, an appearance profile). Escape and a click
 // on the backdrop close it; the panel itself is a dialog for assistive technology.
-import { type ReactNode, useEffect } from 'react'
+import { type ReactNode, useEffect, useRef } from 'react'
 
 export function Drawer({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+  const panel = useRef<HTMLElement>(null)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
+  /**
+   * Take focus on open and give it back on close. Without this the keyboard stays on the trigger,
+   * behind the backdrop, and Tab walks the settings controls the drawer covers (Codex on #157).
+   * `aria-modal` tells assistive technology the same thing the backdrop tells the mouse.
+   */
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null
+    panel.current?.focus()
+    return () => opener?.focus?.()
+  }, [])
+  /** Tab stays inside while it is open: the first and last focusable elements wrap onto each other */
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Tab' || !panel.current) return
+    const focusable = panel.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (!first || !last) return
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+  }
   return (
     <div className="fixed inset-0 z-20 flex justify-end">
       {/* A real button, so the backdrop is reachable and dismissible from the keyboard as well */}
       <button type="button" aria-label="关闭" tabIndex={-1} onClick={onClose} className="absolute inset-0 cursor-default bg-black/25" />
-      <section role="dialog" aria-label={title} className="relative flex h-full w-[420px] max-w-full flex-col bg-bg shadow-[0_0_40px_rgba(0,0,0,0.2)]">
+      <section ref={panel} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onKeyDown={onKeyDown} className="relative flex h-full w-[420px] max-w-full flex-col bg-bg shadow-[0_0_40px_rgba(0,0,0,0.2)] outline-none">
         <header className="flex items-center justify-between border-b border-line px-5 py-4">
           <h2 className="text-[15px] font-bold">{title}</h2>
           <button type="button" aria-label="关闭" onClick={onClose} className="cursor-pointer text-fg-2 hover:text-fg">

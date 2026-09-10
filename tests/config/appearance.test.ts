@@ -15,13 +15,19 @@ describe('appearance profiles', () => {
     expect(activeStyle(a).id).toBe('follow')
     expect(activeHighlight(a).id).toBe('soft-green')
   })
-  it("reset restores edited and deleted built-ins and keeps the reader's own", () => {
+  it("reset restores edited and deleted built-ins of one list and keeps the reader's own", () => {
     const own = { id: 'style-abc12345', name: '我的', color: '#123456', opacity: 1, underline: 'none' as const, thickness: 1 as const, blur: false, css: '' }
-    const a = { ...DEFAULT_CONFIG.appearance, styles: [{ ...BUILT_IN_STYLES[0]!, color: '#ff0000' }, own], highlights: [] }
-    const r = resetBuiltIns(a)
+    const editedBand = { ...BUILT_IN_HIGHLIGHTS[0]!, opacity: 0.5 }
+    const a = { ...DEFAULT_CONFIG.appearance, styles: [{ ...BUILT_IN_STYLES[0]!, color: '#ff0000' }, own], highlights: [editedBand] }
+    const r = resetBuiltIns(a, 'styles')
     expect(r.styles.map(s => s.id)).toEqual([...BUILT_IN_STYLES.map(s => s.id), own.id])
     expect(r.styles[0]!.color).toBe('')
-    expect(r.highlights.map(h => h.id)).toEqual(BUILT_IN_HIGHLIGHTS.map(h => h.id))
+    // The other grid has its own 重置; resetting styles must not undo an edited band
+    expect(r.highlights).toEqual([editedBand])
+    const b = resetBuiltIns(a, 'highlights')
+    expect(b.highlights.map(h => h.id)).toEqual(BUILT_IN_HIGHLIGHTS.map(h => h.id))
+    expect(b.highlights[0]!.opacity).toBe(BUILT_IN_HIGHLIGHTS[0]!.opacity)
+    expect(b.styles).toEqual(a.styles)
   })
   it('rejects a bad colour, an opacity out of range, a css block with braces, an unknown underline', () => {
     const base = DEFAULT_CONFIG.appearance

@@ -86,16 +86,18 @@ export function newProfileId(prefix: 'style' | 'hl'): string {
   return `${prefix}-${Array.from(bytes, b => ID_CHARS[b % ID_CHARS.length]).join('')}`
 }
 
-/** Built-ins back to their shipped values, in their shipped order, the reader's own after them */
-export function resetBuiltIns(a: Appearance): Appearance {
-  const builtInStyleIds = new Set(BUILT_IN_STYLES.map(s => s.id))
-  const builtInHlIds = new Set(BUILT_IN_HIGHLIGHTS.map(h => h.id))
-  return {
-    styles: [...BUILT_IN_STYLES, ...a.styles.filter(s => !builtInStyleIds.has(s.id))],
-    activeStyle: a.activeStyle,
-    highlights: [...BUILT_IN_HIGHLIGHTS, ...a.highlights.filter(h => !builtInHlIds.has(h.id))],
-    activeHighlight: a.activeHighlight,
+/**
+ * Built-ins back to their shipped values, in their shipped order, the reader's own after them.
+ * **One list at a time**: the two grids have a 重置 each, and resetting styles must not quietly
+ * discard edits to the bands (Codex on #157)
+ */
+export function resetBuiltIns(a: Appearance, list: 'styles' | 'highlights'): Appearance {
+  if (list === 'styles') {
+    const ids = new Set(BUILT_IN_STYLES.map(s => s.id))
+    return { ...a, styles: [...BUILT_IN_STYLES, ...a.styles.filter(s => !ids.has(s.id))] }
   }
+  const ids = new Set(BUILT_IN_HIGHLIGHTS.map(h => h.id))
+  return { ...a, highlights: [...BUILT_IN_HIGHLIGHTS, ...a.highlights.filter(h => !ids.has(h.id))] }
 }
 
 export const duplicateStyle = (p: StyleProfile): StyleProfile => ({ ...p, id: newProfileId('style'), name: `${p.name} 副本` })

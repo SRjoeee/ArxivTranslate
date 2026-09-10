@@ -33,5 +33,13 @@ export function serviceOf(config: Pick<Config, 'services'>, id: string): Service
 export const chosenService = (config: Pick<Config, 'services' | 'provider'>): Service | undefined => serviceOf(config, config.provider)
 export const isLlmChosen = (config: Pick<Config, 'services' | 'provider'>): boolean => chosenService(config) !== undefined
 
-/** The service's default name: the model's last segment (`deepseek/deepseek-v4-flash` → `deepseek-v4-flash`) */
-export const defaultServiceName = (model: string): string => model.split('/').pop() || model
+/** As long as `serviceSchema.name` allows; a longer one would make the whole config invalid */
+export const NAME_MAX = 40
+
+/**
+ * The service's default name: the model's last segment (`deepseek/deepseek-v4-flash` →
+ * `deepseek-v4-flash`), clipped to what the schema accepts. A v11 model name had no length limit,
+ * so an unclipped copy could migrate to an object zod rejects — and a rejected config falls back to
+ * defaults, taking the reader's endpoint and key out of effect (Codex on #157)
+ */
+export const defaultServiceName = (model: string): string => (model.split('/').pop() || model).slice(0, NAME_MAX) || 'LLM'

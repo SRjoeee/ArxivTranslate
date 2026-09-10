@@ -68,7 +68,7 @@ export function Reading({ data }: { data: OptionsData }) {
         onChoose={id => setAppearance(c => ({ ...c, activeStyle: id }))}
         onEdit={id => setEditing({ list: 'style', id })}
         onAdd={addStyle}
-        onReset={() => setAppearance(resetBuiltIns)}
+        onReset={() => setAppearance(c => resetBuiltIns(c, 'styles'))}
         renderTile={profile => <span style={styleTile(profile)} className="text-[13px]">{O.reading.previewTarget}</span>}
       />
 
@@ -85,7 +85,7 @@ export function Reading({ data }: { data: OptionsData }) {
         onChoose={id => setAppearance(c => ({ ...c, activeHighlight: id }))}
         onEdit={id => setEditing({ list: 'highlight', id })}
         onAdd={addBand}
-        onReset={() => setAppearance(resetBuiltIns)}
+        onReset={() => setAppearance(c => resetBuiltIns(c, 'highlights'))}
         renderTile={profile => <span className="text-[13px]"><span style={bandTile(profile)}>{O.reading.previewTarget}</span></span>}
       />
 

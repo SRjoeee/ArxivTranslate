@@ -127,9 +127,11 @@ export function derivePopupView(input: PopupInput): PopupView {
   const paused = progress.state === 'stopped' && progress.fatal !== undefined
   const canRun = runnable(config, pack)
   const demoted = on ? provider?.engine.demoted : undefined
-  // The page runs on other settings than the saved ones, and the saved ones cannot start: the only
-  // case a change does not restart the page at once (data.ts), so the only case the reader sees it
-  const behind = on && page.running !== undefined && !canRun
+  // The page runs on settings other than the saved ones. A change made here restarts the page at
+  // once (data.ts), so this is what is left: a choice that cannot start, and a change made from
+  // another tab, which leaves this page pinned to the session it began (Codex on #157). Either way
+  // the reader is offered 重新翻译 — enabled when the saved settings can actually run
+  const behind = on && page.running !== undefined
     && (page.running.provider !== config.provider || page.running.target !== config.targetLanguage)
   const named = (id: string) => serviceName(id, config.services)
 
@@ -151,7 +153,7 @@ export function derivePopupView(input: PopupInput): PopupView {
   const failed = failedCount > 0 && progress.state !== 'idle' && !progress.fatal && !page.images?.fatal ? S.failed.text(failedCount) : null
 
   const primary: PopupView['primary'] = on && !behind ? { label: S.primary.restore, action: 'restore', disabled: false }
-    : behind ? { label: S.primary.retranslate, action: 'retranslate', disabled: true }
+    : behind ? { label: S.primary.retranslate, action: 'retranslate', disabled: !canRun }
     : paused ? { label: S.primary.retranslate, action: 'retranslate', disabled: !canRun && !provider?.fallback }
     : { label: S.primary.translate, action: 'translate', disabled: !canRun && !provider?.fallback }
   if (primary.action !== 'restore' && !primary.disabled && shortcut) primary.shortcut = shortcut

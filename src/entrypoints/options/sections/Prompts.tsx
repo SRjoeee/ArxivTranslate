@@ -1,6 +1,7 @@
 // 提示词与术语: how an LLM service translates. The free services read neither, so the section says
 // so rather than hiding itself — a reader looking for the glossary should find it either way.
 import { useEffect, useState } from 'react'
+import { configSchema } from '@/config/schema'
 import { isLlmChosen } from '@/config/services'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 import { O } from '@/ui/strings'
@@ -14,6 +15,10 @@ export function Prompts({ data }: { data: OptionsData }) {
   useEffect(() => { if (config && text === null) setText(formatGlossaryText(config.glossary)) }, [config, text])
   if (!config || text === null) return null
   const parsed = parseGlossary(text)
+  // A table can parse line by line and still break the schema's limits (200 entries, per-field
+  // length, 6000 characters in all). Writing it would reject silently and leave the reader looking
+  // at a glossary that is not in storage (Codex on #157)
+  const overLimit = parsed.issues.length === 0 && !configSchema.shape.glossary.safeParse(parsed.entries).success
 
   return (
     <>
@@ -38,15 +43,19 @@ export function Prompts({ data }: { data: OptionsData }) {
         placeholder={'token, 词元\nembedding, 嵌入'}
         onChange={e => {
           setText(e.target.value)
-          // Only a clean table is written: a line with a mistake stays on screen with its reason
+          // Only a table that parses **and** fits the schema is written; the rest stays on screen
+          // with its reason
           const next = parseGlossary(e.target.value)
-          if (next.issues.length === 0) void patch(latest => ({ ...latest, glossary: next.entries }))
+          if (next.issues.length === 0 && configSchema.shape.glossary.safeParse(next.entries).success) {
+            void patch(latest => ({ ...latest, glossary: next.entries }))
+          }
         }}
         className="w-full rounded-control border border-line bg-card px-3 py-2 font-mono text-[12px] text-fg outline-none focus:border-fg-2"
       />
       {parsed.issues.map(issue => (
         <p key={issue.line} className="mt-1 text-[11px] text-accent">第 {issue.line} 行{issue.reason}</p>
       ))}
+      {overLimit && <p className="mt-1 text-[11px] text-accent">{O.prompts.glossaryTooBig}</p>}
     </>
   )
 }

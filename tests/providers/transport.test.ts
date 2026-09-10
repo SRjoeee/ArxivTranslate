@@ -139,6 +139,7 @@ describe('createLocalTransport：状态', () => {
       targetLanguage: 'cmn',
       promptId: 'default',
       chain: [SVC.id, 'google-web'],
+      demotions: [],
       engine: { id: SVC.id, displayName: SVC.id },
     })
   })

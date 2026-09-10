@@ -6,7 +6,6 @@ import { getConfig } from '@/config/storage'
 import type { Config } from '@/config/schema'
 import { type Service, defaultServiceName, newServiceId, serviceSchema } from '@/config/services'
 import { wireFormatOfProvider } from '@/providers/wire-formats'
-import { awaitChain } from '@/shared/chain'
 import { sendMessage } from '@/shared/messages'
 import { Button } from '@/ui/Button'
 import { Confirm } from '@/ui/Confirm'
@@ -87,10 +86,11 @@ export function ServiceDrawer({ service, patch, onClose }: {
       setKeyInput('')
 
       // Name the engine: the question is whether *this* endpoint answers, and going down the chain
-      // would report success for a broken one (Codex on #59). background rebuilds its chain from a
-      // storage event, so wait for it to report this service — otherwise a new one comes back as
-      // "not on the current chain" and an edited one is tested at its old endpoint (Codex on #157)
-      await awaitChain(s => s.providerId === saving)
+      // would report success for a broken one (Codex on #59). Ask background to rebuild and wait for
+      // its answer, rather than polling for a status that already looks right: editing a service
+      // keeps its id, so "the chain reports this id" is true of the old chain too (Codex on #157).
+      // No session is moved: a page translating on this service keeps the chain it started on
+      await sendMessage({ type: 'axt:engine-ready', id: saving }).catch(() => undefined)
       const current = await getConfig()
       const res = await sendMessage({
         type: 'axt:translate',
@@ -116,9 +116,10 @@ export function ServiceDrawer({ service, patch, onClose }: {
     }))
     if (savedURL) await releaseHostPermission(savedURL, saved.services.map(s => s.baseURL))
     // A page translating in another tab is pinned to the chain it started on, so a deleted service
-    // would go on spending its key whenever the reader scrolls (Codex on #157). Deleting is the
-    // reader's explicit action, so those sessions move onto a chain that no longer has it
-    await sendMessage({ type: 'axt:engine-ready', id: gone, rebind: true }).catch(() => undefined)
+    // would go on spending its key whenever the reader scrolls (Codex on #157). This is the one
+    // action that moves every session: the service has to stop serving everywhere, which outweighs
+    // moving an unrelated tab onto another chain
+    await sendMessage({ type: 'axt:engine-ready', id: gone, rebindAll: true }).catch(() => undefined)
     onClose()
   }
 

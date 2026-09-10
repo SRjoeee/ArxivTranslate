@@ -26,6 +26,12 @@ export interface FallbackStatus {
   activeId: string
   /** 最近一次降级的原因，popup 用来解释为什么译文换了引擎 */
   demoted?: DemotedInfo
+  /**
+   * 此刻仍然生效的**全部**降级记录。只看 `demoted` 是不够的：LLM 因 auth 永久降级之后，中间那个
+   * 免费引擎再来一次瞬时失败，`demoted` 就变成了那条瞬时的，调用方会以为「这次换服务不是永久的」
+   *（Codex 在 #157 指出）。content 据此判断**它这次会话起始的那个引擎**是不是被永久放下了
+   */
+  demotions: DemotedInfo[]
 }
 
 /**
@@ -122,6 +128,8 @@ export function createFallbackService(
     configuredId: steps[0]!.provider.id,
     activeId: available()[0]!.provider.id,
     ...(lastDemoted ? { demoted: lastDemoted } : {}),
+    // 过期的冷却记录不算：`isDemoted` 用的就是这条界线
+    demotions: steps.filter(step => isDemoted(step.provider.id)).map(step => demotions.get(step.provider.id)!.info),
   })
 
   return { translate, cancel, status }

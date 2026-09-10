@@ -100,9 +100,9 @@ export function useOptionsData(): OptionsData {
     try {
       await downloadPack(target)
       // The chain lives in background (§8.0): have it rebuild one with the now-usable offline
-      // service. `rebind: false` — a page translating in another tab keeps the chain it started on,
-      // because this page promised nothing about it and its target language may differ (Codex on #157)
-      await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin', rebind: false }).catch(() => undefined)
+      // service. No session is moved — this page promised nothing about any tab, and a page
+      // translating into another language must keep the chain it started on (Codex on #157)
+      await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).catch(() => undefined)
     } finally {
       setPack(await packState(target))
     }

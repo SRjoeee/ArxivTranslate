@@ -67,12 +67,18 @@ export interface AxtMessages {
    * (a language pack finished downloading, a service was deleted). Rebuild the chain so later
    * sessions see it.
    *
-   * `rebind` says whether the pages **already translating** move onto the new chain too. The popup's
-   * pack download promises "接下来的段落会用离线翻译", so it rebinds; the settings page promises no
-   * such thing, and rebinding there would hand a session translating into one language a chain
-   * built for another (Codex on #157). Absent means true, the behaviour before the field existed
+   * The response arrives **after** the chain has been rebuilt, so a caller that must act on the new
+   * configuration can await this instead of polling for a state that may look settled already.
+   *
+   * Which sessions move onto the new chain is the caller's to say, because only the caller knows
+   * what it promised (Codex on #157):
+   * - `scope` — that one session. The popup's pack download says "接下来的段落会用离线翻译" about
+   *   the tab it is open on, and about no other.
+   * - `rebindAll` — every session. Only for a service the reader deleted: it has to stop serving
+   *   everywhere, and that outweighs moving an unrelated tab onto another chain.
+   * - neither — rebuild only. Later sessions see the new chain; the ones translating keep theirs.
    */
-  'axt:engine-ready': { request: { id: string; rebind?: boolean }; response: { reset: boolean } }
+  'axt:engine-ready': { request: { id: string; scope?: string; rebindAll?: boolean }; response: { reset: boolean } }
   /** options / content → background：本机 OCR helper 是否可用（DESIGN §15.4 的 ping 检测） */
   'axt:helper-status': { request: Record<never, never>; response: HelperStatus }
   /** content → background：给一张位图做 OCR；结果按 imageHash 缓存（§15.2） */

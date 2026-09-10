@@ -47,6 +47,9 @@ describe('右键菜单的翻译开关（#146）', () => {
     expect(actionFor(progress('idle'))).toBe('axt:translate-page')
     expect(actionFor(progress('on'))).toBe('axt:restore-page')
     expect(actionFor(progress('stopped'))).toBe('axt:restore-page')
+    // 致命错误停下的那种「已停止」是要重试的：popup 的主按钮就写着「重新翻译」，快捷键角标贴在它上面，
+    // 这里若恢复原文就会把读者想重试的译文一起删掉（Codex 在 #157 指出）
+    expect(actionFor({ progress: { ...progress('stopped').progress, fatal: 'auth: bad key' } })).toBe('axt:translate-page')
     // 页面答不上状态：什么都不做，而不是瞎猜一个方向
     expect(actionFor(undefined)).toBeUndefined()
   })

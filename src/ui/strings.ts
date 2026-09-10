@@ -143,7 +143,7 @@ export const O = {
     previewSource: 'The Fourier transform is bounded.',
     previewTarget: '傅里叶变换是有界的。',
   },
-  prompts: { title: '提示词', glossary: '术语表', glossaryHint: '每行「原文, 译文」，让同一篇里的译法一致', glossaryCount: (n: number) => `${n} 条`, onlyLlm: '只对 LLM 服务生效' },
+  prompts: { title: '提示词', glossaryTooBig: '术语表太长，超出上限后没有保存；请减少条目或缩短内容', glossary: '术语表', glossaryHint: '每行「原文, 译文」，让同一篇里的译法一致', glossaryCount: (n: number) => `${n} 条`, onlyLlm: '只对 LLM 服务生效' },
   data: {
     cache: '已缓存的译文',
     cacheHint: '换了服务、模型或提示词会自动分开存，通常不用清',

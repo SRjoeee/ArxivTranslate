@@ -33,6 +33,7 @@ function provider(over: Partial<ProviderStatus> = {}): ProviderStatus {
     promptId: 'default',
     engine: { id: 'microsoft', displayName: 'Microsoft' },
     chain: ['microsoft', 'google-web'],
+    demotions: [],
     ...over,
   }
 }
