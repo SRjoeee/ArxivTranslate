@@ -1,3 +1,4 @@
+import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'wxt'
 
 // WXT 工程配置。host_permissions 等到 Phase 3 接网络引擎时再加。
@@ -5,7 +6,7 @@ export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
   // 扩展页面里 <link rel="modulepreload" crossorigin> 会触发 Chrome 的 "cross-world extension resource mismatch" 告警（无害但刷屏），关掉预加载
-  vite: () => ({ build: { modulePreload: false } }),
+  vite: () => ({ build: { modulePreload: false }, plugins: [tailwindcss()] }),
   manifest: {
     name: 'arXiv HTML Translator',
     // 图片叠加层用 CSS 锚点定位，`anchor-scope` 要 Chrome 131（§15.2）。文档一直这么写，但没落到
