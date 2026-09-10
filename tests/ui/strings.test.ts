@@ -23,11 +23,11 @@ describe('parseFatal', () => {
 })
 
 describe('serviceName', () => {
-  it('shows the model for the AI service and the service name for the rest', () => {
+  it('shows the model for the LLM and the service name for the rest', () => {
     expect(serviceName('openai-compat', 'deepseek/deepseek-v4-flash')).toBe('deepseek-v4-flash')
-    expect(serviceName('openai-compat')).toBe(S.service.ai)
+    expect(serviceName('openai-compat')).toBe(S.service.llm)
     expect(serviceName('google-web')).toBe('Google 翻译')
-    expect(serviceName('chrome-builtin')).toBe('Chrome 离线翻译')
+    expect(serviceName('chrome-builtin')).toBe('Chrome 翻译')
     expect(serviceName('microsoft')).toBe('Microsoft 翻译')
     expect(serviceName('mystery')).toBe('mystery')
   })
@@ -36,7 +36,11 @@ describe('serviceName', () => {
 describe('the strings themselves', () => {
   it('carry the product name and no implementation words', () => {
     expect(S.brand).toBe('Readarxiv')
-    const all = JSON.stringify(S, (_k, v) => (typeof v === 'function' ? v('x', 'y', 'z') : v))
+    // Values only: keys are code (S.helper is a key, 识别助手 is the word a reader sees)
+    const values = (v: unknown): string => typeof v === 'string' ? v : typeof v === 'function' ? String(v('x', 'y', 'z')) : v && typeof v === 'object' ? Object.values(v).map(values).join(' ') : ''
+    const all = values(S)
     expect(all).not.toMatch(/引擎|降级|块|会话|provider|fallback|helper/)
+    // No casual register either: a button is a noun or a verb, not a spoken phrase
+    expect(all).not.toMatch(/去填|去修|去查看|没翻出来|翻完/)
   })
 })

@@ -5,6 +5,6 @@ import { usePopupData } from './data'
 import { derivePopupView } from './view-model'
 
 export function App() {
-  const { input, error, actions } = usePopupData()
-  return <PopupView view={derivePopupView(input)} error={error} actions={actions} />
+  const { input, error, copied, actions } = usePopupData()
+  return <PopupView view={derivePopupView(input)} error={error} copied={copied} actions={actions} />
 }

@@ -34,6 +34,9 @@ export interface ProviderStatus {
   maxBatchItems: number
   /** 协商出的渲染路径（§8.5）：一次会话只有一个，content 侧据此序列化与算缓存键 */
   renderPath: RenderPath
+  /** The config this chain was built from: the popup waits for these to match what it just saved before restarting a page */
+  targetLanguage: string
+  promptId: string
   engine: EngineStatus
   /** 链上引擎的 id，按优先级。popup 用它判断刚下好语言包的引擎有没有进链，e2e 用它断言降级 */
   chain: string[]
@@ -110,6 +113,8 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
       maxBatchChars: primary.maxBatchChars,
       maxBatchItems: primary.maxBatchItems,
       renderPath,
+      targetLanguage: config.targetLanguage,
+      promptId: config.prompts.promptId,
       chain: chain.map(engine => engine.id),
       engine: {
         id: active.id,

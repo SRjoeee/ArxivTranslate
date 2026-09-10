@@ -10,9 +10,10 @@ import { derivePopupView } from '@/entrypoints/popup/view-model'
 
 const log = (name: string) => (...args: unknown[]) => console.log(`[gallery] ${name}`, ...args)
 const actions: PopupActions = {
-  translate: log('translate'), restore: log('restore'), chooseMode: log('chooseMode'), retryFailed: log('retryFailed'),
-  chooseProvider: log('chooseProvider'), chooseLanguage: log('chooseLanguage'), choosePrompt: log('choosePrompt'),
-  setHighlight: log('setHighlight'), downloadPack: log('downloadPack'), toggleList: log('toggleList'), openOptions: log('openOptions'),
+  translate: log('translate'), retranslate: log('retranslate'), restore: log('restore'), chooseMode: log('chooseMode'), retryFailed: log('retryFailed'),
+  openMenu: log('openMenu'), closeMenu: log('closeMenu'), chooseService: log('chooseService'), chooseLanguage: log('chooseLanguage'), choosePrompt: log('choosePrompt'),
+  setHighlight: log('setHighlight'), setImages: log('setImages'), downloadPack: log('downloadPack'),
+  copyInstallCommand: log('copyInstallCommand'), openGuide: log('openGuide'), openOptions: log('openOptions'),
 }
 
 function Gallery() {
@@ -26,8 +27,8 @@ function Gallery() {
             <section key={f.id} className="flex flex-col gap-2">
               <h2 className="text-[12px] font-semibold text-fg-2"><span className="mr-2 rounded bg-control px-1.5 py-0.5 font-mono text-fg">{f.id}</span>{f.name}<span className="ml-3 font-mono font-normal">{f.when}</span></h2>
               <div className="flex items-start gap-8">
-                <div data-theme="light" className="rounded-[18px] shadow-[0_8px_24px_rgba(0,0,0,0.08)]"><PopupView view={view} error={null} actions={actions} /></div>
-                <div data-theme="dark" className="rounded-[18px] shadow-[0_8px_24px_rgba(0,0,0,0.3)]"><PopupView view={view} error={null} actions={actions} /></div>
+                <div data-theme="light" className="rounded-[18px] shadow-[0_8px_24px_rgba(0,0,0,0.08)]"><PopupView view={view} error={null} copied={false} actions={actions} /></div>
+                <div data-theme="dark" className="rounded-[18px] shadow-[0_8px_24px_rgba(0,0,0,0.3)]"><PopupView view={view} error={null} copied={false} actions={actions} /></div>
               </div>
             </section>
           )

@@ -993,8 +993,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // "...后面的段落改用 Google 翻译..."); no developer word like 降级 appears anywhere in it
   await popup.getByText(/改用 Google 翻译/).waitFor({ timeout: 10_000 }).catch(() => undefined)
   const notice = await popup.getByText(/改用 Google 翻译/).count()
-  const pill = await popup.getByText('已改用', { exact: true }).count()
-  check('popup says the page is now on the free service: the pill and the in-card note', notice > 0 && pill > 0, `note ${notice}, pill ${pill}`)
+  check('popup says the page is now on the free service (the note under the card)', notice > 0, `note ${notice}`)
   await popup.screenshot({ path: `${SHOTS}/popup-demoted.png` })
   await popup.close()
   await page.close()

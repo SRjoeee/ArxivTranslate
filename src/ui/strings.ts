@@ -1,50 +1,57 @@
 // Every reader-visible string of the extension's pages (docs/UI.md §3). Components hold no Chinese
-// literals; a wording change is a change here. Numbers follow UI.md's S-P-xx; the tone rules are
-// §1: buttons are verbs, states are nouns, an error says what happened, what it means, what to do.
+// literals; a wording change is a change here. The register is that of a product, not a chat:
+// nouns for states, verbs for buttons, and an error says what happened and what to do.
 import type { ProviderErrorKind } from '@/providers/types'
 
 export const S = {
   brand: 'Readarxiv', // S-P-01
-  settings: '设置', // S-P-02
-  notArxiv: '打开一篇 arXiv 论文的 HTML 版本，就可以翻译', // S-P-03
-  service: {
-    label: '翻译服务', // S-P-10
-    ai: 'AI 模型',
-    google: 'Google 翻译',
-    offline: 'Chrome 离线翻译',
-    microsoft: 'Microsoft 翻译', // S-P-49
-    hintAi: '译文最准确', // S-P-44
-    hintGoogle: '免费，几秒翻完', // S-P-45
-    hintOffline: '不联网，速度最快', // S-P-46
-    hintMicrosoft: '免费，斜体等样式会丢', // S-P-49
-    packDownload: '下载', // S-P-40
-    packDownloading: '下载中，约需 1 分钟', // S-P-41
-    packUnavailable: '这个语言暂不支持离线翻译', // S-P-42
-    packUnsupported: '此版本 Chrome 没有离线翻译', // S-P-43
+  settings: '设置', // S-P-02, and the button on every note
+  notArxiv: '打开 arXiv 论文的 HTML 页面后即可翻译', // S-P-03
+  rows: {
+    service: '翻译服务', // S-P-10
+    language: '目标语言', // S-P-20
     prompt: '提示词', // S-P-47
+    highlight: '对照高亮', // S-P-80
+    highlightTitle: '悬停时高亮对应句子；仅译文模式下停留可查看原文', // S-P-81
+    images: '图片翻译', // S-P-85
   },
-  pill: {
-    ready: '就绪', // S-P-12
-    busy: '翻译中', // S-P-13
-    demoted: '已改用', // S-P-14
-    willFallback: '将改用', // S-P-15
-    needsSetup: '需要设置', // S-P-16
-    paused: '已暂停', // S-P-17
-    downloading: '下载中', // S-P-18
+  service: {
+    microsoft: 'Microsoft 翻译',
+    google: 'Google 翻译',
+    llm: 'LLM',
+    chrome: 'Chrome 翻译',
+    free: '免费', // S-P-44
+    chrome_ready: '浏览器内置，无需联网', // S-P-46
+    llm_noKey: '尚未配置 API Key', // S-P-45: the LLM item's hint until a key is set
+    microsoft_unsupported: '不支持当前目标语言',
+    chrome_download: '下载', // S-P-40
+    chrome_downloading: '语言包下载中', // S-P-41
+    chrome_unavailable: '当前不可用', // S-P-42 / S-P-43
   },
-  language: { label: '翻译为' }, // S-P-20
+  menu: {
+    searchLanguages: '搜索语言', // S-P-22
+    noMatch: '没有匹配的语言', // S-P-23
+  },
   note: {
-    // S-P-30: {former service}: {reason}. Later paragraphs use {new service}; technical terms may suffer
-    demoted: (from: string, reason: string, to: string) => `${from}：${reason}。后面的段落改用 ${to}，专业术语可能不准`,
-    willFallback: (to: string) => `还没有填写 API Key，这次会用 ${to}`, // S-P-31
-    needsKey: '还没有填写 API Key，填好就能翻译', // S-P-32
-    needsPack: '先下载离线语言包，下好就能翻译', // S-P-32 (offline service)
-    paused: (reason: string) => `${reason}。改好设置后点「重新翻译」`, // S-P-33
-    configFallback: '设置没能读取，正在用默认设置', // S-P-34
-    imagesPaused: (reason: string) => `图片翻译已暂停：${reason}。显示原文、改好设置后再翻译`, // S-P-35
-    linkFix: '去修',
-    linkFill: '去填',
-    linkView: '去查看',
+    // S-P-30: {service put aside}: {reason}. The page now runs on {service in use}
+    replaced: (from: string, reason: string, to: string) => `${from}：${reason}。本页已改用 ${to}`,
+    // S-P-31: {why the chosen service cannot run}, this time {service} will be used
+    willFallback: (why: string, to: string) => `${why}，本次将使用 ${to}`,
+    // S-P-32: the chosen service cannot run and nothing takes over; the reason alone
+    cannotRun: (why: string) => why,
+    llmNoKey: 'LLM 尚未配置 API Key',
+    chromeNoPack: 'Chrome 翻译的语言包尚未下载',
+    chromeDownloading: 'Chrome 翻译的语言包下载中，约需 1 分钟',
+    microsoftUnsupported: 'Microsoft 翻译不支持当前目标语言',
+    paused: (reason: string) => `${reason}。请检查设置后重新翻译`, // S-P-33
+    imagesPaused: (reason: string) => `图片翻译已暂停：${reason}`, // S-P-35
+  },
+  helper: {
+    install: '图片翻译需要安装识别助手', // S-P-86, macOS
+    macOnly: '图片翻译目前仅支持 macOS', // S-P-87
+    copy: '复制安装命令', // S-P-88
+    copied: '已复制',
+    guide: '教程', // S-P-89
   },
   primary: {
     translate: '翻译本页', // S-P-50
@@ -52,9 +59,7 @@ export const S = {
     retranslate: '重新翻译', // S-P-52
   },
   failed: {
-    // S-P-60: three phrasings, by what there is
-    text: (blocks: number, images: number) =>
-      blocks > 0 && images > 0 ? `${blocks} 段、${images} 张图没翻出来` : blocks > 0 ? `${blocks} 段没翻出来` : `${images} 张图没翻出来`,
+    text: (n: number) => `${n} 处翻译失败`, // S-P-60
     retry: '重试', // S-P-61
   },
   mode: {
@@ -66,22 +71,18 @@ export const S = {
     onlyTitle: '隐藏原文，参考文献仍保留双语', // S-P-73
     narrow: '窗口较窄，暂按上下显示', // S-P-74
   },
-  highlight: {
-    label: '对照高亮', // S-P-80
-    title: '指到哪句亮哪句；仅译文时停留一下会浮出原文', // S-P-81
-  },
-  actionFailed: (message: string) => message, // S-P-90: a failed action shows its message as one line
+  actionFailed: (message: string) => message, // S-P-90
 } as const
 
 /** §3.4: ProviderErrorKind → a reader's sentence. `aborted` is the reader's own doing and shows nothing. */
 const REASON: Record<ProviderErrorKind, string> = {
-  'no-key': '还没有填写 API Key',
+  'no-key': '尚未配置 API Key',
   auth: 'API Key 无效或已过期',
-  'rate-limit': '请求太频繁，稍后自动重试',
+  'rate-limit': '请求过于频繁，稍后自动重试',
   timeout: '翻译超时',
-  network: '网络不通',
-  'bad-request': '翻译服务拒绝了这个请求',
-  'invalid-response': '返回的译文格式不对',
+  network: '网络连接失败',
+  'bad-request': '翻译服务拒绝了请求',
+  'invalid-response': '译文格式无效',
   unknown: '翻译失败',
   aborted: '',
 }
@@ -102,18 +103,24 @@ export function parseFatal(fatal: string): { kind: ProviderErrorKind; message: s
   return { kind: 'unknown', message: fatal }
 }
 
-/** provider id → the name a reader sees (§2). The AI service shows the model's last segment (no `deepseek/` prefix). */
+/** provider id → the name a reader sees (§2). The LLM shows the model's last segment (no `deepseek/` prefix). */
 export function serviceName(id: string, model?: string): string {
   switch (id) {
     case 'openai-compat':
-      return model ? (model.split('/').pop() ?? model) : S.service.ai
+      return model ? (model.split('/').pop() ?? model) : S.service.llm
     case 'google-web':
       return S.service.google
     case 'chrome-builtin':
-      return S.service.offline
+      return S.service.chrome
     case 'microsoft':
       return S.service.microsoft
     default:
       return id
   }
+}
+
+/** The helper's install command for this extension (helper/README.md); one place to change when a hosted installer exists */
+export const HELPER_GUIDE_URL = 'https://github.com/SRjoeee/ArxivTranslate/blob/main/helper/README.md'
+export function helperInstallCommand(extensionId: string): string {
+  return `helper/install.sh ${extensionId}`
 }

@@ -134,6 +134,8 @@ describe('createLocalTransport：状态', () => {
       maxBatchChars: 1000,
       maxBatchItems: 4,
       renderPath: 'tags',
+      targetLanguage: 'cmn',
+      promptId: 'default',
       chain: ['openai-compat', 'google-web'],
       engine: { id: 'openai-compat', displayName: 'openai-compat' },
     })
