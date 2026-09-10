@@ -65,6 +65,16 @@ export default defineContentScript({
       // 否则「页面带着旧外观启动 + 用户点恢复默认」会走进等值快路径，闸没立起来，
       // 随后 getConfig() 那份旧快照又把非默认外观装回去（Codex 在 #106 指出）
       styleFromWatcher = true
+      // The hover highlight is a front-page toggle (UI.md S-P-80), so it takes effect on this page
+      // at once: installed or torn down mid-session, no translation node touched. Outside a session
+      // there is nothing to pair, and start() reads the setting itself
+      if (run) {
+        if (config.reading.sentenceHighlight && !highlight) highlight = startSentenceHighlight(document) ?? null
+        else if (!config.reading.sentenceHighlight && highlight) {
+          highlight.stop()
+          highlight = null
+        }
+      }
       if (JSON.stringify(config.style) === JSON.stringify(style)) return
       style = config.style
       applyStyle(document, style)
