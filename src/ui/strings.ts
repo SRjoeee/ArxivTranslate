@@ -14,7 +14,7 @@ export const S = {
     highlight: '对照高亮', // S-P-80
     highlightTitle: '悬停时高亮对应句子；仅译文模式下停留可查看原文', // S-P-81
     images: '图片翻译', // S-P-85
-    style: '译文样式', // S-P-86；与设置页「阅读 · 译文样式」同名，两处是同一件事
+    style: '译文样式', // S-P-82；与设置页「阅读 · 译文样式」同名，两处是同一件事
   },
   service: {
     microsoft: 'Microsoft 翻译',
@@ -55,6 +55,21 @@ export const S = {
     copy: '复制安装命令', // S-P-88
     copied: '已复制',
     guide: '教程', // S-P-89
+  },
+  /** The guided install on the settings page (S-O-30…36). The popup keeps the one-line version above */
+  setup: {
+    title: '安装识别助手',
+    intro: '图片翻译要在本机识别图里的文字。装一次，之后都不用管。',
+    step1: '打开「终端」',
+    step1Hint: '按 ⌘ 空格，输入 Terminal，回车',
+    step2: '粘贴这行命令，按回车',
+    step2Hint: '点命令即可复制',
+    step3: '装完回到这里',
+    step3Hint: '命令跑完会打印一行「已安装」',
+    check: '我已经装好了',
+    checking: '检测中…',
+    notYet: '还没检测到。确认命令跑完没有报错，然后再试一次',
+    done: '识别助手已就绪',
   },
   primary: {
     translate: '翻译本页', // S-P-50

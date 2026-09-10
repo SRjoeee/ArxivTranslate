@@ -9,8 +9,9 @@ import { Button } from '@/ui/Button'
 import { MenuField } from '@/ui/MenuField'
 import { Row } from '@/ui/Field'
 import { Switch } from '@/ui/Switch'
-import { HELPER_GUIDE_URL, MODE_ORDER, O, S, helperInstallCommand } from '@/ui/strings'
+import { MODE_ORDER, O, S } from '@/ui/strings'
 import type { OptionsData } from '../data'
+import { HelperSetup } from './HelperSetup'
 import { ServiceDrawer } from './ServiceDrawer'
 
 const MODE_NAMES: Record<(typeof MODE_VALUES)[number], string> = { stack: S.mode.stack, side: S.mode.side, only: S.mode.only }
@@ -18,10 +19,9 @@ const MODE_NAMES: Record<(typeof MODE_VALUES)[number], string> = { stack: S.mode
 const RADIO = 'size-3.5 shrink-0 appearance-none rounded-full border-[1.5px] border-line checked:border-[5px] checked:border-accent disabled:opacity-40'
 
 export function Services({ data, extensionId }: { data: OptionsData; extensionId: string }) {
-  const { config, patch, pack, checkPack, fetchPack, helper, platform } = data
+  const { config, patch, pack, checkPack, fetchPack, helper, setHelper, platform } = data
   /** null = closed, 'new' = the add form, otherwise the service being edited */
   const [editing, setEditing] = useState<'new' | string | null>(null)
-  const [copied, setCopied] = useState(false)
   if (!config) return null
 
   const chrome = (): { hint: string; disabled: boolean; action?: 'download' | 'busy' } => {
@@ -113,19 +113,11 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
         </Row>
         <div className="border-t border-line py-3 text-[12px] leading-relaxed text-fg-2">
           {helper === null || platform === null ? '正在检测识别助手…'
-            : helper.available ? `识别助手已就绪 ${helper.version ?? ''}`
+            : helper.available ? `${S.setup.done} ${helper.version ?? ''}`
             // The installer exits at once on anything but macOS, so offering it elsewhere would be
             // an actionable-looking path that cannot work (Codex on #157)
             : platform !== 'mac' ? S.helper.macOnly
-            : (
-              <span className="flex flex-col gap-2">
-                <span>{S.helper.install}</span>
-                <span className="flex items-center gap-3">
-                  <Button variant="solid" onClick={() => { void navigator.clipboard.writeText(helperInstallCommand(extensionId)); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>{copied ? S.helper.copied : S.helper.copy}</Button>
-                  <a className="text-[12px] font-semibold text-fg-2 hover:text-fg" href={HELPER_GUIDE_URL} target="_blank" rel="noreferrer">{S.helper.guide}</a>
-                </span>
-              </span>
-            )}
+            : <HelperSetup extensionId={extensionId} onStatus={setHelper} />}
         </div>
         <fieldset className="border-0 border-t border-line p-0 py-3">
           <legend className="p-0 text-[12px] font-semibold text-fg-2">在这些模式下显示图片译文</legend>

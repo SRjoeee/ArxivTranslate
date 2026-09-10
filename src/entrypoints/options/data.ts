@@ -21,6 +21,8 @@ export interface OptionsData {
   checkPack(target: string): Promise<void>
   fetchPack(): Promise<void>
   helper: HelperStatus | null
+  /** What a fresh probe found, from the guided install's own button (sections/HelperSetup.tsx) */
+  setHelper(status: HelperStatus): void
   /** Which platform this is; the installer only runs on macOS */
   platform: 'mac' | 'other' | null
   cache: CacheStats | null
@@ -72,7 +74,10 @@ export function useOptionsData(): OptionsData {
       setFallbackReason(configFallbackReason())
       void checkPack(c.targetLanguage)
     })
-    sendMessage({ type: 'axt:helper-status' }).then(setHelper).catch(() => setHelper({ available: false, reason: '扩展后台未响应' }))
+    // `recheck` on every open of a page: the reader may have installed the helper since the worker
+    // last looked, and it remembers a missing host for its whole life. Chrome fails a connect to an
+    // absent host without spawning anything, so asking again costs nothing
+    sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ available: false, reason: '扩展后台未响应' }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
     void loadCache()
     // 翻译发生在别的标签页：切回设置页时重新读一次，否则显示的永远是打开那一刻的数字
@@ -130,5 +135,5 @@ export function useOptionsData(): OptionsData {
     await loadCache()
   }, [loadCache])
 
-  return { config, fallbackReason, patch, pack, checkPack, fetchPack, helper, platform, cache, cacheError, clearCache, cacheCleared }
+  return { config, fallbackReason, patch, pack, checkPack, fetchPack, helper, setHelper, platform, cache, cacheError, clearCache, cacheCleared }
 }

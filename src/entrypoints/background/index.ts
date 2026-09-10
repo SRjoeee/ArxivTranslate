@@ -180,7 +180,7 @@ export default defineBackground(() => {
           .catch((e: unknown) => sendResponse({ ok: false, message: e instanceof Error ? e.message : String(e) }))
         return true
       case 'axt:helper-status':
-        ocr.status().then(sendResponse)
+        ocr.status(message.recheck ? { recheck: true } : undefined).then(sendResponse)
         return true
       case 'axt:ocr':
         // 先把 scope 绑到 sender 的标签页：它可能是这个标签页第一条带 scope 的消息，不绑的话关标签页时 dropTab 撤不到

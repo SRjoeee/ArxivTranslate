@@ -87,7 +87,8 @@ export interface AxtMessages {
    */
   'axt:engine-ready': { request: { id: string; scope?: string; rebindAll?: boolean }; response: { reset: boolean } }
   /** options / content → background：本机 OCR helper 是否可用（DESIGN §15.4 的 ping 检测） */
-  'axt:helper-status': { request: Record<never, never>; response: HelperStatus }
+  /** `recheck` re-probes a host that was reported missing; see HelperClient.status */
+  'axt:helper-status': { request: { recheck?: boolean }; response: HelperStatus }
   /** content → background：给一张位图做 OCR；结果按 imageHash 缓存（§15.2） */
   'axt:ocr': { request: OcrCall; response: OcrMessageResponse }
 }

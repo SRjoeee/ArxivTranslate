@@ -52,7 +52,7 @@ export interface PopupView {
   language: Row
   /** Only while the LLM is the chosen service */
   prompt: Row | null
-  /** The chosen translation style (S-P-86); the menu lists what the settings page holds */
+  /** The chosen translation style (S-P-82); the menu lists what the settings page holds */
   style: Row
   highlight: boolean
   images: boolean

@@ -95,7 +95,7 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
           </div>
 
           {/* How the translation looks, beside the two switches rather than in the card above: that
-              card is what translates, this is how it reads (S-P-86) */}
+              card is what translates, this is how it reads (S-P-82) */}
           <StyleRow view={view} actions={actions} />
         </>
       )}
@@ -171,7 +171,7 @@ function MenuRow({ kind, label, row, view, actions, compact = false, last = fals
 
 /**
  * The translation's style, on a bare row beside the two switches rather than in the card above:
- * that card is what translates, this is how it reads (S-P-86). Its own component rather than another
+ * that card is what translates, this is how it reads (S-P-82). Its own component rather than another
  * `MenuRow` variant — no card, no divider, and the same 12px scale the switches sit on
  */
 function StyleRow({ view, actions }: { view: View; actions: PopupActions }) {

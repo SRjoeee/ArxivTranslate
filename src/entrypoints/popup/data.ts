@@ -90,7 +90,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
     browser.commands.getAll()
       .then(all => setShortcut(all.find(c => c.name === COMMAND_ID)?.shortcut || null))
       .catch(() => setShortcut(null))
-    sendMessage({ type: 'axt:helper-status' }).then(setHelper).catch(() => setHelper({ available: false }))
+    sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ available: false }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
   }, [refresh, checkPack, loadProvider])
 

@@ -13,7 +13,8 @@ export interface OcrServiceDeps {
 }
 
 export interface OcrService {
-  status(): Promise<HelperStatus>
+  /** `recheck` re-probes a host reported missing; see HelperClient.status */
+  status(options?: { recheck?: boolean }): Promise<HelperStatus>
   ocr(call: OcrCall): Promise<OcrMessageResponse>
   /** 撤掉该 scope 排队与在飞的识别；`remember: false` 只排空、不判死（见 `CancelOptions`） */
   cancel(scope: string, options?: CancelOptions): number
@@ -41,7 +42,7 @@ export function createOcrService(deps: OcrServiceDeps): OcrService {
   const aborted = (): OcrMessageResponse => ({ ok: false, error: { kind: 'aborted', message: '会话已撤销' } })
 
   return {
-    status: () => deps.helper.status(),
+    status: options => deps.helper.status(options),
 
     async ocr(call) {
       if (call.scope && cancelled.has(call.scope)) return aborted()

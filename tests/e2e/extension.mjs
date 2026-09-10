@@ -14,7 +14,7 @@ const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chro
 const PROFILE = `${HERE}.profile`
 const SHOTS = `${HERE}.shots`
 const PAPER = process.env.AXT_PAPER ?? '2410.00260'
-/** popup 里那一行的名字（S-P-86）；与设置页「译文样式」同名 */
+/** popup 里那一行的名字（S-P-82）；与设置页「译文样式」同名 */
 const S_STYLE = '译文样式'
 const PAPER2 = process.env.AXT_PAPER2 ?? '2312.17527'
 /** 第三篇：前面的用例都没碰过它，缓存是冷的——导航那条要靠真实积压才测得出东西 */
@@ -336,7 +336,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   check('译文外观「淡一档」：译文透明度降下来，原文不受影响', styled.opacity > 0 && styled.opacity < 1 && styled.sourceOpacity === 1, JSON.stringify(styled))
   await page.screenshot({ path: `${SHOTS}/style-muted.png` })
 
-  // popup 也能换样式（S-P-86）：走的是「popup 写配置 → 页面的配置监听重画」，与设置页那条不同，
+  // popup 也能换样式（S-P-82）：走的是「popup 写配置 → 页面的配置监听重画」，与设置页那条不同，
   // 而且**页面正开着**，所以它同时证明了换样式不需要重开会话
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)
