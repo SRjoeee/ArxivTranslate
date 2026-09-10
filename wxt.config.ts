@@ -7,6 +7,15 @@ export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   // 扩展页面里 <link rel="modulepreload" crossorigin> 会触发 Chrome 的 "cross-world extension resource mismatch" 告警（无害但刷屏），关掉预加载
   vite: () => ({ build: { modulePreload: false }, plugins: [tailwindcss()] }),
+  // The gallery is for `wxt` (serve) only: a release must not ship a debug page anyone can open
+  hooks: {
+    'entrypoints:found': (wxt, infos) => {
+      if (wxt.config.command !== 'serve') {
+        const at = infos.findIndex(info => info.name === 'gallery')
+        if (at >= 0) infos.splice(at, 1)
+      }
+    },
+  },
   manifest: {
     name: 'arXiv HTML Translator',
     // 图片叠加层用 CSS 锚点定位，`anchor-scope` 要 Chrome 131（§15.2）。文档一直这么写，但没落到
