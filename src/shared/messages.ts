@@ -25,12 +25,22 @@ export interface PageStatus {
    * 「目的地会不会再发请求」）
    */
   session?: string | null
+  /**
+   * What the current session runs on: the service chosen when it started, its target language,
+   * and the service actually serving right now (a hand-over down the chain changes it). The popup
+   * compares it with the saved settings to know when the page is behind them
+   */
+  running?: { provider: string; target: string; engine: string }
 }
 
 /** 消息表：type → { request, response } */
 export interface AxtMessages {
-  /** popup → content：开始翻译当前页面 */
-  'axt:translate-page': { request: { mode?: Mode }; response: { started: boolean; reason?: string } }
+  /**
+   * popup → content: start translating the page. `restart` starts a new session over a running one
+   * without showing the original first: the settings changed and the page follows them paragraph
+   * by paragraph as each is requested again (cached ones at once)
+   */
+  'axt:translate-page': { request: { mode?: Mode; restart?: boolean }; response: { started: boolean; reason?: string } }
   /** popup → content：中止并恢复原文 */
   'axt:restore-page': { request: Record<never, never>; response: { removedNodes: number } }
   /** popup → content：切换模式（只改 <html> 上的属性，不重新翻译；§4 第 9 步） */

@@ -14,7 +14,7 @@ import {
 import { escapeText, unescapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { beginSession, endSession, getSessionId, translateTitle, type TitleTranslator } from '@/core/scheduler'
-import { isAxtMessage, sendMessage } from '@/shared/messages'
+import { isAxtMessage, type PageStatus, sendMessage } from '@/shared/messages'
 import type { ImageProgress } from '@/shared/ocr'
 import { createMessageTransport } from '@/shared/transport'
 import { enableDebug } from './debug'
@@ -75,6 +75,18 @@ export default defineContentScript({
           highlight = null
         }
       }
+      // The image switch (popup) too: on starts the image run for this session, off stops it and
+      // hides every overlay through the display gate; the text run is not touched
+      if (run && current && config.image.enabled !== current.config.image.enabled) {
+        current = { ...current, config }
+        if (config.image.enabled) startImages(current.session, config, current.context, current.renderPath)
+        else {
+          images?.stop()
+          images = null
+          imageProgress = null
+          setImageModes(document, [])
+        }
+      }
       if (JSON.stringify(config.style) === JSON.stringify(style)) return
       style = config.style
       applyStyle(document, style)
@@ -85,6 +97,12 @@ export default defineContentScript({
     /** 图片翻译（§15）：helper 可用且设置里至少勾了一种模式时才有 */
     let images: ImageRun | null = null
     let imageProgress: ImageProgress | null = null
+    /** What the session runs on (PageStatus.running); null outside a session */
+    let running: NonNullable<PageStatus['running']> | null = null
+    /** The session's start-time inputs, for the parts a settings change can restart on their own (images) */
+    let current: { session: string; config: Config; context: Parameters<typeof startTranslation>[0]['context']; renderPath: RenderPath } | null = null
+    /** The service a permanent hand-over already restarted the page for; one restart per hand-over */
+    let restartedFor: string | null = null
     const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
     let progress: Progress = idle()
 
@@ -104,8 +122,8 @@ export default defineContentScript({
       if (session) void backend.cancel(session)
     }
 
-    async function start(requested?: Mode): Promise<{ started: boolean; reason?: string }> {
-      if (progress.state === 'on') return { started: false, reason: '翻译已开启，滚动会继续翻' }
+    async function start(requested?: Mode, restart = false): Promise<{ started: boolean; reason?: string }> {
+      if (progress.state === 'on' && !restart) return { started: false, reason: '翻译已开启，滚动会继续翻' }
       if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
       if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
       const tStart = performance.now()
@@ -134,6 +152,9 @@ export default defineContentScript({
       if (config.reading.sentenceHighlight) highlight = startSentenceHighlight(document) ?? null
       const session = beginSession()
       progress = { ...idle(), state: 'on' }
+      const startEngine = status.engine.id
+      running = { provider: config.provider, target: config.targetLanguage, engine: startEngine }
+      current = { session, config, context, renderPath: status.renderPath }
       prep.reset() // 新会话：镜像允许再跑一次、量宽缓存清空、栏宽重读
       enterSide(modes.effective())
       const t1 = performance.now()
@@ -155,6 +176,23 @@ export default defineContentScript({
         onRendered: blocks => {
           if (getSessionId() !== session) return
           prep.touch(blocks)
+        },
+        onProvider: id => {
+          if (getSessionId() !== session) return
+          if (running) running.engine = id
+          if (id === startEngine || restartedFor === id) return
+          // A permanent hand-over (missing or rejected key) would leave the paragraphs already on
+          // screen from one service and the rest from another. Start over on the service that is
+          // actually available, so the whole page reads from one hand (UI.md, decided 2026-09-10).
+          // Temporary hand-overs (rate limits, timeouts) keep going: they come back on their own
+          void backend.status().then(s => {
+            if (getSessionId() !== session) return
+            const kind = s.engine.demoted?.kind
+            if (kind !== 'no-key' && kind !== 'auth') return
+            restartedFor = id
+            console.debug(`[axt] hand-over to ${id} is permanent (${kind}); restarting the page on it`)
+            void start(undefined, true)
+          }).catch(() => undefined)
         },
         onProgress: p => {
           // 会话已结束（恢复原文 / 重开）：旧运行的回调一律忽略
@@ -193,7 +231,7 @@ export default defineContentScript({
       // 上一轮（致命错误后没恢复原文就重开）留下的叠加层与模式闸先摘掉：helper 没了、图片翻译关了、
       // 目标语言换了，旧的都不该再显示；新一轮处理到那张图时会替换它（Codex 在 #89 指出）
       setImageModes(document, [])
-      if (config.image.modes.length === 0) return
+      if (!config.image.enabled || config.image.modes.length === 0) return
       if (!paper) return
       const targets = collectImageTargets(document)
       if (targets.length === 0) return
@@ -220,7 +258,7 @@ export default defineContentScript({
         ocr: call => sendMessage({ type: 'axt:ocr', ...call }),
         translate: request => backend.translate(request),
         // 模式闸对两种图一样；位图额外要等 helper（§15.5）
-      isEnabled: t => config.image.modes.includes(modes?.effective() ?? config.mode) && (t.kind === 'svg' || helperReady),
+      isEnabled: t => config.image.enabled && config.image.modes.includes(modes?.effective() ?? config.mode) && (t.kind === 'svg' || helperReady),
         isCurrent: () => getSessionId() === session,
         onProgress: p => {
           if (getSessionId() !== session) return
@@ -318,6 +356,9 @@ export default defineContentScript({
       uninstallAnchors = null
       const result = restore(document)
       progress = idle()
+      running = null
+      current = null
+      restartedFor = null
       console.debug(`[axt] translation stopped: ${result.removedNodes} nodes removed`)
       return { removedNodes: result.removedNodes }
     }
@@ -329,7 +370,7 @@ export default defineContentScript({
           sendResponse(statsOf(blocks))
           return true
         case 'axt:translate-page':
-          start(message.mode).then(sendResponse)
+          start(message.mode, message.restart === true).then(sendResponse)
           return true
         case 'axt:restore-page':
           sendResponse(restorePage())
@@ -346,7 +387,7 @@ export default defineContentScript({
           return true
         }
         case 'axt:page-status':
-          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, session: getSessionId(), ...(imageProgress ? { images: imageProgress } : {}) })
+          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, session: getSessionId(), ...(imageProgress ? { images: imageProgress } : {}), ...(running ? { running } : {}) })
           return true
       }
     })

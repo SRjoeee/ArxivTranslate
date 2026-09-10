@@ -44,6 +44,23 @@ async function start(doc: Document, blocks: Block[], transport: Transport, extra
 const byId = (blocks: Block[], id: string) => blocks.find(b => b.id === id)!
 
 describe('startTranslation', () => {
+  it('reports the serving service on the first batch and on every hand-over, never twice in a row', async () => {
+    const doc = docOf()
+    const blocks = extract(doc)
+    let calls = 0
+    const transport: Transport = async req => {
+      calls++
+      const provider = calls <= 1 ? 'llm' : 'free'
+      return { ok: true, result: { segments: req.request.segments.map(seg => ({ id: seg.id, text: seg.text })), provider }, cached: 0 }
+    }
+    const seen: string[] = []
+    const run = await start(doc, blocks, transport, { onProvider: id => seen.push(id) })
+    await run.translate(blocks.slice(0, 1))
+    await run.translate(blocks.slice(1, 2))
+    await run.translate(blocks.slice(2, 3))
+    expect(seen).toEqual(['llm', 'free'])
+  })
+
   it('开始只打标记不发请求；交出去的块攒批翻完，进度与缓存计数正确', async () => {
     const doc = docOf()
     const blocks = extract(doc)
