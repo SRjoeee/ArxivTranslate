@@ -67,9 +67,10 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(cmn.keywords).toMatch(/Mandarin/)
     expect(cmn.keywords).toMatch(/cmn/)
   })
-  it('P4 translating: the button says it, the rows stay open, no counts anywhere', () => {
+  it('P4 translating: the button says it and keeps the shortcut, the rows stay open, no counts anywhere', () => {
     const v = view('P4')
-    expect(v.primary).toEqual({ label: '显示原文', action: 'restore', disabled: false })
+    // ⌥T restores a translated page, so the badge stays on this face of the button too（用户 2026-09-11）
+    expect(v.primary).toEqual({ label: '显示原文', action: 'restore', disabled: false, shortcut: '⌥T' })
     expect(v.note).toBeNull()
     expect(JSON.stringify(v)).not.toMatch(/24|31/)
   })

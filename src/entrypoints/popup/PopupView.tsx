@@ -79,7 +79,9 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
           <Button variant={view.primary.action === 'restore' ? 'secondary' : 'primary'} disabled={view.primary.disabled} aria-label={view.primary.label} onClick={actions[view.primary.action]}>
             {view.primary.label}
             {view.primary.shortcut && (
-              <kbd className="rounded-[6px] bg-white/20 px-1.5 py-0.5 font-ui text-[11px] font-semibold">{view.primary.shortcut}</kbd>
+              // `current`: the chip reads on the red 翻译本页 and on the plain 显示原文 alike, where a
+              // white chip would disappear into the button
+              <kbd className="rounded-[6px] bg-current/15 px-1.5 py-0.5 font-ui text-[11px] font-semibold">{view.primary.shortcut}</kbd>
             )}
           </Button>
           {view.secondary && <Button variant="text" className="self-center" onClick={actions[view.secondary.action]}>{view.secondary.label}</Button>}

@@ -166,7 +166,10 @@ export function derivePopupView(input: PopupInput): PopupView {
     : behind ? { label: S.primary.retranslate, action: 'retranslate', disabled: !canRun }
     : paused ? { label: S.primary.retranslate, action: 'retranslate', disabled: !canRun && !provider?.fallback }
     : { label: S.primary.translate, action: 'translate', disabled: !canRun && !provider?.fallback }
-  if (primary.action !== 'restore' && !primary.disabled && shortcut) primary.shortcut = shortcut
+  // On every action the key actually performs, 显示原文 included: ⌥T translates a page that is not
+  // translated and restores one that is, so the badge belongs on both faces of the same button
+  // (user 2026-09-11). A paused session retries rather than restores, which is what its label says
+  if (!primary.disabled && shortcut) primary.shortcut = shortcut
   const secondary = behind || paused ? { label: S.primary.restore, action: 'restore' as const } : null
 
   const helperHint: PopupView['helper'] = config.image.enabled && helper !== null && !helper.available && platform !== null

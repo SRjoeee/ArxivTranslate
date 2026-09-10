@@ -4,7 +4,7 @@
 import type { ProviderErrorKind } from '@/providers/types'
 
 export const S = {
-  brand: 'Readarxiv', // S-P-01
+  brand: 'Read arXiv', // S-P-01
   settings: '设置', // S-P-02, and the button on every note
   notArxiv: '打开 arXiv 论文的 HTML 页面后即可翻译', // S-P-03
   rows: {

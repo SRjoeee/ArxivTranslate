@@ -65,7 +65,7 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 
 | 编号 | 位置 / 何时 | 文案 | 备注 |
 |---|---|---|---|
-| S-P-01 | 品牌行 | Readarxiv | [定] 2026-09-10 更名；扩展 manifest `name` 已同步，商店名与 readarxiv.org 待办。品牌标记见 §5.1 |
+| S-P-01 | 品牌行 | Read arXiv | [定] 2026-09-11 定为分写、arXiv 照官方大小写；扩展 manifest `name`、三个页面的 `<title>` 与工具栏提示都同步了，商店名与 readarxiv.org 待办。品牌标记见 §5.1 |
 | S-P-02 | 品牌行齿轮 `aria-label`；每条说明旁的按钮 | 设置 | The one button of every note; opens the options page |
 | S-P-03 | 非 arXiv 页 / 页面加载中（P0） | 打开 arXiv 论文的 HTML 页面后即可翻译 | Same sentence for both cases; never "后台未响应" |
 | S-P-10 | 服务行标签 | 翻译服务 | The row opens the service menu (S-P-40…46) under itself |
@@ -90,8 +90,8 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 | S-P-45 | 服务菜单 · LLM 副标题 | {模型名} / 尚未配置 API Key | Selectable without a key; the note S-P-31/32 and its 设置 button follow |
 | S-P-46 | 服务菜单 · 名称与顺序 | Microsoft 翻译 · Google 翻译 · LLM · Chrome 翻译 | [定] 2026-09-10; Microsoft is the shipped default |
 | S-P-47 | 提示词行 | 提示词 / {名称} | Only while the LLM is chosen; opens the prompt menu |
-| S-P-50 | 主按钮 · 未翻译 | 翻译本页 | Shortcut badge: the key Chrome reports for `axt-toggle` (suggested Alt+T); on an enabled 翻译本页 / 重新翻译 only |
-| S-P-51 | 主按钮 · 翻译中 | 显示原文 | The only sign that the page is on: no pill |
+| S-P-50 | 主按钮 · 未翻译 | 翻译本页 | Shortcut badge: the key Chrome reports for `axt-toggle` (suggested Alt+T). **On every enabled face of the button** (2026-09-11): the key translates an untranslated page and restores a translated one, so 显示原文 carries it too; a paused session's 重新翻译 is what the key does there. Chrome reports nothing when another extension — or another copy of this one — already holds the combination, and then no badge is drawn |
+| S-P-51 | 主按钮 · 翻译中 | 显示原文 | The only sign that the page is on: no pill. Carries the same shortcut badge as S-P-50 |
 | S-P-52 | 主按钮 · 已暂停 / 页面落后于设置 | 重新翻译 | Disabled while the saved service cannot run; S-P-53 alongside |
 | S-P-53 | 次按钮 | 显示原文 | Text button under S-P-52 |
 | S-P-60 | 失败行 | {n} 处翻译失败 | Paragraphs and figures counted together; only when `progress.failed + images.failed > 0` and nothing is fatal |
@@ -261,20 +261,23 @@ Rules:
 
 ### 5.1 The brand mark [定，2026-09-11]
 
-An open book: the left page dark grey with an `A`, the right page arXiv red with a `文`. One vector,
-`public/icon/logo.svg`, is the source for everything else.
+An open book: the left page dark grey with an `A`, the right page arXiv red with a `文`. It ships in
+**two shapes**, because the two surfaces it lands on are different, and one shape cannot serve both.
 
-| Where | What | Who reads it |
+| Vector | Shape | Where it goes |
 |---|---|---|
-| `public/icon/{16,32,48,96,128}.png` | rendered from the vector by `pnpm icons` | WXT fills the manifest's `icons` from the file names; Chrome uses them for the toolbar, the extensions page and the install dialog |
-| `public/icon/logo.svg` | the vector, shipped | the popup's brand row and the settings sidebar draw it through `src/ui/BrandMark.tsx`; the three extension pages point their `<link rel="icon">` at the 32 |
-| `docs/brand/store-icon-128.png` | 96 of artwork inset in a 128 canvas | uploaded by hand to the store listing, which wants the inset rather than a full-bleed icon. Never shipped inside the extension |
+| `public/icon/tile.svg` | the book on a white rounded tile, the app-icon shape | `public/icon/{16,32,48,96,128}.png` (WXT fills the manifest's `icons` from those names) for the extensions page, the install dialog and the store, where the icon sits on a card of its own. Also the brand row of the popup and the settings sidebar, through `src/ui/BrandMark.tsx`, and the three pages' `<link rel="icon">` |
+| `public/icon/toolbar.svg` | the bare book with a white outline, no tile | `public/icon/toolbar-{16,32,48}.png`, declared as `action.default_icon` in `wxt.config.ts`, for the browser's own toolbar. A white tile up there reads as a sticker; the outline is what keeps the mark legible on a light and a dark toolbar alike |
+| `docs/brand/store-icon-128.png` | 96 of tile artwork inset in a 128 canvas | uploaded by hand to the store listing, which wants the inset rather than a full-bleed icon. Never shipped inside the extension |
+
+`pnpm icons` renders every PNG from the two vectors; the PNGs are committed, so an ordinary build
+needs neither the script nor a browser.
 
 The mark is decorative wherever it appears: the name sits beside it as text, so it carries `alt=""`.
 
-At 16 px the two glyphs lose their strokes. It is shipped at that size anyway: a retina toolbar picks
-the 32, the shape and the two colours still identify it, and one mark at every size beats two marks
-that differ. A simplified 16 is the fallback if it ever reads badly in the wild.
+At 16 px the two glyphs lose their strokes. Both shapes ship at that size anyway: a retina toolbar
+picks the 32, the silhouette and the two colours still identify it, and one mark at every size beats
+two that differ. A simplified 16 is the fallback if it ever reads badly in the wild.
 
 ## 6. 需要改 DESIGN.md 的条目
 
@@ -322,7 +325,7 @@ that differ. A simplified 16 is the fallback if it ever reads badly in the wild.
 
 ## 8. 待讨论
 
-1. ~~产品名。~~ [定] Readarxiv（2026-09-10）。
+1. ~~产品名。~~ [定] Read arXiv（2026-09-10 定名，2026-09-11 改为分写）。
 2. 「AI 模型」这个叫法 vs 「AI 翻译」。
 3. P8 已暂停：主按钮「重新翻译」+ 次按钮「显示原文」，还是只留一个？
 4. 语言行点开是原生 `<select>`（首字母跳转）还是带搜索的列表——先实测原生在 popup 里的表现。

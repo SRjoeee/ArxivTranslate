@@ -35,7 +35,7 @@ describe('serviceName', () => {
 
 describe('the strings themselves', () => {
   it('carry the product name and no implementation words', () => {
-    expect(S.brand).toBe('Readarxiv')
+    expect(S.brand).toBe('Read arXiv')
     // Values only: keys are code (S.helper is a key, 识别助手 is the word a reader sees)
     const values = (v: unknown): string => typeof v === 'string' ? v : typeof v === 'function' ? String(v('x', 'y', 'z')) : v && typeof v === 'object' ? Object.values(v).map(values).join(' ') : ''
     const all = values(S)

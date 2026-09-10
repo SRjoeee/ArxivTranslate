@@ -18,7 +18,14 @@ export default defineConfig({
   },
   manifest: {
     // UI.md S-P-01 requires the store listing, the manifest and the site to carry one name
-    name: 'Readarxiv',
+    name: 'Read arXiv',
+    // Two marks, two surfaces (scripts/icons.mjs): `icons` is filled by WXT from public/icon/<size>.png,
+    // the tile that sits on a card in the extensions page and the store. The toolbar gets the bare
+    // book instead — a white tile up there reads as a sticker, and the outline keeps the mark legible
+    // on a light and a dark toolbar alike
+    action: {
+      default_icon: { 16: 'icon/toolbar-16.png', 32: 'icon/toolbar-32.png', 48: 'icon/toolbar-48.png' },
+    },
     // 图片叠加层用 CSS 锚点定位，`anchor-scope` 要 Chrome 131（§15.2）。文档一直这么写，但没落到
     // manifest 上，低于这个版本的 Chrome 照样装得上、拿到一个错位的叠加层，而且滚动容器也不进
     // 顺序焦点（Codex 在 #99 指出）。声明出来，让文档写的下限真正生效
