@@ -1,5 +1,6 @@
 // 回填（DESIGN §6.4）：译文 → DocumentFragment。占位符换成原节点的克隆，按译文顺序放置；原节点不动。
 import { cloneWithoutIds } from './clone'
+import { restoreLeadingLabel } from './label'
 import { scanTokens, type WireSpan } from './offsets'
 import type { ProtectedBlock } from './serialize'
 import { PlaceholderIntegrityError, validate } from './validate'
@@ -56,5 +57,8 @@ export function rehydrate(translated: string, block: ProtectedBlock, doc: Docume
       spans.push({ kind: 'slot', node: el, from: t.from, to: t.to, role: 'close' })
     }
   }
+  // Markers flattened the block's formatting; the one piece that can be put back safely is a
+  // label the block opened with (`label.ts`, issue #150). Splits a span where it splits a node
+  if (block.format === 'markers') restoreLeadingLabel(fragment, spans, block, doc)
   return Object.assign(fragment, { offsets: spans })
 }

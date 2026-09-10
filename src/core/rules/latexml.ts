@@ -242,6 +242,13 @@ export function classify(el: Element): Classification | null {
  */
 export const FUNCTIONAL_INLINE = 'a[href]'
 
+/**
+ * 纯格式的行内元素：markers 格式下会被拍平成文字（§6.3）。回填时段首的这类元素——`Keywords:`、
+ * `Note.`、斜体的定理陈述——可以按分隔符包回去（protector/label.ts，issue #150）。
+ * 不含 `.ltx_font_typewriter`：它按代码整块保留，本来就不会被拍平
+ */
+export const LABEL_FORMATTING = '.ltx_font_bold, .ltx_font_italic, .ltx_font_smallcaps, .ltx_emph'
+
 /** 插图与图形（Phase 0 统计脚本用） */
 /**
  * 图目标（§15）。`graphics` 两种都收：位图走 OCR，SVG 直接读字形（§15.5）。
