@@ -11,7 +11,7 @@ import { en } from './en'
 import { zh } from './zh-CN'
 
 /**
- * The Chinese pack's shape with its literals widened: `brand: 'Readarxiv'` becomes `string`, so
+ * The Chinese pack's shape with its literals widened: `brand: 'Read arXiv'` becomes `string`, so
  * another pack can hold another sentence, while a **missing** key still fails to compile. Tuples
  * keep their length (the two stop lists have a fixed number of steps)
  */
