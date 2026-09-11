@@ -13,7 +13,7 @@ import { Drawer } from '@/ui/Drawer'
 import { Field, inputClass } from '@/ui/Field'
 import { Switch } from '@/ui/Switch'
 import { O, reasonText } from '@/ui/strings'
-import { ensureHostPermission, releaseHostPermission } from '../permissions'
+import { PermissionError, ensureHostPermission, releaseHostPermission } from '../permissions'
 
 /** The sample says whether the endpoint keeps our placeholders, so it is written in this service's wire format */
 const SAMPLE_TAGS = 'Let <x id="1"/> be a <t id="2">connected</t> graph; see <x id="3"/>.'
@@ -108,7 +108,10 @@ export function ServiceDrawer({ service, patch, onClose }: {
       // Nothing was stored, so an origin this attempt asked for should not stay granted — the
       // schema's service limit and any storage failure both land here (Codex on #157)
       if (granted) await releaseHostPermission(form.baseURL, (await getConfig()).services.map(s => s.baseURL)).catch(() => undefined)
-      setResult(e instanceof Error ? e.message : String(e))
+      // 权限申请只说是哪一种，句子在语言包里（Codex 在 #161 指出）
+      setResult(e instanceof PermissionError
+        ? (e.kind === 'badURL' ? O.services.permission.badURL : O.services.permission.denied(e.origin ?? ''))
+        : e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
     }

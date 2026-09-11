@@ -143,6 +143,11 @@ const O = {
     more: '更多选项',
     thinking: '深度思考',
     thinkingHint: '翻译不需要推理，开启会明显变慢',
+    /** 申请接口地址的访问权限失败（entrypoints/options/permissions.ts 只报是哪一种） */
+    permission: {
+      badURL: '接口地址不合法',
+      denied: (origin: string) => `没有拿到访问 ${origin} 的权限，浏览器的弹窗里需要点「允许」`,
+    },
     connect: '连接',
     connecting: '连接中…',
     connected: (ms: number) => `已连接 · ${ms} ms`,

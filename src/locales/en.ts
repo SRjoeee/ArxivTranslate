@@ -138,6 +138,10 @@ const O: Locale['O'] = {
     more: 'More',
     thinking: 'Extended thinking',
     thinkingHint: 'Translation does not need reasoning, and it makes this markedly slower',
+    permission: {
+      badURL: 'That endpoint address is not valid',
+      denied: origin => `Permission to reach ${origin} was not given; the browser's prompt needs an Allow`,
+    },
     connect: 'Connect',
     connecting: 'Connecting…',
     connected: ms => `Connected · ${ms} ms`,
