@@ -842,4 +842,18 @@ describe('术语表只发用得上的那几条（§8.2）', () => {
     const { context } = await run([{ id: 'a', text: 'Let <x id="1"/> be positive.' }], { glossary: [{ term: 'id', translation: '标识' }] })
     expect((context as { glossary?: unknown } | undefined)?.glossary).toBeUndefined()
   })
+
+  // 线上文本里 & < > 是转义过的（serialize.ts），不解实体就永远匹配不上带这些字符的术语
+  // （Codex 在 #163 指出）。这类术语在论文里很常见：R&D、<UNK>、A&B
+  it('匹配前先解实体：R&D 对得上线上的 R&amp;D', async () => {
+    const terms = [{ term: 'R&D', translation: '研发' }, { term: '<UNK>', translation: '未知词' }]
+    const { context } = await run([{ id: 'a', text: 'Our R&amp;D team replaces &lt;UNK&gt; tokens.' }], { glossary: terms })
+    expect(context?.glossary?.map(g => g.term)).toEqual(['R&D', '<UNK>'])
+  })
+
+  it('解实体不会凭空造出实体：`&` 与 `amp;` 被占位符隔开时不算命中', async () => {
+    // 逐段解、不是先拼后解：拼起来像 `X&amp;Y`，逐段解出来是 `X&` + `amp;Y`
+    const { context } = await run([{ id: 'a', text: 'X&amp;<x id="1"/>amp;Y uses R&amp;D' }], { glossary: [{ term: 'R&D', translation: '研发' }, { term: 'X&Y', translation: '异或' }] })
+    expect(context?.glossary?.map(g => g.term)).toEqual(['R&D'])
+  })
 })

@@ -33,8 +33,23 @@ export const AXT_ATTR_PREFIX = 'data-axt-'
  * 会执行脚本的 URL。克隆件里**不留这种**：链接的行为归原件，克隆只是拿来读的副本。
  * 只挡这两种，不做通用 URL 清洗——`data:image/...` 是论文里真实存在的内联图
  */
-const UNSAFE_URL = /^\s*(?:javascript:|data:text\/html)/i
+const UNSAFE_URL = /^(?:javascript:|data:text\/html)/i
 const URL_ATTRS = ['href', 'xlink:href', 'src', 'action', 'formaction', 'data']
+
+/**
+ * 按 URL 标准先归一化再判协议，否则协议名里塞一个控制符就绕过了（Codex 在 #163 指出）：
+ * `href="java&#10;script:alert(1)"` 经 HTML 解析后 `getAttribute` 拿到的是带换行的
+ * `java\nscript:`，正则匹配不上，而浏览器解析 URL 时**在任意位置**删掉制表符与换行、
+ * 并从头剥掉 C0 控制符与空格，结果照样是一个 `javascript:` URL
+ */
+const normalizeUrl = (value: string) => {
+  const flat = value.replace(/[\t\n\r]/g, '')
+  // 从头剥掉 C0 控制符与空格。写成码点比较而不是字符类：正则里放控制符 Biome 不让过，
+  // 而这里要的恰恰是 U+0000–U+0020 整段
+  let i = 0
+  while (i < flat.length && flat.charCodeAt(i) <= 0x20) i += 1
+  return flat.slice(i)
+}
 
 /**
  * 克隆件入页之前的清理：删掉克隆里已有的注入节点（别人的译文 / 镜像会被整块复制进来），
@@ -55,7 +70,7 @@ export function stripInjected(root: Element, includeRoot = true): void {
     el.removeAttribute('id')
     for (const name of el.getAttributeNames()) {
       if (name.startsWith(AXT_ATTR_PREFIX) || name.toLowerCase().startsWith('on')) el.removeAttribute(name)
-      else if (URL_ATTRS.includes(name.toLowerCase()) && UNSAFE_URL.test(el.getAttribute(name) ?? '')) el.removeAttribute(name)
+      else if (URL_ATTRS.includes(name.toLowerCase()) && UNSAFE_URL.test(normalizeUrl(el.getAttribute(name) ?? ''))) el.removeAttribute(name)
     }
   }
 }

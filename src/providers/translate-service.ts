@@ -10,6 +10,7 @@ import { cacheKeyFor, type RenderPath } from '@/cache/key'
 import { type SentenceAlignment, verifyAlignment } from './alignment'
 import { markSentences, stripMarkers, unmarkSentences, type MarkedText } from './sentence-markers'
 // 深引 validate 而不是 protector 的桶：serialize / rehydrate 要碰 DOM，那两个不该进 background 的包
+import { decodeText } from '@/core/protector/text'
 import { tokenize } from '@/core/protector/tokens'
 import { expectationsFromText, validate } from '@/core/protector/validate'
 import { createGlossaryMatcher, type GlossaryEntry } from './glossary'
@@ -392,7 +393,10 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       const glossary = request.context?.glossary ?? []
       const matcher = glossary.length > 0 ? createGlossaryMatcher(glossary) : null
       const wire = wireFormatOf(cache?.renderPath ?? 'tags')
-      const proseOf = (text: string) => Array.from(tokenize(text, wire)).filter(t => t.kind === 'text').map(t => t.text).join('')
+      // 逐个文本 token 解实体再拼：线上文本里 `&` / `<` / `>` 是转义过的（serialize.ts），术语
+      // `R&D`、`<UNK>` 对着 `R&amp;D`、`&lt;UNK&gt;` 永远匹配不上（Codex 在 #163 指出）。
+      // 先拼后解会凭空造出实体——`foo&` + 占位符 + `amp;bar` 拼起来像个 `&amp;`，所以逐段解
+      const proseOf = (text: string) => Array.from(tokenize(text, wire)).filter(t => t.kind === 'text').map(t => decodeText(t.text)).join('')
       const termsFor = (segment: { text: string }) => (matcher ? matcher.match(proseOf(segment.text)) : [])
       /** 这一段自己用到的术语进它自己的键；没配术语表时与从前逐字节相同 */
       const contextFor = (segment: { text: string }) => {

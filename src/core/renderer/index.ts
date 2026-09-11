@@ -243,6 +243,13 @@ export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragm
   clearTranslation(block)
   const clone = block.el.cloneNode(true) as Element
   stripInjected(clone)
+  // 译文单元格也要 `lang` / `dir`，理由与 renderText 里那两段完全相同（Codex 在 #163 指出表格这条
+  // 路漏了 `dir`；`lang` 同样漏了，屏幕阅读器会用英文语音念表格里的中文）。打在**换过内容的格**上
+  // 而不是整张表上：`dir` 落到 `<table>` 会连列序一起翻转，而这张克隆表里没被翻译的数字列仍是原样，
+  // 翻转列序会让它与上面的原表对不上；落到格上只改这一格里文本的基方向，正是我们要的那一点
+  const html = block.el.ownerDocument.documentElement
+  const cellLang = html.getAttribute(LANG_ATTR)
+  const cellDir = html.getAttribute(DIR_ATTR)
   // 两棵树结构相同：原表的单元格与克隆表的单元格按同序对应（tableCells 取任意深度，嵌套 tabular 的格也在内）。
   // 每格替换前重新定位：外层格的译文里带着嵌套表的克隆，先替换外层再替换内层，
   // 事先取好的内层引用会指向已被丢弃的节点（§5.3）
@@ -253,6 +260,8 @@ export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragm
     if (!target) return
     target.textContent = ''
     target.append(content)
+    if (cellLang) target.setAttribute('lang', cellLang)
+    if (cellDir) target.setAttribute('dir', cellDir)
     rendered?.set(cell.el, target)
   })
   clone.classList.add(T_CLASS)
