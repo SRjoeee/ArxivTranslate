@@ -6,6 +6,7 @@ import { toErrorInfo } from '@/providers/translate-service'
 import { isAxtMessage } from '@/shared/messages'
 import { HELPER_HOST } from '@/shared/ocr'
 import { createHelperClient } from './helper'
+import { createHelperWaiter } from './helper-await'
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { installContextMenu, refreshContextMenu, installToggleCommand } from './context-menu'
@@ -120,6 +121,37 @@ export default defineBackground(() => {
     for (const tab of tabs) if (tab.id !== undefined) void browser.tabs.sendMessage(tab.id, message).catch(() => undefined)
   }
 
+  /**
+   * 安装引导的等待（§15.4）：读者复制走安装命令之后，由这里定时探，探到了就广播——
+   * 读者不必回到扩展点任何东西。截止时间存在 **session** storage：浏览器关掉之后
+   * 这次安装就不必再等了
+   */
+  const AWAIT_KEY = 'axt-helper-await-until'
+  const helperWaiter = createHelperWaiter({
+    probe: () => ocr.status({ recheck: true }),
+    announce: () => {
+      void tellTabs({ type: 'axt:helper-ready' })
+      // 扩展页面（设置页、还开着的 popup）不是内容脚本，收不到 tabs.sendMessage。
+      // 没有页面在听时这一条会 reject，正是常态
+      void browser.runtime.sendMessage({ type: 'axt:helper-ready' }).catch(() => undefined)
+    },
+    now: () => Date.now(),
+    schedule: (run, ms) => setTimeout(run, ms) as unknown as number,
+    cancel: id => clearTimeout(id),
+    load: async () => {
+      const stored = await browser.storage.session.get(AWAIT_KEY).catch(() => ({}) as Record<string, unknown>)
+      const value = stored[AWAIT_KEY]
+      return typeof value === 'number' ? value : undefined
+    },
+    save: async deadline => {
+      if (deadline === undefined) await browser.storage.session.remove(AWAIT_KEY).catch(() => undefined)
+      else await browser.storage.session.set({ [AWAIT_KEY]: deadline }).catch(() => undefined)
+    },
+    warn: (message, error) => console.debug(message, error),
+  })
+  // worker 醒来就把没到期的等待接上：读者可能还在终端里，而这个 worker 是上一个被回收后新起的
+  void helperWaiter.resume()
+
   const menuDeps = {
     create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>
       browser.contextMenus.create(options as Parameters<typeof browser.contextMenus.create>[0]),
@@ -220,6 +252,15 @@ export default defineBackground(() => {
           sendResponse(status)
         })
         return true
+      case 'axt:helper-await':
+        // 一条消息两种用法：带 start 是「复制走了，开始等」，不带是「还在等吗」——
+        // popup 一失焦就销毁，重开时靠后一种把同一次等待接上（DESIGN §15.4）
+        if (message.start) {
+          void helperWaiter.start().then(() => sendResponse({ until: helperWaiter.until() }))
+          return true
+        }
+        sendResponse({ until: helperWaiter.until() })
+        return false
       case 'axt:ocr':
         // 先把 scope 绑到 sender 的标签页：它可能是这个标签页第一条带 scope 的消息，不绑的话关标签页时 dropTab 撤不到
         // 排队的识别。只记关联、不建链：OCR 不能等翻译链构造（Codex 在 #87 两轮指出）

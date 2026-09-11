@@ -1263,6 +1263,58 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   check('换回中文之后设置页也跟着回来', /翻译服务/.test(back), back.replace(/\n+/g, ' ').slice(0, 40))
 }
 
+// ── 识别助手的安装引导（DESIGN §15.4，issue #102）：两步走完，装完不必回到扩展 ──────────
+// 只在 macOS 上跑：别的平台安装脚本会立刻退出，那张卡只有一行「仅支持 macOS」。
+// Playwright 每次用全新 profile，而 host manifest 存在 profile 里，所以这里**必然**是「未安装」
+if (process.platform === 'darwin') {
+  const paper = await openPaper(PAPER, GOOGLE)
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await paper.page.bringToFront()
+  await popup.waitForTimeout(800)
+
+  // 前面的用例把图片翻译关掉了，而这张卡只在它开着时出现——先打开（顺带证明卡片跟着开关走）
+  const imagesSwitch = popup.getByRole('switch', { name: '图片翻译', exact: true })
+  if ((await imagesSwitch.getAttribute('aria-checked')) !== 'true') {
+    await imagesSwitch.click()
+    await popup.waitForTimeout(400)
+  }
+
+  const install = popup.getByRole('button', { name: '安装', exact: true })
+  const shown = (await popup.locator('main').innerText()).replace(/\n+/g, ' | ')
+  check('引导：未装助手时 popup 上只有一行提示与「安装」', await install.isVisible() && shown.includes('图片翻译需要安装识别助手'), shown.slice(0, 120))
+
+  await install.click()
+  await popup.waitForTimeout(300)
+  const opened = (await popup.locator('main').innerText()).replace(/\n+/g, ' ')
+  // 两步，没有第三步：原来的「我已经装好了」按钮已经去掉
+  check('引导：就地展开成两步，没有「我已经装好了」',
+    /打开「终端」/.test(opened) && /在终端中执行以下命令/.test(opened) && !/我已经装好了/.test(opened),
+    opened.slice(0, 70))
+
+  const command = popup.locator('button[title]').filter({ hasText: 'curl -fsSL' })
+  check('引导：命令块带着本扩展的 id', (await command.innerText()).includes(extId), extId)
+
+  await command.click()
+  await popup.waitForTimeout(500)
+  check('引导：复制之后说的是「无需返回此处」，不是让读者回来点确认',
+    (await popup.locator('main').innerText()).includes('执行完成后自动生效，无需返回此处'), '')
+
+  // 关键的一条：等待在 background 里，popup 关了再开也接得上（§15.4）
+  await popup.goto('about:blank')
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await paper.page.bringToFront()
+  await popup.waitForTimeout(800)
+  await popup.getByRole('button', { name: '安装', exact: true }).click()
+  await popup.waitForTimeout(400)
+  check('引导：重开 popup 之后同一次等待还在（状态在 background，不在组件里）',
+    (await popup.locator('main').innerText()).includes('执行完成后自动生效'), '')
+
+  await popup.screenshot({ path: `${SHOTS}/helper-onboarding.png` })
+  await popup.close()
+  await paper.page.close()
+}
+
 await context.close()
 const pass = results.filter(r => r.ok).length
 console.log(`\n${pass}/${results.length} passed; screenshots in ${SHOTS}`)

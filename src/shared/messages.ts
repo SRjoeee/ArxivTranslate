@@ -96,6 +96,14 @@ export interface AxtMessages {
    * stay as it was (Codex on #161)
    */
   'axt:helper-ready': { request: Record<never, never>; response: { resumed: boolean } }
+  /**
+   * popup / options → background: the reader has copied the install command, so start looking for
+   * the helper. Nothing else can tell us it arrived — the script writes a native host manifest to
+   * disk and Chrome only reads it when `connectNative` runs (DESIGN §15.4). Without this the
+   * reader would have to come back and press a button to ask the question the program can answer
+   * itself, and by then the popup that asked is long closed.
+   */
+  'axt:helper-await': { request: { start?: boolean }; response: { until: number | null } }
   /** content → background：给一张位图做 OCR；结果按 imageHash 缓存（§15.2） */
   'axt:ocr': { request: OcrCall; response: OcrMessageResponse }
 }
