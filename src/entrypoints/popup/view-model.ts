@@ -67,7 +67,11 @@ export interface PopupView {
   mode: { value: Mode; note: string | null }
 }
 
-const EMPTY: PopupView = {
+/**
+ * 「不是论文页」那一屏。**按调用时算，不在模块加载时算**：这个模块在 `applyLocale` 之前就被导入，
+ * 常量会把兜底语言冻在里面，于是中文界面上会出现一个英文按钮（Codex 在 #161 指出）
+ */
+const empty = (): PopupView => ({
   empty: true,
   service: { value: '' },
   language: { value: '' },
@@ -81,8 +85,8 @@ const EMPTY: PopupView = {
   failed: null,
   primary: { label: S.primary.translate, action: 'translate', disabled: true },
   secondary: null,
-  mode: { value: 'stack', note: null },
-}
+  mode: { value: DEFAULT_CONFIG.mode, note: null },
+})
 
 /** A local endpoint needs no key: Ollama and LM Studio answer without one */
 const isLoopback = (baseURL: string): boolean => {
@@ -129,8 +133,8 @@ function cannotRunWhy(config: Config, pack: PackState | null): string {
 
 export function derivePopupView(input: PopupInput): PopupView {
   const { page, provider, config, pack, helper, platform, menu, shortcut, extensionId } = input
-  if (page === null) return EMPTY
-  if (config === null) return { ...EMPTY, empty: false, mode: { value: page.preference, note: null } }
+  if (page === null) return empty()
+  if (config === null) return { ...empty(), empty: false, mode: { value: page.preference, note: null } }
 
   const progress = page.progress
   const on = progress.state === 'on'

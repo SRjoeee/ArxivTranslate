@@ -92,6 +92,18 @@ describe('locale packs', () => {
   })
 })
 
+describe('what a pack is read at', () => {
+  it('空状态按调用时算：模块加载早于 applyLocale，常量会把兜底语言冻住（Codex 在 #161 指出）', () => {
+    setLocale('zh-CN')
+    const zhEmpty = derivePopupView({ page: null, provider: null, config: null, pack: null, helper: null, platform: null, menu: null, shortcut: null, extensionId: 'x' })
+    expect(zhEmpty.primary.label).toBe(LOCALES['zh-CN'].S.primary.translate)
+    setLocale('en')
+    const enEmpty = derivePopupView({ page: null, provider: null, config: null, pack: null, helper: null, platform: null, menu: null, shortcut: null, extensionId: 'x' })
+    expect(enEmpty.primary.label).toBe(LOCALES.en.S.primary.translate)
+    setLocale('zh-CN')
+  })
+})
+
 describe('copy names', () => {
   it('长名字复制时让出的是名字，不是后缀：不然复制出来与原件同名（Codex 在 #161 指出）', () => {
     setLocale('zh-CN')

@@ -7,7 +7,7 @@ import { Switch } from '@/ui/Switch'
 import { Field, inputClass } from '@/ui/Field'
 import { HL_OPACITY_MAX, HL_OPACITY_MIN, type HighlightProfile, type StyleProfile } from '@/config/appearance'
 import { OPACITY_MAX, OPACITY_MIN } from '@/core/renderer'
-import { O } from '@/ui/strings'
+import { O, profileName } from '@/ui/strings'
 import { AdvancedCss } from './AdvancedCss'
 import { ColorField } from './ColorField'
 import { OpacityField } from './OpacityField'
@@ -34,8 +34,11 @@ export function StyleEditor({ value, highlight, onChange, onDuplicate, onDelete,
       </>}
     >
       <Preview style={value} highlight={highlight} />
+      {/* The shipped profiles are stored under their Chinese names and displayed in the reader's
+          language (`profileName`); the field has to show what the grid shows, or an English drawer
+          opens on 与原文相同. Typing is a rename and writes what was typed (Codex on #161) */}
       <Field label={O.reading.name}>
-        <input className={inputClass} value={value.name} onChange={e => onChange({ ...value, name: e.target.value })} />
+        <input className={inputClass} value={profileName(value, 'styles')} onChange={e => onChange({ ...value, name: e.target.value })} />
       </Field>
       <ColorField label={O.reading.color} value={value.color} onChange={color => onChange({ ...value, color })} emptyLabel={O.reading.followText} />
       <OpacityField label={O.reading.opacity} value={value.opacity} min={OPACITY_MIN} max={OPACITY_MAX} onChange={opacity => onChange({ ...value, opacity })} />
@@ -73,7 +76,7 @@ export function HighlightEditor({ value, style, onChange, onDuplicate, onDelete,
     >
       <Preview style={style} highlight={value} band />
       <Field label={O.reading.name}>
-        <input className={inputClass} value={value.name} onChange={e => onChange({ ...value, name: e.target.value })} />
+        <input className={inputClass} value={profileName(value, 'highlights')} onChange={e => onChange({ ...value, name: e.target.value })} />
       </Field>
       <ColorField label={O.reading.bandColor} value={value.color} onChange={color => onChange({ ...value, color })} emptyLabel={O.reading.custom} />
       <OpacityField label={O.reading.opacity} value={value.opacity} min={HL_OPACITY_MIN} max={HL_OPACITY_MAX} step={0.01} onChange={opacity => onChange({ ...value, opacity })} />

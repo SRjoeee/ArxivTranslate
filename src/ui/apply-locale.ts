@@ -25,16 +25,25 @@ function browserLanguages(): string[] {
  * keep the Chinese it was born with, whatever the interface says (Codex on #161)
  */
 export async function applyLocale(title?: (brand: string) => string): Promise<LocaleCode> {
+  const code = await resolveLocale()
+  setLocale(code)
+  markDocument(code, title)
+  return code
+}
+
+/**
+ * Which pack the settings ask for, **without applying it**. For a caller that has to decide whether
+ * to apply at all: the background reads this at startup while a language change may already have
+ * landed, and applying first and checking afterwards is how the stale snapshot won (Codex on #161)
+ */
+export async function resolveLocale(): Promise<LocaleCode> {
   let chosen: string | undefined
   try {
     chosen = (await getConfig()).uiLanguage
   } catch {
     // Unreadable settings must not leave the interface blank: the browser's language still applies
   }
-  const code = pickLocale(chosen, browserLanguages())
-  setLocale(code)
-  markDocument(code, title)
-  return code
+  return pickLocale(chosen, browserLanguages())
 }
 
 /** The same choice from a configuration already in hand — the paper's script has just read it */

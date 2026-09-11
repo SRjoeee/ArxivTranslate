@@ -10,7 +10,8 @@ import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { installContextMenu, refreshContextMenu, installToggleCommand } from './context-menu'
 import { handlePing } from '@/shared/ping'
-import { applyLocale, applyLocaleFrom } from '@/ui/apply-locale'
+import { applyLocaleFrom, resolveLocale } from '@/ui/apply-locale'
+import { setLocale } from '@/ui/strings'
 
 // background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
 // 异步响应必须用 sendResponse + return true。
@@ -127,11 +128,13 @@ export default defineBackground(() => {
     send: (tabId: number, message: unknown) => browser.tabs.sendMessage(tabId, message as never),
   }
   installContextMenu(menuDeps)
-  void applyLocale().then(code => {
-    // 读者在这次读还没回来的时候改了界面语言：watcher 已经用新的那份画过菜单，这个旧快照不许再盖回去。
-    // `uiLanguage` 非空就说明 watcher 先到了（Codex 在 #161 指出，与内容脚本里那处同一个形状）
+  // 读者在这次读还没回来的时候改了界面语言：watcher 已经换过语言包，这个旧快照不许再盖回去。
+  // **先判断再应用**：`applyLocale` 自己就会 setLocale，等它回来再看闸，包已经被换回旧的了
+  //（Codex 在 #161 两轮分别指出这处与它的位置）
+  void resolveLocale().then(code => {
     if (uiLanguage !== null) return
     uiLanguage = code
+    setLocale(code)
     refreshContextMenu(menuDeps)
   })
   // The keyboard shortcut (UI.md S-P-50): same toggle, third entry
