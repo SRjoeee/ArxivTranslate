@@ -188,6 +188,10 @@ OCR 小程序移植自 [macos-vision-ocr](https://github.com/bytefer/macos-visio
 
 Copyright © 2026 SRjoeee。采用 [GPL-3.0](LICENSE)，与它所移植的项目相同。
 
+本程序是自由软件：你可以依据自由软件基金会发布的 GNU 通用公共许可证第 3 版，或（由你选择）任何更高版本，
+重新发布和修改它。发布本程序是希望它能有用，但**不附带任何担保**，甚至不包含对适销性或特定用途适用性的
+默示担保。详见[许可证全文](LICENSE)。
+
 ---
 
 Read arXiv 是一个独立项目，与 arXiv 及康奈尔大学没有隶属关系，也未获其背书。
