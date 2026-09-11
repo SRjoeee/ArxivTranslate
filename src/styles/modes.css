@@ -303,9 +303,23 @@ html:not([data-axt-mode="side"]) .axt-mirror {
    要解决的是**同一条脚注出现两次**：段落译文由占位符协议回填，脚注是受保护节点，
    于是译文段落里会重建一份原文脚注。localizeNotes 把译文复制进那份副本（副本因此是原文 + 译文，
    上下排），原件那份就多余了——它标上 data-axt-note 后由这条规则整框隐藏。
+   没有可翻文字的脚注（正文全是 URL）没有译文可搬，副本与原件逐字相同，同样多余、同样打标记。
    只隐藏**确实复制过**的那份：没复制成时原样显示，不会把脚注弄丢 */
 html[data-axt-on] .ltx_note[data-axt-note] > .ltx_note_outer {
   display: none;
+}
+
+/* 从右往左的译文里，**所有原文原子仍然从左往右**（Read Frog 的 inline atom 也写死 dir="ltr"）：
+   MathML Core 把 `direction` 直接用在行的排布上，继承了 rtl 之后 `a+b` 会排成 `b+a`。
+   公式之外，占位符回填进来的也都是原文：行内代码、打字机体的标识符、引用、URL，以及边注副本里
+   那段英文原文（.axt-note-s）。它们在 rtl 基方向下由双向算法重排——`f(x)` 这种末尾是中性字符的
+   会把括号排到另一侧（Codex 在 #163 指出，原来这条只管了公式）。
+   `unicode-bidi: isolate` 把每个原子当成一个整体嵌进 rtl 段落里，两边互不影响。
+   写在样式里而不是逐个节点写属性：回填进译文的、镜像里的、拆图副本里的是同一件事，
+   而它们是不同的代码路径插进去的 */
+html[data-axt-dir="rtl"] .axt-t :is(math, .ltx_Math, .ltx_ref, .ltx_url, .ltx_listing, code, .ltx_font_typewriter, .axt-note-s) {
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 /* 搬进副本的译文：另起一行接在原文下面。它已经被摘掉 .ltx_note_content，
@@ -425,6 +439,12 @@ html[data-axt-mode="side"] .ltx_note:not(.ltx_note_frontmatter) > .ltx_note_oute
   height: 0;
   overflow: visible;
 }
+
+/* The height is also what makes one float step aside for another, so zeroing it lets two notes
+   anchored a line apart pile up (2509.10652v3's opening sentence carries six, reported 2026-09-11).
+   Giving the height back is not the answer — it is the blank row again, and on 2609.10326v1's two
+   long notes it was a 1442px row for 162px of text. Keeping them apart is `renderer/margin-notes.ts`
+   instead: it measures and pushes each note down with a transform, which no box's height can see */
 
 @media (width >= 96rem) {
   /* 边注：float: inline-end + 负的 margin-inline-end 推到文章外（ar5iv 按 96 / 109rem 写死 20 / 27rem 两档） */

@@ -16,6 +16,7 @@ const S = {
     highlightTitle: '悬停时高亮对应句子；仅译文模式下停留可查看原文', // S-P-81
     images: '图片翻译', // S-P-85
     style: '译文样式', // S-P-82；与设置页「阅读 · 译文样式」同名，两处是同一件事
+    manageStyles: '管理译文样式…', // S-P-83：样式菜单的最后一行，直接开到设置页的「阅读」
   },
   service: {
     microsoft: 'Microsoft 翻译',

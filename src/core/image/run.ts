@@ -12,12 +12,12 @@ import { type ImageLabel, type ImageTarget, clearImage, renderImage } from '@/co
 import { DOCUMENT_ROOT, FIGURE_SELECTORS } from '@/core/rules/latexml'
 import { INJECTED_SELECTOR } from '@/core/marks'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
-import { linesOf, looksLikeCode } from '@/core/svg'
+import { foreignLinesOf, linesOf, looksLikeCode, pictureTexts } from '@/core/svg'
 import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
 import type { TranslateContext } from '@/providers/types'
 import { sha256Hex } from '@/shared/digest'
 import type { ImageProgress, OcrCall, OcrLine, OcrMessageResponse } from '@/shared/ocr'
-import { linesToBoxes } from './boxes'
+import { isTranslatable, linesToBoxes, type Box } from './boxes'
 
 export type { ImageTarget } from '@/core/renderer/image'
 
@@ -83,6 +83,11 @@ export interface ImageRun {
 
 type Outcome = 'waiting' | 'requested' | 'done' | 'failed'
 
+/** 这张内联图里有没有值得翻的标签：纯公式的 TikZ 图（语料里的多数）不必进调度 */
+function hasPictureText(picture: Element): boolean {
+  return pictureTexts(picture).some(isTranslatable)
+}
+
 /**
  * 翻译根内的位图，不含块内的（块内的图会随占位符克隆进译文、only 模式下原块整个隐藏，叠加层无处可挂；
  * 与拆图的"游离媒体"同一判定）与我们自己节点里的。要在块标记写完之后调用
@@ -93,12 +98,16 @@ export function collectImageTargets(doc: Document): ImageTarget[] {
   const used = new Set<string>()
   let n = 0
   const targets: ImageTarget[] = []
-  for (const el of Array.from(root.querySelectorAll(FIGURE_SELECTORS.graphics))) {
+  for (const el of Array.from(root.querySelectorAll(`${FIGURE_SELECTORS.graphics}, ${FIGURE_SELECTORS.picture}`))) {
     if (el.closest(`[${ID_ATTR}]`) || el.closest(INJECTED_SELECTOR)) continue
+    const tag = el.tagName.toLowerCase()
+    // 内联 TikZ 图（§15.6）：只收**带词的**那些。语料里 170 张里多数画的是公式，收下来只会给调度器
+    // 添一堆最后什么都没有的目标；判定读的是文字，不读几何
+    if (tag === 'svg' && (el.parentElement?.closest(FIGURE_SELECTORS.picture) || !hasPictureText(el))) continue
     let id = el.id || `axt-img-${++n}`
     while (used.has(id)) id = `${id}-${++n}`
     used.add(id)
-    targets.push({ id, el, kind: el.tagName.toLowerCase() === 'object' ? 'svg' : 'raster' })
+    targets.push({ id, el, kind: tag === 'object' ? 'svg' : tag === 'svg' ? 'picture' : 'raster' })
   }
   return targets
 }
@@ -211,6 +220,27 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
     reasons.set(target, reason)
   }
 
+  /** 把回来的段落配回它们的框；成功与部分成功两条路共用一份 */
+  const labelsFrom = (segments: readonly { id: string; text: string }[], boxes: readonly Box[], target: ImageTarget): ImageLabel[] => {
+    // 转义用的是协商出的格式，反转义必须用同一个：原来这里连格式都没传，markers 下会拿 HTML 实体规则去解一段纯文本
+    const translated = new Map(segments.map(s => [s.id, unescapeText(s.text, wireFormatOf(options.renderPath))]))
+    const labels: ImageLabel[] = []
+    for (const [i, box] of boxes.entries()) {
+      const text = translated.get(`${target.id}#L${i}`)?.trim()
+      // 译文与原文相同（单位、变量名、引擎原样返回的）不画：白框盖住原图只会把排版好的下标变成 OCR 读歪的字
+      if (!text || sameText(text, box.text)) continue
+      const label: ImageLabel = { x: box.x, y: box.y, w: box.w, h: box.h, lines: box.lines, source: box.text, text }
+      if (box.angle) {
+        label.angle = box.angle
+        // 斜标签自己的盒子：叠加层按它沿文字的轴摆（§15.5）
+        if (box.len) label.len = box.len
+        if (box.thick) label.thick = box.thick
+      }
+      labels.push(label)
+    }
+    return labels
+  }
+
   /**
    * SVG 图的「识别」：直接读 `contentDocument` 里的字形（§15.5）。
    *
@@ -251,7 +281,10 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
     try {
       let lines: readonly OcrLine[]
       let frames = 1
-      if (target.kind === 'svg') {
+      if (target.kind === 'picture') {
+        // 内联 TikZ 图（§15.6）：文字与几何都在主文档里，没有要取、要等、要识别的东西
+        lines = foreignLinesOf(target.el).filter(line => !looksLikeCode(line.text))
+      } else if (target.kind === 'svg') {
         const read = await svgLines(target)
         if (!alive()) return
         if (typeof read === 'string') return fail(target, read)
@@ -279,7 +312,8 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       }
       // 动图：helper 只识别了第 0 帧，浏览器在放后面的帧，框对不上——不叠
       if (frames > 1) return finishEmpty()
-      const boxes = linesToBoxes(lines)
+      // 内联图的每一行本来就是一个完整的 TikZ 节点，不该与上下相邻的节点合并（§15.6）
+      const boxes = linesToBoxes(lines, target.kind === 'picture' ? { merge: false } : {})
       if (boxes.length === 0) return finishEmpty() // 图里没有可翻的文字
       const caption = captionOf(target.el)
       const context: TranslateContext = { ...options.context, ...(caption ? { sectionTitle: caption } : {}) }
@@ -295,6 +329,16 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       })
       if (!alive()) return
       if (!res.ok) {
+        // 一张图的标签可能横跨多个批次（内联 TikZ 动辄上百个节点）：一批失败时另一批已经译好的
+        // 标签随失败一起回来（§8.2 的 `partial`），先把它们画上去再处理失败——整张图空着不如
+        // 少几个标签，而重试时画过的那些直接命中缓存（Codex 在 #163 指出，文字管线已经这么做了）。
+        // **画在致命分支之前**：降级链上前一步译出来的段落会跟着末步的 auth 失败一起回来，
+        // 而致命分支会就地停掉整个调度、这张图这一轮再没有第二次机会（Codex 在 #163 第五轮指出）
+        const done = labelsFrom(res.partial ?? [], boxes, target)
+        if (done.length > 0) {
+          renderImage(target, done)
+          options.onRendered?.([target])
+        }
         // key 失效 / 没配 key：与文字管线一样，第一次遇到就停调度，之后的图不再取、不再识别
         if (FATAL_KINDS.has(res.error.kind) && fatal === undefined) {
           fatal = `${res.error.kind}: ${res.error.message}`
@@ -310,17 +354,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
         }
         return fail(target, `翻译失败：${res.error.message}`)
       }
-      // 转义用的是协商出的格式，反转义必须用同一个：原来这里连格式都没传，markers 下会拿 HTML 实体规则去解一段纯文本
-      const translated = new Map(res.result.segments.map(s => [s.id, unescapeText(s.text, wireFormatOf(options.renderPath))]))
-      const labels: ImageLabel[] = []
-      for (const [i, box] of boxes.entries()) {
-        const text = translated.get(`${target.id}#L${i}`)?.trim()
-        // 译文与原文相同（单位、变量名、引擎原样返回的）不画：白框盖住原图只会把排版好的下标变成 OCR 读歪的字
-        if (!text || sameText(text, box.text)) continue
-        const label: ImageLabel = { x: box.x, y: box.y, w: box.w, h: box.h, lines: box.lines, source: box.text, text }
-        if (box.angle) label.angle = box.angle
-        labels.push(label)
-      }
+      const labels = labelsFrom(res.result.segments, boxes, target)
       if (labels.length === 0) return finishEmpty()
       renderImage(target, labels)
       outcome.set(target, 'done')

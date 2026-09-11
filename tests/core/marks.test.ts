@@ -24,6 +24,53 @@ describe('isInjected / stripInjected', () => {
     expect(root.querySelector('img')!.id).toBe('')
   })
 
+  it('克隆不带行为：事件属性与会执行脚本的 URL 都剥掉（独立审计 B17）', () => {
+    // 审计实测：回填出来的克隆带着原节点的 onclick，点下去真的执行。译文里的副本是给人读的，
+    // 不该是第二个可触发的控件。arXiv 今天不产出事件属性，这条是把不变量写死
+    const doc = new DOMParser().parseFromString(
+      '<div id="root"><a href="#dest" onclick="window.__x=1" onmouseover="void 0">链接</a>'
+      + '<a id="js" href="javascript:alert(1)">坏链接</a>'
+      + '<img src="data:image/png;base64,iVBORw0KGgo=" alt="内联图">'
+      + '<svg><animate onbegin="void 0"/></svg></div>', 'text/html')
+    const root = doc.getElementById('root')!
+    stripInjected(root)
+    const link = root.querySelector('a')!
+    expect(link.hasAttribute('onclick')).toBe(false)
+    expect(link.hasAttribute('onmouseover')).toBe(false)
+    // 链接本身照旧可点、指向不变——丢的是行为属性，不是内容
+    expect(link.getAttribute('href')).toBe('#dest')
+    expect(root.querySelector('animate')!.hasAttribute('onbegin')).toBe(false)
+    // javascript: 去掉；论文里真实存在的 data:image 留着
+    expect(root.querySelector('#js, a[href^="javascript"]')).toBeNull()
+    expect(root.querySelector('img')!.getAttribute('src')).toMatch(/^data:image\/png/)
+  })
+
+  it('协议名里夹控制符的 URL 也算会执行脚本（Codex 在 #163 指出）', () => {
+    // HTML 解析把 `&#10;` 解成真正的换行，`getAttribute` 拿到的就是 `java\nscript:`（下面第一例实测），
+    // 而浏览器解析 URL 时在任意位置删掉制表符与换行、再从头剥掉 C0 控制符，结果照样是 javascript: URL。
+    // 其余几种直接 setAttribute 写进去：考的是 stripInjected，不是解析器解不解某个字符引用
+    const doc = new DOMParser().parseFromString('<div id="root"><a href="java&#10;script:alert(1)">换行</a></div>', 'text/html')
+    const root = doc.getElementById('root')!
+    expect(root.querySelector('a')!.getAttribute('href')).toBe('java\nscript:alert(1)')
+    const bad = ['java\tscript:alert(1)', '\u0001javascript:alert(1)', ' \u0000javascript:alert(1)', 'data:text/\nhtml,<script>1</script>']
+    for (const href of bad) {
+      const a = doc.createElement('a')
+      a.setAttribute('href', href)
+      root.append(a)
+    }
+    const ok = ['https://arxiv.org/abs/2509.10652', '#S1.p2', 'data:image/png;base64,iVBORw0KGgo=']
+    for (const href of ok) {
+      const a = doc.createElement('a')
+      a.setAttribute('href', href)
+      root.append(a)
+    }
+    const links = Array.from(root.querySelectorAll('a'))
+    stripInjected(root)
+    // 前 1 + bad.length 条全被剥掉 href，后面的正常链接一个都不许误伤
+    expect(links.slice(0, 1 + bad.length).map(a => a.hasAttribute('href'))).toEqual(Array(1 + bad.length).fill(false))
+    expect(links.slice(1 + bad.length).map(a => a.getAttribute('href'))).toEqual(ok)
+  })
+
   it('序列化跳过叠加层：块里的图上叠了译文标签，再翻这个块时标签文字不能进 prompt', () => {
     // 叠加层真实是 div，这里用 span：HTML 解析会让 <div> 截断 <p>，考的是按 class 跳过、不是标签
     const doc = new DOMParser().parseFromString(`<p class="ltx_p">See <img class="ltx_graphics" src="a.png"><span class="${IMG_CLASS}"><span>静态电荷</span></span> here.</p>`, 'text/html')

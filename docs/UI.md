@@ -104,6 +104,7 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 | S-P-80 | 对照高亮行 | 对照高亮 | Switch in the card (`reading.sentenceHighlight`); saved at once, live on the page |
 | S-P-81 | 对照高亮 `title` | 悬停时高亮对应句子；仅译文模式下停留可查看原文 | |
 | S-P-82 | 译文样式 · 与两个开关同一行 | 译文样式 | [定，2026-09-11，读者定稿] The last row is 对照高亮 · 图片翻译 · 译文样式 side by side — all three are "how this reads". The entry is plain text plus a chevron; the **preview is inside the menu**, where each style draws the shared sample sentence (§5.1 的 `PREVIEW_TARGET`) in itself — 淡一档 and 模糊 mean nothing as names. The list is `appearance.styles`, in the settings page's order, under the same name it has there. **The menu opens upward**: this row sits at the foot of the popup and the window does not grow to fit a panel below it. The page's config watcher redraws in the new style, so nothing restarts |
+| S-P-83 | 译文样式菜单 · 最后一行 | 管理译文样式… | [定，2026-09-11，读者提出] 与服务菜单的「管理翻译服务…」同一个角色：菜单的最后一行不是一种样式，而是去管理它们的入口，所以不带预览、不参与选中。样式住在设置页的**阅读**一节，因此这一行直接开到那一节（`options.html#reading`）——`openOptionsPage` 递不进 hash，落在「翻译服务」那一节比多开一个标签页更糟；不带分节的入口（右上角齿轮、提示里的「设置」）仍用 `openOptionsPage`，它会把已经开着的那个标签页拉到前面 |
 | S-P-85 | 图片翻译行 | 图片翻译 | Switch in the card (`image.enabled`, v11); saved at once, live on the page; the per-mode list stays on the options page |
 | S-P-86 | 图片翻译行下 · 助手未安装（macOS） | 图片翻译需要安装识别助手 | Only while the switch is on and the helper is not detected |
 | S-P-87 | 图片翻译行下 · 非 macOS | 图片翻译目前仅支持 macOS | |

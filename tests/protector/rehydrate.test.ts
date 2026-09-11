@@ -38,6 +38,23 @@ describe('rehydrate', () => {
     expect(htmlOf(rehydrate('&lt;b&gt; &amp; &quot;c&quot; &#39;d&#39; &#65;&#x42;&nbsp;e', b, document))).toBe('&lt;b&gt; &amp; "c" \'d\' AB&nbsp;e')
   })
 
+  it('【已知行为，待 A03】序列化之后原节点被换掉，回填放回去的仍是当时那一份（独立审计 B12 / B18-mutate）', () => {
+    // 槽位记的是**节点引用**，请求在飞的这段时间里页面把公式换了，回填不会察觉。
+    // arXiv 是静态页、自带 JS 不改正文（RESEARCH §3.3），所以今天没有触发路径；
+    // 这条把边界钉下来：真要修就是"序列化时留一份源快照、提交前复核"（研究审计的 A03），
+    // 那时这条测试的期望要跟着改成"拒绝并标记为陈旧"，而不是悄悄换语义
+    const p = el('<p class="ltx_p">Let <math class="ltx_Math"><mi>x</mi></math> be positive.</p>')
+    const b = serialize(p)
+    const before = p.querySelector('math')!
+    // 页面把 x 换成了 y（同一个位置、同一种标签）
+    before.replaceWith(el('<math class="ltx_Math"><mi>y</mi></math>'))
+    expect(p.querySelector('math')!.textContent).toBe('y')
+    const out = htmlOf(rehydrate(b.text, b, document))
+    // 回填用的是捕获时的那份，所以译文里是 x，不是页面上现在的 y
+    expect(out).toContain('<mi>x</mi>')
+    expect(out).not.toContain('<mi>y</mi>')
+  })
+
   it('校验失败抛 PlaceholderIntegrityError', () => {
     const p = el('<p class="ltx_p">a <math class="ltx_Math"><mi>x</mi></math></p>')
     const b = serialize(p)

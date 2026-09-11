@@ -18,7 +18,7 @@ import type { HelperStatus } from '@/shared/ocr'
 import { awaitChain } from '@/shared/chain'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
 import { HELPER_GUIDE_URL, helperInstallCommand } from '@/ui/strings'
-import { MANAGE_SERVICES, type MenuKind, type PopupInput, runnable } from './view-model'
+import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, runnable } from './view-model'
 
 const scriptStart = performance.now()
 
@@ -42,7 +42,21 @@ export interface PopupActions {
   downloadPack(): void
   copyInstallCommand(): void
   openGuide(): void
-  openOptions(): void
+  /** `section` 省略时开到设置页自己的默认分节；带上时直接开到那一节 */
+  openOptions(section?: OptionsSection): void
+}
+
+/** 设置页的分节名，与 options/App.tsx 的 SECTIONS 一致 */
+export type OptionsSection = 'services' | 'reading' | 'prompts' | 'data'
+
+/**
+ * 打开设置页。**不带分节时用 `openOptionsPage`**：它会把已经开着的那个标签页拉到前面，而不是再开一个。
+ * 带分节时只能自己建标签页——`openOptionsPage` 递不进 hash，而设置页正是靠 hash 认分节的（App.tsx）。
+ * 让读者点「管理译文样式」却落在「翻译服务」那一节，比多开一个标签页更糟
+ */
+function openOptions(section?: OptionsSection): void {
+  if (!section) return void browser.runtime.openOptionsPage()
+  void browser.tabs.create({ url: browser.runtime.getURL(`/options.html#${section}`) })
 }
 
 export function usePopupData(): { input: PopupInput; error: string | null; copied: boolean; actions: PopupActions } {
@@ -179,7 +193,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
     chooseService: id => void guard(async () => {
       setMenu(null)
       // The last row of the menu is not a service: it opens the page where services are managed
-      if (id === MANAGE_SERVICES) return void browser.runtime.openOptionsPage()
+      if (id === MANAGE_SERVICES) return void openOptions()
       const next = await patchConfig(latest => (
         // The menu may have been built before another tab deleted this service; storing an id that
         // names nothing would leave the reader looking at a choice nothing honours (Codex on #157)
@@ -205,6 +219,8 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
     // The page's config watcher redraws the translations in the new style; no session restarts
     chooseStyle: id => void guard(async () => {
       setMenu(null)
+      // 最后一行不是样式，是去管理它们的地方（S-P-83）。样式住在「阅读」那一节，所以带上分节
+      if (id === MANAGE_STYLES) return void openOptions('reading')
       // Same as the service menu: this list may have been built before another tab deleted the
       // profile, and a dangling id leaves every profile unmarked while the page reads the first
       // one (Codex on #161)
@@ -242,7 +258,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
       setTimeout(() => setCopied(false), 1500)
     }),
     openGuide: () => void browser.tabs.create({ url: HELPER_GUIDE_URL }),
-    openOptions: () => void browser.runtime.openOptionsPage(),
+    openOptions: section => void openOptions(section),
   }
 
   return { input: { page, provider, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id }, error, copied, actions }

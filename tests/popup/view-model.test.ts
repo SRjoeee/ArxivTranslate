@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { setLocale } from '@/ui/strings'
 import { POPUP_FIXTURES } from '@/entrypoints/popup/fixtures'
-import { derivePopupView, runnable } from '@/entrypoints/popup/view-model'
+import { MANAGE_STYLES, derivePopupView, runnable } from '@/entrypoints/popup/view-model'
 
 const input = (id: string) => POPUP_FIXTURES.find(f => f.id === id)!.input
 const view = (id: string) => derivePopupView(input(id))
@@ -135,8 +135,12 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(v.style.value).toBe('与原文相同')
     expect(v.menu!.kind).toBe('style')
     expect(v.menu!.search).toBe(false)
-    expect(v.menu!.items.map(i => i.id)).toEqual(c.appearance.styles.map(p => p.id))
+    // 最后一行不是样式，是去设置页管理它们的入口（S-P-83），与服务菜单的「管理翻译服务…」同一个角色
+    expect(v.menu!.items.map(i => i.id)).toEqual([...c.appearance.styles.map(p => p.id), MANAGE_STYLES])
+    expect(v.menu!.items.at(-1)).toMatchObject({ id: MANAGE_STYLES, selected: false })
     expect(v.menu!.items.filter(i => i.selected).map(i => i.id)).toEqual([c.appearance.activeStyle])
+    // 入口不带预览：它不是一种样式
+    expect(v.menu!.items.at(-1)!.preview).toBeUndefined()
   })
   it('P15 prompt menu lists the built-ins and the reader\'s own', () => {
     const m = view('P15').menu!

@@ -19,7 +19,9 @@ const asRehydrated = (wire: string, fmt: 'tags' | 'markers') =>
   tokenize(wire, fmt).map(t => (t.kind === 'text' ? { kind: t.kind, text: decodeText(t.text) } : t))
 
 describe('positioned token scan (#105)', () => {
-  it('agrees with tokenize across every fixture in both formats', () => {
+  // 整套 fixture × 两种格式扫一遍，是 CPU 密集的一趟；跑满时它与另外一百多个测试文件抢 worker，
+  // 实测挂在全局 30s 上（空载 5s、并发时 31–38s）。这条与产品行为无关，给它自己的余量
+  it('agrees with tokenize across every fixture in both formats', { timeout: 120_000 }, () => {
     // The scan mirrors tokenize rather than changing it, because tokenize is the protector's
     // hottest path and its markers branch has already turned `@@` back into `@`. Mirroring only
     // works while the two agree, so this is the guard that says they do.

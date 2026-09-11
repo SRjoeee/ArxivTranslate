@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RenderPath } from '@/cache/key'
+import { BatchCountMismatchError } from '@/providers/request/batch-queue'
 import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
 import type { CachedEntry } from '@/cache/store'
-import { createTranslateService, type CacheEntry, type CachePort } from '@/providers/translate-service'
+import { createTranslateService, toErrorInfo, type CacheEntry, type CachePort } from '@/providers/translate-service'
 import { ProviderError, type TranslationProvider } from '@/providers/types'
 
 const provider = (translate: TranslationProvider['translate'], id = 'mock', extra: Partial<TranslationProvider> = {}): TranslationProvider => ({
@@ -165,10 +166,10 @@ describe('createTranslateService', () => {
     const service = createTranslateService({
       getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }),
     })
-    expect(await service.translate({ ...req(['a']), scope: 's1' })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+    expect(await service.translate({ ...req(['a']), scope: 's1' })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key', isolatable: false } })
     expect(calls).toBe(1)
     // 后到的块（视口滚动、攒批攒满）：同样报 auth，但不再问端点
-    expect(await service.translate({ ...req(['b', 'c']), scope: 's1' })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+    expect(await service.translate({ ...req(['b', 'c']), scope: 's1' })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key', isolatable: false } })
     expect(calls).toBe(1)
     // 换一个会话（新页面，或用户改完 key 重翻）要重新试：致命是这一轮的事，不是这个引擎的事
     await service.translate({ ...req(['d']), scope: 's2' })
@@ -265,7 +266,7 @@ describe('createTranslateService', () => {
     const service = createTranslateService({
       getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }),
     })
-    expect(await service.translate(req(['a']))).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+    expect(await service.translate(req(['a']))).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key', isolatable: false } })
     expect(calls).toBe(1)
   })
 
@@ -373,6 +374,9 @@ describe('createTranslateService', () => {
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.error.kind).toBe('invalid-response')
     expect(writes.flat().map(w => w.translation)).toEqual(['译:text-a', '译:text-b'])
+    // 写进缓存还不够，成功的那两段要随失败一起送回调用方：不然 run.ts 把整批标成失败，
+    // 读者看到"全失败"，一按重试它们又从缓存里秒回（Codex 在 #163 指出）
+    if (!res.ok) expect(res.partial?.map(p => `${p.id}=${p.text}`)).toEqual(['a=译:text-a', 'b=译:text-b'])
   })
 
   it('id 对不上：BatchQueue 整批重试后逐条兜底，RequestQueue 自己不重试（否则兜底前要打 12 次）', async () => {
@@ -752,5 +756,107 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
     const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
     await service.translate({ request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.', cuts: [19] }], source: 'en', target: 'zh-CN' } })
     expect(sent).toBe('One sentence here. Two sentences here.')
+  })
+})
+
+describe('失败归属：isolatable 跟着错误过消息边界（研究审计 F14 / A02）', () => {
+  it('按 kind 取默认值：拆小了可能好的才是 true', () => {
+    // 判据是"这次失败是某一段引起的，还是整条路都不通"
+    for (const kind of ['invalid-response', 'unknown'] as const) {
+      expect([kind, new ProviderError(kind, 'x').isolatable]).toEqual([kind, true])
+    }
+    // timeout 量过之后归到不可隔离：8 段在内容层扇出 15 次调用，而超时的恢复本来就归队列
+    for (const kind of ['timeout', 'rate-limit', 'network', 'bad-request', 'no-key', 'auth', 'aborted'] as const) {
+      expect([kind, new ProviderError(kind, 'x').isolatable]).toEqual([kind, false])
+    }
+  })
+
+  it('provider 知道得更多时可以覆盖，两个方向都能覆盖', () => {
+    // 免费引擎返回的不是 JSON：系统性失败，拆多小都一样（Codex 在 #61 指出）
+    expect(new ProviderError('invalid-response', '不是 JSON', { isolatable: false }).isolatable).toBe(false)
+    // 反过来，某一段太长导致的 4xx 是能靠拆分定位的
+    expect(new ProviderError('bad-request', '段落过长', { isolatable: true }).isolatable).toBe(true)
+  })
+
+  it('toErrorInfo 把它带过边界；不是 ProviderError 的按来源给', () => {
+    expect(toErrorInfo(new ProviderError('rate-limit', '慢点'))).toEqual({ kind: 'rate-limit', message: '慢点', isolatable: false })
+    // 条数对不上正是"某一段把输出带偏了"的典型
+    expect(toErrorInfo(new BatchCountMismatchError(4, 3, ['x'])).isolatable).toBe(true)
+    expect(toErrorInfo(new Error('boom'))).toMatchObject({ kind: 'unknown', isolatable: true })
+    const timeout = Object.assign(new Error('慢'), { name: 'RequestTimeoutError' })
+    expect(toErrorInfo(timeout)).toMatchObject({ kind: 'timeout', isolatable: false })
+  })
+})
+
+describe('术语表只发用得上的那几条（§8.2）', () => {
+  const glossary = [
+    { term: 'attention', translation: '注意力' },
+    { term: 'kernel', translation: '核' },
+    { term: 'manifold', translation: '流形' },
+  ]
+  /** 记下 provider 收到的 context 与每段的缓存键 */
+  const run = async (segments: { id: string; text: string }[], context?: Record<string, unknown>) => {
+    const seen: unknown[] = []
+    const { port, reads } = fakePort()
+    const service = createTranslateService({
+      getProvider: async () => provider(async req => {
+        seen.push(req.context)
+        return { segments: req.segments.map(s => ({ id: s.id, text: `[${s.text}]` })), provider: 'llm' }
+      }, 'llm', { promptKey: 'default' }),
+      cache: port,
+    })
+    const res = await service.translate({ request: { segments, source: 'en', target: 'zho', context: context as never }, cache: { paper: 'p', renderPath: 'tags' } })
+    expect(res.ok).toBe(true)
+    // 读缓存用的键就是这一段的键（写入是异步的，读更稳）
+    return { context: seen[0] as { glossary?: { term: string }[] } | undefined, keys: reads[0] ?? [] }
+  }
+
+  it('一批发出去的是这一批的并集，顺序按术语表', async () => {
+    const { context } = await run([
+      { id: 'a', text: 'The kernel trick is standard.' },
+      { id: 'b', text: 'We revisit attention here.' },
+    ], { glossary })
+    expect(context?.glossary?.map(g => g.term)).toEqual(['attention', 'kernel'])
+  })
+
+  it('用不到术语的段落，键与"没配术语表"时相同——改一条术语不该让整站缓存作废', async () => {
+    const plain = [{ id: 'a', text: 'Nothing relevant here.' }]
+    // 其余上下文保持一致，差别只在有没有术语表
+    const without = await run(plain, { paperTitle: 'T' })
+    const with_ = await run(plain, { paperTitle: 'T', glossary })
+    expect(with_.keys).toEqual(without.keys)
+    // 而且请求里不带一条用不上的术语
+    expect((with_.context as { glossary?: unknown } | undefined)?.glossary).toBeUndefined()
+  })
+
+  it('用到术语的段落，键随**它自己**用到的那几条变', async () => {
+    const text = [{ id: 'a', text: 'The kernel trick is standard.' }]
+    const a = await run(text, { glossary })
+    const b = await run(text, { glossary: [glossary[0]!, { term: 'kernel', translation: '核函数' }, glossary[2]!] })
+    // 改的是它用到的那条译法：键必须变
+    expect(a.keys).not.toEqual(b.keys)
+    // 改的是它用不到的那条：键不变
+    const c = await run(text, { glossary: [{ term: 'attention', translation: '注意' }, glossary[1]!, glossary[2]!] })
+    expect(a.keys).toEqual(c.keys)
+  })
+
+  it('匹配的是去掉占位符之后的正文：属性名不算命中', async () => {
+    // 线上文本长这样：`Let <x id="1"/> be positive.`——`id` 若按字面匹配就会命中占位符的属性
+    const { context } = await run([{ id: 'a', text: 'Let <x id="1"/> be positive.' }], { glossary: [{ term: 'id', translation: '标识' }] })
+    expect((context as { glossary?: unknown } | undefined)?.glossary).toBeUndefined()
+  })
+
+  // 线上文本里 & < > 是转义过的（serialize.ts），不解实体就永远匹配不上带这些字符的术语
+  // （Codex 在 #163 指出）。这类术语在论文里很常见：R&D、<UNK>、A&B
+  it('匹配前先解实体：R&D 对得上线上的 R&amp;D', async () => {
+    const terms = [{ term: 'R&D', translation: '研发' }, { term: '<UNK>', translation: '未知词' }]
+    const { context } = await run([{ id: 'a', text: 'Our R&amp;D team replaces &lt;UNK&gt; tokens.' }], { glossary: terms })
+    expect(context?.glossary?.map(g => g.term)).toEqual(['R&D', '<UNK>'])
+  })
+
+  it('解实体不会凭空造出实体：`&` 与 `amp;` 被占位符隔开时不算命中', async () => {
+    // 逐段解、不是先拼后解：拼起来像 `X&amp;Y`，逐段解出来是 `X&` + `amp;Y`
+    const { context } = await run([{ id: 'a', text: 'X&amp;<x id="1"/>amp;Y uses R&amp;D' }], { glossary: [{ term: 'R&D', translation: '研发' }, { term: 'X&Y', translation: '异或' }] })
+    expect(context?.glossary?.map(g => g.term)).toEqual(['R&D'])
   })
 })

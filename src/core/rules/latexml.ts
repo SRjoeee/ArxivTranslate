@@ -5,9 +5,10 @@
 /**
  * 任何表或函数的行为变化都要递增；进缓存键。0.5.0：单元格取任意深度、格内单元走进去序列化（§5.3）。
  * 0.6.2：带环境名的 tag 改为可翻，纯标识符（`(a)`、`(ii)`）仍保护——分类语义变了，
- * 旧缓存不该跨过去（Codex 在 #53 指出）
+ * 旧缓存不该跨过去（Codex 在 #53 指出）。0.10.1：`.ltx_nodisplay` 作 void——缓存里存着的
+ * 那些块把隐藏的无障碍描述一起翻了，键不换就会继续吐出来
  */
-export const RULES_VERSION = '0.10.0'
+export const RULES_VERSION = '0.10.1'
 
 /** LaTeXML 类名前缀，用于判断一个元素是否属于论文正文 */
 export const LTX_CLASS_PREFIX = 'ltx_'
@@ -89,7 +90,9 @@ export const SKIP_RULES: readonly Rule[] = [
   { id: 'author-glue', selector: '.ltx_author_before, .ltx_author_after', note: '作者之间的连接词（“ and ”“, ”）' },
   { id: 'classification', selector: '.ltx_classification', note: 'MSC / ACM 分类号，如“Primary: 11L07”' },
   { id: 'pubnotes', selector: '.ltx_pubnotes', note: '出版元数据（ACM 模板的 CCS / DOI / 期刊）' },
-  { id: 'picture', selector: 'svg, .ltx_picture', note: 'TikZ 图，实测无可翻译文字（§15.1）' },
+  // 文字管线整块跳过内联 TikZ 图，这条不变：图里的标签是 foreignObject 里的 HTML，按块翻会把译文
+  // 插进 svg 内部、撑破画布。它们由图片管线画叠加层（§15.6），与位图、外链 SVG 走同一条路
+  { id: 'picture', selector: 'svg, .ltx_picture', note: 'TikZ 图；里面的标签由图片管线叠加（§15.6）' },
   { id: 'error', selector: '.ltx_ERROR, .ltx_FATAL, .ltx_WARNING, .ltx_INFO', note: 'LaTeXML 的转换错误与提示，不是论文内容' },
   { id: 'nav', selector: '.ltx_page_navbar, .ltx_TOC', note: '导航栏与目录；位于翻译根之外，供渲染层隐藏用' },
 ]
@@ -139,6 +142,14 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
   // 不挡住的话，邮箱那条 .ltx_contact 里唯一可翻的就是这个隐藏标签，译文出来是一行看不见的
   // 「电子邮件：」加一份原样的地址——页面上就是两行一样的邮箱（§5.2 的决定）
   { id: 'contact-label', selector: '.ltx_contact_name', note: '联系方式标签，模板生成且站点隐藏' },
+  // What LaTeXML marks as not displayed — in practice the ACM template's `\Description{}`, the
+  // accessibility text behind a figure or table's `aria-describedby`. ar5iv hides it with
+  // `.ltx_nodisplay { display: none }`, but our translation is our own node and carries no such
+  // class, so translating it printed several hundred words of prose — `\par` macros and all, since
+  // LaTeXML leaves those unexpanded — right under the caption (reported on 2509.10652v3's Table 5,
+  // 2026-09-11). Left alone it also spends tokens on text nobody reads. Same shape as the
+  // `contact-label` rule above: hidden at the source, so it must never reach the engine
+  { id: 'nodisplay', selector: '.ltx_nodisplay', note: 'LaTeXML 标为不显示的内容（ACM \\Description），站点隐藏' },
   // 引文年份（Codex 在 #74 指出）：`.ltx_bibblock` 放开作者段之后（§5.4），年份跟着一起被送去翻。
   // 它在序列化里本来是**成对**占位符，协议保的是标签、**内容照样可翻**——`(2024)` 可以被
   // 换成全角括号或加上「年」，而校验只看占位符包装，一个字都不会拦。only 模式下原块隐藏，
@@ -255,7 +266,17 @@ export const LABEL_FORMATTING = '.ltx_font_bold, .ltx_font_italic, .ltx_font_sma
  * 图目标（§15）。`graphics` 两种都收：位图走 OCR，SVG 直接读字形（§15.5）。
  * 实测这些 `<object>` 与位图一样带 `.ltx_graphics`
  */
-export const FIGURE_SELECTORS = { figure: '.ltx_figure', graphics: 'img.ltx_graphics, object.ltx_graphics[type="image/svg+xml"]' } as const
+export const FIGURE_SELECTORS = {
+  figure: '.ltx_figure',
+  graphics: 'img.ltx_graphics, object.ltx_graphics[type="image/svg+xml"]',
+  /**
+   * Inline TikZ (§15.6). Its labels are ordinary HTML inside `<foreignObject>`, so they are read
+   * from the main document rather than recognised or reconstructed from glyphs — the text pipeline
+   * still skips the whole picture (`PROTECT/skip` rule `picture`), the image pipeline draws over it
+   */
+  picture: 'svg.ltx_picture',
+  pictureText: '.ltx_foreignobject_content',
+} as const
 
 /** 脚注（§7.2 两栏归位用）：容器、正文、正文的 class 名、自带的标号 */
 /**
@@ -275,6 +296,12 @@ export const NOTE = {
   marks: '.ltx_note_mark, .ltx_tag',
   /** The note's box, which ar5iv floats to the page's edge; neither a sentence's ranges nor a grid row's height should include it */
   outer: '.ltx_note_outer',
+  /**
+   * The boxes that hang in the page's margin: body footnotes, not the frontmatter notes (a
+   * frontmatter note with a translation goes back into the article's flow, §7.2). This is what
+   * `renderer/margin-notes.ts` stacks down the gutter
+   */
+  marginOuter: '.ltx_note:not(.ltx_note_frontmatter) > .ltx_note_outer',
 } as const
 
 /** 插图整块拆分（§7.2）：没有译文、也翻不了的媒体——两栏各需要一份的正是这些 */
@@ -356,14 +383,36 @@ const TEXT_NODE = 3
  * 不看 descend 标志：脚注正文对外层段落不是可见文本，descend 只影响 extractor 的块发现。
  */
 export function visibleText(el: Element): string {
+  return textOf(el)
+}
+
+/**
+ * LaTeXML 给「数学模式里排版成文字的那部分」打的 class（`\text{}`、`\mathrm{}` 之类）：
+ * `initMT`、`barrier_N_record(b)` 这些在读者眼里是标识符，不是词。
+ */
+const MARKED_AS_MATH = '.ltx_markedasmath'
+
+/**
+ * `visibleText` 再减去被标成数学的标识符。**只用来判「这个节点是不是整个就是一个公式」**——
+ * 夹在句子里的标识符照旧随句子一起翻（`Block n−1` 连符号一起走），所以译什么仍看 `visibleText`。
+ * 图内标签（§15.6）是唯一会把一个标识符**单独**发出去、还在图上盖一块白底的地方：实测语料 507 个
+ * 图内标签里正有 1 个是这种（2609.00246 的 `initMT`），它过了判词就会被译、被盖（Codex 在 #163 指出）
+ */
+export function proseText(el: Element): string {
+  if (el.matches(MARKED_AS_MATH)) return ''
+  return textOf(el, node => node.matches(MARKED_AS_MATH))
+}
+
+function textOf(el: Element, drop?: (el: Element) => boolean): string {
   const parts: string[] = []
   const walk = (node: Element) => {
     for (const child of Array.from(node.childNodes)) {
       if (child.nodeType === TEXT_NODE) {
         parts.push((child as Text).data)
       } else if (child.nodeType === ELEMENT_NODE) {
-        const kind = classify(child as Element)?.kind
-        if (kind !== 'skip' && kind !== 'protect') walk(child as Element)
+        const el = child as Element
+        const kind = classify(el)?.kind
+        if (kind !== 'skip' && kind !== 'protect' && !drop?.(el)) walk(el)
       }
     }
   }

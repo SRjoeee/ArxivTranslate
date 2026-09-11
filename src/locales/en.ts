@@ -18,6 +18,7 @@ const S: Locale['S'] = {
     highlightTitle: 'Highlights the matching sentence on hover; in translation-only mode, rest on a sentence to see the original',
     images: 'Images',
     style: 'Style',
+    manageStyles: 'Manage styles…',
   },
   service: {
     microsoft: 'Microsoft Translator',

@@ -25,6 +25,8 @@ import { HELPER_GUIDE_URL, PREVIEW_TARGET, S, helperInstallCommand, languageName
 export type { PackState }
 /** The last row of the service menu: not a service, it opens the settings page */
 export const MANAGE_SERVICES = '__manage'
+/** The same for the style menu: not a profile, it opens the settings page at the section that holds them */
+export const MANAGE_STYLES = '__manage-styles'
 export type MenuKind = 'service' | 'language' | 'prompt' | 'style'
 
 export interface PopupInput {
@@ -244,13 +246,17 @@ function menuOf(kind: MenuKind, config: Config, pack: PackState | null): NonNull
         kind,
         label: S.rows.style,
         search: false,
-        items: config.appearance.styles.map(p => ({
-          id: p.id,
-          name: profileName(p),
-          hint: PREVIEW_TARGET,
-          preview: styleTile(p),
-          selected: p.id === config.appearance.activeStyle,
-        })),
+        items: [
+          ...config.appearance.styles.map(p => ({
+            id: p.id,
+            name: profileName(p),
+            hint: PREVIEW_TARGET,
+            preview: styleTile(p),
+            selected: p.id === config.appearance.activeStyle,
+          })),
+          // 与服务菜单同一个位置、同一种角色：最后一行不是样式，是去管理它们的入口（S-P-83）
+          { id: MANAGE_STYLES, name: S.rows.manageStyles, selected: false },
+        ],
       }
   }
 }

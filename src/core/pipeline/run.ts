@@ -236,13 +236,27 @@ export function startTranslation(options: RunOptions): TranslationRun {
     if (stopped) return
     if (!res.ok) {
       noteFatal(res)
-      if (fatal === undefined && segments.length > 1) {
-        // 批次失败：对半拆分重试（§8.2）
-        const mid = Math.ceil(segments.length / 2)
-        await translateSegments(segments.slice(0, mid), sectionTitle, out)
-        await translateSegments(segments.slice(mid), sectionTitle, out)
+      // 一次调用可能被拆到多个批次，一批失败不代表另一批没成：成功的那些随失败一起送回来，
+      // 先把它们渲染掉（它们已经在缓存里，不渲染的话读者看到"全失败"，重试时又秒回）。
+      // 余下的才进下面的判断（Codex 在 #163 指出）
+      const done = new Map((res.partial ?? []).map(s => [s.id, s]))
+      const left = segments.filter(segment => {
+        const hit = done.get(segment.id)
+        if (hit === undefined || !validate(hit.text, segment.protected).ok) return true
+        out.set(segment, { fragment: rehydrate(hit.text, segment.protected, doc, hit.alignment), alignment: hit.alignment })
+        return false
+      })
+      if (left.length === 0) return
+      // 批次失败：**某一段引起的**才对半拆分重试（§8.2）。系统性失败拆了也是同一个结果，
+      // 只是把它乘以段数——实测 4 段的 `bad-request` 会变成 7 次调用（`4,2,1,1,2,1,1`），
+      // 限额类失败更是反效果。判据由 service 侧随错误一起送过来（providers/types.ts 的
+      // `ISOLATABLE_BY_KIND`，provider 可以覆盖），content 这一层不再自己猜
+      if (fatal === undefined && left.length > 1 && res.error.isolatable) {
+        const mid = Math.ceil(left.length / 2)
+        await translateSegments(left.slice(0, mid), sectionTitle, out)
+        await translateSegments(left.slice(mid), sectionTitle, out)
       } else {
-        for (const segment of segments) out.set(segment, errorOf(res))
+        for (const segment of left) out.set(segment, errorOf(res))
       }
       return
     }

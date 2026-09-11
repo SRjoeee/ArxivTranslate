@@ -66,7 +66,7 @@ extId = worker.url().split('/')[2]
 const IDLE = /session idle: (\d+)\/(\d+) requested of (\d+)/
 const IMAGES_IDLE = /images idle: (\d+)\/(\d+) of (\d+), (\d+) failed/
 /** content 报的图数，SVG 与位图分开数；两种都进同一条流水线，idle 的分母是两者之和 */
-const IMAGE_COUNTS = /\[axt\] images: (\d+) SVG \+ (\d+) bitmaps/
+const IMAGE_COUNTS = /\[axt\] images: (\d+) SVG \+ (\d+) inline pictures \+ (\d+) bitmaps/
 async function waitForLog(logs, pattern, timeoutMs, predicate = () => true) {
   const t0 = Date.now()
   while (Date.now() - t0 < timeoutMs) {
@@ -82,6 +82,17 @@ async function scrollThrough(page) {
     const height = await page.evaluate(() => document.documentElement.scrollHeight)
     if (y > height) break
     await page.evaluate(top => window.scrollTo(0, top), y)
+    await sleep(150)
+  }
+  // 固定步长扫一遍还不够：译文是边滚边插的，文档在变高，两个位置之间可能整张图被跨过去
+  // （实测跑出过 `5/5 of 6`，第六张始终没进过视口）。最后按图逐张滚一次，让"都进过视口"这件事是确定的。
+  // 选择器要与生产侧的目标集合一致（rules/latexml.ts 的 graphics + picture）：只滚位图的话，
+  // AXT_PAPER 换成带外链 SVG 或内联 TikZ 的论文时，被跳过的那张永远不会被认领，images idle 就等到超时
+  // （Codex 在 #163 指出）
+  const TARGETS = 'img.ltx_graphics, object.ltx_graphics[type="image/svg+xml"], svg.ltx_picture'
+  const count = await page.evaluate(sel => document.querySelectorAll(sel).length, TARGETS)
+  for (let i = 0; i < count; i++) {
+    await page.evaluate(([sel, n]) => document.querySelectorAll(sel)[n]?.scrollIntoView({ block: 'center' }), [TARGETS, i])
     await sleep(150)
   }
 }
@@ -126,10 +137,21 @@ const page = await context.newPage()
 const logs = []
 page.on('console', m => { const text = m.text(); if (text.includes('[axt]')) logs.push({ t: Date.now(), text }) })
 await page.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
+// 这一段量的是**上下**：默认模式 2026-09-11 起是左右（§7.2），不显式切过来的话插图一开始就被拆成两份，
+// 下面数出来的叠加层是「原件 + 副本」，后面几段的期望值全跟着错
+{
+  const modePopup = await context.newPage()
+  await modePopup.goto(`chrome-extension://${extId}/popup.html`)
+  await page.bringToFront()
+  await modePopup.getByRole('button', { name: '上下', exact: true }).waitFor({ timeout: 10_000 })
+  await modePopup.getByRole('button', { name: '上下', exact: true }).click()
+  await sleep(300)
+  await modePopup.close()
+}
 // 图数从 content 的日志里取，换论文（AXT_PAPER）时期望跟着变（Codex 在 #89 指出）
 const counted = await waitForLog(logs, IMAGE_COUNTS, 20_000)
 const found = counted ? IMAGE_COUNTS.exec(counted.text) : null
-const N = found ? +found[1] + +found[2] : 0
+const N = found ? +found[1] + +found[2] + +found[3] : 0
 check('content 认出了页面上的图', N >= 1, counted?.text ?? '没有 images 日志')
 await scrollThrough(page)
 const idle = await waitForLog(logs, IMAGES_IDLE, 90_000, m => +m[2] === N && +m[1] + +m[4] === N)
@@ -138,7 +160,9 @@ await sleep(500)
 let probe = await page.evaluate(PROBE)
 const withOverlay = probe.filter(p => p.overlay)
 // 不是每张图都有叠加层：只有数字与单字母的图、译文与原文相同的（单位、变量名）不画。默认论文 2507.00150v1 的 6 张里 5 张有坐标轴文字
-const minOverlays = PAPER === '2507.00150v1' ? 5 : 1
+// 下界不追着引擎的口味走：短轴标签（`Epoch`、`Loss`）Google 有时原样返回，`sameText` 就不画那一张，
+// 同一份构建两次跑会在 4 与 6 之间跳（实测）。这条断言守的是"图片翻译整条路真的跑了"，不是翻译口味
+const minOverlays = PAPER === '2507.00150v1' ? 3 : 1
 check(`stack：有可翻文字的图都有叠加层（≥ ${minOverlays} 张），每层至少一个标签`, withOverlay.length >= minOverlays && withOverlay.every(p => p.overlay.labels >= 1), probe.map(p => `${p.id}:${p.overlay?.labels ?? 0}`).join(' '))
 check('stack：叠加层矩形与图重合（锚点定位）', withOverlay.every(p => p.overlay.visible && coincide(p.overlay.rect, p.imgRect)), withOverlay.map(p => `${p.id} Δ(${(p.overlay.rect.x - p.imgRect.x).toFixed(1)},${(p.overlay.rect.y - p.imgRect.y).toFixed(1)},${(p.overlay.rect.w - p.imgRect.w).toFixed(1)},${(p.overlay.rect.h - p.imgRect.h).toFixed(1)})`).join(' '))
 // 字号随框高：宽扁的图上标签只有三四像素，与原图上的字一样小——不设下限，读者缩放页面时一起放大

@@ -35,7 +35,7 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
           <BrandMark />
           <span className="text-[14px] font-bold">{S.brand}</span>
         </div>
-        <button type="button" aria-label={S.settings} title={S.settings} onClick={actions.openOptions} className="cursor-pointer text-fg-2 hover:text-fg">
+        <button type="button" aria-label={S.settings} title={S.settings} onClick={() => actions.openOptions()} className="cursor-pointer text-fg-2 hover:text-fg">
           <GearIcon />
         </button>
       </header>
@@ -57,7 +57,7 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
           {view.note && (
             <Bubble>
               <span className="font-semibold text-accent">{view.note.text}</span>
-              {view.note.settings && <Button variant="solid" onClick={actions.openOptions}>{S.settings}</Button>}
+              {view.note.settings && <Button variant="solid" onClick={() => actions.openOptions()}>{S.settings}</Button>}
             </Bubble>
           )}
           {view.failed && (

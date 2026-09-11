@@ -151,7 +151,7 @@ describe('startImageTranslation', () => {
   })
 
   it('OCR 出错记失败；图里没有可翻的字算完成、不插叠加层', async () => {
-    const failing = setup({ ocr: async () => ({ ok: false, error: { kind: 'network', message: 'helper 断开' } }) })
+    const failing = setup({ ocr: async () => ({ ok: false, error: { kind: 'network', message: 'helper 断开', isolatable: false } }) })
     await failing.run.translate(failing.targets)
     expect(failing.run.failed()).toHaveLength(1)
     const empty = setup({ ocr: async () => ({ ok: true, result: { width: 1, height: 1, lines: [line('12.5', 0.1), line('B', 0.5)] }, cached: false }) })
@@ -187,7 +187,7 @@ describe('startImageTranslation', () => {
       doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }),
       ocr,
-      translate: async () => ({ ok: false, error: { kind: 'auth', message: 'User not found.' } }),
+      translate: async () => ({ ok: false, error: { kind: 'auth', message: 'User not found.', isolatable: false } }),
       isEnabled: () => true, isCurrent: () => true,
     })
     await run.translate([targets[0]!])
@@ -206,13 +206,56 @@ describe('startImageTranslation', () => {
     const run = startImageTranslation({
       doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr,
-      translate: async () => ({ ok: false, error: { kind: 'network', message: 'offline' } }),
+      translate: async () => ({ ok: false, error: { kind: 'network', message: 'offline', isolatable: false } }),
       isEnabled: () => true, isCurrent: () => true,
     })
     await run.translate(targets)
     expect(run.fatal()).toBeUndefined()
     expect(ocr).toHaveBeenCalledTimes(2)
     expect(run.failed()).toHaveLength(2)
+  })
+
+  // Codex 在 #163 指出：一张图的标签可能横跨多个批次（内联 TikZ 上百个节点），
+  // 一批失败时另一批已经译好的标签随失败一起回来，不该整张图空着
+  it('部分成功：译好的标签先画上去，同时仍记这张图失败', async () => {
+    const { doc, targets, run } = setup({
+      // 第一个标签译出来了，其余没有
+      translate: async call => ({
+        ok: false as const,
+        error: { kind: 'network' as const, message: 'offline', isolatable: false },
+        partial: call.request.segments.slice(0, 1).map(s => ({ id: s.id, text: `译:${s.text}` })),
+      }),
+    })
+    await run.translate(targets)
+    expect(run.failed()).toHaveLength(1)
+    // 叠加层画出来了，且只有译好的那一个标签
+    const overlay = doc.querySelector('.axt-img')
+    expect(overlay).not.toBeNull()
+    expect(overlay!.querySelectorAll('span')).toHaveLength(1)
+  })
+
+  // 第五轮：致命失败会就地停掉整个调度，这张图这一轮再没有第二次机会——
+  // 降级链上前一步译出来的标签会跟着末步的 auth 失败一起回来，画在致命分支之前才画得上
+  it('致命失败也先画：降级链上译好的标签不能跟着 auth 一起丢', async () => {
+    const { doc, targets, run } = setup({
+      translate: async call => ({
+        ok: false as const,
+        error: { kind: 'auth' as const, message: 'User not found.', isolatable: false },
+        partial: call.request.segments.slice(0, 1).map(s => ({ id: s.id, text: `译:${s.text}` })),
+      }),
+    })
+    await run.translate(targets)
+    expect(run.fatal()).toBeDefined()
+    expect(doc.querySelector('.axt-img')?.querySelectorAll('span')).toHaveLength(1)
+  })
+
+  it('一个标签都没译出来就不画叠加层', async () => {
+    const { doc, targets, run } = setup({
+      translate: async () => ({ ok: false as const, error: { kind: 'network' as const, message: 'offline', isolatable: false } }),
+    })
+    await run.translate(targets)
+    expect(run.failed()).toHaveLength(1)
+    expect(doc.querySelector('.axt-img')).toBeNull()
   })
 
   it('并发有上限：同时在处理的图不超过 maxConcurrent，其余排队（Codex 在 #89 指出）', async () => {
@@ -298,7 +341,7 @@ describe('startImageTranslation', () => {
     const run = startImageTranslation({
       doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr, maxConcurrent: 2,
-      translate: async () => ({ ok: false, error: { kind: 'no-key', message: '未配置 key' } }),
+      translate: async () => ({ ok: false, error: { kind: 'no-key', message: '未配置 key', isolatable: false } }),
       isEnabled: () => true, isCurrent: () => true,
       onProgress: p => { progress.push({ failed: p.failed, fatal: p.fatal }) },
     })
@@ -326,7 +369,7 @@ describe('startImageTranslation', () => {
     const run = startImageTranslation({
       doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
       fetchBytes, ocr, maxConcurrent: 1,
-      translate: async () => ({ ok: false, error: { kind: 'network', message: 'x' } }),
+      translate: async () => ({ ok: false, error: { kind: 'network', message: 'x', isolatable: false } }),
       isEnabled: () => true, isCurrent: () => true,
     })
     const all = run.translate(targets) // 1 在飞、2 排队

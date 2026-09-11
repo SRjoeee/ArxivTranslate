@@ -29,7 +29,7 @@ describe('启动期间恢复原文（issue #45 实验 1）', () => {
       paper: '0000.00000',
       capabilities: { maxBatchChars: 1000, maxBatchItems: 4, renderPath: 'tags' },
       preload: { margin: 1000, threshold: 0 },
-      transport: async () => ({ ok: false, error: { kind: 'aborted', message: '不该发出请求' } }),
+      transport: async () => ({ ok: false, error: { kind: 'aborted', message: '不该发出请求', isolatable: false } }),
     })
     // 标记循环刚开始就停：初始化在让出主线程时被打断
     run.stop()

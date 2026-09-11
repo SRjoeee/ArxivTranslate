@@ -246,7 +246,35 @@ async function measureFrame(page) {
   check('\\resizebox 包着的表格：原表在左栏、译表在右栏，都不越界',
     tables.rows.length === 5 && bad.length === 0,
     `${tables.rows.length - bad.length}/${tables.rows.length} 对；栏宽 ${tables.col}${bad.length ? `；越界的 ${bad.map(t => `${t.id} ${t.a.l}–${t.a.r} / ${t.b.l}–${t.b.r}`).join('、')}` : ''}`)
-  await page.screenshot({ path: `${SHOTS}/layout-resizebox-table.png` })
+  // Two footnotes in one paragraph (§7.2). Both halves of the contract at once: the boxes stay
+  // zero-height, so no note can size the grid row (#154's 1300px blank, and the 1442px one a
+  // height-restoring fix brought back on 2609.10326v1), and margin-notes.ts has still pushed the
+  // second clear of the first, so neither draws on top of the other (2509.10652v3, both 2026-09-11)
+  // Wide enough for the gutter: below 96rem ar5iv folds its margin notes away into hover popovers
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.evaluate(() => document.querySelector('#S2\\.p2\\.1')?.scrollIntoView({ block: 'center' }))
+  await quiesce(page, 'S2.p2.1')
+  const stacked = await page.evaluate(() => {
+    const source = document.querySelector('#S2\\.p2\\.1')
+    const pair = [source, source?.nextElementSibling].filter(el => el?.classList.contains('ltx_p') || el?.classList.contains('axt-t'))
+    const boxes = pair.flatMap(el => [...el.querySelectorAll('.ltx_note:not(.ltx_note_frontmatter) > .ltx_note_outer')])
+      .filter(el => el.checkVisibility())
+      .map(el => {
+        // What the note actually paints: the box is zero-height on purpose, so the text spills out
+        // of it — the span that must not collide with the next note is the content's, not the box's
+        const c = el.querySelector('.ltx_note_content').getBoundingClientRect()
+        // The box is 2rem of ar5iv's padding around a zero content height, whatever the note says —
+        // that is what keeps it out of the grid row's sizing
+        return { t: Math.round(c.top), b: Math.round(c.bottom), box: Math.round(el.getBoundingClientRect().height) }
+      })
+      .sort((a, b) => a.t - b.t)
+    return { notes: pair.flatMap(el => [...el.querySelectorAll('.ltx_note:not(.ltx_note_frontmatter)')]).length, boxes }
+  })
+  const [first, second] = stacked.boxes
+  check('two footnotes in one paragraph: zero-height boxes (no grid row grows), stacked clear of each other',
+    stacked.notes === 4 && stacked.boxes.length === 2 && stacked.boxes.every(b => b.box < b.b - b.t) && second.t >= first.b,
+    `${stacked.notes} notes, ${stacked.boxes.length} painted, ${stacked.boxes.map(b => `${b.t}–${b.b} in a ${b.box}px box`).join(' / ')}`)
+  await page.screenshot({ path: `${SHOTS}/layout-margin-notes.png` })
   await page.close()
 }
 

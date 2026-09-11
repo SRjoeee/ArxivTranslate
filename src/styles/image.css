@@ -16,7 +16,9 @@
 }
 
 @supports (top: anchor(top)) and (anchor-scope: --x) {
-  html[data-axt-on] :is(img, object):has(+ .axt-img) {
+  /* 内联 TikZ 图（§15.6）也是锚点：叠加层同样贴它的盒子。svg 自己会被 side 的配对规则当成媒体，
+     不会被当成翻译块 */
+  html[data-axt-on] :is(img, object, svg):has(+ .axt-img) {
     anchor-name: --axt-img;
   }
 

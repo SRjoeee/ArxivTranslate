@@ -2,6 +2,7 @@
 // 不变量：译文节点只作为原块的下一个兄弟插入；原节点只追加 data-axt-id / data-axt-state；
 // 全局状态只在 <html> 上；restore 后 DOM 与翻译前逐节点相等。
 import type { Block, TableBlock, TextBlock } from '@/core/extractor'
+import { isRtlTag } from '@/config/languages'
 import { AXT_ATTR_PREFIX, INJECTED_SELECTOR, T_CLASS, isInjected, stripInjected } from '@/core/marks'
 import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
 import highlightCss from '@/styles/highlight.css?inline'
@@ -26,6 +27,12 @@ export const MODE_ATTR = 'data-axt-mode'
 export const INLINE_ATTR = 'data-axt-inline'
 /** 译文语言（BCP-47），由 enable 写在 <html> 上供 renderText 读取 */
 export const LANG_ATTR = 'data-axt-lang'
+/**
+ * 译文的书写方向，只在从右往左的目标语言下出现在 `<html>` 上（§7.1：全局状态只在这里）。
+ * `renderText` 逐个抄到译文节点的 `dir` 上——**只写 `lang` 不够**：双向算法看的是 `dir`，
+ * 而 arXiv 的 `<html>` 是 ltr，继承下来的阿拉伯语译文里句号会跑到词前面、整段还靠左（实测）
+ */
+export const DIR_ATTR = 'data-axt-dir'
 /**
  * 「译文与原文逐字相同」的标记（Codex 在 #74 指出）。默认提示词里那条
  * 「Keep author names, journal names, conference names … in the original language」
@@ -95,7 +102,11 @@ export function enable(doc: Document, mode: Mode, look?: Look, lang?: string): v
   doc.documentElement.setAttribute(MODE_ATTR, mode)
   // 译文的语言记在 <html> 上（§7.1：全局状态只在这里），renderText 逐个写到译文节点的 lang 上。
   // 不能直接改 <html lang>：那会把原文也说成中文
-  if (lang) doc.documentElement.setAttribute(LANG_ATTR, lang)
+  if (lang) {
+    doc.documentElement.setAttribute(LANG_ATTR, lang)
+    if (isRtlTag(lang)) doc.documentElement.setAttribute(DIR_ATTR, 'rtl')
+    else doc.documentElement.removeAttribute(DIR_ATTR)
+  }
   if (look) setAppearanceAttrs(doc, look)
   const existing = doc.querySelector(`style[${STYLE_ATTR}="${STYLE_MARK}"]`)
   const css = styleSheet(look)
@@ -182,8 +193,13 @@ export function renderText(block: TextBlock, content: DocumentFragment): Element
   node.setAttribute(FOR_ATTR, block.id)
   // 译文是另一种语言，页面的 <html lang> 说的是原文（arXiv 上是 en）。不标的话屏幕阅读器会用英文
   // 语音去念中文（实测：14 个译文节点全部继承 lang="en"，Codex 的同行审计没查到这条）
-  const lang = block.el.ownerDocument.documentElement.getAttribute(LANG_ATTR)
+  const html = block.el.ownerDocument.documentElement
+  const lang = html.getAttribute(LANG_ATTR)
   if (lang) node.setAttribute('lang', lang)
+  // 从右往左的语言还要 `dir`：`lang` 只说"这是哪种语言"，段落的基方向由 `dir` 定。
+  // 只给真正的译文写——骨架屏、失败小部件是界面语言，镜像里装的是原文
+  const dir = html.getAttribute(DIR_ATTR)
+  if (dir) node.setAttribute('dir', dir)
   if (shouldInline(block)) {
     block.el.setAttribute(INLINE_ATTR, '')
     node.setAttribute(INLINE_ATTR, '')
@@ -227,6 +243,13 @@ export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragm
   clearTranslation(block)
   const clone = block.el.cloneNode(true) as Element
   stripInjected(clone)
+  // 译文单元格也要 `lang` / `dir`，理由与 renderText 里那两段完全相同（Codex 在 #163 指出表格这条
+  // 路漏了 `dir`；`lang` 同样漏了，屏幕阅读器会用英文语音念表格里的中文）。打在**换过内容的格**上
+  // 而不是整张表上：`dir` 落到 `<table>` 会连列序一起翻转，而这张克隆表里没被翻译的数字列仍是原样，
+  // 翻转列序会让它与上面的原表对不上；落到格上只改这一格里文本的基方向，正是我们要的那一点
+  const html = block.el.ownerDocument.documentElement
+  const cellLang = html.getAttribute(LANG_ATTR)
+  const cellDir = html.getAttribute(DIR_ATTR)
   // 两棵树结构相同：原表的单元格与克隆表的单元格按同序对应（tableCells 取任意深度，嵌套 tabular 的格也在内）。
   // 每格替换前重新定位：外层格的译文里带着嵌套表的克隆，先替换外层再替换内层，
   // 事先取好的内层引用会指向已被丢弃的节点（§5.3）
@@ -237,6 +260,8 @@ export function renderTable(block: TableBlock, cells: Map<Element, DocumentFragm
     if (!target) return
     target.textContent = ''
     target.append(content)
+    if (cellLang) target.setAttribute('lang', cellLang)
+    if (cellDir) target.setAttribute('dir', cellDir)
     rendered?.set(cell.el, target)
   })
   clone.classList.add(T_CLASS)
@@ -277,6 +302,7 @@ export * from './mirror'
 export * from './side-layout'
 export * from './table-fit'
 export * from './pair-margins'
+export * from './margin-notes'
 export * from './notes'
 export * from './anchors'
 export * from './prep'

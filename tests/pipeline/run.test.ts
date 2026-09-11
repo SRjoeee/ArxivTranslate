@@ -18,14 +18,20 @@ const PAGE =
 const docOf = (page = PAGE) => new DOMParser().parseFromString(`<!doctype html><html><head></head><body><article class="ltx_document">${page}</article></body></html>`, 'text/html')
 
 /** 恒等 transport：原样返回；可用 mutate 篡改某些段 */
-function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: string }, calls: number) => string | { error: string }) {
+function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: string }, calls: number) => string | { error: string; isolatable?: boolean; partial?: boolean }) {
   const requests: TranslateCall[] = []
   const transport: Transport = async req => {
     requests.push(req)
     const segments: { id: string; text: string }[] = []
     for (const seg of req.request.segments) {
       const out = mutate?.(req, seg, requests.length)
-      if (out && typeof out === 'object') return { ok: false, error: { kind: out.error as 'unknown', message: out.error } }
+      // 默认按"某一段引起的"算：批次报错时 translateSegments 会对半拆到单段，
+      // 现有用例正是靠这条路只标记真正失败的那一块。系统性失败另有用例显式传 isolatable: false
+      if (out && typeof out === 'object') {
+        // partial：这次调用里另一批已经译好的段落随失败一起回来（§8.2）
+        const partial = out.partial ? req.request.segments.filter(s => s.id !== seg.id).map(s => ({ id: s.id, text: s.text })) : undefined
+        return { ok: false, error: { kind: out.error as 'unknown', message: out.error, isolatable: out.isolatable ?? true }, ...(partial && partial.length > 0 ? { partial } : {}) }
+      }
       segments.push({ id: seg.id, text: typeof out === 'string' ? out : seg.text })
     }
     return { ok: true, result: { segments, provider: 'mock' }, cached: 1 }
@@ -182,6 +188,80 @@ describe('startTranslation', () => {
     expect(run.progress()).toMatchObject({ failed: 0, done: 6 })
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)?.classList.contains(ERROR_CLASS)).toBe(false)
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)?.querySelector('math')).not.toBeNull()
+  })
+
+  it('丢了占位符也不把公式挪到句末：两个从句各自留住自己的那个（研究审计 F03 的验收口径）', async () => {
+    // Read Frog 的兜底是把丢掉的公式**追加在译文末尾**——一句话里两个从句、两个公式时，
+    // 谁属于哪半句就没了。我们的 runs 兜底按位置重拼，所以位置是可以断言的
+    const page = '<p class="ltx_p" id="two">If <math class="ltx_Math"><mi>x</mi></math> is positive then '
+      + '<math class="ltx_Math"><mi>y</mi></math> is negative.</p>'
+    const doc = docOf(page)
+    const blocks = extract(doc)
+    const { transport } = makeTransport((req, seg) => (seg.id === 'two' && req.cache?.renderPath === 'tags' ? '占位符全丢了' : undefined as unknown as string))
+    const run = await start(doc, blocks, transport)
+    await run.translate(blocks)
+    const node = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="two"]`)!
+    expect(node.querySelectorAll('math')).toHaveLength(2)
+    // 两个公式仍夹在各自那半句里：x 在 "If … is positive" 内，y 在 "then … is negative" 内
+    const parts = Array.from(node.childNodes).map(n => n.nodeType === 1 ? (n as Element).textContent : n.textContent).join('|')
+    expect(parts.indexOf('x')).toBeGreaterThan(parts.indexOf('If'))
+    expect(parts.indexOf('x')).toBeLessThan(parts.indexOf('then'))
+    expect(parts.indexOf('y')).toBeGreaterThan(parts.indexOf('then'))
+    // 已知代价（研究审计 A04 要让它可见）：runs 是按段分别翻的，整句上下文丢了，
+    // 所以这里断言的是"内容与位置"，不是"译文质量"
+    expect(node.textContent).toContain('If')
+  })
+
+  /** 同一页跑一遍，返回每次请求带了几段 */
+  const requestSizes = async (mutate?: Parameters<typeof makeTransport>[0]) => {
+    const doc = docOf()
+    const blocks = extract(doc)
+    const { transport, requests } = makeTransport(mutate)
+    const run = await start(doc, blocks, transport)
+    await run.translate(blocks)
+    return { sizes: requests.map(r => r.request.segments.length), run, doc }
+  }
+
+  it('系统性失败不再对半拆：每批只打一次（研究审计 B20 的反例）', async () => {
+    // 以前不论哪种失败都拆，一批 N 段会变成 2N-1 次调用（实测 4 段 → `4,2,1,1,2,1,1`）——
+    // 同一个失败乘以段数，限额类失败更是反效果。判据由 service 侧随错误送过来
+    const base = await requestSizes()
+    const systemic = await requestSizes((_req, seg) => (seg.id === 'p1' ? { error: 'bad-request', isolatable: false } : undefined as unknown as string))
+    expect(systemic.sizes).toEqual(base.sizes)
+    // 整批算失败（这一批里没有一段能成），但仍是可重试的失败块，不是崩溃
+    expect(systemic.run.progress().failed).toBeGreaterThan(0)
+    expect(systemic.doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
+  })
+
+  it('超时不在内容层拆：恢复归队列，两层相乘实测 8 段能扇出 15 次调用', async () => {
+    const base = await requestSizes()
+    const timedOut = await requestSizes(() => ({ error: 'timeout', isolatable: false }))
+    expect(timedOut.sizes).toEqual(base.sizes)
+  })
+
+  // Codex 在 #163 指出：一次调用会被拆到多个批次，一批失败不代表另一批没成。
+  // service 把成功的那些随失败一起送回来，这一层要渲染出来——否则读者看到"全失败"，
+  // 而重试时它们又从缓存里秒回
+  it('系统性失败里成功的那些段照样渲染出来，只有真失败的才算失败', async () => {
+    const systemic = await requestSizes((_req, seg) => (seg.id === 'p1' ? { error: 'timeout', isolatable: false, partial: true } : undefined as unknown as string))
+    // 没有多打一次（系统性失败仍然不拆）
+    expect(systemic.sizes).toEqual((await requestSizes()).sizes)
+    // p1 失败，同一批里的其他段有译文
+    expect(systemic.doc.getElementById('p1')?.getAttribute(STATE_ATTR)).toBe('failed')
+    const others = ['p2', 'p3'].map(id => systemic.doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="${id}"]`))
+    expect(others.map(el => el !== null && !el.classList.contains(ERROR_CLASS))).toEqual([true, true])
+    expect(systemic.run.progress().failed).toBe(1)
+    expect(systemic.doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
+  })
+
+  it('某一段引起的失败照旧拆到单段，好的段落照样救回来', async () => {
+    const base = await requestSizes()
+    const isolatable = await requestSizes((_req, seg) => (seg.id === 'p1' ? { error: 'invalid-response' } : undefined as unknown as string))
+    expect(isolatable.sizes.length).toBeGreaterThan(base.sizes.length)
+    expect(isolatable.sizes).toContain(1)
+    expect(isolatable.run.progress()).toMatchObject({ failed: 1 })
+    expect(isolatable.doc.getElementById('p1')?.getAttribute(STATE_ATTR)).toBe('failed')
+    expect(isolatable.doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)?.classList.contains(ERROR_CLASS)).toBe(false)
   })
 
   it('小部件上的"重试"按钮走同一条重试路径', async () => {

@@ -36,6 +36,21 @@ describe('serialize', () => {
     expect([...b.paired]).toEqual([2])
   })
 
+  it('图表说明里不显示的无障碍描述作 void：一个字都不送去翻（§5.2，2026-09-11）', () => {
+    // ACM 模板的 \Description{}，站点 display:none。译文节点没有这个 class，
+    // 翻了就会在图表说明下面显示出几百字（用户在 2509.10652v3 的表 5 上反馈）
+    const caption = el(
+      '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table 5. </span>'
+      + 'Role-specific differences in the use of vibe coding tools.'
+      + '<span id="acmlabel6" class="ltx_nodisplay ltx_acm_description">A table describing role-specific differences. \\parUX or UI designers use AI for user interface generation.</span></figcaption>',
+    )
+    const b = serialize(caption)
+    // 「Table 5.」是带环境名的 tag，按 0.6.2 的决定成对可翻；描述那一段是 void
+    expect(b.text).toBe('<t id="1">Table 5. </t>Role-specific differences in the use of vibe coding tools.<x id="2"/>')
+    expect(b.text).not.toContain('\\par')
+    expect(b.slots.get(2)).toBe(caption.querySelector('.ltx_nodisplay'))
+  })
+
   it('没有文本的元素作 void', () => {
     const p = el('<p class="ltx_p">a<span class="ltx_rule"></span>b<img class="ltx_graphics" alt="">c<br>d</p>')
     expect(serialize(p).text).toBe('a<x id="1"/>b<x id="2"/>c<x id="3"/>d')

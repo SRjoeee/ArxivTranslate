@@ -105,33 +105,40 @@ describe('labelStyle', () => {
 })
 
 describe('rotated labels (§15.5)', () => {
+  // 斜标签自带长与厚（都按图**宽**的比例）：轴对齐外接框只在 90° 的倍数上与文字重合，
+  // 5° 时比文字大一圈，照着画会把白框斜铺到图上
   const label = (over: Partial<ImageLabel> = {}): ImageLabel => ({ x: 0.1, y: 0.2, w: 0.05, h: 0.4, lines: 1, source: 'wall time', text: '每轮耗时', ...over })
+  const rotated = (degrees: number, over: Partial<ImageLabel> = {}) =>
+    labelStyle(label({ angle: (degrees * Math.PI) / 180, len: 0.4, thick: 0.05, ...over }))
 
-  it('sizes a vertical label against the axis it actually runs along', () => {
-    // The trap: `width: X%` is a percentage of the container's *width*, and after rotating 90° the
-    // box's width is what you see vertically. On a figure that is not square that makes the label
-    // the wrong length. cqh and cqw name the two axes, so each dimension can be given in the one it
-    // belongs to.
-    const style = labelStyle(label({ angle: -Math.PI / 2 }))
-    expect(style).toContain('width:40.000cqh')
+  it('沿文字自己的轴摆：长与厚都用同一个单位，绕中心转过去', () => {
+    // `width: X%` 是容器**宽**的百分比，转 90° 之后那条边在屏幕上是竖的，容器不是正方形时长度就错了。
+    // cqw 是长度单位（图宽的 1%），一个数在哪个方向上都是同一段实际长度
+    const style = rotated(-90)
+    expect(style).toContain('width:40.000cqw')
     expect(style).toContain('height:5.000cqw')
-    expect(style).toContain('transform:rotate(-90.00deg)')
-    // Nothing is left in percentages, which would silently mean "of the width"
+    expect(style).toContain('transform:translate(-50%,-50%) rotate(-90.00deg)')
+    // 位置是中心，尺寸不带百分比（那会悄悄变成「宽的百分比」）
+    expect(style).toContain('left:12.500%;top:40.000%')
     expect(style).not.toMatch(/(width|height):[\d.]+%/)
   })
 
-  it('places a vertical label around its own centre', () => {
-    // It rotates about its centre, so left/top have to be the centre minus half of the *rotated*
-    // extent — and those two halves are in different units
-    const style = labelStyle(label({ angle: -Math.PI / 2 }))
-    expect(style).toContain('left:calc(12.500cqw - 20.000cqh)')
-    expect(style).toContain('top:calc(40.000cqh - 2.500cqw)')
+  it('任意角度都摆得下（2609.10326v1 的 reheating 是 6°）', () => {
+    const style = rotated(6)
+    expect(style).toContain('transform:translate(-50%,-50%) rotate(6.00deg)')
+    expect(style).toContain('width:40.000cqw')
   })
 
-  it('takes the font size from the thickness, not the length', () => {
+  it('字号按厚度算，不按长度', () => {
+    // 72 * thick 是一行的高度上限
+    expect(rotated(-90)).toContain('font-size:min(3.60cqw,')
+  })
+
+  it('没有自己的盒子就退回轴对齐那一支，不会照着错的尺寸画', () => {
+    // OCR 后端不会给 len / thick；真出现带角度却没有盒子的行时，按外接框画总好过乱转
     const style = labelStyle(label({ angle: -Math.PI / 2 }))
-    // 72 * w for a single line, in the across-axis unit
-    expect(style).toContain('font-size:min(3.60cqw,')
+    expect(style).not.toContain('rotate')
+    expect(style).toContain('left:10.000%;top:20.000%')
   })
 
   it('leaves upright labels exactly as they were', () => {

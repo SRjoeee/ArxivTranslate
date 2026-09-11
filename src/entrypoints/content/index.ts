@@ -8,7 +8,7 @@ import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl, startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
 import {
   applyStyle,
-  clearPairMargins, createModeController, createPrep, installAnchorFallback,
+  clearMarginNotes, clearPairMargins, createModeController, createPrep, installAnchorFallback,
   clearImageEverywhere, restore, setImageModes, startSentenceHighlight,
   type Mode, type ModeController, type SentenceHighlight, relabelFailed,
 } from '@/core/renderer'
@@ -312,7 +312,7 @@ export default defineContentScript({
         ocr: call => sendMessage({ type: 'axt:ocr', ...call }),
         translate: request => backend.translate(request),
         // 模式闸对两种图一样；位图额外要等 helper（§15.5）
-      isEnabled: t => config.image.enabled && config.image.modes.includes(modes?.effective() ?? config.mode) && (t.kind === 'svg' || helperReady),
+      isEnabled: t => config.image.enabled && config.image.modes.includes(modes?.effective() ?? config.mode) && (t.kind !== 'raster' || helperReady),
         isCurrent: () => getSessionId() === session,
         onProgress: p => {
           if (getSessionId() !== session) return
@@ -327,7 +327,7 @@ export default defineContentScript({
           prep.touch(rendered)
         },
       })
-            console.debug(`[axt] images: ${targets.filter(t => t.kind === 'svg').length} SVG + ${targets.filter(t => t.kind === 'raster').length} bitmaps, modes ${config.image.modes.join('/')}`)
+            console.debug(`[axt] images: ${targets.filter(t => t.kind === 'svg').length} SVG + ${targets.filter(t => t.kind === 'picture').length} inline pictures + ${targets.filter(t => t.kind === 'raster').length} bitmaps, modes ${config.image.modes.join('/')}`)
 
       /**
        * 位图要等 helper。**探测失败或没装也要收尾**：上一轮成功画过的位图叠加层还挂在页面上，
@@ -372,8 +372,10 @@ export default defineContentScript({
         fitObserver?.disconnect()
         fitObserver = null
         prep.cancel()
-        // 对齐用的内联边距只服务于左右分栏，其他模式下要还给站点样式
+        // 对齐用的内联边距只服务于左右分栏，其他模式下要还给站点样式；
+        // 边注的下排同理——别的模式下浮动按自己的高度互相避让，用不着我们推
         clearPairMargins(document)
+        clearMarginNotes(document)
         return
       }
       // 进 side：栏宽重读、全量整理一趟（stack / only 回来时对齐边距已被清掉，得从头算）

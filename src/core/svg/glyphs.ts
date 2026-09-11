@@ -179,43 +179,30 @@ export function viewBoxOf(svg: Element): { x: number; y: number; w: number; h: n
 }
 
 /**
- * The quarter turn the overlay will place a run at, or `undefined` when it is not near one.
+ * How far off horizontal a run may sit and still be treated as upright.
  *
- * Only upright and the two quarter turns. Everything downstream describes a rotated label by its
- * axis-aligned bounding box plus an angle, and that only *is* the label's own box at a quarter
- * turn — at 30° the bounding box is much larger than the text, and rotating it would put the
- * overlay across the plot at the wrong size.
+ * Upright is not just a layout: an upright line may be **merged** with the line above it
+ * (`linesToBoxes`), which is what puts a wrapped label back together. Real data reaches this
+ * tolerance — 17 runs in the corpus sit within 1e-4° of horizontal without being exactly
+ * horizontal — and letting a residual of a thousandth of a degree through once drew a horizontal
+ * label as a tall narrow strip (Codex on #134).
  *
- * **180° is excluded too**, even though its bounding box would be right. The overlay's geometry for
- * a rotated label swaps the two axes, which a half turn does not; accepting it would draw an
- * upside-down horizontal label as a tall narrow box (Codex pointed this out on #134). It does not
- * occur in the corpus, so there is nothing to gain by handling it and something to lose by
- * pretending to.
- *
- * **The result is snapped, not merely accepted.** The tolerance below accepts a run up to 1.8° off
- * the axis, and consumers of the angle downstream do not read it as a number — they ask whether it
- * is truthy. `linesToBoxes` refuses to merge a line that carries one, and `labelStyle` selects the
- * ±90° layout that swaps width for height and cqw for cqh. Passing a tolerated residual through
- * therefore drew a label a fraction of a degree off horizontal as a tall narrow strip (Codex on
- * #134). Returning the nearest quarter turn exactly means no consumer can see an angle that is
- * neither 0 nor ±90°. Real data reaches the tolerance: 17 runs in the corpus sit within 1e-4° of
- * horizontal without being exactly horizontal, two of them translatable, and 22 rotated ones sit
- * at -90.000002° rather than -90°.
- *
- * Measured over the whole sampled set (58028 glyphs, 284 glyph-bearing files): 90.279% upright,
- * 8.455% at -90°, 0.107% at +90°, and **1.160% at 42 other angles**, the commonest -30°. An earlier
- * seven-paper sample contained none of the last group and the survey wrongly concluded there were
- * only two angles (Codex caught that on #133). Those counts were once quoted as 55047 glyphs over
- * 253 files: the crawl logged 281 asset references but only 276 distinct paths, five files being
- * referenced twice within their paper and counted twice (`docs/RESEARCH.md` §6.11).
+ * Everything else keeps **its own angle**, and the overlay places it along its own axis (§15.5).
+ * That is new: v1 accepted only the two quarter turns and dropped the rest, which over the sampled
+ * set was 1.160% of glyphs across 42 angles — and on 2609.10326v1 it was `reheating` (6°) and
+ * `radiation domination` (5°), the two annotations that carry the figure (reported 2026-09-11).
+ * The old reason for dropping them was real but was a property of the overlay, not of the angle:
+ * a label described by its axis-aligned bounding box only *is* that box at a quarter turn. Now the
+ * label carries its own length and thickness instead (`len` / `thick`), so any angle can be drawn.
  */
-function quarterTurn(angle: number): number | undefined {
+const UPRIGHT_TOLERANCE = 0.02
+
+/** The run's angle, or 0 when it is within a rounding error of horizontal */
+function drawAngle(angle: number): number {
   const quarters = angle / (Math.PI / 2)
-  const nearest = Math.round(quarters)
-  if (Math.abs(quarters - nearest) >= 0.02 || Math.abs(nearest) > 1) return undefined
-  // Just below horizontal `Math.round` yields `-0`; normalising it away keeps the returned value
-  // exactly one of 0, +π/2 and -π/2, which is the whole point of snapping
-  return nearest === 0 ? 0 : nearest * (Math.PI / 2)
+  // Just below horizontal `Math.round` yields `-0`; normalising it away keeps upright exactly 0,
+  // which is what every consumer downstream tests for
+  return Math.abs(quarters) < UPRIGHT_TOLERANCE ? 0 : angle
 }
 
 /**
@@ -250,13 +237,20 @@ export function linesOf(svg: Element): OcrLine[] {
   if (!box) return []
   const out: OcrLine[] = []
   for (const run of runsOf(svg)) {
-    const angle = quarterTurn(run.angle)
-    if (angle === undefined) continue
+    const angle = drawAngle(run.angle)
     // The corners keep the run's true angle: the box is then the text's own, and the axis-aligned
     // bounds taken downstream cover it whichever way the residual leans
     const quad = cornersOf(run).map(([x, y]) => [(x - box.x) / box.w, (y - box.y) / box.h] as [number, number])
     // An upright run carries no angle at all, exactly the shape the OCR backend produces
-    out.push(angle === 0 ? { text: run.text, quad: quad as Quad, conf: 1 } : { text: run.text, quad: quad as Quad, conf: 1, angle })
+    if (angle === 0) {
+      out.push({ text: run.text, quad: quad as Quad, conf: 1 })
+      continue
+    }
+    // A tilted run also carries its own box, both axes measured against the figure's width so the
+    // overlay can lay it out along the text's own direction (§15.5)
+    const len = (run.to - run.from + 0.7 * run.size) / box.w
+    const thick = run.size / box.w
+    out.push({ text: run.text, quad: quad as Quad, conf: 1, angle, len, thick })
   }
   return out
 }
