@@ -9,7 +9,7 @@
 在 popup 的「图片翻译」下点「安装」，按引导把命令粘到终端里执行即可；命令已经带上了你的扩展 id：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SRjoeee/ArxivTranslate/main/helper/install-remote.sh | bash -s -- <扩展 id>
+curl -fsSL https://raw.githubusercontent.com/SRjoeee/ReadarXiv/main/helper/install-remote.sh | bash -s -- <扩展 id>
 ```
 
 第二个参数可以指定分支（默认 main），引导里复制的命令会带上它自己所在的分支。

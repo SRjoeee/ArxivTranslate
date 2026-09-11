@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-line install of the recognition helper (macOS), the command the popup copies:
-#   curl -fsSL https://raw.githubusercontent.com/SRjoeee/ArxivTranslate/<ref>/helper/install-remote.sh | bash -s -- <extension-id> [<ref>]
+#   curl -fsSL https://raw.githubusercontent.com/SRjoeee/ReadarXiv/<ref>/helper/install-remote.sh | bash -s -- <extension-id> [<ref>]
 # <ref> is the branch the sources come from (default main; the popup passes the one it was built from).
 # Downloads this repository's helper/ into ~/Library/Application Support/Readarxiv/helper, builds it
 # with the Swift toolchain of the Xcode Command Line Tools, and registers the Native Messaging host
@@ -8,7 +8,7 @@
 # that directory and the two NativeMessagingHosts folders.
 set -euo pipefail
 
-REPO=SRjoeee/ArxivTranslate
+REPO=SRjoeee/ReadarXiv
 REF="${2:-${AXT_HELPER_REF:-main}}"
 NAME=io.github.srjoeee.arxivtranslate
 DIR="$HOME/Library/Application Support/Readarxiv/helper"
@@ -38,7 +38,12 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$REF" -o "$tmp/src.tgz"
 tar -xzf "$tmp/src.tgz" -C "$tmp"
-src="$(find "$tmp" -maxdepth 1 -type d -name 'ArxivTranslate-*' | head -1)"
+# 目录名由 GitHub 按**当前**仓库名生成（`<repo>-<ref>`），所以不要写死：仓库一改名，
+# 写死的 glob 就再也匹配不上，脚本会在下一行静默地拿着空路径去 cp（2026-09-12 实测：
+# 仓库改名成 Readarxiv 之后 tarball 解出来的是 `Readarxiv-main/`，而这里找的是
+# `ArxivTranslate-*`，一键安装整个坏掉）。tarball 里只有一个顶层目录，取它即可
+src="$(find "$tmp" -maxdepth 1 -mindepth 1 -type d | head -1)"
+[ -n "$src" ] || { echo "解压后没有找到源码目录" >&2; exit 1; }
 rm -rf "$DIR/Sources" "$DIR/Tests"
 cp -R "$src/helper/Sources" "$src/helper/Package.swift" "$src/helper/LICENSE-macos-vision-ocr.txt" "$DIR/"
 [ -d "$src/helper/Tests" ] && cp -R "$src/helper/Tests" "$DIR/"
