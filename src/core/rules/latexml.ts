@@ -27,8 +27,17 @@ export interface ProtectRule extends Rule {
   descend?: boolean
 }
 
-/** 方程组的表：组内有公式行，也可能有 `\intertext` 的说明行 */
-export const EQUATION_GROUP = 'table.ltx_equationgroup'
+/**
+ * 方程组容器。**不限定 `table`**：LaTeXML 也会输出 span 形态的组
+ *（实测 2312.17141 的 26 个组里有 2 个是 `<span class="ltx_equationgroup …">`，且都在翻译单元内部）。
+ * 收窄成 `table.` 会让 span 形态那些丢掉原来的整块保护——外层单元会把整组序列化成一个成对包装
+ * 加一串独立的 void，而 provider 是**允许重排占位符**的，公式行就可能在译文克隆里换位置
+ *（Codex 在 #168 指出）。渲染与拆分那两件事才限定在 table 形态（见 EQUATION_GROUP_TABLE）
+ */
+export const EQUATION_GROUP = '.ltx_equationgroup'
+
+/** 表形态的方程组：只有它有 `<tr>` 行，也只有它值得整块拆两份 */
+export const EQUATION_GROUP_TABLE = 'table.ltx_equationgroup'
 
 /**
  * 方程组里的说明行（`\intertext`）：`tr.ltx_eqn_row` 而**不带** `.ltx_equation`。
@@ -98,7 +107,7 @@ export function eqnProseCell(row: Element): Element | null {
  * 右栏只有一行中文，对照就断了；而让整组通栏又会把「公式在两栏各一份」的现有版式改掉。
  * 与插图同样处理：克隆一份、删掉每对的原文成员，于是左栏是原组、右栏是同一组配中文说明（issue #152）
  */
-export const SPLIT_ROOTS = `figure, ${EQUATION_GROUP}`
+export const SPLIT_ROOTS = `figure, ${EQUATION_GROUP_TABLE}`
 
 
 /** 表格块的全部单元格，按文档序、任意深度：嵌套 tabular 的格也是外层块的格（§5.3） */
@@ -278,32 +287,24 @@ export function isNamedTag(el: Element): boolean {
 }
 
 /**
- * 除说明行以外的全部翻译单元，用来判断「这个方程组在不在别的单元里」。
- * 说明行自己排除在外：它只可能在组里，拿它判祖先没有意义
- */
-const OUTER_UNITS = UNIT_RULES.filter(r => r.id !== 'intertext').map(r => r.selector).join(', ')
-
-/**
- * 说明行只有在方程组**自己成块**时才算翻译单元。
+ * 这些单元藏在一个「对外层是原子」的容器里，**外层确实成块时要让位**。
  *
- * 组嵌在别的单元里时（实测 13 篇 fixture 的 39 个组里有 5 个，容器是 `.ltx_item`），外层已经把
- * 整组当成一个 void 原子克隆进自己的译文了；说明行再单独成块，页面上就会出现两份——外层克隆里
- * 一份英文、组里一份中文——而且 `splitFigures` 还会在原件下面再生成一份（Codex 在 #168 指出）。
- * 脚注遇到同样的形状时靠 `localizeNotes` 把译文搬进副本再隐藏原件，方程组没有对应的一步，
- * 所以这里直接不成块，与改动前逐字节一致。实测那 5 个嵌套组一个都没有说明行，堵的是洞不是路
+ * 目前只有方程组里的说明行：外层成块意味着它已经把整组当成一个 void 克隆进自己的译文了，
+ * 说明行再单独成块，页面上就会出现两份——外层克隆里一份英文、组里一份中文——而且拆分还会在
+ * 原件下面再生成一份。脚注遇到同样的形状靠 `localizeNotes` 归位，方程组没有对应的一步。
+ *
+ * **判据是「外层真的成了块」而不是「祖先匹配单元选择器」**（Codex 在 #168 指出）：
+ * `.ltx_item` 里只有嵌套的 `.ltx_p` 和一个方程组时，它自己没有 ownText、根本不成块，
+ * 没人克隆那个组，说明行却会被误压住、整段不翻。所以这一步交给 extractor 决定——
+ * 只有它知道哪些单元真的产出了块
  */
-function isStandaloneGroupRow(row: Element): boolean {
-  const group = row.closest(EQUATION_GROUP)
-  return group !== null && group.parentElement?.closest(OUTER_UNITS) == null
-}
+export const YIELDS_TO_OUTER_BLOCK: ReadonlySet<string> = new Set(['intertext'])
 
 export function classify(el: Element): Classification | null {
   const skip = SKIP_RULES.find(r => el.matches(r.selector))
   if (skip) return { kind: 'skip', rule: skip.id, descend: false }
   if (el.matches(TABLE_RULES.root)) return TABLE_CLASSIFICATION
   const unit = UNIT_RULES.find(r => el.matches(r.selector))
-  // 与下面 `tag` 那条同一个形状：规则命中了，但这一处的上下文说它不该成块
-  if (unit?.id === 'intertext' && !isStandaloneGroupRow(el)) return null
   if (unit) return { kind: 'unit', rule: unit.id, descend: true }
   const protect = PROTECT_RULES.find(r => el.matches(r.selector))
   // 带环境名的 tag 不作 void：它内含 Definition / Table / Algorithm 这类要翻的词

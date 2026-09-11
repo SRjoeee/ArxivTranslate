@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { extract, type TextBlock } from '@/core/extractor'
 import { serialize } from '@/core/protector'
 import { EQN_PROSE_ROW, classify, eqnProseCell } from '@/core/rules/latexml'
+import { serialize as ser } from '@/core/protector'
 
 /** 真实形状（抄自 2609.09360v1）：间隔行、公式行、说明行各一 */
 const GROUP = `<table class="ltx_equationgroup ltx_eqn_table"><tbody>
@@ -109,5 +110,52 @@ describe('eqnProseCell', () => {
     const doc = docOf(`<div class="ltx_para">${GROUP}<p class="ltx_p">text</p></div>`)
     expect(eqnProseCell(doc.querySelector('tr.ltx_equation')!)).toBeNull()
     expect(eqnProseCell(doc.querySelector('p.ltx_p')!)).toBeNull()
+  })
+})
+
+// LaTeXML 也会输出 span 形态的方程组（实测 2312.17141 的 26 个组里有 2 个），
+// 收窄成 `table.` 会让它们丢掉整块保护：外层会把整组序列化成一个成对包装加一串独立的 void，
+// 而 provider 允许重排占位符，公式行就可能在译文克隆里换位置（Codex 在 #168 指出）
+describe('span 形态的方程组同样是原子', () => {
+  const SPAN_GROUP = `<span class="ltx_equationgroup ltx_eqn_gather ltx_eqn_table">
+    <span class="ltx_equation"><math class="ltx_Math"><mi>a</mi></math></span>
+    <span class="ltx_equation"><math class="ltx_Math"><mi>b</mi></math></span>
+  </span>`
+
+  it('分类成 protect，与表形态同一条规则', () => {
+    const doc = docOf(`<div class="ltx_para"><p class="ltx_p">See ${SPAN_GROUP} above.</p></div>`)
+    const group = doc.querySelector('span.ltx_equationgroup')!
+    expect(classify(group)).toMatchObject({ kind: 'protect', descend: true })
+  })
+
+  it('在成块的段落里序列化成**一个** void，不是包装加一串 void', () => {
+    const doc = docOf(`<div class="ltx_para"><p class="ltx_p">See ${SPAN_GROUP} above.</p></div>`)
+    const para = (extract(doc) as TextBlock[]).find(b => b.unit === 'p')!
+    const wire = ser(para.el, 'tags').text
+    expect(wire).toContain('See')
+    expect(wire).toContain('above.')
+    expect(wire).not.toContain('<t id=')
+    expect(wire.match(/<x id="\d+"\/>/g) ?? []).toHaveLength(1)
+  })
+})
+
+// 判据是「外层真的成了块」而不是「祖先匹配单元选择器」：`.ltx_item` 里只有嵌套的 `.ltx_p`
+// 和一个方程组时，它自己没有 ownText、根本不成块，没人克隆那个组（Codex 在 #168 指出）
+describe('让位的判据是外层真的成块', () => {
+  it('外层单元自己不成块时，说明行照常翻', () => {
+    const doc = docOf(`<ul class="ltx_itemize"><li class="ltx_item"><p class="ltx_p">Prose lives here.</p>${GROUP}</li></ul>`)
+    const blocks = extract(doc) as TextBlock[]
+    // `.ltx_item` 的自有文本只有空白，不成块；那段正文归嵌套的 `.ltx_p`
+    expect(blocks.map(b => b.unit)).not.toContain('item')
+    expect(blocks.map(b => b.unit)).toContain('p')
+    // 没人把整组克隆走，所以说明行要自己成块，否则整段不翻
+    expect(blocks.map(b => b.unit)).toContain('intertext')
+  })
+
+  it('外层单元确实成块时才让位', () => {
+    const doc = docOf(`<ul class="ltx_itemize"><li class="ltx_item">See the system ${GROUP} for details.</li></ul>`)
+    const units = (extract(doc) as TextBlock[]).map(b => b.unit)
+    expect(units).toContain('item')
+    expect(units).not.toContain('intertext')
   })
 })

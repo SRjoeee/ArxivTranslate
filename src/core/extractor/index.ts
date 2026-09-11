@@ -1,7 +1,7 @@
 // 块提取（DESIGN.md §4.1）。extract() 只读 DOM；markBlocks() 才写 data-axt-id。
 // 遍历策略与分类解耦：分类来自 rules/latexml 的 classify()，这里只决定"是否产出"与"是否下钻"。
 import { isInjected } from '@/core/marks'
-import { classify, documentRoot, isNumericCell, tableCells } from '@/core/rules/latexml'
+import { YIELDS_TO_OUTER_BLOCK, classify, documentRoot, isNumericCell, tableCells } from '@/core/rules/latexml'
 
 export interface Cell {
   el: Element
@@ -101,6 +101,19 @@ export function extract(root: Document | Element): Block[] {
     return id
   }
 
+  /**
+   * 真正产出了块的单元。`YIELDS_TO_OUTER_BLOCK` 里的单元（方程组里的说明行）据此让位：
+   * 外层成块意味着它已经把整组当成一个 void 克隆进自己的译文了，说明行再成块就是两份。
+   * 判「外层真的成了块」而不是「祖先匹配单元选择器」——后者会把「有单元祖先、但那个祖先
+   * 自己没有 ownText 所以不成块」的情形一起误伤（Codex 在 #168 指出）。
+   * 这里走的是先序遍历，祖先总在后代之前处理完，所以查到这一步时这张表对祖先是完整的
+   */
+  const emitted = new Set<Element>()
+  const underEmittedBlock = (el: Element): boolean => {
+    for (let p = el.parentElement; p; p = p.parentElement) if (emitted.has(p)) return true
+    return false
+  }
+
   const stack: Element[] = [start]
   while (stack.length) {
     const el = stack.pop()!
@@ -120,7 +133,11 @@ export function extract(root: Document | Element): Block[] {
           break
         }
         case 'unit':
-          if (LETTER.test(ownText(el))) blocks.push({ id: assignId(el), kind: 'text', el, unit: c.rule })
+          if (YIELDS_TO_OUTER_BLOCK.has(c.rule) && underEmittedBlock(el)) break
+          if (LETTER.test(ownText(el))) {
+            blocks.push({ id: assignId(el), kind: 'text', el, unit: c.rule })
+            emitted.add(el)
+          }
           break
         case 'protect':
           descend = c.descend
