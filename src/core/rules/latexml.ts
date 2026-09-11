@@ -383,14 +383,36 @@ const TEXT_NODE = 3
  * 不看 descend 标志：脚注正文对外层段落不是可见文本，descend 只影响 extractor 的块发现。
  */
 export function visibleText(el: Element): string {
+  return textOf(el)
+}
+
+/**
+ * LaTeXML 给「数学模式里排版成文字的那部分」打的 class（`\text{}`、`\mathrm{}` 之类）：
+ * `initMT`、`barrier_N_record(b)` 这些在读者眼里是标识符，不是词。
+ */
+const MARKED_AS_MATH = '.ltx_markedasmath'
+
+/**
+ * `visibleText` 再减去被标成数学的标识符。**只用来判「这个节点是不是整个就是一个公式」**——
+ * 夹在句子里的标识符照旧随句子一起翻（`Block n−1` 连符号一起走），所以译什么仍看 `visibleText`。
+ * 图内标签（§15.6）是唯一会把一个标识符**单独**发出去、还在图上盖一块白底的地方：实测语料 507 个
+ * 图内标签里正有 1 个是这种（2609.00246 的 `initMT`），它过了判词就会被译、被盖（Codex 在 #163 指出）
+ */
+export function proseText(el: Element): string {
+  if (el.matches(MARKED_AS_MATH)) return ''
+  return textOf(el, node => node.matches(MARKED_AS_MATH))
+}
+
+function textOf(el: Element, drop?: (el: Element) => boolean): string {
   const parts: string[] = []
   const walk = (node: Element) => {
     for (const child of Array.from(node.childNodes)) {
       if (child.nodeType === TEXT_NODE) {
         parts.push((child as Text).data)
       } else if (child.nodeType === ELEMENT_NODE) {
-        const kind = classify(child as Element)?.kind
-        if (kind !== 'skip' && kind !== 'protect') walk(child as Element)
+        const el = child as Element
+        const kind = classify(el)?.kind
+        if (kind !== 'skip' && kind !== 'protect' && !drop?.(el)) walk(el)
       }
     }
   }

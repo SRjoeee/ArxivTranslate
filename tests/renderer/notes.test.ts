@@ -191,6 +191,16 @@ describe('localizeNotes', () => {
     expect(localizeNotes(doc)).toBe(0) // 幂等
   })
 
+  // Codex 在 #163 指出：译文与原文逐字相同的块在 stack 模式下整份 .axt-t 被藏起来
+  //（modes.css 的 data-axt-identity 规则）。那份副本是这条脚注唯一剩下的一份，
+  // 再把原件也标成隐藏，整条脚注就从页面上没了
+  it('译文整块与原文相同（stack 会藏掉副本）时不动原件：一份总比没有好', () => {
+    const doc = unregistered()
+    doc.querySelector(`.${T_CLASS}`)!.setAttribute('data-axt-identity', '')
+    expect(localizeNotes(doc)).toBe(0)
+    expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
+  })
+
   it('副本被引擎改过字就两份都留着：宁可重复也不丢内容', () => {
     const doc = unregistered('https://chat.openai.com/zh')
     expect(localizeNotes(doc)).toBe(0)

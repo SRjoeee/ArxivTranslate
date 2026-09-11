@@ -49,7 +49,10 @@ export function stackShifts(boxes: readonly NoteBox[], gap: number): number[] {
   for (const box of boxes) {
     const shift = box.ours ? Math.max(0, floor - box.top) : 0
     out.push(shift)
-    floor = box.top + shift + box.height + gap
+    // 底线只会往下走，不会回头（Codex 在 #163 指出）：推不动的原件若自然落得比当前底线还高，
+    // 直接赋值会把底线**拉回去**，下一条副本于是只躲开了这个原件、又压回前面那条被推下去的副本上。
+    // 浮动要躲开的是它前面**所有**条，所以取最大值——正常情况（原件在下一行、本来就更低）这一步是个空操作
+    floor = Math.max(floor, box.top + shift + box.height + gap)
   }
   return out
 }

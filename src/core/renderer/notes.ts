@@ -24,6 +24,7 @@
 import { ID_ATTR } from '@/core/extractor'
 import { T_CLASS, isInjected } from '@/core/marks'
 import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
+import { IDENTITY_ATTR } from './index'
 import { PENDING_CLASS } from './pending'
 import { mirrorPair } from './sentences'
 
@@ -187,8 +188,14 @@ export function localizeNotes(root: Document | Element): number {
         // 2026-09-11). A registered one keeps waiting: hiding it early would take its skeleton with
         // it, and after a failure the widget the reader retries from (Codex on #153).
         // The mark goes on only while the copy reproduces the original word for word; against a copy
-        // the engine mangled both stay on screen — a duplicate beats a note gone missing
-        if (!registered && note && !note.hasAttribute(LOCALIZED_ATTR) && reproduces(source, copy)) {
+        // the engine mangled both stay on screen — a duplicate beats a note gone missing.
+        // Nor against a copy that stack mode hides: a clone whose own text came back unchanged
+        // carries `data-axt-identity` and is `display: none` there (modes.css), so hiding the
+        // original too would take the footnote off the page altogether (Codex on #163). Keeping the
+        // original leaves one note in stack (the clone is hidden) and two in side — the same
+        // duplicate-beats-missing trade, now for the one block whose translation is its source
+        const hidable = !!copy.closest(`.${T_CLASS}[${IDENTITY_ATTR}]`)
+        if (!registered && note && !hidable && !note.hasAttribute(LOCALIZED_ATTR) && reproduces(source, copy)) {
           note.setAttribute(LOCALIZED_ATTR, '')
           localized += 1
         }

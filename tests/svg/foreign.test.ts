@@ -55,6 +55,15 @@ describe('foreignLinesOf', () => {
     expect(foreignLinesOf(picture)[0]!.rows).toBe(2)
   })
 
+  // Codex 在 #163 指出：标识符也可以不是 <math>，LaTeXML 会打 .ltx_markedasmath。
+  // 实测语料 507 个图内标签里正有一个（2609.00246 的 initMT），过了判词就会被译、被白底盖住
+  it('被标成数学的标识符不算词：initMT 不送（2609.00246）', () => {
+    const marked = (id: string) => `<span class="ltx_text ltx_markedasmath ltx_font_sansserif">${id}</span>`
+    const picture = pictureOf([marked('initMT'), `start ${marked('initMT')}`, 'Router'], [[140, 70, 80, 20], [140, 100, 80, 20], [200, 130, 40, 20]])
+    // 夹在词里的照旧整条送（白框会把标识符一起盖住，只送 start 会把它盖没）
+    expect(foreignLinesOf(picture).map(l => l.text)).toEqual(['start initMT', 'Router'])
+  })
+
   it('量不到盒子就什么都不返回（图还没排版、或在隐藏的原件里）', () => {
     const picture = pictureOf(['Router'], [[0, 0, 0, 0]])
     expect(foreignLinesOf(picture)).toEqual([])
@@ -65,5 +74,10 @@ describe('pictureTexts', () => {
   it('不读几何，只回答这张图里有没有词——整篇每张图都要问一遍', () => {
     const picture = pictureOf(['Router', '(a)'], [[0, 0, 0, 0], [0, 0, 0, 0]])
     expect(pictureTexts(picture)).toEqual(['Router'])
+  })
+
+  it('整张图只有被标成数学的标识符时，这张图根本不进图片翻译', () => {
+    const picture = pictureOf(['<span class="ltx_text ltx_markedasmath">initMT</span>'], [[0, 0, 0, 0]])
+    expect(pictureTexts(picture)).toEqual([])
   })
 })

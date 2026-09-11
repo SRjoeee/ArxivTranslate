@@ -20,7 +20,7 @@
 //
 // **Read-only, like the rest of §15**: the overlay is a sibling of the `<svg>`, nothing inside the
 // picture is touched, and §7.1 is unaffected.
-import { FIGURE_SELECTORS, classify, visibleText } from '@/core/rules/latexml'
+import { FIGURE_SELECTORS, classify, proseText } from '@/core/rules/latexml'
 import type { OcrLine, Quad } from '@/shared/ocr'
 
 /**
@@ -62,15 +62,16 @@ function renderedText(label: Element): string {
  *
  * A node that is nothing but a formula must be left alone: `softmax`, `argmax` and `exp` are words
  * to a translator and symbols to a reader, and a white label reading 「软最大」 over a formula is
- * worse than no translation at all. `visibleText` is exactly "the label minus what the rules
- * protect", maths included, so a label with no letters left in it after that is pure maths.
+ * worse than no translation at all. `proseText` is exactly "the label minus what the rules protect,
+ * minus the identifiers LaTeXML marked as maths", so a label with no letters left in it after that
+ * is pure maths (the corpus has one: 2609.00246's `initMT`, a `.ltx_markedasmath` span — Codex on #163).
  * `Block n−1` keeps its `Block` and is translated whole, symbol and all.
  */
 const WORDY = /\p{L}{2,}/u
 
 /** The label as the reader sees it, or '' when it is pure maths / nothing worth translating */
 function labelText(label: Element): string {
-  if (!WORDY.test(visibleText(label))) return ''
+  if (!WORDY.test(proseText(label))) return ''
   return renderedText(label)
 }
 

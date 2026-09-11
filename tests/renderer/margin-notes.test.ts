@@ -25,6 +25,17 @@ describe('stackShifts', () => {
     expect(shifts).toEqual([0, 40])
   })
 
+  // Codex 在 #163 指出：底线只能往下走。推不动的原件若自然落得比当前底线还高，
+  // 直接赋值会把底线拉回去，下一条副本只躲开了这个原件、又压回前面那条副本上
+  it('推不动的原件不会把底线拉回去', () => {
+    // 副本一被推到 0–100；原件自然落在 10–30（比底线高得多）；副本二自然落在 20
+    const shifts = stackShifts([box(0, 100), box(10, 20, false), box(20, 30)], 0)
+    expect(shifts).toEqual([0, 0, 80])
+    const tops = shifts.map((v, i) => [box(0, 100), box(10, 20, false), box(20, 30)][i]!.top + v)
+    // 副本二落在 100，正好接在副本一（0–100）下面，而不是接在原件（10–30）下面
+    expect(tops).toEqual([0, 10, 100])
+  })
+
   it('六条同一行上的短脚注排成一列（2509.10652v3 的形状）', () => {
     const boxes = Array.from({ length: 6 }, (_, i) => box(i * 32, 50))
     const shifts = stackShifts(boxes, 8)
