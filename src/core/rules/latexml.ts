@@ -277,11 +277,33 @@ export function isNamedTag(el: Element): boolean {
   return !ROMAN_ID.test(last)
 }
 
+/**
+ * 除说明行以外的全部翻译单元，用来判断「这个方程组在不在别的单元里」。
+ * 说明行自己排除在外：它只可能在组里，拿它判祖先没有意义
+ */
+const OUTER_UNITS = UNIT_RULES.filter(r => r.id !== 'intertext').map(r => r.selector).join(', ')
+
+/**
+ * 说明行只有在方程组**自己成块**时才算翻译单元。
+ *
+ * 组嵌在别的单元里时（实测 13 篇 fixture 的 39 个组里有 5 个，容器是 `.ltx_item`），外层已经把
+ * 整组当成一个 void 原子克隆进自己的译文了；说明行再单独成块，页面上就会出现两份——外层克隆里
+ * 一份英文、组里一份中文——而且 `splitFigures` 还会在原件下面再生成一份（Codex 在 #168 指出）。
+ * 脚注遇到同样的形状时靠 `localizeNotes` 把译文搬进副本再隐藏原件，方程组没有对应的一步，
+ * 所以这里直接不成块，与改动前逐字节一致。实测那 5 个嵌套组一个都没有说明行，堵的是洞不是路
+ */
+function isStandaloneGroupRow(row: Element): boolean {
+  const group = row.closest(EQUATION_GROUP)
+  return group !== null && group.parentElement?.closest(OUTER_UNITS) == null
+}
+
 export function classify(el: Element): Classification | null {
   const skip = SKIP_RULES.find(r => el.matches(r.selector))
   if (skip) return { kind: 'skip', rule: skip.id, descend: false }
   if (el.matches(TABLE_RULES.root)) return TABLE_CLASSIFICATION
   const unit = UNIT_RULES.find(r => el.matches(r.selector))
+  // 与下面 `tag` 那条同一个形状：规则命中了，但这一处的上下文说它不该成块
+  if (unit?.id === 'intertext' && !isStandaloneGroupRow(el)) return null
   if (unit) return { kind: 'unit', rule: unit.id, descend: true }
   const protect = PROTECT_RULES.find(r => el.matches(r.selector))
   // 带环境名的 tag 不作 void：它内含 Definition / Table / Algorithm 这类要翻的词

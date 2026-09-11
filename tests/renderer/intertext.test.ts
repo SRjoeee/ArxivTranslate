@@ -2,7 +2,8 @@
 // 而行里的内容必须装在单元格里——直接挂在 `<tr>` 下表格布局根本不排它。
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks, type TextBlock } from '@/core/extractor'
-import { FOR_ATTR, SPLIT_ATTR, SPLIT_CLASS, T_CLASS, renderText, splitFigures } from '@/core/renderer'
+import { rehydrate, serialize } from '@/core/protector'
+import { ERROR_CLASS, FOR_ATTR, PENDING_CLASS, SPLIT_ATTR, SPLIT_CLASS, T_CLASS, renderFailed, renderPending, renderText, splitFigures } from '@/core/renderer'
 import { docOf, frag } from './helpers'
 
 const GROUP = `<table class="ltx_equationgroup ltx_eqn_table" id="E1"><tbody>
@@ -38,6 +39,27 @@ describe('说明行的译文', () => {
     // 多的是一行，不是一列
     expect(doc.querySelector('table')!.querySelectorAll('tr')).toHaveLength(before + 1)
     expect(block.el.children).toHaveLength(1)
+  })
+
+  // 占位符路径下整格就是一个成对占位符，回填出来的顶层**已经是** `<td>`；再套一层壳就成了
+  // `<tr><td><td>…</td></td></tr>`。第一版测试用裸文本 fragment，所以没抓到（Codex 在 #168 指出）
+  it('走真实往返：回填出来已经是格时不再套壳，行下只有一个 td', () => {
+    const doc = docOf(`<div class="ltx_para">${GROUP}</div>`)
+    const block = rowOf(doc)
+    const wire = serialize(block.el, 'tags')
+    // 引擎原样返回：回填得到的顶层就是那个格
+    const node = renderText(block, rehydrate(wire.text, wire, doc))
+    expect(node.tagName).toBe('TR')
+    expect(Array.from(node.children).map(c => c.tagName)).toEqual(['TD'])
+    expect(node.querySelector('td td')).toBeNull()
+    expect(node.textContent).toContain('where the mean curvature is')
+  })
+
+  it('runs 降级路径回填出来是纯文本，那时仍然要套壳', () => {
+    const doc = docOf(`<div class="ltx_para">${GROUP}</div>`)
+    const node = renderText(rowOf(doc), frag(doc, '其中平均曲率为'))
+    expect(Array.from(node.children).map(c => c.tagName)).toEqual(['TD'])
+    expect(node.firstElementChild!.textContent).toBe('其中平均曲率为')
   })
 
   it('普通段落不受影响：译文里没有凭空多出来的单元格', () => {
@@ -95,5 +117,53 @@ describe('含说明行的方程组整块拆两份', () => {
     expect(splitFigures(doc)).toBe(1)
     expect(splitFigures(doc)).toBe(0)
     expect(doc.querySelectorAll(`.${SPLIT_CLASS}`)).toHaveLength(1)
+  })
+})
+
+// 圆环与失败小部件走的是另外两条路：只给译文开特例的话，等待中的圆环会直接挂在 `<tr>` 下、
+// 失败小部件会变成 `<tbody>` 的 `<span>` 子节点，两者都不合表格的内容模型（Codex 在 #168 指出）
+describe('说明行的等待态与失败态', () => {
+  it('圆环装在单元格里，而不是直接挂在行下', () => {
+    const doc = docOf(`<div class="ltx_para">${GROUP}</div>`)
+    const node = renderPending(rowOf(doc))
+    expect(node.tagName).toBe('TR')
+    expect(node.classList.contains(PENDING_CLASS)).toBe(true)
+    const cell = node.firstElementChild!
+    expect(cell.tagName).toBe('TD')
+    expect(cell.getAttribute('colspan')).toBe('5')
+    // 骨架屏在格里面，行下没有别的直接子节点
+    expect(node.children).toHaveLength(1)
+    expect(cell.children.length).toBeGreaterThan(0)
+  })
+
+  it('失败小部件包成一行一格，配对标记在行上', () => {
+    const doc = docOf(`<div class="ltx_para">${GROUP}</div>`)
+    const block = rowOf(doc)
+    markBlocks([block])
+    const node = renderFailed(block, 'network: offline', () => {})
+    expect(node.tagName).toBe('TR')
+    expect(node.previousElementSibling).toBe(block.el)
+    expect(node.classList.contains(T_CLASS)).toBe(true)
+    expect(node.classList.contains(ERROR_CLASS)).toBe(true)
+    expect(node.getAttribute(FOR_ATTR)).toBe(block.id)
+    const cell = node.firstElementChild!
+    expect(cell.tagName).toBe('TD')
+    // 小部件本体在格里，且不再自带配对标记（标记移到了行上）
+    const widget = cell.firstElementChild!
+    expect(widget.tagName).toBe('SPAN')
+    expect(widget.classList.contains(T_CLASS)).toBe(false)
+    expect(widget.hasAttribute(FOR_ATTR)).toBe(false)
+    // `<tbody>` 下不许出现 span
+    expect(doc.querySelector('tbody > span')).toBeNull()
+  })
+
+  it('普通段落的圆环与失败件不受影响', () => {
+    const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p></div>')
+    const block = (extract(doc) as TextBlock[])[0]!
+    markBlocks([block])
+    expect(renderPending(block).querySelector('td')).toBeNull()
+    const failed = renderFailed(block, 'network: offline', () => {})
+    expect(failed.tagName).toBe('SPAN')
+    expect(failed.getAttribute(FOR_ATTR)).toBe(block.id)
   })
 })

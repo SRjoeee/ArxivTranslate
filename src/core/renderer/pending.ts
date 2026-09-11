@@ -2,7 +2,7 @@
 // 译文到达后被真译文替换——renderText / renderTable 开头的 clearTranslation 会删掉同 data-axt-for 的兄弟。
 // 与 §7.1 一致：它只是原块的下一个兄弟，原节点不动。
 import type { Block, TextBlock } from '@/core/extractor'
-import { FOR_ATTR, INLINE_ATTR, clearTranslation, setState, shouldInline, translationClass } from './index'
+import { FOR_ATTR, INLINE_ATTR, clearTranslation, setState, shouldInline, translationClass, translationShell } from './index'
 import { cancelSkeletonsIn, createSkeletonInside } from './skeleton'
 
 export const PENDING_CLASS = 'axt-pending'
@@ -29,8 +29,8 @@ export function renderPending(block: Block): Element {
   // `clearTranslation` 把同 id 的译文 / 半成品 / 小部件一并清掉，`setState` 顺带清掉 partial 标记
   clearTranslation(block)
   setState(block, 'pending')
-  const doc = block.el.ownerDocument
-  const node = doc.createElement(block.kind === 'table' ? 'div' : block.el.tagName)
+  // 说明行的圆环也要装进单元格：直接挂在 `<tr>` 下表格布局不排它（Codex 在 #168 指出）
+  const { node, slot } = translationShell(block, block.kind === 'table' ? 'div' : undefined)
   node.className = `${translationClass(block.el)} ${PENDING_CLASS}`
   node.setAttribute(FOR_ATTR, block.id)
   if (block.kind === 'text' && shouldInline(block as TextBlock)) {
@@ -38,7 +38,7 @@ export function renderPending(block: Block): Element {
     node.setAttribute(INLINE_ATTR, '')
   }
   // 几条条按原文长度估（skeleton.ts 说明为什么不量）；同行的短标题只放一条
-  createSkeletonInside(node as HTMLElement, { chars: block.el.textContent?.length ?? 0, inline: node.hasAttribute(INLINE_ATTR) })
+  createSkeletonInside(slot as HTMLElement, { chars: block.el.textContent?.length ?? 0, inline: node.hasAttribute(INLINE_ATTR) })
   block.el.after(node)
   return node
 }

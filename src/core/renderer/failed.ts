@@ -4,7 +4,7 @@
 // 与 §7.1 一致：它只是原块的下一个兄弟，restore 删掉宿主节点就干净了。
 import type { Block } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
-import { FOR_ATTR, clearTranslation, setState } from './index'
+import { FOR_ATTR, clearTranslation, setState, translationShell } from './index'
 import { S, parseFatal, reasonText } from '@/ui/strings'
 
 /** 原始诊断留在属性里：`restore()` 按注入标记整体清掉，它不进界面 */
@@ -43,6 +43,10 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
   const host = doc.createElement('span')
   host.className = `${T_CLASS} ${ERROR_CLASS}`
   host.setAttribute(FOR_ATTR, block.id)
+  // 说明行的小部件不能作 `<tbody>` 的 `<span>` 子节点：那不合表格的内容模型，
+  // 浏览器会把它挪到表外（Codex 在 #168 指出）。用与译文同一套外壳包成 `<tr><td>…</td></tr>`
+  const { node: outer, slot } = translationShell(block)
+  const widget = outer === slot ? null : outer
   // 读者看到的是按界面语言写的那一句；`kind: 诊断` 里的后半段留着给诊断，不显示（Codex 在 #161 指出）
   const kind = parseFatal(reason)
   host.title = reasonText(kind.kind) || S.page.retry
@@ -62,6 +66,16 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
   mark.title = host.title
   mark.textContent = '！'
   root.append(style, button, mark)
+  if (widget) {
+    // 外壳自己带 class / data-axt-for，配对与清理都按它来；host 只是里面的那个小部件
+    widget.className = host.className
+    widget.setAttribute(FOR_ATTR, block.id)
+    host.classList.remove(T_CLASS)
+    host.removeAttribute(FOR_ATTR)
+    slot.append(host)
+    block.el.after(widget)
+    return widget
+  }
   block.el.after(host)
   return host
 }

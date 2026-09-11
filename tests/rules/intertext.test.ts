@@ -73,11 +73,20 @@ describe('方程组对外层单元仍是一个原子', () => {
     expect((wire.match(/<x id="\d+"\/>/g) ?? [])).toHaveLength(1)
   })
 
-  it('组是 void，但提取器照样下钻到里面的说明行', () => {
+  // 嵌套的组里，说明行**不**成块：外层已经把整组当成一个 void 原子克隆进自己的译文了，
+  // 说明行再单独成块，页面上就会出现两份——外层克隆里一份英文、组里一份中文——而且拆分
+  // 还会在原件下面再生成一份（Codex 在 #168 指出）。脚注靠 localizeNotes 归位，方程组没有
+  // 对应的一步，所以这里与改动前逐字节一致。实测 13 篇 fixture 的 5 个嵌套组一个都没有说明行
+  it('组嵌在别的单元里时，说明行不成块（外层已经整组克隆过去了）', () => {
     const doc = docOf(`<ul class="ltx_itemize"><li class="ltx_item">See the system ${GROUP} for details.</li></ul>`)
     const units = (extract(doc) as TextBlock[]).map(b => b.unit)
     expect(units).toContain('item')
-    expect(units).toContain('intertext')
+    expect(units).not.toContain('intertext')
+  })
+
+  it('组自己成块时照常下钻：说明行是独立的翻译单元', () => {
+    const doc = docOf(`<div class="ltx_para">${GROUP}</div>`)
+    expect((extract(doc) as TextBlock[]).map(b => b.unit)).toContain('intertext')
   })
 
   it('分类是 protect + descend，与脚注同一个形状', () => {
