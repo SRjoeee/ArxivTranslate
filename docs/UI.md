@@ -108,8 +108,7 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 | S-P-85 | 图片翻译行 | 图片翻译 | Switch in the card (`image.enabled`, v11); saved at once, live on the page; the per-mode list stays on the options page |
 | S-P-86 | 图片翻译行下 · 助手未安装（macOS） | 图片翻译需要安装识别助手 | Only while the switch is on and the helper is not detected |
 | S-P-87 | 图片翻译行下 · 非 macOS | 图片翻译目前仅支持 macOS | |
-| S-P-88 | 助手提示动作 | 复制安装命令 / 已复制 | Copies the one-line install `curl -fsSL …/helper/install-remote.sh \| bash -s -- <extension id>` (helper/README.md) |
-| S-P-89 | 助手提示动作 | 教程 | Opens helper/README.md |
+| S-P-88 | 助手提示动作 | 安装 | [定，2026-09-12] 就地展开 S-O-27 的引导，不跳设置页、不开新窗口。取代了原来的「复制安装命令 · 教程」两个按钮——引导自己带命令块与教程链接 |
 | S-P-90 | 动作失败 | {原始信息} | Red line under the primary button (`role=alert`), cleared before the next action |
 
 Removed 2026-09-10: the state pills (S-P-12…18) and the config-fallback note (S-P-34; the options page announces it).
@@ -141,10 +140,11 @@ changes, and the two drawers commit with one button.
 | S-O-23 | 目标语言 | 目标语言 | The popup's searchable menu (S-P-22/23) |
 | S-O-24 | 图片翻译 | 图片翻译 / 译文叠在图上，鼠标悬停查看原文 | The switch the popup shows (S-P-85) |
 | S-O-25 | 识别助手 · 检测中 / 已就绪 | 正在检测识别助手… / 识别助手已就绪 {版本} | |
-| S-O-27 | 识别助手 · 未安装（macOS） | 安装识别助手 / 图片翻译要在本机识别图里的文字。装一次，之后都不用管。 | [定，2026-09-11] **三步走完，不离开这一页**（`sections/HelperSetup.tsx`）。取代了原来那一行「复制安装命令 · 教程」；popup 空间小，仍是那一行 |
-| S-O-27a | 步骤一 | 打开「终端」 / 按 ⌘ 空格，输入 Terminal，回车 | |
-| S-O-27b | 步骤二 | 粘贴这行命令，按回车 / 点命令即可复制 → 已复制 | 命令整块是一个按钮，点哪里都复制。**换行不横向滚动**：这是一条 `curl \| bash`，看不到结尾的读者无从判断该不该运行 |
-| S-O-27c | 步骤三 | 装完回到这里 / 命令跑完会打印一行「已安装」 | 「我已经装好了」→ 检测中… → 成功则整块换成 S-O-25 的已就绪；失败留一行「还没检测到。确认命令跑完没有报错，然后再试一次」。旁边仍有 教程 |
+| S-O-27 | 识别助手 · 未安装（macOS） | 安装识别助手 / 图片翻译在本机识别图中的文字。识别助手仅需安装一次，后续自动生效。 | [定，2026-09-12，改自 09-11 的三步版] **两步走完**（`src/ui/HelperSetup.tsx`）。**popup 与设置页共用这一个组件**：两处说的是同一件事，分两套写法只会漂移 |
+| S-O-27a | 步骤一 | 打开「终端」 / ⌘ 空格，输入 Terminal 后回车 | |
+| S-O-27b | 步骤二 | 在终端中执行以下命令 / 点击复制 → 已复制 | 命令整块是一个按钮，点击任意位置均可复制。**折行显示而非横向滚动**：这是一条 `curl \| bash`，看不到结尾便无从判断是否应当执行 |
+| S-O-27c | 等待中 | 执行完成后自动生效，无需返回此处 | [定，2026-09-12] **取代了原来的「我已经装好了」按钮**：装完由 background 自己检测（DESIGN §15.4），读者不必回到扩展。复制即开始等 |
+| S-O-27d | 3 分钟未检测到 | 尚未检测到识别助手。请确认命令已执行完毕且未出现报错。 | 在 S-O-27c 原处换成这一句，不切换界面；命令块始终可点，随时可重新复制 |
 | S-O-26 | 图片模式 | 在这些模式下显示图片译文 / 只影响显示：切到没勾的模式时叠加层隐藏，切回来再显示，不重新识别 | 上下 · 左右 · 仅译文 |
 | S-O-40 | 译文样式 | 译文样式 / 选中的样式立即生效 | A grid of tiles; the chosen one carries a pencil |
 | S-O-41 | 列表动作 | 添加配置 / 重置 | 重置 restores the built-ins and keeps the reader's own |
