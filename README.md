@@ -4,8 +4,8 @@
 
 # Read arXiv
 
-**Read arXiv in your language.** The translation sits beside the paper rather than in place of it,
-and the equations, the figures and the layout stay exactly as the author set them.
+**Read arXiv in your language.** The translation sits beside the paper, and the formulas, the
+figures and the layout keep working.
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Chrome 131+](https://img.shields.io/badge/Chrome-131%2B-4285F4.svg)](#start-reading)
@@ -17,35 +17,16 @@ and the equations, the figures and the layout stay exactly as the author set the
 
 ![A paper open in side-by-side mode, the original on the left and the translation on the right](docs/images/hero.png)
 
-Read arXiv puts a translation beside a paper instead of in place of it. Follow the argument in your
-own language, check a line against the author's own words, and go back to the original whenever you
-want — without leaving the page.
+Read arXiv is a reading and translation extension built for one kind of page: arXiv's HTML papers.
 
-## Read the paper, not just the translation
+Translate a paper with a general-purpose extension and it tends to come apart — formulas turn into
+source or garbage, citations stop working, tables collapse, and checking a line against the original
+means scrolling back and forth. Read arXiv is built for these pages and nothing else. You get the
+paper back in your language, still working: what you are reading is a paper, not just a translation.
 
-**The original never goes away.** Read the two columns side by side, stack the translation under
-each paragraph, or hide the original entirely, and change your mind as often as you like. *Show the
-original* returns the page to exactly what arXiv served.
+## What it does
 
-**The paper keeps its shape.** Headings, figures, tables, numbered equations, footnotes and the
-reference list stay where the author put them. The translation is added around them rather than
-over them, so what you are reading is still the paper's own layout.
-
-**The mathematics is the author's, not a copy of it.** Equations, citations, code and links are set
-aside before a paragraph is translated and put back afterwards, unchanged. A formula you stop to
-check is the one arXiv rendered.
-
-**The words inside figures are translated too.** Labels and axes in a paper's diagrams are as much
-of the argument as the prose around them.
-
-**Only what you are reading is translated.** Paragraphs are translated as you reach them, and kept
-afterwards, so coming back to a paper costs nothing and picks up where you left off.
-
-Machine translation misreads terminology and will occasionally change a claim. Keeping the original
-beside you is not a nicety — it is how you catch that. Protecting the structure of a page does not
-make the words on it correct.
-
-## Choose how it reads
+**Bilingual reading, three ways.**
 
 <table>
 <tr>
@@ -60,31 +41,34 @@ make the words on it correct.
 </tr>
 </table>
 
-Switching is instant, and nothing is translated a second time.
+Switch between them whenever you like, and back to the original whenever you want.
 
-**Hover to line the sentences up.** Rest on a sentence and the matching one lights up on the other
-side, a band behind the whole line, so a sentence broken across inline formulas still reads as one.
-The pairing comes from the translation service rather than from guesswork, which is why it is
-available with Microsoft Translator and not yet with the others.
+**Aligned sentence by sentence.** Rest on any sentence and the matching one lights up on both sides,
+so you never have to count your way through a long paragraph to find which translation belongs to
+which line. Available with Microsoft Translator, which is the service selected by default.
 
 ![Hovering a sentence bands it on both sides](docs/images/hover.gif)
 
-**In translation-only mode, the original comes to you.** Rest on a sentence and its source appears
-beside it — in the page's right margin where there is room, otherwise just below the line. It is
-the passage itself, so the formulas and links inside it are live.
+In translation-only mode there is no second column, so resting on a sentence brings its original to
+you instead — in the margin where there is room, otherwise just below the line.
 
 ![The original of a sentence shown in the margin in translation-only mode](docs/images/only-peek.png)
 
-**Figures are translated in place.** In a vector figure the characters are already in the file, so
-its labels are translated from the paper's own text rather than guessed from pixels. Bitmap figures
-are read by a small helper on your own machine, currently macOS only, and the translation is laid
-over the figure where the original words were; hover to see them again.
+**The paper still works.** Formulas are still formulas, citations are still clickable, and tables,
+footnotes and the table of contents are all where the author left them. Translating a paper does not
+cost you the ability to read it.
+
+**The words inside figures are translated too.** Labels and axes in vector charts, and text inside
+bitmap images, with the translation laid over the original; hover to see what was underneath.
+Bitmap figures are macOS-only for now.
 
 ![A figure's labels translated in place over the original](docs/images/figure.png)
 
-**Appearance is yours.** Translation styles and highlight colours are editable lists, not a fixed
-menu — colour, underline, weight, and a blur-until-hovered style for testing yourself. Changes
-apply at once; there is no save button.
+**The translation looks how you want.** Colour, underline and weight are yours to set, and there is
+a blur-until-hovered style for reading the original first and checking yourself afterwards.
+
+Machine translation misreads terminology and will occasionally change a claim. Keeping the original
+beside you is not a nicety — it is how you catch that.
 
 ## Start reading
 
@@ -230,7 +214,8 @@ source in its header; [`docs/THIRD_PARTY.md`](docs/THIRD_PARTY.md) is the regist
 
 ## License
 
-[GPL-3.0](LICENSE), the same licence as the projects it is built on.
+Copyright © 2026 SRjoeee. [GPL-3.0](LICENSE), the same licence as the projects it is
+built on.
 
 ---
 
