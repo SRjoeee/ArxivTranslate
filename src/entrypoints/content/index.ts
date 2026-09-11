@@ -45,8 +45,15 @@ export default defineContentScript({
     let uninstallAnchors: (() => void) | null = null
     /** 悬停对照高亮（§7.7）：跟着一次翻译会话起停，配置关掉时根本不装监听 */
     let highlight: SentenceHighlight | null = null
-    /** 配置读回来之前先按默认值答：写死一个模式的话，默认一改这里就说错（Codex 在 #161 指出） */
+    /**
+     * 读者存的模式。**问状态要等它读回来**：popup 一拿到非空的状态就不再重试，所以在这之前
+     * 任何猜测都可能把模式条钉在错的那一档上——升级上来的读者存着「上下」，而默认值是「左右」
+     *（Codex 在 #161 两轮分别指出这个默认值与「先猜」本身）。默认值只是读失败时的兜底
+     */
     let savedMode: Mode = DEFAULT_CONFIG.mode
+    /** 首次读配置完成（无论成败）；`axt:page-status` 等它 */
+    let configRead: () => void = () => undefined
+    const configReady = new Promise<void>(resolve => { configRead = resolve })
     /** 由 startImages 装上：识别助手后来装好时，把这一页停着的位图放出来 */
     let resumeRaster: () => boolean = () => false
     /** 译文外观（§7.5）：读者选中的那一份样式与高亮配置，写成 <html> 上的属性与变量 */
@@ -72,7 +79,11 @@ export default defineContentScript({
       if (!styleFromWatcher) applyLocaleFrom(uiLanguage)
     }
     // The words this script puts on the page follow the interface's language too (UI.md §6)
-    void getConfig().then(config => { savedMode = config.mode; adoptLocale(config.uiLanguage); adoptStyle(lookOf(config)) })
+    void getConfig()
+      .then(config => { savedMode = config.mode; adoptLocale(config.uiLanguage); adoptStyle(lookOf(config)) })
+      // 读失败也要放行：popup 等不到回答会一直显示「正在读取」，而默认值至少是个能用的答案
+      .catch(e => console.debug('[axt] 读配置失败，先按默认值答', e))
+      .finally(() => configRead())
     // 设置页改完外观立刻生效（#47）：只重算注入表与 <html data-axt-style>，一个译文节点都不碰，
     // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
     // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
@@ -440,7 +451,10 @@ export default defineContentScript({
           sendResponse({ resumed: resumeRaster() })
           return true
         case 'axt:page-status':
-          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, session: getSessionId(), ...(imageProgress ? { images: imageProgress } : {}), ...(running ? { running } : {}) })
+          // 等首次读配置：答一次就定了这一轮 popup 的模式条（见 savedMode 的注释）
+          void configReady.then(() => {
+            sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, session: getSessionId(), ...(imageProgress ? { images: imageProgress } : {}), ...(running ? { running } : {}) })
+          })
           return true
       }
     })
