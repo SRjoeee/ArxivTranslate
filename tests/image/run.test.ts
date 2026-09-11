@@ -215,6 +215,34 @@ describe('startImageTranslation', () => {
     expect(run.failed()).toHaveLength(2)
   })
 
+  // Codex 在 #163 指出：一张图的标签可能横跨多个批次（内联 TikZ 上百个节点），
+  // 一批失败时另一批已经译好的标签随失败一起回来，不该整张图空着
+  it('部分成功：译好的标签先画上去，同时仍记这张图失败', async () => {
+    const { doc, targets, run } = setup({
+      // 第一个标签译出来了，其余没有
+      translate: async call => ({
+        ok: false as const,
+        error: { kind: 'network' as const, message: 'offline', isolatable: false },
+        partial: call.request.segments.slice(0, 1).map(s => ({ id: s.id, text: `译:${s.text}` })),
+      }),
+    })
+    await run.translate(targets)
+    expect(run.failed()).toHaveLength(1)
+    // 叠加层画出来了，且只有译好的那一个标签
+    const overlay = doc.querySelector('.axt-img')
+    expect(overlay).not.toBeNull()
+    expect(overlay!.querySelectorAll('span')).toHaveLength(1)
+  })
+
+  it('一个标签都没译出来就不画叠加层', async () => {
+    const { doc, targets, run } = setup({
+      translate: async () => ({ ok: false as const, error: { kind: 'network' as const, message: 'offline', isolatable: false } }),
+    })
+    await run.translate(targets)
+    expect(run.failed()).toHaveLength(1)
+    expect(doc.querySelector('.axt-img')).toBeNull()
+  })
+
   it('并发有上限：同时在处理的图不超过 maxConcurrent，其余排队（Codex 在 #89 指出）', async () => {
     const doc = docOf([1, 2, 3, 4, 5].map(i => FIGURE.replace(/F1/g, `F${i}`)).join(''))
     markBlocks(extract(doc))

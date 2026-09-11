@@ -17,7 +17,7 @@ import type { TranslateCall, TranslateMessageResponse } from '@/providers/transl
 import type { TranslateContext } from '@/providers/types'
 import { sha256Hex } from '@/shared/digest'
 import type { ImageProgress, OcrCall, OcrLine, OcrMessageResponse } from '@/shared/ocr'
-import { isTranslatable, linesToBoxes } from './boxes'
+import { isTranslatable, linesToBoxes, type Box } from './boxes'
 
 export type { ImageTarget } from '@/core/renderer/image'
 
@@ -220,6 +220,27 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
     reasons.set(target, reason)
   }
 
+  /** 把回来的段落配回它们的框；成功与部分成功两条路共用一份 */
+  const labelsFrom = (segments: readonly { id: string; text: string }[], boxes: readonly Box[], target: ImageTarget): ImageLabel[] => {
+    // 转义用的是协商出的格式，反转义必须用同一个：原来这里连格式都没传，markers 下会拿 HTML 实体规则去解一段纯文本
+    const translated = new Map(segments.map(s => [s.id, unescapeText(s.text, wireFormatOf(options.renderPath))]))
+    const labels: ImageLabel[] = []
+    for (const [i, box] of boxes.entries()) {
+      const text = translated.get(`${target.id}#L${i}`)?.trim()
+      // 译文与原文相同（单位、变量名、引擎原样返回的）不画：白框盖住原图只会把排版好的下标变成 OCR 读歪的字
+      if (!text || sameText(text, box.text)) continue
+      const label: ImageLabel = { x: box.x, y: box.y, w: box.w, h: box.h, lines: box.lines, source: box.text, text }
+      if (box.angle) {
+        label.angle = box.angle
+        // 斜标签自己的盒子：叠加层按它沿文字的轴摆（§15.5）
+        if (box.len) label.len = box.len
+        if (box.thick) label.thick = box.thick
+      }
+      labels.push(label)
+    }
+    return labels
+  }
+
   /**
    * SVG 图的「识别」：直接读 `contentDocument` 里的字形（§15.5）。
    *
@@ -321,24 +342,17 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
           report()
           return
         }
+        // 一张图的标签可能横跨多个批次（内联 TikZ 动辄上百个节点）：一批失败时另一批已经译好的
+        // 标签随失败一起回来（§8.2 的 `partial`），先把它们画上去再记失败——整张图空着不如
+        // 少几个标签，而重试时画过的那些直接命中缓存（Codex 在 #163 指出，文字管线已经这么做了）
+        const done = labelsFrom(res.partial ?? [], boxes, target)
+        if (done.length > 0) {
+          renderImage(target, done)
+          options.onRendered?.([target])
+        }
         return fail(target, `翻译失败：${res.error.message}`)
       }
-      // 转义用的是协商出的格式，反转义必须用同一个：原来这里连格式都没传，markers 下会拿 HTML 实体规则去解一段纯文本
-      const translated = new Map(res.result.segments.map(s => [s.id, unescapeText(s.text, wireFormatOf(options.renderPath))]))
-      const labels: ImageLabel[] = []
-      for (const [i, box] of boxes.entries()) {
-        const text = translated.get(`${target.id}#L${i}`)?.trim()
-        // 译文与原文相同（单位、变量名、引擎原样返回的）不画：白框盖住原图只会把排版好的下标变成 OCR 读歪的字
-        if (!text || sameText(text, box.text)) continue
-        const label: ImageLabel = { x: box.x, y: box.y, w: box.w, h: box.h, lines: box.lines, source: box.text, text }
-        if (box.angle) {
-          label.angle = box.angle
-          // 斜标签自己的盒子：叠加层按它沿文字的轴摆（§15.5）
-          if (box.len) label.len = box.len
-          if (box.thick) label.thick = box.thick
-        }
-        labels.push(label)
-      }
+      const labels = labelsFrom(res.result.segments, boxes, target)
       if (labels.length === 0) return finishEmpty()
       renderImage(target, labels)
       outcome.set(target, 'done')

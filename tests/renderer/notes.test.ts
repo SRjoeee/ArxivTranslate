@@ -201,6 +201,17 @@ describe('localizeNotes', () => {
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
   })
 
+  // 第四轮：守卫原来只长在"没登记过的脚注"那条分支上。登记过、译文也到了的脚注同样会没——
+  // 原件那个边注框里装的正是原文 + 译文，藏了它，译文跟着一起没
+  it('译文已到的脚注，副本会被藏起来时也不藏原件', () => {
+    const doc = withNote()
+    doc.querySelector(`.ltx_p.${T_CLASS}`)!.setAttribute('data-axt-identity', '')
+    expect(localizeNotes(doc)).toBe(0)
+    expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
+    // 副本里照样放了译文：那个模式显示它的时候要有
+    expect(copy(doc).querySelector('.axt-note-t')?.textContent).toContain('中文脚注')
+  })
+
   // 同一个洞的另外两种副本（Codex 在 #163 第三轮指出）：拆图副本在 stack 被整块藏起来，
   // 镜像在 side 以外被藏起来（modes.css）。里面那份脚注都不能算"唯一留下的一份"
   it('拆图副本与镜像同样不算：它们也会被某个模式整块藏掉', () => {

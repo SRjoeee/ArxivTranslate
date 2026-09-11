@@ -32,6 +32,8 @@ function step(id: string, responses: TranslateMessageResponse[]): FallbackStep &
 }
 
 const call = { request: { segments: [{ id: 's1', text: 'Text.' }], source: 'en', target: 'cmn' } } as unknown as TranslateCall
+const partialFail = (kind: ProviderErrorKind, ids: string[]): TranslateMessageResponse =>
+  ({ ok: false, error: { kind, message: kind, isolatable: true }, partial: ids.map(id => ({ id, text: `${id} 译文` })) })
 
 describe('createFallbackService', () => {
   it('首选成功时不碰后面的引擎', async () => {
@@ -156,5 +158,38 @@ describe('createFallbackService', () => {
     await service.translate(call)
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('降级'))
     warn.mockRestore()
+  })
+})
+
+// Codex 在 #163 指出：链上每一步都重发整次调用，而缓存键带 provider，
+// 上一步译好的段落在下一步不会命中缓存——它译不出来就丢了
+describe('降级链上的部分成功', () => {
+  it('各步译出来的合起来带回去：主引擎出 A，备用出 B，调用方两段都要拿到', async () => {
+    const first = step('a', [partialFail('network', ['A'])])
+    const second = step('b', [partialFail('network', ['B'])])
+    const service = createFallbackService([first, second])
+    const res = await service.translate(call)
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.partial?.map(p => p.id).sort()).toEqual(['A', 'B'])
+  })
+
+  it('后一步译出同一段就用后一步的：那是更新的结果', async () => {
+    const first = step('a', [partialFail('network', ['A'])])
+    const second = step('b', [{ ok: false, error: { kind: 'network', message: 'x', isolatable: true }, partial: [{ id: 'A', text: '新译文' }] }])
+    const service = createFallbackService([first, second])
+    const res = await service.translate(call)
+    if (!res.ok) expect(res.partial).toEqual([{ id: 'A', text: '新译文' }])
+  })
+
+  it('一步都没译出来就不带 partial 字段', async () => {
+    const service = createFallbackService([step('a', [fail('network')]), step('b', [fail('network')])])
+    const res = await service.translate(call)
+    if (!res.ok) expect(res.partial).toBeUndefined()
+  })
+
+  it('成功的那一步照常直接返回，不掺前面的残片', async () => {
+    const service = createFallbackService([step('a', [partialFail('network', ['A'])]), step('b', [ok('b')])])
+    const res = await service.translate(call)
+    expect(res.ok).toBe(true)
   })
 })

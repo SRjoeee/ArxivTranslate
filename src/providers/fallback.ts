@@ -5,7 +5,7 @@
 // 解决的问题：key 过期、额度用尽、网络抖动时 run.ts 会把整页翻译停死（no-key / auth 触发
 // scheduler.disconnect()），读者对着半篇译文干等。硬规则 4：失败必须可恢复并触发 fallback 链。
 import type { CancelOptions, TranslateCall, TranslateMessageResponse, TranslateService } from './translate-service'
-import type { ProviderErrorKind, TranslationProvider } from './types'
+import type { ProviderErrorKind, TranslatedSegment, TranslationProvider } from './types'
 
 export interface FallbackStep {
   provider: TranslationProvider
@@ -105,6 +105,15 @@ export function createFallbackService(
   const translate = async (call: TranslateCall): Promise<TranslateMessageResponse> => {
     const chain = available()
     let last: TranslateMessageResponse | null = null
+    // 各步各自译成了哪些段（§8.2 的 `partial`）。链上每一步都重发整次调用，而缓存键带 provider，
+    // 所以上一步译好的段落在下一步并不会命中缓存——它译不出来就丢了。这里按 id 攒起来，
+    // 失败返回时把并集带上：主引擎译出 A/B、备用引擎译出 C 时，调用方要三段都拿到
+    //（Codex 在 #163 指出）。后来的覆盖先前的：那是更新的一次结果
+    const gathered = new Map<string, TranslatedSegment>()
+    const withGathered = (response: TranslateMessageResponse): TranslateMessageResponse => {
+      if (response.ok || gathered.size === 0) return response
+      return { ...response, partial: [...gathered.values()] }
+    }
     for (const [index, step] of chain.entries()) {
       const response = await step.service.translate(call)
       if (response.ok) {
@@ -112,13 +121,14 @@ export function createFallbackService(
         demotions.delete(step.provider.id)
         return response
       }
+      for (const segment of response.partial ?? []) gathered.set(segment.id, segment)
       last = response
       const isLast = index === chain.length - 1
-      if (isLast || !FALLBACK_KINDS.has(response.error.kind)) return response
+      if (isLast || !FALLBACK_KINDS.has(response.error.kind)) return withGathered(response)
       demote(step, response.error)
     }
     // chain 非空，循环至少执行一次
-    return last!
+    return withGathered(last!)
   }
 
   /** 恢复原文要撤掉每套队列：漏一个就有在飞请求回来往 DOM 写 */

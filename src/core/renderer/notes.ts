@@ -186,6 +186,12 @@ export function localizeNotes(root: Document | Element): number {
       // "this is a translation that has landed", and its false branch is a skeleton, a failure
       // widget, or nothing — not "not an element"
       const registered = source.hasAttribute(ID_ATTR) || !!sibling?.classList.contains(T_CLASS)
+      // Whether some mode hides the clone this copy sits in — computed for **both** branches
+      // (Codex on #163, third round: the guard sat inside the untranslated one). Marking the
+      // original hidden is only safe while the copy is guaranteed to be on screen, and that is
+      // just as true for a note whose translation has arrived: the original's outer box carries
+      // that translation too, so hiding it takes both away
+      const hidable = !!copy.closest(hidableCopy)
       if (!arrived(sibling)) {
         // A note the extractor never registered — its content is a bare URL, a lone formula, nothing
         // with letters in it — will never get a translation, and waiting for one left the original
@@ -200,7 +206,6 @@ export function localizeNotes(root: Document | Element): number {
         // identity clone, then the split-figure one). Keeping the original leaves one note in the
         // mode that hides the clone and two in the mode that shows it — the same
         // duplicate-beats-missing trade, for the few clones whose content is its own source
-        const hidable = !!copy.closest(hidableCopy)
         if (!registered && note && !hidable && !note.hasAttribute(LOCALIZED_ATTR) && reproduces(source, copy)) {
           note.setAttribute(LOCALIZED_ATTR, '')
           localized += 1
@@ -220,6 +225,9 @@ export function localizeNotes(root: Document | Element): number {
       // The copy is what is on screen: its sentence registration comes along, so pointing at the
       // note tints the note's own sentence
       if (wrapper) mirrorNote(source, translated, wrapper, fresh)
+      // 副本照放（那个模式显示它时要有译文），但**副本会被藏起来时不藏原件**：
+      // 原件那个边注框里本来就是原文 + 译文，藏了它这条脚注连同译文一起从页面上消失
+      if (hidable) return
       note?.setAttribute(LOCALIZED_ATTR, '')
       localized += 1
     })
