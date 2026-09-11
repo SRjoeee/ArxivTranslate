@@ -17,7 +17,6 @@ import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages
 import type { HelperStatus } from '@/shared/ocr'
 import { awaitChain } from '@/shared/chain'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
-import { HELPER_GUIDE_URL, helperInstallCommand } from '@/ui/strings'
 import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, runnable } from './view-model'
 
 const scriptStart = performance.now()
@@ -40,8 +39,6 @@ export interface PopupActions {
   setHighlight(on: boolean): void
   setImages(on: boolean): void
   downloadPack(): void
-  copyInstallCommand(): void
-  openGuide(): void
   /** `section` 省略时开到设置页自己的默认分节；带上时直接开到那一节 */
   openOptions(section?: OptionsSection): void
 }
@@ -59,7 +56,7 @@ function openOptions(section?: OptionsSection): void {
   void browser.tabs.create({ url: browser.runtime.getURL(`/options.html#${section}`) })
 }
 
-export function usePopupData(): { input: PopupInput; error: string | null; copied: boolean; actions: PopupActions } {
+export function usePopupData(): { input: PopupInput; error: string | null; actions: PopupActions } {
   const [page, setPage] = useState<PageStatus | null>(null)
   const [provider, setProvider] = useState<ProviderStatus | null>(null)
   const [config, setLocalConfig] = useState<Config | null>(null)
@@ -71,7 +68,6 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
   /** The translate shortcut as bound right now; Chrome formats it for the platform (⌥T / Alt+T) */
   const [shortcut, setShortcut] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
   /** Every config write queues behind the previous one; see `patchConfig` */
   const writes = useRef<Promise<Config>>(Promise.resolve(DEFAULT_CONFIG))
 
@@ -107,6 +103,17 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
     sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ available: false }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
   }, [refresh, checkPack, loadProvider])
+
+  // The guided install ends in the background finding the helper, and it says so by broadcasting.
+  // Without this the card would stay up until the reader closed and reopened the popup (§15.4)
+  useEffect(() => {
+    const onReady = (message: unknown) => {
+      if ((message as { type?: string } | null)?.type !== 'axt:helper-ready') return
+      sendMessage({ type: 'axt:helper-status' }).then(setHelper).catch(() => undefined)
+    }
+    browser.runtime.onMessage.addListener(onReady)
+    return () => browser.runtime.onMessage.removeListener(onReady)
+  }, [])
 
   // While the page is still loading the content script is not injected yet (document_idle), so
   // the first ask has no receiver; ask again every 500 ms a few times instead of declaring "not an
@@ -252,14 +259,8 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
       await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin', ...(page?.session ? { scope: page.session } : {}) }).catch(() => undefined)
       loadProvider()
     }),
-    copyInstallCommand: () => void guard(async () => {
-      await navigator.clipboard.writeText(helperInstallCommand(browser.runtime.id))
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    }),
-    openGuide: () => void browser.tabs.create({ url: HELPER_GUIDE_URL }),
     openOptions: section => void openOptions(section),
   }
 
-  return { input: { page, provider, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id }, error, copied, actions }
+  return { input: { page, provider, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id }, error, actions }
 }

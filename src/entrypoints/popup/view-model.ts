@@ -20,7 +20,7 @@ import type { HelperStatus } from '@/shared/ocr'
 import type { PackState } from '@/shared/pack'
 import type { MenuItem } from '@/ui/Menu'
 import { styleTile } from '@/ui/appearance/tiles'
-import { HELPER_GUIDE_URL, PREVIEW_TARGET, S, helperInstallCommand, languageLabel, languageName, parseFatal, profileName, reasonText, serviceName } from '@/ui/strings'
+import { PREVIEW_TARGET, S, languageLabel, languageName, parseFatal, profileName, reasonText, serviceName } from '@/ui/strings'
 
 export type { PackState }
 /** The last row of the service menu: not a service, it opens the settings page */
@@ -60,8 +60,11 @@ export interface PopupView {
   highlight: boolean
   images: boolean
   menu: { kind: MenuKind; label: string; items: MenuItem[]; search: boolean } | null
-  /** Under the image row when the helper is missing: how to install it (macOS) or that it is macOS-only */
-  helper: { text: string; command?: string; guide?: string } | null
+  /**
+   * Under the image row when the helper is missing. `extensionId` present means the guided install
+   * can run here (macOS); without it the line is the macOS-only notice and there is nothing to press
+   */
+  helper: { text: string; extensionId?: string } | null
   note: Note | null
   failed: string | null
   primary: { label: string; action: 'translate' | 'restore' | 'retranslate'; disabled: boolean; shortcut?: string }
@@ -187,7 +190,7 @@ export function derivePopupView(input: PopupInput): PopupView {
 
   const helperHint: PopupView['helper'] = config.image.enabled && helper !== null && !helper.available && platform !== null
     ? platform === 'mac'
-      ? { text: S.helper.install, command: helperInstallCommand(extensionId), guide: HELPER_GUIDE_URL }
+      ? { text: S.helper.install, extensionId }
       : { text: S.helper.macOnly }
     : null
 

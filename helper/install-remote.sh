@@ -70,4 +70,4 @@ JSON
 done
 
 echo "已安装：$("$BIN" --version)"
-echo "回到 Chrome 重新加载扩展，popup 里「图片翻译」下方的提示会消失。"
+echo "图片翻译现已可用，无需重新加载扩展。"

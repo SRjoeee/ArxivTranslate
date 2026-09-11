@@ -3,10 +3,11 @@
 // language card, the prompt row for the LLM, then bubbles for anything that needs attention, the
 // primary button, the mode bar, and the two small switches under it.
 import type { ReactNode } from 'react'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import type { Mode } from '@/core/renderer'
 import { BrandMark } from '@/ui/BrandMark'
 import { Button } from '@/ui/Button'
+import { HelperSetup } from '@/ui/HelperSetup'
 import { Menu } from '@/ui/Menu'
 import { Segmented } from '@/ui/Segmented'
 import { MODE_ORDER, S } from '@/ui/strings'
@@ -27,7 +28,12 @@ const modes = () => MODE_ORDER.map(value => ({
 
 const CARD = 'rounded-card bg-card shadow-[0_1px_2px_rgba(30,30,36,0.06)]'
 
-export function PopupView({ view, error, copied, actions }: { view: View; error: string | null; copied: boolean; actions: PopupActions }) {
+export function PopupView({ view, error, actions }: { view: View; error: string | null; actions: PopupActions }) {
+  /**
+   * 引导展开没展开。放在这里而不是 view model：它只是这一次打开 popup 的界面状态，
+   * 真正要跨 popup 活下来的是「正在等」，那个在 background（DESIGN §15.4）
+   */
+  const [setupOpen, setSetupOpen] = useState(false)
   return (
     <main className="flex w-[320px] flex-col gap-3 bg-bg p-4 font-ui text-[13px] text-fg">
       <header className="flex items-center justify-between px-1">
@@ -66,15 +72,20 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
               <Button variant="solid" onClick={actions.retryFailed}>{S.failed.retry}</Button>
             </Bubble>
           )}
+          {/* 未装识别助手时的那张卡：收起来只有一行字与「安装」，展开就是引导本身（UI.md S-P-86…88）。
+              引导与设置页共用同一个组件——两处说的是同一件事 */}
           {view.helper && (
             <div className={`${CARD} flex flex-col gap-2 px-3.5 py-3 text-[12px] leading-relaxed`}>
-              <span className="text-fg-2">{view.helper.text}</span>
-              {view.helper.command && (
-                <span className="flex items-center gap-3">
-                  <Button variant="solid" onClick={actions.copyInstallCommand}>{copied ? S.helper.copied : S.helper.copy}</Button>
-                  <Button variant="text" onClick={actions.openGuide}>{S.helper.guide}</Button>
-                </span>
-              )}
+              {setupOpen && view.helper.extensionId
+                ? <HelperSetup extensionId={view.helper.extensionId} />
+                : (
+                  <>
+                    <span className="text-fg-2">{view.helper.text}</span>
+                    {view.helper.extensionId && (
+                      <Button variant="solid" className="self-start" onClick={() => setSetupOpen(true)}>{S.helper.start}</Button>
+                    )}
+                  </>
+                )}
             </div>
           )}
 

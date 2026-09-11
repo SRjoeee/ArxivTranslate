@@ -6,15 +6,15 @@
 
 ## 一键安装（macOS）
 
-在 popup 的「图片翻译」下点「复制安装命令」，把命令粘到终端里运行即可；它已经带上了你的扩展 id：
+在 popup 的「图片翻译」下点「安装」，按引导把命令粘到终端里执行即可；命令已经带上了你的扩展 id：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/SRjoeee/ArxivTranslate/main/helper/install-remote.sh | bash -s -- <扩展 id>
 ```
 
-第二个参数可以指定分支（默认 main），popup 复制的命令会带上它自己所在的分支。
+第二个参数可以指定分支（默认 main），引导里复制的命令会带上它自己所在的分支。
 
-脚本会把 helper 的源码放到 `~/Library/Application Support/Readarxiv/helper`，用 Xcode Command Line Tools 编译（首次约 1 分钟；没装的话先运行 `xcode-select --install`），并注册 Chrome / Chromium 的 Native Messaging host。装完回到 Chrome 重新加载扩展即可。不需要 sudo。
+脚本会把 helper 的源码放到 `~/Library/Application Support/Readarxiv/helper`，用 Xcode Command Line Tools 编译（首次约 1 分钟；没装的话先运行 `xcode-select --install`），并注册 Chrome / Chromium 的 Native Messaging host。**执行完成后扩展会自动检测到，无需重新加载扩展、也无需回到引导确认**（DESIGN §15.4）。不需要 sudo。
 
 ## 要求
 
@@ -34,7 +34,7 @@ helper/install.sh <extension-id>
    （`~/Library/Application Support/Google/Chrome/…` 与 `…/Chromium/…`）。Chrome 找的是 **`<用户数据目录>/NativeMessagingHosts/`**，
    所以用 `--user-data-dir` 起的浏览器（Playwright 的 e2e）要把 manifest 复制进它自己的 profile 目录；e2e 脚本会自己做
 
-装完重载扩展；设置页「图片翻译」一节会显示 helper 版本。签名、公证与 pkg 分发暂不做（§15.4）。
+装完扩展会自动检测到；设置页「图片翻译」一节随即显示 helper 版本。签名、公证与 pkg 分发暂不做（§15.4）。
 
 ## 冒烟测试
 

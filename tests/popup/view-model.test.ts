@@ -123,9 +123,11 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(v.primary).toEqual({ label: '重新翻译', action: 'retranslate', disabled: true })
     expect(v.secondary).toEqual({ label: '显示原文', action: 'restore' })
   })
-  it('P14 helper missing on macOS: install text, a copyable command with the extension id, a guide link', () => {
+  it('P14 helper missing on macOS: install text plus the id the guided install needs', () => {
     const v = view('P14')
-    expect(v.helper).toEqual({ text: '图片翻译需要安装识别助手', command: expect.stringMatching(/^curl -fsSL .*install-remote\.sh \| bash -s -- abcdefghijklmnopabcdefghijklmnop\b/), guide: expect.stringMatching(/helper\/README/) })
+    // 带着 extensionId 才有得装：命令要按这个 id 拼（引导本身在 HelperSetup 里，§15.4）
+    expect(v.helper).toEqual({ text: '图片翻译需要安装识别助手', extensionId: 'abcdefghijklmnopabcdefghijklmnop' })
+    // 非 macOS 只有一行说明，没有可按的东西——安装脚本在别处会立刻退出
     expect(derivePopupView({ ...input('P14'), platform: 'other' }).helper).toEqual({ text: '图片翻译目前仅支持 macOS' })
     expect(derivePopupView({ ...input('P14'), config: { ...input('P14').config!, image: { enabled: false, modes: [] } } }).helper).toBeNull()
   })

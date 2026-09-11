@@ -54,24 +54,23 @@ const S = {
   helper: {
     install: '图片翻译需要安装识别助手', // S-P-86, macOS
     macOnly: '图片翻译目前仅支持 macOS', // S-P-87
+    start: '安装', // S-P-88：展开引导；引导本身的文案在 setup
     copy: '复制安装命令', // S-P-88
     copied: '已复制',
-    guide: '教程', // S-P-89
+    guide: '教程', // 引导内的链接（S-O-27 / S-P-88）
   },
   /** The guided install on the settings page (S-O-30…36). The popup keeps the one-line version above */
   setup: {
-    title: '安装识别助手',
-    intro: '图片翻译要在本机识别图里的文字。装一次，之后都不用管。',
-    step1: '打开「终端」',
-    step1Hint: '按 ⌘ 空格，输入 Terminal，回车',
-    step2: '粘贴这行命令，按回车',
-    step2Hint: '点命令即可复制',
-    step3: '装完回到这里',
-    step3Hint: '命令跑完会打印一行「已安装」',
-    copyFailed: '没能复制。请手动选中这行命令再复制',
-    check: '我已经装好了',
-    checking: '检测中…',
-    notYet: '还没检测到。确认命令跑完没有报错，然后再试一次',
+    title: '安装识别助手', // S-O-27 / S-P-86a
+    intro: '图片翻译在本机识别图中的文字。识别助手仅需安装一次，后续自动生效。',
+    step1: '打开「终端」', // S-O-27a
+    step1Hint: '⌘ 空格，输入 Terminal 后回车',
+    step2: '在终端中执行以下命令', // S-O-27b
+    step2Hint: '点击复制',
+    // S-O-27c：取代了原来的「我已经装好了」按钮——装完由扩展自己检测（DESIGN §15.4）
+    waiting: '执行完成后自动生效，无需返回此处',
+    notYet: '尚未检测到识别助手。请确认命令已执行完毕且未出现报错。',
+    copyFailed: '无法复制，请手动选中命令后复制',
     done: '识别助手已就绪',
   },
   primary: {

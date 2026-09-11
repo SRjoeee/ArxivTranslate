@@ -11,7 +11,7 @@ import { Row } from '@/ui/Field'
 import { Switch } from '@/ui/Switch'
 import { MODE_ORDER, O, S, languageLabel, languageName } from '@/ui/strings'
 import type { OptionsData } from '../data'
-import { HelperSetup } from './HelperSetup'
+import { HelperSetup } from '@/ui/HelperSetup'
 import { ServiceDrawer } from './ServiceDrawer'
 
 /** Read at render, not at import: the pack is chosen after this module loads (ui/strings.ts) */

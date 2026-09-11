@@ -43,4 +43,4 @@ EOF
 done
 
 echo "helper $("$BIN" --version)，二进制 $BIN"
-echo "重载扩展后，设置页的「图片翻译」一节应显示已检测到 helper。"
+echo "图片翻译现已可用，无需重新加载扩展。"
