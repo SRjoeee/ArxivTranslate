@@ -329,6 +329,16 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       })
       if (!alive()) return
       if (!res.ok) {
+        // 一张图的标签可能横跨多个批次（内联 TikZ 动辄上百个节点）：一批失败时另一批已经译好的
+        // 标签随失败一起回来（§8.2 的 `partial`），先把它们画上去再处理失败——整张图空着不如
+        // 少几个标签，而重试时画过的那些直接命中缓存（Codex 在 #163 指出，文字管线已经这么做了）。
+        // **画在致命分支之前**：降级链上前一步译出来的段落会跟着末步的 auth 失败一起回来，
+        // 而致命分支会就地停掉整个调度、这张图这一轮再没有第二次机会（Codex 在 #163 第五轮指出）
+        const done = labelsFrom(res.partial ?? [], boxes, target)
+        if (done.length > 0) {
+          renderImage(target, done)
+          options.onRendered?.([target])
+        }
         // key 失效 / 没配 key：与文字管线一样，第一次遇到就停调度，之后的图不再取、不再识别
         if (FATAL_KINDS.has(res.error.kind) && fatal === undefined) {
           fatal = `${res.error.kind}: ${res.error.message}`
@@ -341,14 +351,6 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
           // 立刻把带 fatal 的进度发出去：别等还在等 OCR 的另一个 worker（最长一个 helper 超时）结束才让 popup 知道（Codex 在 #89 指出）
           report()
           return
-        }
-        // 一张图的标签可能横跨多个批次（内联 TikZ 动辄上百个节点）：一批失败时另一批已经译好的
-        // 标签随失败一起回来（§8.2 的 `partial`），先把它们画上去再记失败——整张图空着不如
-        // 少几个标签，而重试时画过的那些直接命中缓存（Codex 在 #163 指出，文字管线已经这么做了）
-        const done = labelsFrom(res.partial ?? [], boxes, target)
-        if (done.length > 0) {
-          renderImage(target, done)
-          options.onRendered?.([target])
         }
         return fail(target, `翻译失败：${res.error.message}`)
       }

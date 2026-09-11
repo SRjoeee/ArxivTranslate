@@ -234,6 +234,21 @@ describe('startImageTranslation', () => {
     expect(overlay!.querySelectorAll('span')).toHaveLength(1)
   })
 
+  // 第五轮：致命失败会就地停掉整个调度，这张图这一轮再没有第二次机会——
+  // 降级链上前一步译出来的标签会跟着末步的 auth 失败一起回来，画在致命分支之前才画得上
+  it('致命失败也先画：降级链上译好的标签不能跟着 auth 一起丢', async () => {
+    const { doc, targets, run } = setup({
+      translate: async call => ({
+        ok: false as const,
+        error: { kind: 'auth' as const, message: 'User not found.', isolatable: false },
+        partial: call.request.segments.slice(0, 1).map(s => ({ id: s.id, text: `译:${s.text}` })),
+      }),
+    })
+    await run.translate(targets)
+    expect(run.fatal()).toBeDefined()
+    expect(doc.querySelector('.axt-img')?.querySelectorAll('span')).toHaveLength(1)
+  })
+
   it('一个标签都没译出来就不画叠加层', async () => {
     const { doc, targets, run } = setup({
       translate: async () => ({ ok: false as const, error: { kind: 'network' as const, message: 'offline', isolatable: false } }),
