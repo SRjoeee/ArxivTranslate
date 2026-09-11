@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 // 说明行的译文（issue #152）：块是 `<tr>`，所以译文也得是 `<tr>`（§7.1），
 // 而行里的内容必须装在单元格里——直接挂在 `<tr>` 下表格布局根本不排它。
 import { describe, expect, it } from 'vitest'
@@ -165,5 +167,43 @@ describe('说明行的等待态与失败态', () => {
     const failed = renderFailed(block, 'network: offline', () => {})
     expect(failed.tagName).toBe('SPAN')
     expect(failed.getAttribute(FOR_ATTR)).toBe(block.id)
+  })
+})
+
+// 部分失败：组里一行成功、另一行失败时仍会拆分，而副本会把失败小部件剥掉
+//（它是我们自己的节点，且 `cloneNode` 不复制 shadow root 与事件监听，留下也只是空壳）。
+// 原件那份再被 side 的样式藏掉，读者两栏都看不到重试按钮——那一块就永远卡在失败态（Codex 在 #168 指出）
+describe('部分失败时重试按钮仍然可点', () => {
+  it('side 模式不隐藏原件里的失败小部件', () => {
+    const RULES = readFileSync(join(import.meta.dirname, '../../src/styles/modes.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+    // 原件里的译文照旧藏起来（副本代劳），但失败小部件要留着
+    expect(RULES).toMatch(/html\[data-axt-mode="side"\] \[data-axt-split\] \.axt-t:not\(\.axt-error\) \{\s*display: none/)
+  })
+
+  it('副本剥掉失败小部件、保留那一行的原文；重试留在原件一侧', () => {
+    const doc = docOf(`<div class="ltx_para"><table class="ltx_equationgroup ltx_eqn_table" id="E2"><tbody>
+      <tr class="ltx_equation ltx_eqn_row"><td class="ltx_eqn_cell"><math class="ltx_Math"><mi>x</mi></math></td></tr>
+      <tr class="ltx_eqn_row ltx_align_baseline"><td class="ltx_eqn_cell" style="white-space:normal;" colspan="5">where the first is</td></tr>
+      <tr class="ltx_eqn_row ltx_align_baseline"><td class="ltx_eqn_cell" style="white-space:normal;" colspan="5">and the second is</td></tr>
+    </tbody></table></div>`)
+    const rows = (extract(doc) as TextBlock[]).filter(b => b.unit === 'intertext')
+    expect(rows).toHaveLength(2)
+    markBlocks(rows)
+    renderText(rows[0]!, frag(doc, '第一段'))
+    renderFailed(rows[1]!, 'network: offline', () => {})
+    expect(splitFigures(doc)).toBe(1)
+    const clone = doc.querySelector(`.${SPLIT_CLASS}`)!
+    // 副本：成功那行是中文，失败那行保留英文、没有小部件
+    expect(clone.textContent).toContain('第一段')
+    expect(clone.textContent).toContain('and the second is')
+    expect(clone.querySelector(`.${ERROR_CLASS}`)).toBeNull()
+    // 原件里那个**活的**小部件还在，样式不再藏它。说明行的失败件包成 `<tr><td><span>`：
+    // 外层行带配对标记，真正带 shadow root（按钮与监听都在里面）的是那个 span
+    const failedRow = doc.querySelector(`[data-axt-split] tr.${ERROR_CLASS}`)
+    expect(failedRow).not.toBeNull()
+    const widget = failedRow!.querySelector(`span.${ERROR_CLASS}`)
+    expect(widget).not.toBeNull()
+    expect(widget!.shadowRoot).not.toBeNull()
+    expect(widget!.shadowRoot!.querySelector('button')).not.toBeNull()
   })
 })

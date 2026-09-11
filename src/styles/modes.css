@@ -335,7 +335,12 @@ html[data-axt-on] .axt-note-t {
    **不缩放**：栏窄了让 ar5iv 自己重排（.ltx_flex_figure 本身就是 flex-flow: wrap，
    实测 2312.17141 满栏 342px 高、半栏 546px 且不溢出）；实在不能重排的（宽公式、宽 SVG，
    实测 8 张图里 3 张溢出 78 / 102 / 209px）退化为栏内横滑，字号一律不动 */
-html[data-axt-mode="side"] [data-axt-split] .axt-t {
+/* 原件里的译文由副本代劳，藏起来——**失败小部件除外**（Codex 在 #168 指出）：
+   副本会把 `.axt-error` 剥掉（那是我们自己的节点），原件这份再藏掉的话，读者在两栏里
+   都看不到重试按钮，那一块就永远卡在失败态。留在原件这一侧才有用：小部件的按钮带着
+   事件监听与 shadow root，`cloneNode` **两样都不复制**（`attachShadow` 没有 clonable），
+   所以副本里即便留下它也只是一个空壳 */
+html[data-axt-mode="side"] [data-axt-split] .axt-t:not(.axt-error) {
   display: none;
 }
 
