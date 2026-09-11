@@ -62,19 +62,23 @@ export function HelperSetup({ extensionId, onStatus }: { extensionId: string; on
    * 而这是整个安装唯一悬着的一步（Codex 在 #161 指出）
    */
   const copy = async () => {
+    // 复制即开始等：读者接下来就要切到终端，那一刻这个组件已经不在了。
+    // **剪贴板被挡住时同样要开始**——那条路上的提示是「请手动选中命令后复制」，读者照做、装成了，
+    // 却没人在探，页面上停着的图就一直停着，而确认按钮已经没有了（Codex 在 #166 指出）
+    const beginWaiting = () => void sendMessage({ type: 'axt:helper-await', start: true })
+      .then(({ until: deadline }) => setUntil(deadline))
+      .catch(() => undefined)
     try {
       await navigator.clipboard.writeText(command)
     } catch {
       setCopyFailed(true)
+      beginWaiting()
       return
     }
     setCopyFailed(false)
     setCopied(true)
     setTimeout(() => setCopied(false), COPIED_MS)
-    // 复制即开始等：读者接下来就要切到终端，那一刻这个组件已经不在了
-    void sendMessage({ type: 'axt:helper-await', start: true })
-      .then(({ until: deadline }) => setUntil(deadline))
-      .catch(() => undefined)
+    beginWaiting()
   }
 
   return (

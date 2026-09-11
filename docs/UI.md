@@ -236,7 +236,8 @@ Rules:
   window keeps its size while it is open; the list scrolls inside that room. The row toggles it,
   a click outside or Escape closes it.
 - Layout: the service/language card, the prompt row (LLM), then a separate bubble for anything
-  that needs attention (note with 设置, failures with 重试, the helper hint with 复制安装命令 / 教程),
+  that needs attention (note with 设置, failures with 重试, the helper hint with 安装, which opens
+  the guided install in place),
   the primary button, the mode bar, and the two small switches under it.
 - Dev-only information (background version, block stats, raw `fatal` text) lives only in the
   dev-build gallery.

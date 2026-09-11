@@ -149,8 +149,10 @@ export default defineBackground(() => {
     },
     warn: (message, error) => console.debug(message, error),
   })
-  // worker 醒来就把没到期的等待接上：读者可能还在终端里，而这个 worker 是上一个被回收后新起的
-  void helperWaiter.resume()
+  // worker 醒来就把等待接上：读者可能还在终端里，而这个 worker 是上一个被回收后新起的。
+  // **唤醒 worker 的往往正是 popup 那条查询**，所以查询必须等这一步读完 storage 才能回答，
+  // 否则它拿到的是还没恢复的 null（Codex 在 #166 指出）
+  const helperRestored = helperWaiter.resume()
 
   const menuDeps = {
     create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>
@@ -259,8 +261,8 @@ export default defineBackground(() => {
           void helperWaiter.start().then(() => sendResponse({ until: helperWaiter.until() }))
           return true
         }
-        sendResponse({ until: helperWaiter.until() })
-        return false
+        void helperRestored.then(() => sendResponse({ until: helperWaiter.until() }))
+        return true
       case 'axt:ocr':
         // 先把 scope 绑到 sender 的标签页：它可能是这个标签页第一条带 scope 的消息，不绑的话关标签页时 dropTab 撤不到
         // 排队的识别。只记关联、不建链：OCR 不能等翻译链构造（Codex 在 #87 两轮指出）

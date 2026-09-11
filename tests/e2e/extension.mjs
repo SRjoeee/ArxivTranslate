@@ -1311,7 +1311,39 @@ if (process.platform === 'darwin') {
     (await popup.locator('main').innerText()).includes('执行完成后自动生效'), '')
 
   await popup.screenshot({ path: `${SHOTS}/helper-onboarding.png` })
+
+  // service worker 闲置 30 秒会被回收，而**唤醒它的往往正是 popup 那条查询**：
+  // 查询必须等 `resume()` 读完 storage 才能回答，否则拿到的是还没恢复的 null（Codex 在 #166 指出）。
+  // worker 没被回收时这一条走的是内存那条路，同样该通过——两条路都不许把等待弄丢
+  await popup.waitForTimeout(35_000)
+  await popup.goto('about:blank')
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await paper.page.bringToFront()
+  await popup.waitForTimeout(1_000)
+  await popup.getByRole('button', { name: '安装', exact: true }).click()
+  await popup.waitForTimeout(400)
+  check('引导：service worker 被回收之后，等待仍然接得上',
+    (await popup.locator('main').innerText()).includes('执行完成后自动生效'), '')
   await popup.close()
+
+  // 剪贴板被挡住时走的是「请手动选中命令后复制」那条路——读者照做、装成了，
+  // 检测也必须已经在跑，否则页面上停着的图就一直停着（确认按钮已经没有了）
+  const denied = await context.newPage()
+  await denied.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('denied')) }, configurable: true })
+  })
+  await denied.goto(`chrome-extension://${extId}/popup.html`)
+  await paper.page.bringToFront()
+  await denied.waitForTimeout(900)
+  await denied.getByRole('button', { name: '安装', exact: true }).click()
+  await denied.waitForTimeout(300)
+  await denied.locator('button[title]').filter({ hasText: 'curl -fsSL' }).click()
+  await denied.waitForTimeout(600)
+  const fallback = (await denied.locator('main').innerText()).replace(/\n+/g, ' | ')
+  check('引导：复制失败时给出手动办法，并且照样开始检测',
+    fallback.includes('无法复制') && fallback.includes('执行完成后自动生效'), fallback.slice(-60))
+  await denied.close()
+
   await paper.page.close()
 }
 

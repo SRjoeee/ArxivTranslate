@@ -49,7 +49,10 @@ export interface HelperWaiter {
   start: () => Promise<void>
   /** worker 刚起来：storage 里还有没到期的等待就接上 */
   resume: () => Promise<void>
-  /** 等到什么时候；没在等时为 null。界面据此在重开之后接上同一次等待 */
+  /**
+   * 这一次等待的截止时间；没等过为 null。**可能已经过去**——那说明等过、没等到，
+   * 界面据此在重开之后说「尚未检测到」。探到或重新开始才清掉
+   */
   until: () => number | null
   /** 停下并清掉存着的截止时间 */
   stop: () => Promise<void>
@@ -68,7 +71,8 @@ export function createHelperWaiter(deps: HelperWaitDeps): HelperWaiter {
     timer = null
   }
 
-  const stop = async (): Promise<void> => {
+  /** 彻底结束：探到了，或者外部撤掉 */
+  const clear = async (): Promise<void> => {
     disarm()
     deadline = null
     await deps.save(undefined)
@@ -85,8 +89,10 @@ export function createHelperWaiter(deps: HelperWaitDeps): HelperWaiter {
   const tick = async (): Promise<void> => {
     if (deadline === null) return
     if (deps.now() >= deadline) {
-      // 到点了就收摊。界面那边靠自己的计时显示「尚未检测到」，两边不互相依赖
-      await stop()
+      // 到点了停掉轮次，但**留着这个过期的截止时间**：读者多半这时还在终端里，
+      // 等他回来重开 popup，界面要能分辨「等过、没等到」与「压根没开始」——
+      // 清掉的话两者都是 null，那句「尚未检测到」就永远不会出现（Codex 在 #166 指出）
+      disarm()
       return
     }
     // **先排下一轮，再探**：排在探测之后的话，一次挂住的探测会让等待静默停住——
@@ -97,7 +103,7 @@ export function createHelperWaiter(deps: HelperWaitDeps): HelperWaiter {
     try {
       const status = await deps.probe()
       if (status.available) {
-        await stop()
+        await clear()
         await deps.announce()
       }
     } catch (error) {
@@ -117,15 +123,13 @@ export function createHelperWaiter(deps: HelperWaitDeps): HelperWaiter {
     async resume() {
       if (deadline !== null) return
       const saved = await deps.load()
-      if (saved === undefined || saved <= deps.now()) {
-        // 过期的记录顺手清掉，免得它一直躺在 storage 里
-        if (saved !== undefined) await deps.save(undefined)
-        return
-      }
+      if (saved === undefined) return
+      // 过期的也认下来、但不再探：界面要靠它说出「尚未检测到」。
+      // session storage 随浏览器关闭而空，留着不占长期的地方
       deadline = saved
-      arm()
+      if (saved > deps.now()) arm()
     },
     until: () => deadline,
-    stop,
+    stop: clear,
   }
 }

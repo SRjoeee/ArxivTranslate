@@ -65,7 +65,9 @@ describe('createHelperWaiter', () => {
     installed = true
     await h.tick(2_000)
     expect(h.announced).toHaveLength(1)
+    // 探到才是真的结束：截止时间清掉，重开的界面看到的是「没在等」
     expect(waiter.until()).toBeNull()
+    expect(h.savedAt()).toBeUndefined()
     // 广播之后不再排新的一轮
     expect(h.armed()).toBe(0)
     const after = h.probes.length
@@ -73,19 +75,38 @@ describe('createHelperWaiter', () => {
     expect(h.probes.length).toBe(after)
   })
 
-  it('一窗走完就收摊，存着的截止时间也清掉', async () => {
+  // 到点之后**留着**那个过期的截止时间：读者多半这时还在终端里，等他回来重开 popup，
+  // 界面要能分辨「等过、没等到」与「压根没开始」——清掉的话两者都是 null（Codex 在 #166 指出）
+  it('一窗走完停掉轮次，但留着过期的截止时间给界面读', async () => {
     const h = harness()
     const waiter = createHelperWaiter(h.deps)
     await waiter.start()
     await flush()
-    expect(h.savedAt()).toBe(h.at() + 180_000)
+    const deadline = h.at() + 180_000
+    expect(h.savedAt()).toBe(deadline)
 
     await h.tick(181_000)
-    expect(waiter.until()).toBeNull()
-    expect(h.savedAt()).toBeUndefined()
+    expect(waiter.until()).toBe(deadline)
+    expect(h.savedAt()).toBe(deadline)
     expect(h.announced).toHaveLength(0)
-    // 停下之后不留定时器：worker 才有机会被回收
+    // 不再探、也不留定时器：worker 才有机会被回收
     expect(h.armed()).toBe(0)
+    const probed = h.probes.length
+    await h.tick(20_000)
+    expect(h.probes.length).toBe(probed)
+  })
+
+  it('超时之后重新开始一次，覆盖掉那个过期的', async () => {
+    const h = harness()
+    const waiter = createHelperWaiter(h.deps)
+    await waiter.start()
+    await flush()
+    await h.tick(181_000)
+
+    await waiter.start()
+    await flush()
+    expect(waiter.until()).toBe(h.at() + 180_000)
+    expect(h.armed()).toBe(1)
   })
 
   it('探测抛错不打断等待：下一轮照常', async () => {
@@ -134,14 +155,15 @@ describe('createHelperWaiter', () => {
     expect(h.probes.length).toBe(2)
   })
 
-  it('过期的记录不接，顺手清掉', async () => {
+  it('过期的记录认下来但不再探：界面靠它说出「尚未检测到」', async () => {
     const h = harness({ stored: 1_000_000 - 1 })
     const waiter = createHelperWaiter(h.deps)
     await waiter.resume()
     await flush()
-    expect(waiter.until()).toBeNull()
-    expect(h.savedAt()).toBeUndefined()
+    expect(waiter.until()).toBe(1_000_000 - 1)
     expect(h.armed()).toBe(0)
+    await h.tick(20_000)
+    expect(h.probes).toHaveLength(0)
   })
 
   it('没存过就什么都不做：绝大多数 worker 启动都走这条', async () => {
@@ -200,7 +222,7 @@ describe('createHelperWaiter', () => {
     await h.tick(181_000)
     // 一直没回来的那一次还挂着，但轮次自己走到了截止时间
     expect(h.probes).toHaveLength(1)
-    expect(waiter.until()).toBeNull()
+    expect(waiter.until()).not.toBeNull()
     expect(h.armed()).toBe(0)
   })
 })
