@@ -1,13 +1,30 @@
 import { describe, expect, it, vi } from 'vitest'
 import { extract, type TableBlock, type TextBlock } from '@/core/extractor'
-import { ERROR_CLASS, FOR_ATTR, REASON_ATTR, PARTIAL_ATTR, SPLIT_CLASS, STATE_ATTR, T_CLASS, clearTranslation, markPartial, renderFailed, renderPending, renderTable, restore, splitFigures } from '@/core/renderer'
+import { ERROR_CLASS, FOR_ATTR, REASON_ATTR, relabelFailed, PARTIAL_ATTR, SPLIT_CLASS, STATE_ATTR, T_CLASS, clearTranslation, markPartial, renderFailed, renderPending, renderTable, restore, splitFigures } from '@/core/renderer'
 import { docOf, frag } from './helpers'
-import { S, reasonText } from '@/ui/strings'
+import { S, reasonText, setLocale } from '@/ui/strings'
 
 const page = '<p class="ltx_p" id="p1">Text.</p>'
 
 // 失败态小部件（§7.6）：重试按钮 + 带原因的"！"，Shadow DOM 里，只是原块的下一个兄弟
 describe('renderFailed', () => {
+  it('换界面语言之后，按钮与悬停的那句一起改写（Codex 在 #161 两轮分别指出这两半）', () => {
+    const doc = docOf('<p class="ltx_p" id="p1">x</p>')
+    const block = extract(doc)[0] as TextBlock
+    renderFailed(block, 'auth: bad key', () => undefined)
+    const host = doc.querySelector<HTMLElement>(`.${ERROR_CLASS}`)!
+    setLocale('en')
+    expect(relabelFailed(doc)).toBe(1)
+    expect(host.getAttribute('title')).toBe(reasonText('auth'))
+    expect(host.shadowRoot?.querySelector('button')?.textContent).toBe(S.page.retry)
+    expect(host.shadowRoot?.querySelector('.mark')?.getAttribute('title')).toBe(reasonText('auth'))
+    // 原始诊断不动：它是给诊断用的，不跟着语言走
+    expect(host.getAttribute(REASON_ATTR)).toBe('auth: bad key')
+    setLocale('zh-CN')
+    relabelFailed(doc)
+    expect(host.getAttribute('title')).toBe(reasonText('auth'))
+  })
+
   it('删掉 pending、标 failed，插带 shadow root 的小部件：按钮 + 原因', () => {
     const doc = docOf(page)
     const p = extract(doc)[0] as TextBlock

@@ -72,10 +72,17 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
  * retried (Codex on #161). Called when the interface's language changes under an open paper
  */
 export function relabelFailed(doc: Document): number {
-  const buttons = doc.querySelectorAll<HTMLElement>(`.${ERROR_CLASS}`)
-  for (const host of buttons) {
-    const button = (host as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot?.querySelector('button')
+  const hosts = doc.querySelectorAll<HTMLElement>(`.${ERROR_CLASS}`)
+  for (const host of hosts) {
+    const root = (host as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot
+    const button = root?.querySelector('button')
     if (button) button.textContent = S.page.retry
+    // 悬停看到的那句同样要跟着换：它是从 kind 算出来的，原始诊断还留在属性里（Codex 在 #161 指出）
+    const reason = host.getAttribute(REASON_ATTR)
+    if (reason === null) continue
+    host.title = reasonText(parseFatal(reason).kind) || S.page.retry
+    const mark = root?.querySelector<HTMLElement>('.mark')
+    if (mark) mark.title = host.title
   }
-  return buttons.length
+  return hosts.length
 }
