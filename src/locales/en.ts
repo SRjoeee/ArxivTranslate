@@ -7,7 +7,7 @@ import type { Locale } from './index'
 import { PREVIEW_SOURCE, PREVIEW_TARGET } from './preview'
 
 const S: Locale['S'] = {
-  brand: 'Read arXiv',
+  brand: 'Readarxiv',
   settings: 'Settings',
   notArxiv: 'Open the HTML version of an arXiv paper to translate it',
   rows: {

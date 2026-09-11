@@ -5,7 +5,7 @@ import type { ProviderErrorKind } from '@/providers/types'
 import { PREVIEW_SOURCE, PREVIEW_TARGET } from './preview'
 
 const S = {
-  brand: 'Read arXiv', // S-P-01
+  brand: 'Readarxiv', // S-P-01
   settings: '设置', // S-P-02, and the button on every note
   notArxiv: '打开 arXiv 论文的 HTML 页面后即可翻译', // S-P-03
   rows: {

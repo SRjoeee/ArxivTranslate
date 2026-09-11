@@ -18,7 +18,7 @@ export default defineConfig({
   },
   manifest: {
     // UI.md S-P-01 requires the store listing, the manifest and the site to carry one name
-    name: 'Read arXiv',
+    name: 'Readarxiv',
     // Two marks, two surfaces (scripts/icons.mjs): `icons` is filled by WXT from public/icon/<size>.png,
     // the tile, for the card the extensions page and the store put an icon on. Everywhere the mark
     // stands on its own — this toolbar button, the page tabs, our own brand rows — it is the bare
