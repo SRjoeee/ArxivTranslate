@@ -175,6 +175,13 @@ const O = {
     blurHint: '译文先糊着，鼠标停上去才清晰，适合自测',
     advanced: '高级',
     advancedHint: '只填声明，不写选择器和花括号；字体与字号仍随论文',
+    /** 高级 CSS 被拒的四种情形（core/renderer/style-values.ts 只报是哪一种） */
+    advancedRejected: {
+      closeBrace: '不要写右花括号：这里只填声明，选择器由扩展补上',
+      openBrace: '不要写左花括号：这里只填声明，选择器由扩展补上',
+      atRule: '不支持 @ 规则',
+      angle: '不能包含 <',
+    },
     duplicate: '复制一份',
     /** 复制出来的那份叫什么：显示名 + 这个后缀（config/appearance.ts 的 duplicateStyle） */
     copySuffix: '副本',

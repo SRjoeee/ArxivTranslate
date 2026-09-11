@@ -170,6 +170,12 @@ const O: Locale['O'] = {
     blurHint: 'The translation stays blurred until the pointer rests on it, for testing yourself',
     advanced: 'Advanced',
     advancedHint: 'Declarations only, no selectors and no braces; the typeface and size still follow the paper',
+    advancedRejected: {
+      closeBrace: 'No closing brace: declarations only, the extension supplies the selector',
+      openBrace: 'No opening brace: declarations only, the extension supplies the selector',
+      atRule: 'At-rules are not supported',
+      angle: 'No < allowed',
+    },
     duplicate: 'Duplicate',
     copySuffix: 'copy',
     delete: 'Delete',
