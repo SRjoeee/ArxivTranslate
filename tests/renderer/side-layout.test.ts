@@ -196,6 +196,9 @@ describe('side 模式的容器覆盖', () => {
       // 一个配对只有在祖先链每一层都是容器时才会真的左右分栏；
       // 链上出现被排除的元素就会退化为上下堆叠。快照记录每类排除项挡住了多少，
       // 往排除清单里加东西、或者容器判定退回白名单，这里的数字都会变。
+      // **`tbody` 挡住的是方程组里的说明行**（issue #152），那是对的：这一趟只做
+      // `fakeTranslate`，而真实流程里 `splitFigures` 会把整组拆两份——原表进左栏、
+      // 只有译文的副本进右栏，配对链根本不需要走到行上（表格内部本来就在排除清单里）
       let connected = 0
       const blockedBy = new Map<string, number>()
       for (const node of Array.from(doc.querySelectorAll(`.${T_CLASS}`))) {

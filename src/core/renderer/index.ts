@@ -4,7 +4,7 @@
 import type { Block, TableBlock, TextBlock } from '@/core/extractor'
 import { isRtlTag } from '@/config/languages'
 import { AXT_ATTR_PREFIX, INJECTED_SELECTOR, T_CLASS, isInjected, stripInjected } from '@/core/marks'
-import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
+import { eqnProseCell, isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
 import highlightCss from '@/styles/highlight.css?inline'
 import imageCss from '@/styles/image.css?inline'
 import modesCss from '@/styles/modes.css?inline'
@@ -186,7 +186,17 @@ export function shouldInline(block: TextBlock): boolean {
 export function renderText(block: TextBlock, content: DocumentFragment): Element {
   clearTranslation(block)
   const node = block.el.ownerDocument.createElement(block.el.tagName)
-  node.append(content)
+  // 方程组里的说明行（§5.2 的 intertext）：块是 `<tr>`，译文按 §7.1 也得是 `<tr>`，
+  // 而行里的内容必须装在单元格里——直接挂在 `<tr>` 下表格布局根本不排它。用原格的**浅克隆**
+  // 当壳：`colspan` 与对齐 class 跟着走，译文行于是和原行一样宽、一样对齐
+  const shell = eqnProseCell(block.el)
+  if (shell) {
+    const cell = shell.cloneNode(false) as Element
+    cell.append(content)
+    node.append(cell)
+  } else {
+    node.append(content)
+  }
   // 表格单元格里的 .ltx_p 本身也是块，它的译文作为兄弟插在原表内，整表克隆会把它一起复制进来（2026-09-04 实测）
   stripInjected(node, false)
   node.className = translationClass(block.el)

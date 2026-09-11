@@ -356,6 +356,7 @@ exports[`fixture > synthetic-structures.html 1`] = `
     "cv": 2,
     "dedicatory": 1,
     "indexentry": 2,
+    "intertext": 2,
     "item": 2,
     "marginal": 1,
     "p": 12,
@@ -368,13 +369,13 @@ exports[`fixture > synthetic-structures.html 1`] = `
     "axt-b3",
   ],
   "lastIds": [
-    "axt-b30",
-    "axt-b31",
     "axt-b32",
+    "axt-b33",
+    "axt-b34",
   ],
   "numericCells": 0,
   "table": 0,
-  "text": 32,
-  "total": 32,
+  "text": 34,
+  "total": 34,
 }
 `;

@@ -27,6 +27,15 @@ export interface ProtectRule extends Rule {
   descend?: boolean
 }
 
+/** 方程组的表：组内有公式行，也可能有 `\intertext` 的说明行 */
+export const EQUATION_GROUP = 'table.ltx_equationgroup'
+
+/**
+ * 方程组里的说明行（`\intertext`）：`tr.ltx_eqn_row` 而**不带** `.ltx_equation`。
+ * 组里的间隔行也是这个形状，但它的格是空的，`extract` 的「有字母才成块」把它自然挡在外面
+ */
+export const EQN_PROSE_ROW = 'tr.ltx_eqn_row:not(.ltx_equation)'
+
 /** §5.1 翻译单元：命中且含可翻译文本即成块，并继续下钻发现嵌套单元 */
 export const UNIT_RULES: readonly Rule[] = [
   { id: 'p', selector: '.ltx_p', note: '正文段落，可能是 <span>；摘要、列表项、定理内的段落都由本条覆盖' },
@@ -51,6 +60,12 @@ export const UNIT_RULES: readonly Rule[] = [
   // 以下结构没在抓过的真实论文里出现，靠 tests/fixtures/arxiv/synthetic-structures.html 守护（RESEARCH.md §2.12）
   { id: 'dedicatory', selector: '.ltx_role_dedicatory', note: '献词' },
   { id: 'item', selector: '.ltx_item', note: '列表项 / description 术语的裸文本；项内有 .ltx_p 时由 p 规则接管' },
+  // `\intertext`：方程组里夹在公式之间的说明文字。LaTeXML 把它渲染成组表里一整行的单元格
+  // （`tr.ltx_eqn_row` 不带 `.ltx_equation`，格子上是 `white-space:normal` 与整组的 colspan），
+  // 不是 `<p>`。**单元是行不是格**：译文作下一个兄弟（§7.1），格的兄弟是同一行的第二个格，
+  // 两个 colspan 会把表撑出一倍的列、公式全被挤扁；行的兄弟是新的一行，正是想要的。
+  // 组里的间隔行同样匹配，但它的格是空的、没有字母，本来就不成块，不必特判
+  { id: 'intertext', selector: EQN_PROSE_ROW, note: '方程组里的 \\intertext 说明行（issue #152）' },
   { id: 'marginal', selector: '.ltx_marginpar', note: '边注' },
   { id: 'indexentry', selector: '.ltx_indexentry', note: '索引词条；页码由 .ltx_indexrefs 作占位符' },
   { id: 'cv', selector: '.ltx_cv_item_label, .ltx_cv_item_content, .ltx_cv_entry_date', note: 'CV 模板的条目字段' },
@@ -65,6 +80,26 @@ export const EQUATION_TABLE = 'table.ltx_eqn_table'
 export const EQUATION_PAD_CELL = '.ltx_eqn_center_padleft, .ltx_eqn_center_padright, .ltx_eqn_left_padleft, .ltx_eqn_right_padright'
 /** side 模式要装进一栏的宽内容（renderer/table-fit.ts）：表格与行间公式 */
 export const FIT_TARGETS = `${TABLE_RULES.root}, ${EQUATION_TABLE}`
+
+/**
+ * 说明行里装正文的那个格。渲染层拿它的**浅克隆**当译文行的壳：
+ * 行里的内容必须在单元格里，直接把译文挂在 `<tr>` 下表格布局根本不排它；
+ * 浅克隆带着 `colspan` 与对齐 class，译文行于是和原行一样宽、一样对齐
+ */
+export function eqnProseCell(row: Element): Element | null {
+  if (!row.matches(EQN_PROSE_ROW)) return null
+  return row.querySelector(':scope > td')
+}
+
+/**
+ * side 模式下整块拆两份的根（renderer/split-figures.ts）。
+ *
+ * 插图之外还有**含说明行的方程组**：组里的公式没有译文，只有说明行有，按块配对的话左栏是整组、
+ * 右栏只有一行中文，对照就断了；而让整组通栏又会把「公式在两栏各一份」的现有版式改掉。
+ * 与插图同样处理：克隆一份、删掉每对的原文成员，于是左栏是原组、右栏是同一组配中文说明（issue #152）
+ */
+export const SPLIT_ROOTS = `figure, ${EQUATION_GROUP}`
+
 
 /** 表格块的全部单元格，按文档序、任意深度：嵌套 tabular 的格也是外层块的格（§5.3） */
 export function tableCells(table: Element): Element[] {
@@ -83,7 +118,10 @@ export function isTableCell(el: Element): boolean {
 
 /** §5.2 块级整体跳过：不产出、不下钻。出现在翻译单元内部时（如段落里的 .ltx_ERROR）对该单元等价于 void */
 export const SKIP_RULES: readonly Rule[] = [
-  { id: 'equation', selector: '.ltx_equation, .ltx_equationgroup', note: '行间公式，含其对齐表格与 .ltx_eqn_cell' },
+  // `.ltx_equation` 同时匹配单式表 `table.ltx_equation` 与组内的公式行 `tr.ltx_equation`，两者都整块跳过。
+  // **方程组不在这里**：它是容器，里面除了公式行还可能有 `\intertext` 的说明行，那是正文
+  //（PROTECT_RULES 的 equationgroup + UNIT_RULES 的 intertext，issue #152）
+  { id: 'equation', selector: '.ltx_equation', note: '行间公式：单式的表与组内的公式行' },
   { id: 'listing', selector: '.ltx_listing, .ltx_listingline, .ltx_listing_data, .ltx_verbatim, pre, code', note: '代码、算法框内的行、verbatim、隐藏的代码数据' },
   // 作者区不再整块跳过（§5.2 修订）；姓名 2026-09-06 起也翻（见 UNIT_RULES 的 personname），
   // 只剩连接词还挡着：它们单独成块会把姓名列表打断成一行一个词
@@ -136,6 +174,11 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
   { id: 'tag', selector: '.ltx_tag', note: '编号与符号：章节号、公式编号、列表符号、脚注标记、代码行号；带环境名的除外，见 isNamedTag' },
   { id: 'tt', selector: '.ltx_text.ltx_font_typewriter', note: '等宽文本，视为代码' },
   { id: 'note', selector: '.ltx_note', descend: true, note: '脚注容器：对外层段落是 void，内部的 .ltx_note_content 仍要被发现为块' },
+  // 与脚注同一个形状（issue #152）：**对外层单元是一个原子**——整组当 void，线上文本与从前逐字节相同，
+  // 决不能把 `<table><tbody><tr>` 当成对标签发给引擎；**但提取器要下钻**，因为组里可能有
+  // `\intertext` 的说明行，那是独立的翻译单元。实测 12 篇 fixture 的 39 个方程组里有 5 个
+  // 落在 `.ltx_item` 之类的单元内部，写成 skip 或不写 descend 都会改掉那 5 个块发出去的内容
+  { id: 'equationgroup', selector: EQUATION_GROUP, descend: true, note: '方程组容器：对外层单元是 void，内部的说明行仍要被发现为块' },
   { id: 'note-mark', selector: '.ltx_note_mark, .ltx_note_type', note: '脚注标记与类型标签（容器外层与正文内各一次）' },
   { id: 'mailto', selector: 'a[href^="mailto:"]', note: '邮箱地址原样保留' },
   // LaTeXML 生成的联系方式标签（"Affiliation: " / "Email: "），arXiv 的样式表把它 display:none。
