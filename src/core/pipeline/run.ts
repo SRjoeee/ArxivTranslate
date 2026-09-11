@@ -86,8 +86,12 @@ type Outcome = 'waiting' | 'requested' | 'done' | 'failed'
  */
 type SegmentResult = { fragment: DocumentFragment & { offsets?: WireSpan[] }; alignment?: SentenceAlignment } | { error: string }
 type BatchResult = Map<Segment, SegmentResult>
-const CANCELLED: SegmentResult = { error: '已取消' }
-const MISMATCH: SegmentResult = { error: '译文的占位符与原文对不上' }
+/**
+ * 失败原因一律写成 `kind: 诊断`，与 provider 的错误同一个形状（`parseFatal` 读的就是它）：
+ * 读者看到的是按界面语言写的那一句，`kind` 之后那半句是给诊断用的，不进界面（Codex 在 #161 指出）
+ */
+const CANCELLED: SegmentResult = { error: 'aborted: 已取消' }
+const MISMATCH: SegmentResult = { error: 'invalid-response: 译文的占位符与原文对不上' }
 const errorOf = (res: Extract<TranslateMessageResponse, { ok: false }>): SegmentResult => ({ error: `${res.error.kind}: ${res.error.message}` })
 
 export function startTranslation(options: RunOptions): TranslationRun {
@@ -196,7 +200,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
     served(res.result.provider)
     const byId = new Map(res.result.segments.map(s => [s.id, s.text]))
     const texts = layout.runs.map((_, i) => byId.get(`${segment.id}#r${i}`))
-    if (texts.some(t => t === undefined)) return { error: '译文条数与原文对不上' }
+    if (texts.some(t => t === undefined)) return { error: 'invalid-response: 译文条数与原文对不上' }
     try {
       return { fragment: joinRuns(texts as string[], layout, segment.protected, doc) }
     } catch {
@@ -269,7 +273,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
       const cells = new Map<Element, DocumentFragment>()
       // 一格的原文侧偏移与对齐，等 renderTable 建出克隆格之后才登记得了（§7.7）
       const pairs = new Map<Element, { spans: readonly WireSpan[]; offsets?: WireSpan[]; alignment?: SentenceAlignment }>()
-      let reason = '未知错误'
+      let reason = 'unknown: 整批没有结果'
       for (const [segment, result] of out) {
         if ('fragment' in result) {
           if (!segment.cell) continue
@@ -310,7 +314,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
         } else {
           // 删掉 pending 与上一轮的译文（换了引擎 / 目标语言后再翻失败，页面不能还挂着旧译文，Codex 在 #9 指出），
           // 插失败态小部件：原因 + 重试（§7.6）
-          renderFailed(segment.block, result?.error ?? '未知错误', () => { void translate([segment.block]) })
+          renderFailed(segment.block, result?.error ?? 'unknown: 没有这一段的结果', () => { void translate([segment.block]) })
           outcome.set(segment.block, 'failed')
         }
       }

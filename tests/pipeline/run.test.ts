@@ -5,6 +5,7 @@ import { ERROR_CLASS, FOR_ATTR, INLINE_ATTR, PARTIAL_ATTR, PENDING_CLASS, STATE_
 import { TABLE_RULES } from '@/core/rules/latexml'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import type { TranslateCall } from '@/providers/translate-service'
+import { reasonText } from '@/ui/strings'
 
 const PAGE =
   '<h2 class="ltx_title ltx_title_section" id="s1">Introduction</h2>'
@@ -169,7 +170,9 @@ describe('startTranslation', () => {
     // 失败块旁是带原因的小部件（§7.6），不是译文
     const widget = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)!
     expect(widget.classList.contains(ERROR_CLASS)).toBe(true)
-    expect(widget.getAttribute('title')).toBe('unknown: unknown')
+    // 悬停看到的是按界面语言写的那一句，原始诊断在属性里（Codex 在 #161 指出）
+    expect(widget.getAttribute('title')).toBe(reasonText('unknown'))
+    expect(widget.getAttribute('data-axt-reason')).toBe('unknown: unknown')
     expect(doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)?.classList.contains(ERROR_CLASS)).toBe(false)
     // failed() 列出失败块；再交给 translate 就是重试，成功后小部件换成译文

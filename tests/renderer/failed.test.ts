@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { extract, type TableBlock, type TextBlock } from '@/core/extractor'
-import { ERROR_CLASS, FOR_ATTR, PARTIAL_ATTR, SPLIT_CLASS, STATE_ATTR, T_CLASS, clearTranslation, markPartial, renderFailed, renderPending, renderTable, restore, splitFigures } from '@/core/renderer'
+import { ERROR_CLASS, FOR_ATTR, REASON_ATTR, PARTIAL_ATTR, SPLIT_CLASS, STATE_ATTR, T_CLASS, clearTranslation, markPartial, renderFailed, renderPending, renderTable, restore, splitFigures } from '@/core/renderer'
 import { docOf, frag } from './helpers'
-import { S } from '@/ui/strings'
+import { S, reasonText } from '@/ui/strings'
 
 const page = '<p class="ltx_p" id="p1">Text.</p>'
 
@@ -18,10 +18,12 @@ describe('renderFailed', () => {
     expect(p.el.nextElementSibling).toBe(host)
     expect(host.className).toBe(`${T_CLASS} ${ERROR_CLASS}`)
     expect(host.getAttribute(FOR_ATTR)).toBe('p1')
-    expect(host.getAttribute('title')).toBe('auth: bad key')
+    // 读者看到的是按界面语言写的那一句；`kind: 诊断` 的后半段留在属性里给诊断（Codex 在 #161 指出）
+    expect(host.getAttribute('title')).toBe(reasonText('auth'))
+    expect(host.getAttribute(REASON_ATTR)).toBe('auth: bad key')
     const root = host.shadowRoot!
     expect(root.querySelector('button')?.textContent).toBe(S.page.retry)
-    expect(root.querySelector('.mark')?.getAttribute('title')).toBe('auth: bad key')
+    expect(root.querySelector('.mark')?.getAttribute('title')).toBe(reasonText('auth'))
   })
 
   it('点"重试"调回调并禁用按钮', () => {
