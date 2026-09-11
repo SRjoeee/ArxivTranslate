@@ -136,5 +136,12 @@ describe('style previews', () => {
     const escaping = styleTile({ id: 'e', name: 'e', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: 'position: fixed; inset: 0; z-index: 9999; width: 100vw; display: block; transform: scale(9); margin: 40px; color: teal' })
     expect(escaping).toMatchObject({ color: 'teal' })
     for (const gone of ['position', 'inset', 'zIndex', 'width', 'display', 'transform', 'margin']) expect(escaping, gone).not.toHaveProperty(gone)
+    // 撑大盒子的也不进：一个 1000px 的字号会把一行变成几千像素高，其余选项就够不着了
+    const huge = styleTile({ id: 'h', name: 'h', color: '', opacity: 1, underline: 'none', thickness: 1, blur: false, css: 'font-size: 1000px; line-height: 1000px; padding: 500px; border-bottom-width: 400px; font-weight: 700' })
+    expect(huge).toMatchObject({ fontWeight: '700' })
+    for (const gone of ['fontSize', 'lineHeight', 'padding', 'borderBottomWidth']) expect(huge, gone).not.toHaveProperty(gone)
+    // 兜底：无论如何一行都不会被撑高
+    expect(huge.maxHeight).toBeTruthy()
+    expect(huge.overflow).toBe('hidden')
   })
 })

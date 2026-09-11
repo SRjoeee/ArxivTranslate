@@ -16,6 +16,7 @@ export function styleTile(profile: StyleProfile): CSSProperties {
     // the injected sheet. A profile whose whole effect is a `font-weight` there would otherwise look
     // exactly like an unstyled one here, which defeats a preview (Codex on #161)
     ...declarations(profile.css),
+    ...CLAMP,
   }
 }
 
@@ -26,7 +27,15 @@ export function styleTile(profile: StyleProfile): CSSProperties {
  * (Codex on #161). A sample is one line of text, so it takes the properties that describe text and
  * leaves the ones that place a box. The paper still gets the whole declaration list
  */
-const TEXT_ONLY = /^(--|color$|opacity$|filter$|mix-blend-mode$|font-|letter-spacing$|word-spacing$|line-height$|text-|background|border-bottom|border-radius$|white-space$|font-variant)/
+const TEXT_ONLY = /^(--|color$|opacity$|filter$|mix-blend-mode$|font-(family|weight|style|variant|stretch)|letter-spacing$|word-spacing$|text-(decoration|shadow|transform|underline)|background|border-bottom-(color|style)$|border-radius$)/
+/**
+ * …and the ones that make a box bigger stay out even though they describe text: `font-size: 1000px`
+ * or `line-height: 1000px` turns one option into a row thousands of pixels tall and pushes the rest
+ * of the menu out of reach (Codex on #161, twice on this list). The hint under the box already says
+ * the typeface size follows the paper, so a sample that ignores it is not lying to anyone.
+ * The clamp below is the belt to this pair of braces: whatever slips through cannot grow the row
+ */
+const CLAMP: CSSProperties = { maxHeight: '2.6em', overflow: 'hidden' }
 
 /**
  * A sanitised declaration list — `font-weight: 600; letter-spacing: .02em` — as a style object.
