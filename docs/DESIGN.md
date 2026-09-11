@@ -141,7 +141,7 @@ interface Block {
 | 选择器 | 说明 |
 |---|---|
 | `math`, `.ltx_Math` | MathML 公式（行内的作占位符，块级的整体跳过）|
-| `.ltx_equation`, `.ltx_equationgroup` | 行间公式 |
+| `.ltx_equation` | 行间公式：单式的表与组内的公式行。**方程组本身不在这里**，见下面的 `\intertext` |
 | `.ltx_tag` | 公式编号、章节号、图表号、列表符号、代码行号 |
 | `.ltx_listing`, `.ltx_listingline`, `.ltx_listing_data`, `.ltx_verbatim`, `pre`, `code` | 代码、verbatim、隐藏的代码数据。算法框 `figure.ltx_float.ltx_algorithm` / `.ltx_float_algorithm` 内部即 `.ltx_listingline`，由本条覆盖，框内 `.ltx_caption` 正常翻译 |
 | `.ltx_text.ltx_font_typewriter` | 等宽文本（视为代码）|
@@ -170,6 +170,13 @@ interface Block {
   **没有做成"按计算样式跳过隐藏元素"的通用机制**——理由 2026-09-11 实测后修订过一次。原话说它是"性能陷阱"，量下来不是：翻译根内每个元素读一次 `display` / `visibility`，2312.17141（31987 个元素，我们最重的 fixture）**12.3 ms**，2607.24653v2（18941 个）6.2 ms，小论文 1 ms 上下；提取发生在任何写之前，布局是干净的，只付一次样式重算。真正的两条理由是：(1) **今天一个也抓不到**——同一批实测里，隐藏且含字母的子树根全部落在已有规则上（`.ltx_contact_name`、`.ltx_nodisplay`、`.ltx_author_before`），其余 107–141 个是 MathML 的 `<annotation>`，早被 `math` 的保护规则挡在外面；(2) 它会让 extractor **依赖布局与样式表**，而现在它是纯 DOM 的——1400 多个单元测试能在 happy-dom 里跑完整条提取链，正是因为这一点，而 happy-dom 的 `getComputedStyle` 与 Chrome 并不一致。Read Frog 走的是另一条路（通用 walker 每元素一次计算样式，`filter.ts`），代价是它必须配 484 条站点规则去纠偏；我们是单站适配器，规则表就是领域模型。改这条要升 `RULES_VERSION`，已升到 0.7.1。
 
 - **What LaTeXML marks as not displayed is never translated** [decided 2026-09-11, reported on 2509.10652v3]: the ACM template's `\Description{}` — the accessibility text a figure or table points at with `aria-describedby` — comes out as `<span class="ltx_nodisplay ltx_acm_description">`, which ar5iv hides with `display: none`. Our translation is our own node and carries no such class, so the caption's translation **printed the description**: several hundred words of prose, `\par` macros and all (LaTeXML leaves them unexpanded), under a one-line caption in the translated column — the user's report was "the middle of the page grew a screen of text out of nowhere". The same shape as `.ltx_contact_name` above and the same fix: a void placeholder, so it never reaches the engine and is rebuilt hidden. That paper has six of them, one per figure and table, 1.5–3k characters each — also the tokens they were spending. Translating the description properly (for a reader using a screen reader in Chinese) would mean placing a translation *inside* a hidden node, which the sibling-insertion invariant (§7.1) has no room for; not worth it for text no one sees. `RULES_VERSION` → 0.10.1, so the cached blocks that carry the description do not survive.
+- **方程组里的 `\intertext` 是正文，但组对外层单元仍是一个原子** [决定，2026-09-12，issue #152，用户实测反馈 2609.09360v1]：`\intertext` 是夹在对齐公式之间的说明文字，LaTeXML 不把它渲染成 `<p>`，而是方程组表里**整整一行**的单元格（`tr.ltx_eqn_row` 不带 `.ltx_equation`，格上是整组的 `colspan` 与 `white-space:normal`）。`.ltx_equationgroup` 原本是块级跳过，于是整组连同这些说明一起没了：side 模式下右栏显示的是同一段英文（那篇有 5 处）。
+  - **组从 SKIP 挪到 PROTECT + `descend`**，与脚注（`.ltx_note`）同一个形状：**对外层单元是一个 void**，**但提取器继续下钻**。两半都必要——只从 SKIP 里拿掉会改变**别的**块发出去的内容：实测 12 篇 fixture 的 39 个方程组里有 5 个落在 `.ltx_item` 之类的单元内部，那时组会被当成 `<table><tbody><tr>` 一串成对标签发给引擎，既多花 token 又给占位符协议添风险。改成 protect+descend 之后，13 篇 fixture、4691 个块的线上文本**逐字节未变**，块数也未变。
+  - **单元是行不是格**：译文按 §7.1 作下一个兄弟，格的兄弟是同一行的第二个格，两个 `colspan` 会把表撑出一倍的列、公式全被挤扁；行的兄弟是新的一行。译文行的内容装在**原格的浅克隆**里（`eqnProseCell`）——`<tr>` 下直接挂文本表格布局根本不排它，浅克隆带着 `colspan` 与对齐 class。
+  - **组里的间隔行不必特判**：它同样匹配选择器，但格是空的，`extract` 的「有字母才成块」自然把它挡在外面。
+  - **含说明行的组走拆分而不是镜像**（`SPLIT_ROOTS` 从 `figure` 扩到 `figure, table.ltx_equationgroup`）：组里一有块标记，`needsMirror` 就不再镜像它，而让整组通栏会把「公式在两栏各一份」的现有版式改掉——读者看得见。与插图同一条路：克隆一份、删掉每对的原文成员，左栏原组、右栏同一组配中文说明。拆分那套的删除逻辑本来就是通用的（下一个兄弟带 `.axt-t` 就删），只有搜索的根写死成 `figure`。实测 2609.09360v1：表宽与起点前后一致（468px / x=240），公式仍在两栏各一份，只有右栏的说明从英文变中文。
+  - **`RULES_VERSION` 不升** [决定，2026-09-12，用户拍板]：硬规则 6 说"改了规则就要升版本号"，而升一次等于**全站缓存作废**，每位读者重读任何论文都要重译一遍（LLM 用户是真金白银）。这次不需要：实测现有块的线上文本逐字节未变，而且缓存键里本来就含 `normalizedText`——万一有没覆盖到的形状让某个块内容变了，它的键**自动**就变了，不可能命中陈旧条目。`RULES_VERSION` 防的是"同样的文字现在该译成别的样子"（提示词 / 协议变更），纯增量的规则改动不属于那一类。**判据**：改动之后把全部 fixture 的线上文本跑一遍，逐字节相同才可以不升。
+  - 性能：`splitFigures` 每趟多枚举方程组。2312.17141（26 个组、392 张公式表，长任务预算守的那篇）实测 split 从 0.50 ms/趟 涨到 0.67 ms/趟，最长主线程任务 236 → 221 ms（噪声内），预算 600 ms。
 
 
 - **description 列表的术语也要翻** [决定，2026-09-06，Codex 在 #18 指出]：LaTeXML 把 `\item[Compactness]` 的术语放进 `.ltx_tag.ltx_tag_item`，而 tag 是受保护的，于是整个 `.ltx_item` 没有自有文本、**根本不成块**，术语永远不翻。`.ltx_tag_item` 加进 `NAMED_TAGS`，由既有的内容判定分流：12 篇 fixture 共 371 个，含词的只有 8 个（`Markov categories:`、`CD categories:`、`Compactness.`、`RQ1`–`RQ5`），其余 363 个是 `(1)` `•` 这类标记，照旧作 void。google-web 实测把 `RQ1` 原样返回、`Markov categories:` 译成「马尔可夫分类：」，标识符不会被改写。快照增量精确等于这 8 个
