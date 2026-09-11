@@ -312,8 +312,18 @@ two that differ. A simplified 16 is the fallback if it ever reads badly in the w
   逐个 popup 状态检查有没有中文漏出来。
 - **随扩展一起发的样式与背景高亮，名字跟着界面语言走**；读者改过名字之后就用读者的（`profileName`）。
   读者自己添加的配置永远用他自己写的名字。
-- **目标语言的名字也跟着界面语言写**：中文界面「日语（日本語）」，英文界面 "Japanese (日本語)"。括号跟着
+- **目标语言的名字也跟着界面语言写**：菜单里是「日语（日本語）」/ "Japanese (日本語)"，括号跟着
   外面那半句走，全角半角不混用。一种界面语言没有语言名表时读英文名——加语言不必先翻 179 个语言名。
+  **行里只写一个名字**（`languageName`），母语名只在菜单里出现（`languageLabel`）[定，2026-09-11，用户反馈]：
+  行是界面的一行，只有一行的地方，英文界面下 "Simplified Mandarin Chinese (简体中…)" 会拦腰截断，
+  而中文界面因为两个名字恰好相同、显示的是干净的「简体中文」——这是英文界面单边的毛病。找语言靠母语名，
+  那是菜单的事。
+- **界面里的语言名与发给模型的语言名是两张表**：`LANG_CODE_TO_EN_NAME` 是 ISO 639-3 的学名
+  （编的是"语言个体"），对模型正好——`Simplified Mandarin Chinese` 半点不含糊；对读者太拗口，
+  没有产品这么写。`LANG_CODE_TO_EN_UI_NAME` 在它之上覆盖 14 条（`Chinese (Simplified)`、`Arabic`、
+  `Greek`、`Pashto`…），只作用于界面。不改底表是因为它进 prompt，改了要升 `PROMPT_VERSION`、
+  让全站 LLM 缓存作废，为一个名字不值当。方位词是真区分的（`Western Frisian`、`Northern Sotho`）保留；
+  带文字的括号（`Uzbek (Cyrillic)`、`Malay (Jawi)`）也保留——读者拿到的确实是那种文字。
 
 ## 7. 需要改 DESIGN.md 的条目
 
