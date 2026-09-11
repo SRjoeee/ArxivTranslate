@@ -10,7 +10,8 @@ import type { HelperStatus } from '@/shared/ocr'
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 
 /** 受控的时钟与定时器：`tick(ms)` 把时间推进并跑完期间到期的那些 */
-function harness(options: { probe?: () => Promise<HelperStatus>; stored?: number } = {}) {
+function harness(options: { probe?: () => Promise<HelperStatus>; stored?: number; holdLoad?: boolean } = {}) {
+  let releaseLoad: (() => void) | null = null
   let now = 1_000_000
   let next = 1
   const timers = new Map<number, { at: number; run: () => void }>()
@@ -27,7 +28,14 @@ function harness(options: { probe?: () => Promise<HelperStatus>; stored?: number
     now: () => now,
     schedule: (run, ms) => { const id = next++; timers.set(id, { at: now + ms, run }); return id },
     cancel: id => { timers.delete(id) },
-    load: async () => saved,
+    load: async () => {
+      // **取值在读发出的那一刻**，与真实的 `storage.session.get` 一致：读发出之后的写
+      // 不影响这一次读回来的结果。夹具若读实时变量，下面那条竞态用例就永远抓不到
+      const snapshot = saved
+      // holdLoad：把读挂住，好在它回来之前插进别的动作
+      if (options.holdLoad) await new Promise<void>(resolve => { releaseLoad = resolve })
+      return snapshot
+    },
     save: async deadline => { saved = deadline },
     pollMs: 2_000,
     windowMs: 180_000,
@@ -46,7 +54,7 @@ function harness(options: { probe?: () => Promise<HelperStatus>; stored?: number
     now = target
   }
 
-  return { deps, tick, announced, probes, armed: () => timers.size, savedAt: () => saved, at: () => now }
+  return { deps, tick, announced, probes, armed: () => timers.size, savedAt: () => saved, at: () => now, releaseLoad: () => releaseLoad?.() }
 }
 
 const ready: HelperStatus = { available: true, version: '0.1.0' }
@@ -174,6 +182,29 @@ describe('createHelperWaiter', () => {
     expect(waiter.until()).toBeNull()
     expect(h.armed()).toBe(0)
     expect(h.probes).toHaveLength(0)
+  })
+
+  // resume 的守卫写在 await 之前，而读 storage 期间读者可能已经点了复制：
+  // 那一次是更新的、明确的动作，不许被读回来的旧值盖掉（Codex 在 #166 指出）
+  it('读 storage 期间开始了新的一次：旧值不许盖回去', async () => {
+    const h = harness({ stored: 1_000_000 - 5_000, holdLoad: true })
+    const waiter = createHelperWaiter(h.deps)
+    const restoring = waiter.resume()
+    await flush()
+
+    // 读还挂着的时候读者点了复制
+    await waiter.start()
+    await flush()
+    const fresh = h.at() + 180_000
+    expect(waiter.until()).toBe(fresh)
+
+    h.releaseLoad()
+    await restoring
+    await flush()
+    // 那个过期的旧值没有盖掉新的一窗
+    expect(waiter.until()).toBe(fresh)
+    expect(h.savedAt()).toBe(fresh)
+    expect(h.armed()).toBe(1)
   })
 
   it('正在等的时候 resume 不重复武装', async () => {

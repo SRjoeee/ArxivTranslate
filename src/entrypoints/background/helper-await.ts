@@ -123,7 +123,10 @@ export function createHelperWaiter(deps: HelperWaitDeps): HelperWaiter {
     async resume() {
       if (deadline !== null) return
       const saved = await deps.load()
-      if (saved === undefined) return
+      // **读完再判一次**：守卫写在 await 之前，而读 storage 期间读者可能已经点了复制。
+      // 那一次是更新的、明确的动作，不许被读回来的旧值（甚至过期值）盖掉——盖掉的话
+      // 新的一次安装一开始就显示成超时（Codex 在 #166 指出）
+      if (deadline !== null || saved === undefined) return
       // 过期的也认下来、但不再探：界面要靠它说出「尚未检测到」。
       // session storage 随浏览器关闭而空，留着不占长期的地方
       deadline = saved
