@@ -4,10 +4,14 @@ import { describe, expect, it } from 'vitest'
 import { T_CLASS, delocalizeNotes, localizeNotes } from '@/core/renderer'
 import { docOf } from './helpers'
 
-/** 一段带脚注的正文：原文段落（内含脚注与脚注译文）+ 段落译文（内含回填出来的脚注副本） */
+/**
+ * 一段带脚注的正文：原文段落（内含脚注与脚注译文）+ 段落译文（内含回填出来的脚注副本）。
+ * 脚注正文带 data-axt-id：它是提取器登记过的块（`.ltx_note_content` 是一条翻译单元），
+ * 译文早晚会到——没有这个标记的脚注是另一回事，见"没登记过的脚注"那几条
+ */
 const withNote = (translated = true, zh = '中文脚注') => docOf(`
   <p class="ltx_p">body<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup
-    ><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup>English note</span
+    ><span class="ltx_note_outer"><span class="ltx_note_content" data-axt-id="n1"><sup class="ltx_note_mark">1</sup>English note</span
     >${translated ? `<span class="ltx_note_content ${T_CLASS}" data-axt-for="n1"><sup class="ltx_note_mark">1</sup>${zh}</span>` : ''}
     </span></span></p>
   <p class="ltx_p ${T_CLASS}" data-axt-for="p1">正文<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup
@@ -164,6 +168,32 @@ describe('localizeNotes', () => {
     const doc = withNote(false)
     expect(localizeNotes(doc)).toBe(0)
     expect(copy(doc).textContent).toContain('English note')
+    expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
+  })
+
+  /** 一条没被提取器登记的脚注：正文全是 URL，没有字母可翻，所以永远不会有译文（2509.10652v3 的 1–6 号） */
+  const unregistered = (copyText = 'https://chat.openai.com') => docOf(`
+    <p class="ltx_p" data-axt-id="p1">body<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup
+      ><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup> <span class="ltx_tag ltx_tag_note">1</span> <a class="ltx_ref ltx_url">https://chat.openai.com</a></span
+      ></span></span></p>
+    <p class="ltx_p ${T_CLASS}" data-axt-for="p1">正文<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup
+      ><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup> <span class="ltx_tag ltx_tag_note">1</span> <a class="ltx_ref ltx_url">${copyText}</a></span
+      ></span></span></p>`)
+
+  it('没登记过的脚注（正文全是 URL）：副本逐字相同，原件标记隐藏，页面右缘只剩一份', () => {
+    // 译文永远不会到，等下去的结果是同一条边注画两遍（用户 2026-09-11 在 2509.10652v3 上反馈）
+    const doc = unregistered()
+    expect(localizeNotes(doc)).toBe(1)
+    expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(true)
+    // 副本没有译文可放，原样留着（不包 .axt-note-s：只有 only 模式要藏原文时才需要）
+    expect(copy(doc).querySelector('.axt-note-t')).toBeNull()
+    expect(copy(doc).textContent).toContain('https://chat.openai.com')
+    expect(localizeNotes(doc)).toBe(0) // 幂等
+  })
+
+  it('副本被引擎改过字就两份都留着：宁可重复也不丢内容', () => {
+    const doc = unregistered('https://chat.openai.com/zh')
+    expect(localizeNotes(doc)).toBe(0)
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
   })
 

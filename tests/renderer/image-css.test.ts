@@ -9,8 +9,8 @@ const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
 
 describe('image.css', () => {
   it('锚点定位：图声明锚点名、父元素限定作用域并做定位祖先、叠加层用 anchor() / anchor-size() 贴上去', () => {
-    // 位图与 SVG 图共用一条：<object> 也是叠加层的锚（§15.5）
-    expect(RULES).toMatch(/:is\(img, object\):has\(\+ \.axt-img\) \{\s*anchor-name: --axt-img;/)
+    // 三种图共用一条：<object>（外链 SVG，§15.5）与内联的 <svg>（TikZ，§15.6）也是叠加层的锚
+    expect(RULES).toMatch(/:is\(img, object, svg\):has\(\+ \.axt-img\) \{\s*anchor-name: --axt-img;/)
     expect(RULES).toMatch(/:has\(> \.axt-img\) \{\s*position: relative;\s*anchor-scope: --axt-img;/)
     expect(RULES).toMatch(/\.axt-img \{[^}]*position-anchor: --axt-img;[^}]*top: anchor\(top\);[^}]*width: anchor-size\(width\);/)
     // 竖排标签绕自己的中心转，原点被站点样式改掉就会飞出图外（§15.5）

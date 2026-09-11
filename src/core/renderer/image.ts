@@ -3,7 +3,7 @@
 // 叠加层不带 .axt-t（理由见 marks.ts 的 IMG_CLASS），只在成功时插；等待 / 失败没有 DOM 节点。
 // 与 §7.1 一致：<img> 本身一个属性都不加；恢复原文时 restore 按 INJECTED_SELECTOR 整层删掉。
 import { IMG_CLASS } from '@/core/marks'
-import { FOR_ATTR, LANG_ATTR } from './index'
+import { DIR_ATTR, FOR_ATTR, LANG_ATTR } from './index'
 import { MIRROR_CLASS } from './mirror'
 import { SPLIT_FOR_ATTR } from './split-figures'
 
@@ -14,10 +14,11 @@ export interface ImageTarget {
   id: string
   el: Element
   /**
-   * 位图走「取字节 → OCR」，SVG 图直接读 `contentDocument` 里的字形（§15.5）。
-   * 两条路在 `linesToBoxes` 汇合，之后的叠加层、缓存、调度完全一样
+   * 位图走「取字节 → OCR」，外链 SVG 图直接读 `contentDocument` 里的字形（§15.5），
+   * 内联 TikZ 图读 `foreignObject` 里的 HTML 与它的矩形（§15.6）。
+   * 三条路在 `linesToBoxes` 汇合，之后的叠加层、缓存、调度完全一样
    */
-  kind: 'raster' | 'svg'
+  kind: 'raster' | 'svg' | 'picture'
 }
 
 /** 一个译文标签：位置与尺寸是图的归一化坐标（0–1，左上原点），lines 是 OCR 合并进来的行数 */
@@ -31,8 +32,11 @@ export interface ImageLabel {
   source: string
   /** 译文 */
   text: string
-  /** 文字方向，弧度；不在表示横排。语料里只有 -π/2 一种（§15.5） */
+  /** 文字方向，弧度；不在表示横排（§15.5） */
   angle?: number
+  /** 斜标签自己的长与厚，都按图**宽**的比例；与 angle 同时出现 */
+  len?: number
+  thick?: number
 }
 
 export function setImageModes(doc: Document, modes: readonly string[]): void {
@@ -100,18 +104,20 @@ export function emWidth(text: string): number {
  */
 export function labelStyle(label: ImageLabel): string {
   const pct = (v: number) => `${(v * 100).toFixed(3)}%`
-  const cq = (v: number, unit: 'cqw' | 'cqh') => `${(v * 100).toFixed(3)}${unit}`
+  const cq = (v: number) => `${(v * 100).toFixed(3)}cqw`
   const lines = Math.max(1, label.lines)
-  if (label.angle) {
-    // 轴对齐外接框就是竖排文字自己的框（转 90° 没有斜边）：h 是文字长度、w 是行厚度
+  if (label.angle && label.len && label.thick) {
+    // 斜标签沿**自己的轴**摆：盒子是文字自己的长与厚（不是轴对齐外接框——那个框只在 90° 的倍数上
+    // 与文字重合，5° 时比文字大一圈），中心对中心放好再整体转过去。两根轴都用 cqw
+    // （图宽的百分比，一个长度单位），这样一个数在哪个方向上都是同一段实际长度；
+    // 换成 `width: X%` 就会变成「容器宽的百分比」，容器不是正方形时竖向长度就错了
     const cx = label.x + label.w / 2
     const cy = label.y + label.h / 2
-    const byThickness = (72 * label.w) / lines
-    const byLength = (92 * label.h * lines) / emWidth(label.text)
-    return `left:calc(${cq(cx, 'cqw')} - ${cq(label.h / 2, 'cqh')});top:calc(${cq(cy, 'cqh')} - ${cq(label.w / 2, 'cqw')});`
-      + `width:${cq(label.h, 'cqh')};height:${cq(label.w, 'cqw')};`
-      + `transform:rotate(${((label.angle * 180) / Math.PI).toFixed(2)}deg);`
-      + `font-size:min(${byThickness.toFixed(2)}cqw,${byLength.toFixed(2)}cqh)`
+    const byThickness = (72 * label.thick) / lines
+    const byLength = (92 * label.len * lines) / emWidth(label.text)
+    return `left:${pct(cx)};top:${pct(cy)};width:${cq(label.len)};height:${cq(label.thick)};`
+      + `transform:translate(-50%,-50%) rotate(${((label.angle * 180) / Math.PI).toFixed(2)}deg);`
+      + `font-size:min(${byThickness.toFixed(2)}cqw,${byLength.toFixed(2)}cqw)`
   }
   const byHeight = (72 * label.h) / lines
   // 宽度上限：整段文字分成 lines 行，每行大约 emWidth / lines 个 em；留 8% 边距
@@ -133,11 +139,14 @@ export function renderImage(target: ImageTarget, labels: readonly ImageLabel[]):
   node.className = IMG_CLASS
   node.setAttribute(FOR_ATTR, target.id)
   const lang = doc.documentElement.getAttribute(LANG_ATTR)
+  // 图里的标签同样要 `dir`：一个阿拉伯语标签在 ltr 的基方向下标点会跑到另一头（§7.5）
+  const dir = doc.documentElement.getAttribute(DIR_ATTR)
   for (const label of labels) {
     const span = doc.createElement('span')
     span.textContent = label.text
     span.title = label.source
     if (lang) span.setAttribute('lang', lang)
+    if (dir) span.setAttribute('dir', dir)
     span.setAttribute('style', labelStyle(label))
     node.append(span)
   }

@@ -30,10 +30,22 @@ export function isInjected(el: Element): boolean {
 export const AXT_ATTR_PREFIX = 'data-axt-'
 
 /**
+ * 会执行脚本的 URL。克隆件里**不留这种**：链接的行为归原件，克隆只是拿来读的副本。
+ * 只挡这两种，不做通用 URL 清洗——`data:image/...` 是论文里真实存在的内联图
+ */
+const UNSAFE_URL = /^\s*(?:javascript:|data:text\/html)/i
+const URL_ATTRS = ['href', 'xlink:href', 'src', 'action', 'formaction', 'data']
+
+/**
  * 克隆件入页之前的清理：删掉克隆里已有的注入节点（别人的译文 / 镜像会被整块复制进来），
  * 再剥掉 id（避免重复锚点，DESIGN §6.4）与全部 data-axt-* 标记（原块、占位符回填的脚注都可能带着块标记）。
  * 镜像、译文表、占位符回填、拆图以前各有一份几乎一样的实现，漂移过（issue #46）；现在只有这一份。
- * `includeRoot=false` 用于根节点是新建的译文壳、只清理被搬进来的子树
+ * `includeRoot=false` 用于根节点是新建的译文壳、只清理被搬进来的子树。
+ *
+ * **行为属性一并去掉**（2026-09-11，独立审计 B17 实测）：回填出来的克隆带着原节点的 `onclick`，
+ * 点下去真的会执行——译文里的副本是给人读的，不该是第二个可触发的控件，而且同一段行为在页面上
+ * 出现两次本身就不对。arXiv 的 LaTeXML 不产出事件属性，所以今天没有暴露面；这是把不变量写死，
+ * 不是修一个已知故障。Read Frog 的 `sanitizeInlineAtomClone` 做的是同一件事
  */
 export function stripInjected(root: Element, includeRoot = true): void {
   for (const stale of Array.from(root.querySelectorAll(INJECTED_SELECTOR))) stale.remove()
@@ -41,6 +53,9 @@ export function stripInjected(root: Element, includeRoot = true): void {
   if (includeRoot) targets.unshift(root)
   for (const el of targets) {
     el.removeAttribute('id')
-    for (const name of el.getAttributeNames()) if (name.startsWith(AXT_ATTR_PREFIX)) el.removeAttribute(name)
+    for (const name of el.getAttributeNames()) {
+      if (name.startsWith(AXT_ATTR_PREFIX) || name.toLowerCase().startsWith('on')) el.removeAttribute(name)
+      else if (URL_ATTRS.includes(name.toLowerCase()) && UNSAFE_URL.test(el.getAttribute(name) ?? '')) el.removeAttribute(name)
+    }
   }
 }

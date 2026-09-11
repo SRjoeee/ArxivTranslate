@@ -30,6 +30,21 @@ describe('collectImageTargets', () => {
     expect(targets[0]!.id).toBe('axt-img-1') // 没有 id 的图编号
   })
 
+  it('内联 TikZ 图（§15.6）：带词的收，纯公式的不收，块内的照旧不收', () => {
+    const node = (inner: string) =>
+      `<foreignObject><span class="ltx_foreignobject_container"><span class="ltx_foreignobject_content">${inner}</span></span></foreignObject>`
+    const math = '<math class="ltx_Math"><semantics><mrow>E1</mrow><annotation encoding="application/x-tex">E_1</annotation></semantics></math>'
+    const doc = docOf(
+      `<figure class="ltx_figure"><span class="ltx_inline-block"><svg id="words" class="ltx_picture">${node('Shared Expert')}</svg></span></figure>`
+      + `<figure class="ltx_figure"><span class="ltx_inline-block"><svg id="formula" class="ltx_picture">${node(math)}</svg></span></figure>`
+      + `<div class="ltx_para"><p class="ltx_p" id="p">Text <svg id="inline" class="ltx_picture">${node('Shared Expert')}</svg> more text.</p></div>`,
+    )
+    markBlocks(extract(doc))
+    const targets = collectImageTargets(doc)
+    expect(targets.map(t => t.id)).toEqual(['words'])
+    expect(targets[0]!.kind).toBe('picture')
+  })
+
   it('没有块标记时块内的图也会被收进来：调用方必须在标记写完之后再收', () => {
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p">Inline <img class="ltx_graphics" src="b.png"> here.</p></div>')
     expect(collectImageTargets(doc)).toHaveLength(1)

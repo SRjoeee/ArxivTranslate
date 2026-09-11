@@ -932,6 +932,41 @@ export function toBcp47(code: string): string {
 }
 
 /**
+ * 从右往左书写的目标语言（ISO 639-3）。译文节点要按这个写 `dir`——**只写 `lang` 不够**：
+ * 浏览器的双向算法按 `dir` 定段落的基方向，而 arXiv 的 `<html>` 是 ltr，译文节点继承下来之后，
+ * 句末的标点、数字、拉丁词、公式全排在错的一侧（实测 2509.10652v3 译成阿拉伯语：
+ * 「مساهمات متساوية.」渲染成「مساهمات .متساوية」，句号跑到了词前面），整段还靠左。
+ * 我们表里 178 种语言里有这 12 种（Read Frog 用同一套做法，见 utils/content/language-direction.ts）
+ */
+export const RTL_LANGUAGES: ReadonlySet<LangCode> = new Set<LangCode>([
+  'arb', // 阿拉伯语
+  'urd', // 乌尔都语
+  'pes', // 波斯语
+  'prs', // 达里语
+  'ckb', // 中库尔德语（索拉尼）
+  'skr', // 西赖基语
+  'pbu', // 北普什图语
+  'heb', // 希伯来语
+  'div', // 迪维希语
+  'snd', // 信德语
+  'uig', // 维吾尔语
+  'ydd', // 东意第绪语
+])
+
+/** 发给引擎的标签（可能是两字母码，也可能回落成 639-3）对应的主子标签集合，由上表派生 */
+const RTL_TAGS: ReadonlySet<string> = new Set([...RTL_LANGUAGES].map(code => toBcp47(code).toLowerCase().split('-')[0]!))
+
+/** 目标语言是不是从右往左写的。收 ISO 639-3 码 */
+export function isRtl(code: string): boolean {
+  return isLangCode(code) && RTL_LANGUAGES.has(code)
+}
+
+/** 同上，收已经转成 BCP-47 的标签（`<html>` 上记的是它） */
+export function isRtlTag(tag: string): boolean {
+  return RTL_TAGS.has(tag.toLowerCase().split('-')[0] ?? '')
+}
+
+/**
  * BCP-47 → ISO 639-3，配置 v3→v4 迁移用。BCP-47 不分大小写（Codex 在 #39 指出）。
  * 依次：精确反查（zh-TW → cmn-Hant）；子标签相交——表里同主语言的条目中，取地区 / 文字子标签有交集的
  * （zh-Hant-TW ∩ zh-TW → cmn-Hant）；中文的繁体文字标签或港澳台地区（zh-Hant、zh-HK、zh-MO）表里没有对应条目，

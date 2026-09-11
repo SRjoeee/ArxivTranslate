@@ -55,7 +55,8 @@ function boundaryCalls(root: Element, spans: readonly WireSpan[], from: number, 
 
 
 describe('wire offsets to DOM (#105)', () => {
-  it('emits byte-identical wire text on both paths across every fixture and format', () => {
+  // 同上：整套 fixture × 两种格式，CPU 密集，与全局 30s 的余量赛跑
+  it('emits byte-identical wire text on both paths across every fixture and format', { timeout: 120_000 }, () => {
     // The two paths are deliberately separate: the default one escapes the whole string at once and
     // collapses once, touching not one extra character; only the tracked one walks per character so
     // it can record anchors. This is the single guard against them drifting apart.

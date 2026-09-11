@@ -20,6 +20,21 @@ export interface OcrLine {
    * glyph transform; Vision's quads are axis-aligned in practice and the helper leaves it off.
    */
   angle?: number
+  /**
+   * The label's own box when it is not axis-aligned, as fractions of the figure's **width** —
+   * `len` along the baseline, `thick` across it. The quad's axis-aligned bounds are bigger than a
+   * tilted label and in two different scales (x of the width, y of the height), so they cannot
+   * place it; these can, and a single axis keeps the two comparable (§15.5). Set by the glyph path
+   * whenever `angle` is; absent means the overlay falls back to the axis-aligned box.
+   */
+  len?: number
+  thick?: number
+  /**
+   * How many rendered lines the quad spans, when the source knows. Only the inline-picture path
+   * (§15.6) sets it — a TikZ label is one node whatever it wraps to, and the overlay sizes its font
+   * by the box height divided by this. OCR and glyph runs are one line each and leave it off.
+   */
+  rows?: number
 }
 
 export interface OcrResult {

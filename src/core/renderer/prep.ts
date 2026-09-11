@@ -15,6 +15,7 @@
 import { ID_ATTR } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { createCoalescer, type Coalescer } from '@/core/scheduler/coalesce'
+import { applyMarginNotes, planMarginNotes } from './margin-notes'
 import { createMirrors } from './mirror'
 import { localizeNotes } from './notes'
 import { readPairMargins, writePairMargins, type PairMarginPlan } from './pair-margins'
@@ -85,6 +86,9 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
     // 边距先**读**：这一刻还没写任何东西，样式是干净的（上一帧刚渲染完，pipeline 插的译文早就算过了）。
     // 放到插节点之后再读，`:has()` 的失效会让这一次 getComputedStyle 花掉整篇重算的钱
     let margins: PairMarginPlan[] = options.isSide() ? roots.map(r => readPairMargins(r)) : []
+    // 边注的下排也在这里读——**整篇一起**（一条推多少取决于它前面所有条，§7.2），而且搭上面那次读的车：
+    // 这一刻的布局已经被上面那行算过了，多读几个矩形不再付强制布局的钱
+    const noteLayout = options.isSide() ? planMarginNotes(doc) : null
     let notes = 0
     for (const r of roots) notes += localizeNotes(r)
     const t1 = performance.now()
@@ -118,17 +122,28 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
     // 边距最后**写**：读是趟开头做的
     let aligned = 0
     for (const plan of margins) aligned += writePairMargins(plan)
+    const moved = noteLayout ? applyMarginNotes(noteLayout) : 0
     const t5 = performance.now()
+    // 这一趟动过 DOM 的话，上面那份边注计划就是按动之前的位置算的：译文让边注变高、缩表与拆图让块上下挪。
+    // 再排一趟去量新位置——单独一个任务，从干净的布局开始读、读完再写，不在这一趟里读后写（§10）。
+    // 没动过就不排：那一趟的读要付一次强制布局，最重的 fixture 上是一百多毫秒
+    if (notes || split || fitted || made || aligned) restack.schedule()
 
     // 每趟都报（包括什么都没做的）：累计耗时要把"白跑"的趟也算进去，e2e 的整理成本断言靠它
     options.trace?.(
       `side prep${scope === null ? ' (full)' : ` (${scope.length} blocks, ${roots.length} roots)`}: `
-      + `+${split} figures split, +${made} mirrors, ${fitted} tables scaled, ${scrolled} scrollable, ${aligned} margins aligned, ${notes} notes localized; `
+      + `+${split} figures split, +${made} mirrors, ${fitted} tables scaled, ${scrolled} scrollable, ${aligned} margins aligned, ${notes} notes localized, ${moved} notes stacked; `
       + `notes=${(t1 - t0).toFixed(1)} split=${(t2 - t1).toFixed(1)} mirrors=${(t3 - t2).toFixed(1)} tables=${(t4 - t3).toFixed(1)} margins=${(t5 - t4).toFixed(1)} total=${(t5 - t0).toFixed(1)}ms`,
     )
   }
 
   const coalescer: Coalescer<Element> = createCoalescer(run, { delay: options.delay ?? 150, maxWait: options.maxWait ?? 1000 })
+  // 边注下排：读全篇边注的位置、写各自的位移。与上面那趟分开，因为它要量的是那一趟写完的结果
+  const restack: Coalescer = createCoalescer(() => {
+    if (!options.isSide()) return
+    const moved = applyMarginNotes(planMarginNotes(doc))
+    if (moved) options.trace?.(`margin notes: ${moved} stacked`)
+  }, { delay: options.delay ?? 150, maxWait: options.maxWait ?? 1000 })
   // 字体加载完成：自然宽度变了（缓存由 watchFontLoads 清），栏宽也顺手重读一次，然后全量整理一趟
   watchFontLoads(doc, () => {
     columnStale = true
@@ -144,9 +159,11 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
     },
     cancel() {
       coalescer.cancel()
+      restack.cancel()
     },
     reset() {
       coalescer.cancel()
+      restack.cancel()
       mirrorsDone = false
       columnStale = true
       resetFitCache()

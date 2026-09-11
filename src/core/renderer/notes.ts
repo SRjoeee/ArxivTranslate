@@ -17,6 +17,10 @@
 //
 // 隐藏只认 data-axt-note 标记、且标记只在复制成功时才打：第一版用一条无条件的 CSS 藏原件译文，
 // JS 没跑到中文就凭空消失。现在没跑到时只是退回"原件里原文 + 译文并排"的旧样子，不丢内容。
+//
+// "复制成功"有两种：译文已到（副本 = 原文 + 译文），或者这条脚注压根没被提取器登记成块
+//（正文全是 URL、全是公式，没有可翻的字），副本与原件逐字相同。后一种以前不打标记，
+// 原件就一直露着，同一条边注在沟槽里画两遍（2509.10652v3 引言的 6 条 URL 脚注，用户 2026-09-11 反馈）。
 import { ID_ATTR } from '@/core/extractor'
 import { T_CLASS, isInjected } from '@/core/marks'
 import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
@@ -135,6 +139,18 @@ function mirrorNote(source: Element, translated: Element, wrapper: Element, fres
 /** A translation that has actually arrived: not the skeleton, not the failure widget, which are `.axt-t` siblings too */
 const arrived = (el: Element | null): el is Element => !!el && el.classList.contains(T_CLASS) && !el.classList.contains(PENDING_CLASS) && !el.classList.contains('axt-error')
 
+const squeeze = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim()
+
+/**
+ * The copy reproduces the original word for word, so only one of the two needs to be on screen.
+ * It is rebuilt from the placeholder, not translated, so this is the normal state for a note with
+ * nothing to translate in it — a bare URL, a lone formula.
+ */
+const reproduces = (source: Element, copy: Element): boolean => {
+  const text = squeeze(source.textContent)
+  return text !== '' && text === squeeze(copy.textContent)
+}
+
 /**
  * 把脚注的译文复制进译文块里重建出来的副本，并标记原件。
  * 幂等：副本里已有同样内容就不动；内容变了就换。返回本轮改动的数量。
@@ -153,11 +169,32 @@ export function localizeNotes(root: Document | Element): number {
     if (sources.length !== copies.length) continue
     copies.forEach((copy, i) => {
       const source = sources[i]
+      if (!source) return
+      const note = source.closest(NOTE.root)
       // Only a translation that has arrived: the skeleton and the failure widget are `.axt-t` siblings
       // as well, and copying one of them would count as a translation — in only mode the English
       // would be hidden behind a skeleton, or gone for good after a failure (Codex on #153)
-      const translated = source?.nextElementSibling ?? null
-      if (!arrived(translated)) return
+      const sibling = source.nextElementSibling
+      // Whether a translation is coming at all. Computed before the narrowing below: `arrived` says
+      // "this is a translation that has landed", and its false branch is a skeleton, a failure
+      // widget, or nothing — not "not an element"
+      const registered = source.hasAttribute(ID_ATTR) || !!sibling?.classList.contains(T_CLASS)
+      if (!arrived(sibling)) {
+        // A note the extractor never registered — its content is a bare URL, a lone formula, nothing
+        // with letters in it — will never get a translation, and waiting for one left the original
+        // showing beside a copy that says exactly the same thing: one note painted twice, the two
+        // boxes 24px apart (the six URL footnotes of 2509.10652v3's opening sentence, reported
+        // 2026-09-11). A registered one keeps waiting: hiding it early would take its skeleton with
+        // it, and after a failure the widget the reader retries from (Codex on #153).
+        // The mark goes on only while the copy reproduces the original word for word; against a copy
+        // the engine mangled both stay on screen — a duplicate beats a note gone missing
+        if (!registered && note && !note.hasAttribute(LOCALIZED_ATTR) && reproduces(source, copy)) {
+          note.setAttribute(LOCALIZED_ATTR, '')
+          localized += 1
+        }
+        return
+      }
+      const translated = sibling
       const fresh = localizedCopy(translated)
       const existing = copy.querySelector(`:scope > .${NOTE_T_CLASS}`)
       if (existing?.textContent === fresh.textContent) return // 已归位且内容没变
@@ -169,8 +206,8 @@ export function localizeNotes(root: Document | Element): number {
       copy.append(fresh)
       // The copy is what is on screen: its sentence registration comes along, so pointing at the
       // note tints the note's own sentence
-      if (wrapper) mirrorNote(source!, translated, wrapper, fresh)
-      source?.closest(NOTE.root)?.setAttribute(LOCALIZED_ATTR, '')
+      if (wrapper) mirrorNote(source, translated, wrapper, fresh)
+      note?.setAttribute(LOCALIZED_ATTR, '')
       localized += 1
     })
   }

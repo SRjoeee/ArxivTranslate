@@ -151,7 +151,7 @@ describe('startImageTranslation', () => {
   })
 
   it('OCR 出错记失败；图里没有可翻的字算完成、不插叠加层', async () => {
-    const failing = setup({ ocr: async () => ({ ok: false, error: { kind: 'network', message: 'helper 断开' } }) })
+    const failing = setup({ ocr: async () => ({ ok: false, error: { kind: 'network', message: 'helper 断开', isolatable: false } }) })
     await failing.run.translate(failing.targets)
     expect(failing.run.failed()).toHaveLength(1)
     const empty = setup({ ocr: async () => ({ ok: true, result: { width: 1, height: 1, lines: [line('12.5', 0.1), line('B', 0.5)] }, cached: false }) })
@@ -187,7 +187,7 @@ describe('startImageTranslation', () => {
       doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }),
       ocr,
-      translate: async () => ({ ok: false, error: { kind: 'auth', message: 'User not found.' } }),
+      translate: async () => ({ ok: false, error: { kind: 'auth', message: 'User not found.', isolatable: false } }),
       isEnabled: () => true, isCurrent: () => true,
     })
     await run.translate([targets[0]!])
@@ -206,7 +206,7 @@ describe('startImageTranslation', () => {
     const run = startImageTranslation({
       doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr,
-      translate: async () => ({ ok: false, error: { kind: 'network', message: 'offline' } }),
+      translate: async () => ({ ok: false, error: { kind: 'network', message: 'offline', isolatable: false } }),
       isEnabled: () => true, isCurrent: () => true,
     })
     await run.translate(targets)
@@ -298,7 +298,7 @@ describe('startImageTranslation', () => {
     const run = startImageTranslation({
       doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr, maxConcurrent: 2,
-      translate: async () => ({ ok: false, error: { kind: 'no-key', message: '未配置 key' } }),
+      translate: async () => ({ ok: false, error: { kind: 'no-key', message: '未配置 key', isolatable: false } }),
       isEnabled: () => true, isCurrent: () => true,
       onProgress: p => { progress.push({ failed: p.failed, fatal: p.fatal }) },
     })
@@ -326,7 +326,7 @@ describe('startImageTranslation', () => {
     const run = startImageTranslation({
       doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
       fetchBytes, ocr, maxConcurrent: 1,
-      translate: async () => ({ ok: false, error: { kind: 'network', message: 'x' } }),
+      translate: async () => ({ ok: false, error: { kind: 'network', message: 'x', isolatable: false } }),
       isEnabled: () => true, isCurrent: () => true,
     })
     const all = run.translate(targets) // 1 在飞、2 排队
