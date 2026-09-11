@@ -16,7 +16,8 @@ export function createMessageTransport(send: Send = sendMessage): TranslationTra
       try {
         return await send({ type: 'axt:translate', ...call })
       } catch (e) {
-        return { ok: false, error: { kind: 'network', message: `无法与扩展后台通信：${reason(e)}` } }
+        // 后台都联系不上，拆小批次只是把同一个失败重复段数次
+        return { ok: false, error: { kind: 'network', message: `无法与扩展后台通信：${reason(e)}`, isolatable: false } }
       }
     },
     // 取消是尽力而为：撤不掉的在飞请求由 content 侧的会话 id 在接收处挡掉（run.ts 的 halted）

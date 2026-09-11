@@ -116,20 +116,53 @@ const META_BY_KIND: Record<ProviderErrorKind, RequestErrorMeta> = {
   'unknown': {},
 }
 
+/**
+ * 每种 kind 默认**拆小了重试有没有可能成功**。provider 知道得更多时用构造参数覆盖。
+ *
+ * 判据只有一条：这次失败是**某一段引起的**，还是整条路都不通？
+ * - `invalid-response`：多半是某一段把模型的输出带偏了，拆小能定位到它（服务端整个返回坏了的那种，
+ *   provider 自己声明 false）
+ * - `timeout`：批越小越可能在预算内回来
+ * - `unknown`：没有依据，保持从前的行为（拆）
+ * - `rate-limit` / `network` / `bad-request`：拆小只会把同一个失败**乘以段数**——限额上更是反效果，
+ *   一批变成七次请求。`bad-request` 的元数据早就写着"重试多少次都一样，交给降级链换个引擎"，
+ *   拆分同理
+ * - `no-key` / `auth`：整条队列排空，根本走不到拆分
+ * - `aborted`：已经不要这个结果了
+ */
+const ISOLATABLE_BY_KIND: Record<ProviderErrorKind, boolean> = {
+  'invalid-response': true,
+  'unknown': true,
+  // `timeout` 曾经也算可隔离（"批小了也许就在预算内回来了"），量完之后改掉：8 段的一批在内容层
+  // 扇出 **15 次调用**（`8,4,2,1,1,2,1,1,4,2,1,1,2,1,1`），而队列本身还会按 retry-policy 再重试，
+  // 两层相乘最多 45 次请求、每次各等自己的超时——正是"整页停在进行中"那个我们设超时要避免的场景。
+  // 超时的恢复归队列：它按字数给预算、按 meta 记整批的期限，数据和责任都在那一层（tests/pipeline 有回归）
+  'timeout': false,
+  'rate-limit': false,
+  'network': false,
+  'bad-request': false,
+  'no-key': false,
+  'auth': false,
+  'aborted': false,
+}
+
 export class ProviderError extends Error {
   /**
-   * 这次失败**换更小的批次重试有没有可能成功**（Codex 在 #61 指出）。默认认为有：
-   * LLM 的 `invalid-response` 多半是某一段把输出带偏了，拆小能定位到它，所以 BatchQueue 会
-   * 重试 3 次再逐条兜底。但服务端整个返回坏了（不是 JSON、格式不对）属于**系统性**失败，
+   * 这次失败**换更小的批次重试有没有可能成功**（Codex 在 #61 指出）。按 kind 取默认值，
+   * provider 可以覆盖：服务端整个返回坏了（不是 JSON、格式不对）属于**系统性**失败，
    * 拆多小都一样——100 段的一批会白打 104 次请求，而且打在我们本就想省着用的免费端点上。
-   * provider 遇到这种情况显式声明 false，`asBatchError` 就不把它转成批次错误
+   *
+   * 两处在用：`asBatchError` 决定要不要转成批次错误（BatchQueue 会重试 3 次再逐条兜底）；
+   * 这个标记跟着 `toErrorInfo` 过消息边界之后，content 侧的 `translateSegments` 据此决定
+   * 要不要对半拆分——不带它的时候，4 段的系统性 `bad-request` 会拆成 7 次调用
+   *（研究审计 B20 实测 `4,2,1,1,2,1,1`）
    */
   readonly isolatable: boolean
 
   constructor(readonly kind: ProviderErrorKind, message: string, options?: { cause?: unknown; isolatable?: boolean }) {
     super(message, options)
     this.name = 'ProviderError'
-    this.isolatable = options?.isolatable ?? true
+    this.isolatable = options?.isolatable ?? ISOLATABLE_BY_KIND[kind]
     attachRequestErrorMeta(this, META_BY_KIND[kind])
   }
 }

@@ -10,7 +10,9 @@ import { cacheKeyFor, type RenderPath } from '@/cache/key'
 import { type SentenceAlignment, verifyAlignment } from './alignment'
 import { markSentences, stripMarkers, unmarkSentences, type MarkedText } from './sentence-markers'
 // 深引 validate 而不是 protector 的桶：serialize / rehydrate 要碰 DOM，那两个不该进 background 的包
+import { tokenize } from '@/core/protector/tokens'
 import { expectationsFromText, validate } from '@/core/protector/validate'
+import { createGlossaryMatcher, type GlossaryEntry } from './glossary'
 import { getRandomUUID } from '@/shared/uuid'
 import { BatchCountMismatchError, BatchQueue, type BatchExecutionMeta, type BatchOptions } from './request/batch-queue'
 import { CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
@@ -64,7 +66,7 @@ export type TranslateCall = TranslateMessageRequest & {
 export type TranslateMessageResponse =
   // `alignment` is plain number arrays, so it survives the structured clone across the message boundary
   | { ok: true; result: { segments: TranslatedSegment[]; provider: string; model?: string }; cached: number }
-  | { ok: false; error: { kind: ProviderErrorKind; message: string } }
+  | { ok: false; error: { kind: ProviderErrorKind; message: string; isolatable: boolean } }
 
 export interface TranslateServiceDeps {
   getProvider: (providerId?: string) => Promise<TranslationProvider>
@@ -147,6 +149,8 @@ interface QueueItem {
   scheduleAt: number
   provider: TranslationProvider
   request: Pick<TranslateRequest, 'source' | 'target' | 'context'>
+  /** 这一段匹配到的术语（§8.2）；没配术语表时为 undefined，与从前完全一致 */
+  terms?: readonly GlossaryEntry[]
 }
 
 /**
@@ -257,11 +261,25 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     return { text: marks.text, source: segment.text, marks }
   }
 
+  /**
+   * 一批发一份提示词，所以术语取这一批的**并集**，顺序仍按术语表本身——
+   * 同一组术语在任何批次里都渲染成同一段文字。各段的缓存键只带自己那几条：
+   * 一条没在本段出现的术语改不了本段的译文（Read Frog 的 `mergeBatchGlossaryTerms` 是同一个取舍）
+   */
+  const batchRequestOf = (items: QueueItem[]): QueueItem['request'] => {
+    const first = items[0]!
+    const all = first.request.context?.glossary
+    if (!all || items.every(item => item.terms === undefined)) return first.request
+    const used = new Set(items.flatMap(item => (item.terms ?? []).map(entry => entry.term)))
+    const matched = all.filter(entry => used.has(entry.term))
+    return { ...first.request, context: { ...first.request.context, glossary: matched.length > 0 ? matched : undefined } }
+  }
+
   const translateItems = async (items: QueueItem[], ids: string[], signal: AbortSignal | undefined): Promise<TranslationOutcome[]> => {
     const first = items[0]!
     try {
       const result = await first.provider.translate({
-        ...first.request,
+        ...batchRequestOf(items),
         segments: items.map((item, i) => ({ id: ids[i]!, text: item.text })),
         signal,
       })
@@ -368,12 +386,28 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       const model = (await deps.getModel?.()) ?? ''
       const store = cache && deps.cache ? deps.cache : null
 
+      // 术语表只发这一段真的用到的（§8.2）：整张表进每一批，请求可能因此翻倍，
+      // 缓存键里也带着整张表——改一条术语，全站缓存作废。匹配用的是**去掉占位符之后的正文**：
+      // 线上文本里那些 `<x id="1"/>` 会让术语跨不过去，属性名本身也会被当成正文命中（`id`）
+      const glossary = request.context?.glossary ?? []
+      const matcher = glossary.length > 0 ? createGlossaryMatcher(glossary) : null
+      const wire = wireFormatOf(cache?.renderPath ?? 'tags')
+      const proseOf = (text: string) => Array.from(tokenize(text, wire)).filter(t => t.kind === 'text').map(t => t.text).join('')
+      const termsFor = (segment: { text: string }) => (matcher ? matcher.match(proseOf(segment.text)) : [])
+      /** 这一段自己用到的术语进它自己的键；没配术语表时与从前逐字节相同 */
+      const contextFor = (segment: { text: string }) => {
+        if (!provider.promptKey || !request.context) return undefined
+        if (!matcher) return request.context
+        const matched = termsFor(segment)
+        return matched.length > 0 ? { ...request.context, glossary: matched } : { ...request.context, glossary: undefined }
+      }
+
       // 1. 查缓存：一次算完所有键，一次批量读
       const keys = new Map<string, string>()
       const translated = new Map<string, TranslationOutcome>()
       if (store && cache) {
         const computed = await Promise.all(request.segments.map(segment =>
-          cacheKeyFor({ providerId: provider.cacheId ?? provider.id, model, promptKey: provider.promptKey ?? '', context: provider.promptKey ? request.context : undefined, target: request.target, renderPath: cache.renderPath, text: segment.text, ...(segment.cuts ? { cuts: segment.cuts } : {}) }),
+          cacheKeyFor({ providerId: provider.cacheId ?? provider.id, model, promptKey: provider.promptKey ?? '', context: contextFor(segment), target: request.target, renderPath: cache.renderPath, text: segment.text, ...(segment.cuts ? { cuts: segment.cuts } : {}) }),
         ))
         request.segments.forEach((segment, i) => {
           keys.set(segment.id, computed[i]!)
@@ -391,7 +425,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         }
       }
       // 读缓存时让出过主线程，这期间 scope 可能已被撤销（Read Frog translation-queues.ts 也在 await 之后查一次）
-      if (scope && cancelledScopes.has(scope)) return { ok: false, error: { kind: 'aborted', message: `已取消（scope: ${scope}）` } }
+      if (scope && cancelledScopes.has(scope)) return { ok: false, error: { kind: 'aborted', message: `已取消（scope: ${scope}）`, isolatable: false } }
       const cached = translated.size
 
       // 2. 未命中的逐段入队；同一次调用的段落批次键相同，会攒在一起
@@ -402,6 +436,8 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         // 上下文只对有提示词的引擎有意义，和缓存键同一条判断（见上面的 cacheKeyFor）。
         // 不加这道判断的话，run.ts 往 context 里塞的 sectionTitle 每换一节就变一次键，
         // 免费引擎的批次永远跨不了章节——攒批等于没开（§8.3）
+        // **按术语表的状态分批，不按匹配结果分批**：拿匹配结果当批次键的话，
+        // 用到不同术语的两段就攒不到一起，攒批等于白做
         const batchContext = provider.promptKey ? request.context : undefined
         const batchKey = JSON.stringify([provider.id, model, provider.promptKey ?? '', request.target, cache?.renderPath ?? '', batchContext ?? null])
         const items: QueueItem[] = misses.map(segment => ({
@@ -410,6 +446,8 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           // **在这里插，不在派发时插**：攒批按 `item.text.length` 算大小，派发时才插的话
           // 一个贴着上限的批次会在插完之后超限（Codex 在 #137 指出）
           ...markedItem(provider, cache?.renderPath, segment),
+          // 这一段用到的术语；派发时取整批的并集发进提示词（见 translateItems）
+          terms: matcher ? termsFor(segment) : undefined,
           batchKey,
           dedupKey: cache && !cache.bypass ? keys.get(segment.id) : undefined,
           scope,
@@ -506,10 +544,19 @@ function pickError(errors: unknown[]): unknown {
   return real >= 0 ? errors[real] : errors[0]
 }
 
-export function toErrorInfo(e: unknown): { kind: ProviderErrorKind; message: string } {
-  if (e instanceof ProviderError) return { kind: e.kind, message: e.message }
-  if (isTranslationCancelledError(e)) return { kind: 'aborted', message: (e as Error).message }
-  if (e instanceof Error && e.name === REQUEST_TIMEOUT_ERROR_NAME) return { kind: 'timeout', message: e.message }
-  if (e instanceof BatchCountMismatchError) return { kind: 'invalid-response', message: e.message }
-  return { kind: 'unknown', message: e instanceof Error ? e.message : String(e) }
+/**
+ * 错误过消息边界时带上 `isolatable`（§8.5）：content 侧的 `translateSegments` 靠它决定
+ * 要不要把批次对半拆开重试。**不带的话每种失败都会拆**——4 段的系统性 `bad-request` 变成
+ * 7 次调用（研究审计 B20 实测 `4,2,1,1,2,1,1`），而 service 这一层早就为同一件事
+ * 立过规矩（`asBatchError` 不把系统性失败转成批次错误，Codex 在 #61 指出）。
+ * 不是 `ProviderError` 的按 kind 取默认值，判据见 types.ts 的 `ISOLATABLE_BY_KIND`
+ */
+export function toErrorInfo(e: unknown): { kind: ProviderErrorKind; message: string; isolatable: boolean } {
+  if (e instanceof ProviderError) return { kind: e.kind, message: e.message, isolatable: e.isolatable }
+  if (isTranslationCancelledError(e)) return { kind: 'aborted', message: (e as Error).message, isolatable: false }
+  // 超时的恢复归队列（按字数给预算、按整批记期限），内容层再拆就是两层相乘——实测 8 段 15 次
+  if (e instanceof Error && e.name === REQUEST_TIMEOUT_ERROR_NAME) return { kind: 'timeout', message: e.message, isolatable: false }
+  // 条数对不上正是"某一段把输出带偏了"的典型：拆小能定位到它
+  if (e instanceof BatchCountMismatchError) return { kind: 'invalid-response', message: e.message, isolatable: true }
+  return { kind: 'unknown', message: e instanceof Error ? e.message : String(e), isolatable: true }
 }

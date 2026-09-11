@@ -236,8 +236,11 @@ export function startTranslation(options: RunOptions): TranslationRun {
     if (stopped) return
     if (!res.ok) {
       noteFatal(res)
-      if (fatal === undefined && segments.length > 1) {
-        // 批次失败：对半拆分重试（§8.2）
+      // 批次失败：**某一段引起的**才对半拆分重试（§8.2）。系统性失败拆了也是同一个结果，
+      // 只是把它乘以段数——实测 4 段的 `bad-request` 会变成 7 次调用（`4,2,1,1,2,1,1`），
+      // 限额类失败更是反效果。判据由 service 侧随错误一起送过来（providers/types.ts 的
+      // `ISOLATABLE_BY_KIND`，provider 可以覆盖），content 这一层不再自己猜
+      if (fatal === undefined && segments.length > 1 && res.error.isolatable) {
         const mid = Math.ceil(segments.length / 2)
         await translateSegments(segments.slice(0, mid), sectionTitle, out)
         await translateSegments(segments.slice(mid), sectionTitle, out)

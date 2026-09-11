@@ -122,7 +122,8 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
   const translate = (call: TranslateCall): Promise<TranslateMessageResponse> => {
     if (call.providerId === undefined) return service.translate(call)
     const step = steps.find(s => s.provider.id === call.providerId) ?? offChain(call.providerId)
-    if (!step) return Promise.resolve({ ok: false, error: { kind: 'unknown', message: `引擎 ${call.providerId} 不在当前链上` } })
+    // 这一条与段落无关，拆小了也还是同一个引擎不在链上
+    if (!step) return Promise.resolve({ ok: false, error: { kind: 'unknown', message: `引擎 ${call.providerId} 不在当前链上`, isolatable: false } })
     return step.service.translate(call)
   }
 

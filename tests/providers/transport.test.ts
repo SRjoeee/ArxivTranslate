@@ -84,10 +84,10 @@ describe('createLocalTransport：翻译', () => {
 
   it('错误响应形状：ProviderError 带 kind，其他错误为 unknown', async () => {
     const auth = await withChain([mockProvider(async () => { throw new ProviderError('auth', 'bad key') })])
-    expect(await auth.translate({ request: req })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+    expect(await auth.translate({ request: req })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key', isolatable: false } })
     // 未知错误默认可重试：把重试关掉再看形状
     const boom = await withChain([mockProvider(async () => { throw new Error('boom') })], { queue: { maxRetries: 0 } })
-    expect(await boom.translate({ request: req })).toEqual({ ok: false, error: { kind: 'unknown', message: 'boom' } })
+    expect(await boom.translate({ request: req })).toEqual({ ok: false, error: { kind: 'unknown', message: 'boom', isolatable: true } })
   })
 
   it('指名引擎的调用不走降级链：设置页「测试连接」要如实报出这个端点的错', async () => {
@@ -97,7 +97,7 @@ describe('createLocalTransport：翻译', () => {
     // 不指名：链照常兜底，整页翻译不停死
     expect(await t.translate({ request: req })).toMatchObject({ ok: true, result: { provider: 'google-web' } })
     // 指名：直接报错，不能因为链上有免费兜底就显示成成功
-    expect(await t.translate({ request: req, providerId: SVC.id })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key' } })
+    expect(await t.translate({ request: req, providerId: SVC.id })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key', isolatable: false } })
   })
 
   it('指名一个自己配的、不在链上的服务：直接问那个端点，不能报「不在当前链上」', async () => {
@@ -108,12 +108,12 @@ describe('createLocalTransport：翻译', () => {
       { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC, spare] },
       { buildChain: async () => ({ chain: [{ ...mockProvider(async r => ({ segments: r.segments, provider: 'mock' })), id: SVC.id }], renderPath: 'tags' as const }) },
     )
-    expect(await t.translate({ request: req, providerId: spare.id })).toEqual({ ok: false, error: { kind: 'no-key', message: '未配置 API key' } })
+    expect(await t.translate({ request: req, providerId: spare.id })).toEqual({ ok: false, error: { kind: 'no-key', message: '未配置 API key', isolatable: false } })
   })
 
   it('指名一个不在链上的引擎：如实说，不悄悄换成别的', async () => {
     const t = await withChain([mockProvider(async r => ({ segments: r.segments, provider: 'mock' }))])
-    expect(await t.translate({ request: req, providerId: 'chrome-builtin' })).toEqual({ ok: false, error: { kind: 'unknown', message: '引擎 chrome-builtin 不在当前链上' } })
+    expect(await t.translate({ request: req, providerId: 'chrome-builtin' })).toEqual({ ok: false, error: { kind: 'unknown', message: '引擎 chrome-builtin 不在当前链上', isolatable: false } })
   })
 
   it('cancel 撤掉在飞的请求，撤掉的条数如实返回', async () => {

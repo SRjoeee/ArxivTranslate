@@ -33,7 +33,7 @@ describe('createMessageTransport', () => {
   it('后台不通时给出结构化错误：抛异常会被 run.ts 当成崩溃，整批都标失败', async () => {
     const { send } = recorder(() => { throw new Error('Extension context invalidated.') })
     const res = await createMessageTransport(send).translate({ request: { segments: [], source: 'en', target: 'cmn' } })
-    expect(res).toEqual({ ok: false, error: { kind: 'network', message: '无法与扩展后台通信：Extension context invalidated.' } })
+    expect(res).toEqual({ ok: false, error: { kind: 'network', message: '无法与扩展后台通信：Extension context invalidated.', isolatable: false } })
   })
 
   it('cancel 发 axt:cancel-scope，返回撤掉的条数；发不出去按 0 算', async () => {

@@ -15,7 +15,7 @@ const provider = (id: string): TranslationProvider => ({
 })
 
 const ok = (id: string): TranslateMessageResponse => ({ ok: true, result: { segments: [{ id: 's1', text: `${id} 译文` }], provider: id }, cached: 0 })
-const fail = (kind: ProviderErrorKind, message: string = kind): TranslateMessageResponse => ({ ok: false, error: { kind, message } })
+const fail = (kind: ProviderErrorKind, message: string = kind): TranslateMessageResponse => ({ ok: false, error: { kind, message, isolatable: true } })
 
 /** 每次调用依次返回预设的结果；用完后重复最后一个 */
 function step(id: string, responses: TranslateMessageResponse[]): FallbackStep & { calls: number; cancelled: string[] } {
