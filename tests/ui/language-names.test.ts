@@ -2,7 +2,7 @@
 // 用户 2026-09-11 反馈：英文界面下语言行写着 "Simplified Mandarin Chinese (简体中…)"，
 // 又长又截断，而中文界面显示的是干净的「简体中文」。
 import { describe, expect, it } from 'vitest'
-import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_EN_UI_NAME, LANG_CODE_TO_ZH_NAME, englishName } from '@/config/languages'
+import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_EN_UI_NAME, LANG_CODE_TO_ZH_NAME, englishName, label } from '@/config/languages'
 import { languageLabel, languageName, setLocale } from '@/ui/strings'
 
 describe('界面里的语言名', () => {
@@ -35,6 +35,14 @@ describe('界面里的语言名', () => {
     // 文字标注保留：读者拿到的确实是那种文字，去掉就成了惊吓
     expect(LANG_CODE_TO_EN_UI_NAME.zlm).toBe('Malay (Jawi)')
     expect(LANG_CODE_TO_EN_UI_NAME.uzn).toBe('Uzbek (Cyrillic)')
+  })
+
+  // Codex 在 #165 指出：名字表可以是半张（UI.md §6「没有语言名表时读英文名」），
+  // 行与菜单两处的兜底若不一样，同一种语言会在行里写 Chinese (Simplified)、在菜单里写回学名
+  it('半张名字表时，行与菜单兜底到同一个名字', () => {
+    // 一个只有日语的界面语言名字表：中文该走兜底
+    expect(label('cmn', { jpn: '日本語' })).toBe('Chinese (Simplified) (简体中文)')
+    expect(label('jpn', { jpn: '日本語' })).toBe('日本語')
   })
 
   it('三张表都不许重名：菜单里两行一模一样，读者没法选', () => {

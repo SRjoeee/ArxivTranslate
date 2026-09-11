@@ -934,7 +934,10 @@ export const LANG_CODE_TO_EN_UI_NAME: Record<LangCode, string> = { ...LANG_CODE_
  * 英文界面下这一行要读作 "Japanese (日本語)"，否则读者会以为界面没换干净
  */
 export function label(code: LangCode, inLocale: Partial<Record<LangCode, string>> = LANG_CODE_TO_ZH_NAME): string {
-  const named = inLocale[code] ?? LANG_CODE_TO_EN_NAME[code]
+  // 兜底走**界面用的**那张表，与 `languageName` 同一条（Codex 在 #165 指出）：名字表可以是半张
+  //（`Partial`，见 UI.md §6「没有语言名表时读英文名」），两处兜底若不一样，同一种语言会在行里
+  // 写 `Chinese (Simplified)`、在菜单里写回 `Simplified Mandarin Chinese`
+  const named = inLocale[code] ?? LANG_CODE_TO_EN_UI_NAME[code]
   const local = LANG_CODE_TO_LOCALE_NAME[code]
   if (named === local) return named
   // 括号跟着外面那半句走：中文用全角，其余用半角。「Japanese（日本語）」两种括号混在一句里最难看
