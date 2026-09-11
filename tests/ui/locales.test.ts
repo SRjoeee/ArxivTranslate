@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { LOCALES, LOCALE_CODES, LOCALE_NAMES, isLocaleCode, pickLocale } from '@/locales'
 import { POPUP_FIXTURES } from '@/entrypoints/popup/fixtures'
 import { derivePopupView } from '@/entrypoints/popup/view-model'
-import { S, localeInUse, setLocale } from '@/ui/strings'
+import { S, copyName, localeInUse, setLocale } from '@/ui/strings'
+import { NAME_MAX } from '@/config/appearance'
 import { styleTile } from '@/ui/appearance/tiles'
 
 /** Every leaf of a pack, with the path that leads to it, so a failure names the key */
@@ -88,6 +89,31 @@ describe('locale packs', () => {
     }
     setLocale('zh-CN')
     expect(S.primary.translate).toBe('翻译本页')
+  })
+})
+
+describe('copy names', () => {
+  it('长名字复制时让出的是名字，不是后缀：不然复制出来与原件同名（Codex 在 #161 指出）', () => {
+    setLocale('zh-CN')
+    const long = { id: 'x', name: 'あ'.repeat(40) }
+    const copy = copyName(long)
+    expect(copy.length).toBeLessThanOrEqual(NAME_MAX)
+    expect(copy.endsWith(LOCALES['zh-CN'].O.reading.copySuffix)).toBe(true)
+    expect(copy).not.toBe(long.name)
+    setLocale('en')
+    const en = copyName(long)
+    expect(en.length).toBeLessThanOrEqual(NAME_MAX)
+    expect(en.endsWith(LOCALES.en.O.reading.copySuffix)).toBe(true)
+    setLocale('zh-CN')
+  })
+
+  it('术语表逐行的问题整句由包来拼，中英标点各随各的', () => {
+    for (const code of LOCALE_CODES) {
+      const text = LOCALES[code].O.prompts.glossaryIssue.noSeparator(2)
+      expect(text, code).toContain('2')
+      // 「第 2 行缺少…」/ "Line 2 has no separator…"：两段之间不能直接粘在一起
+      expect(text, code).not.toMatch(/2[A-Za-z]/)
+    }
   })
 })
 

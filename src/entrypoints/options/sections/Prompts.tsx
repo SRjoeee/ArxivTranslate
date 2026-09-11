@@ -53,7 +53,7 @@ export function Prompts({ data }: { data: OptionsData }) {
         className="w-full rounded-control border border-line bg-card px-3 py-2 font-mono text-[12px] text-fg outline-none focus:border-fg-2"
       />
       {parsed.issues.map(issue => (
-        <p key={issue.line} className="mt-1 text-[11px] text-accent">{O.prompts.glossaryIssue.line(issue.line)}{issue.reason === 'noSeparator' ? O.prompts.glossaryIssue.noSeparator : issue.reason === 'emptySource' ? O.prompts.glossaryIssue.emptySource : O.prompts.glossaryIssue.emptyTarget}</p>
+        <p key={issue.line} className="mt-1 text-[11px] text-accent">{O.prompts.glossaryIssue[issue.reason](issue.line)}</p>
       ))}
       {overLimit && <p className="mt-1 text-[11px] text-accent">{O.prompts.glossaryTooBig}</p>}
     </>

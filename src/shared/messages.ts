@@ -89,6 +89,13 @@ export interface AxtMessages {
   /** options / content → background：本机 OCR helper 是否可用（DESIGN §15.4 的 ping 检测） */
   /** `recheck` re-probes a host that was reported missing; see HelperClient.status */
   'axt:helper-status': { request: { recheck?: boolean }; response: HelperStatus }
+  /**
+   * Sent to every tab when a re-probe finds the helper that was missing. A paper parks its bitmaps
+   * when the probe at session start came back empty-handed, and nothing else would ever tell it
+   * otherwise: the reader would install the helper, be told it is ready, and watch the open paper
+   * stay as it was (Codex on #161)
+   */
+  'axt:helper-ready': { request: Record<never, never>; response: { resumed: boolean } }
   /** content → background：给一张位图做 OCR；结果按 imageHash 缓存（§15.2） */
   'axt:ocr': { request: OcrCall; response: OcrMessageResponse }
 }

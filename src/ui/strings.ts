@@ -9,7 +9,7 @@
 //
 // The pack is chosen once, before anything renders (`applyLocale`), so nothing on screen is ever
 // half translated.
-import { BUILT_IN_HIGHLIGHTS, BUILT_IN_STYLES } from '@/config/appearance'
+import { BUILT_IN_HIGHLIGHTS, BUILT_IN_STYLES, NAME_MAX } from '@/config/appearance'
 import { LANG_CODE_TO_EN_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
 import type { FallbackReason } from '@/config/storage'
 import { FALLBACK_LOCALE, LOCALES, type Locale, type LocaleCode } from '@/locales'
@@ -74,9 +74,15 @@ export function fallbackText(reason: FallbackReason): string {
   }
 }
 
-/** What a duplicate is called: the name as displayed, plus the pack's suffix (clipped by the schema) */
+/**
+ * What a duplicate is called: the name as displayed, plus the pack's suffix. **The base gives way,
+ * not the suffix** — clipping the finished string would eat the suffix off a name already at the
+ * limit and hand back a copy indistinguishable from its source (Codex on #161)
+ */
 export function copyName(profile: { id: string; name: string }, kind: 'styles' | 'highlights' = 'styles'): string {
-  return `${profileName(profile, kind)} ${O.reading.copySuffix}`
+  const suffix = O.reading.copySuffix
+  const room = NAME_MAX - suffix.length - 1
+  return `${profileName(profile, kind).slice(0, Math.max(1, room))} ${suffix}`
 }
 
 export function profileName(profile: { id: string; name: string }, kind: 'styles' | 'highlights' = 'styles'): string {

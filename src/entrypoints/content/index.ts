@@ -45,7 +45,10 @@ export default defineContentScript({
     let uninstallAnchors: (() => void) | null = null
     /** 悬停对照高亮（§7.7）：跟着一次翻译会话起停，配置关掉时根本不装监听 */
     let highlight: SentenceHighlight | null = null
-    let savedMode: Mode = 'stack'
+    /** 配置读回来之前先按默认值答：写死一个模式的话，默认一改这里就说错（Codex 在 #161 指出） */
+    let savedMode: Mode = DEFAULT_CONFIG.mode
+    /** 由 startImages 装上：识别助手后来装好时，把这一页停着的位图放出来 */
+    let resumeRaster: () => boolean = () => false
     /** 译文外观（§7.5）：读者选中的那一份样式与高亮配置，写成 <html> 上的属性与变量 */
     let look: Look = lookOf(DEFAULT_CONFIG)
     /**
@@ -59,8 +62,17 @@ export default defineContentScript({
     const adoptStyle = (next: Look) => {
       if (!styleFromWatcher) look = next
     }
+    /**
+     * The same gate for the interface's language: this read is a snapshot from when it was issued,
+     * and a language chosen while it was in flight would be undone by its continuation — the paper
+     * would keep the previous language until some other configuration event came along
+     * (Codex on #161, the same shape as the appearance read above)
+     */
+    const adoptLocale = (uiLanguage: string) => {
+      if (!styleFromWatcher) applyLocaleFrom(uiLanguage)
+    }
     // The words this script puts on the page follow the interface's language too (UI.md §6)
-    void getConfig().then(config => { savedMode = config.mode; applyLocaleFrom(config.uiLanguage); adoptStyle(lookOf(config)) })
+    void getConfig().then(config => { savedMode = config.mode; adoptLocale(config.uiLanguage); adoptStyle(lookOf(config)) })
     // 设置页改完外观立刻生效（#47）：只重算注入表与 <html data-axt-style>，一个译文节点都不碰，
     // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
     // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
@@ -317,6 +329,13 @@ export default defineContentScript({
         if (available) images?.resume()
         else for (const t of targets) if (t.kind === 'raster') clearImageEverywhere(t)
       }
+      // 装好识别助手之后要能把这一页放出来（Codex 在 #161 指出）：会话开始时探测扑空的话，
+      // 位图一直停在 parked 里，而这一页自己没有任何再问一次的由头
+      resumeRaster = () => {
+        if (helperReady || getSessionId() !== session) return false
+        settleRaster(true)
+        return true
+      }
       sendMessage({ type: 'axt:helper-status' })
         .then(helper => settleRaster(helper.available))
         .catch(e => { console.debug('[axt] helper-status 失败', e); settleRaster(false) })
@@ -417,6 +436,9 @@ export default defineContentScript({
           sendResponse({ retried: failed.length + failedImages.length })
           return true
         }
+        case 'axt:helper-ready':
+          sendResponse({ resumed: resumeRaster() })
+          return true
         case 'axt:page-status':
           sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, session: getSessionId(), ...(imageProgress ? { images: imageProgress } : {}), ...(running ? { running } : {}) })
           return true

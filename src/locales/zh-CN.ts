@@ -246,10 +246,10 @@ const O = {
     title: '提示词', glossaryTooBig: '术语表太长，超出上限后没有保存；请减少条目或缩短内容', glossary: '术语表', glossaryHint: '每行「原文, 译文」，让同一篇里的译法一致', glossaryCount: (n: number) => `${n} 条`, onlyLlm: '只对 LLM 服务生效',
     /** 术语表逐行的问题（providers/glossary.ts 只报是哪一种） */
     glossaryIssue: {
-      line: (n: number) => `第 ${n} 行`,
-      noSeparator: '缺少分隔符，应写成「原文, 译文」',
-      emptySource: '原文为空',
-      emptyTarget: '译文为空',
+      /** 整句由包来拼：标点是语言的一部分，「第 1 行缺少分隔符」与 "Line 1: ..." 拼法不同 */
+      noSeparator: (n: number) => `第 ${n} 行缺少分隔符，应写成「原文, 译文」`,
+      emptySource: (n: number) => `第 ${n} 行原文为空`,
+      emptyTarget: (n: number) => `第 ${n} 行译文为空`,
     },
     glossaryPlaceholder: 'token, 词元\nembedding, 嵌入' },
   close: '关闭',

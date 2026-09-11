@@ -238,10 +238,9 @@ const O: Locale['O'] = {
     glossaryCount: n => (n === 1 ? '1 entry' : `${n} entries`),
     onlyLlm: 'Only an LLM service reads these',
     glossaryIssue: {
-      line: n => `Line ${n}`,
-      noSeparator: 'No separator: write it as "source, translation"',
-      emptySource: 'The source is empty',
-      emptyTarget: 'The translation is empty',
+      noSeparator: n => `Line ${n} has no separator: write it as "source, translation"`,
+      emptySource: n => `Line ${n} has no source`,
+      emptyTarget: n => `Line ${n} has no translation`,
     },
     glossaryPlaceholder: 'token, jeton\nembedding, plongement',
   },

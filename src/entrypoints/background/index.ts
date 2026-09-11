@@ -109,6 +109,16 @@ export default defineBackground(() => {
   // 右键菜单（issue #146）：第二个入口，动作与 popup 走同一条消息。
   // **同步注册**，读语言包不等（context-menu.ts 说明为什么）：菜单先用兜底语言建出来，
   // 语言包读到之后再重建一次，标题就跟着界面语言走了（UI.md §6）
+  /**
+   * Say something to every tab that will listen. No `tabs` permission is needed to enumerate ids,
+   * and a tab without our content script simply rejects — there is nothing to filter on and nothing
+   * to lose by asking
+   */
+  const tellTabs = async (message: { type: 'axt:helper-ready' }) => {
+    const tabs = await browser.tabs.query({}).catch(() => [])
+    for (const tab of tabs) if (tab.id !== undefined) void browser.tabs.sendMessage(tab.id, message).catch(() => undefined)
+  }
+
   const menuDeps = {
     create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>
       browser.contextMenus.create(options as Parameters<typeof browser.contextMenus.create>[0]),
@@ -197,7 +207,12 @@ export default defineBackground(() => {
           .catch((e: unknown) => sendResponse({ ok: false, message: e instanceof Error ? e.message : String(e) }))
         return true
       case 'axt:helper-status':
-        ocr.status(message.recheck ? { recheck: true } : undefined).then(sendResponse)
+        ocr.status(message.recheck ? { recheck: true } : undefined).then(status => {
+          // A re-probe that finds it has to reach the papers already open, which parked their
+          // bitmaps when the probe at their session start found nothing (Codex on #161)
+          if (message.recheck && status.available) void tellTabs({ type: 'axt:helper-ready' })
+          sendResponse(status)
+        })
         return true
       case 'axt:ocr':
         // 先把 scope 绑到 sender 的标签页：它可能是这个标签页第一条带 scope 的消息，不绑的话关标签页时 dropTab 撤不到
