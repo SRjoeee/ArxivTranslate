@@ -126,7 +126,7 @@ export type Mutation = Pick<MutationRecord, 'target' | 'type'> & Partial<Pick<Mu
  * Whether a mutation can have moved text that registered offsets point into.
  *
  * Attribute changes never do. Nor does anything happening inside a node of our own, or our own
- * nodes arriving or leaving — a translation rendered, a spinner removed, a footnote's translation
+ * nodes arriving or leaving — a translation rendered, a skeleton removed, a footnote's translation
  * inserted inside its paragraph: `rangesOf` skips injected nodes, so the offsets around them hold.
  * Those are also exactly the mutations the pipeline makes right after registering a block, whose
  * records reach the observer after the registration; counting them would expire every block the

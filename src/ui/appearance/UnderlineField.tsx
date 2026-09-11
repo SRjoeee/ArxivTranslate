@@ -3,7 +3,8 @@ import { UNDERLINES, type Underline } from '@/config/appearance'
 import { Segmented } from '@/ui/Segmented'
 import { O } from '@/ui/strings'
 
-const NAMES: Record<Underline, string> = { none: '无', solid: '实线', dotted: '点线', dashed: '虚线', wavy: '波浪' }
+/** Read at render: the pack is chosen after this module loads (ui/strings.ts) */
+const nameOf = (u: Underline): string => O.reading.underlines[u]
 
 export function UnderlineField({ underline, thickness, onChange }: { underline: Underline; thickness: 1 | 2; onChange: (next: { underline: Underline; thickness: 1 | 2 }) => void }) {
   return (
@@ -11,7 +12,7 @@ export function UnderlineField({ underline, thickness, onChange }: { underline: 
       <div className="mb-1.5 text-[12px] font-semibold text-fg-2">{O.reading.underline}</div>
       <Segmented
         value={underline}
-        options={UNDERLINES.map(u => ({ value: u, label: NAMES[u], title: NAMES[u] }))}
+        options={UNDERLINES.map(u => ({ value: u, label: nameOf(u), title: nameOf(u) }))}
         onChange={next => onChange({ underline: next, thickness })}
       />
       {underline !== 'none' && (

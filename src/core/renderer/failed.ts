@@ -5,7 +5,10 @@
 import type { Block } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
 import { FOR_ATTR, clearTranslation, setState } from './index'
+import { S, parseFatal, reasonText } from '@/ui/strings'
 
+/** 原始诊断留在属性里：`restore()` 按注入标记整体清掉，它不进界面 */
+export const REASON_ATTR = 'data-axt-reason'
 export const ERROR_CLASS = 'axt-error'
 
 const STYLE = `
@@ -40,22 +43,46 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
   const host = doc.createElement('span')
   host.className = `${T_CLASS} ${ERROR_CLASS}`
   host.setAttribute(FOR_ATTR, block.id)
-  host.title = reason
+  // 读者看到的是按界面语言写的那一句；`kind: 诊断` 里的后半段留着给诊断，不显示（Codex 在 #161 指出）
+  const kind = parseFatal(reason)
+  host.title = reasonText(kind.kind) || S.page.retry
+  host.setAttribute(REASON_ATTR, reason)
   const root = host.attachShadow({ mode: 'open' })
   const style = doc.createElement('style')
   style.textContent = STYLE
   const button = doc.createElement('button')
   button.type = 'button'
-  button.textContent = '重试'
+  button.textContent = S.page.retry
   button.addEventListener('click', () => {
     button.disabled = true
     retry()
   })
   const mark = doc.createElement('span')
   mark.className = 'mark'
-  mark.title = reason
+  mark.title = host.title
   mark.textContent = '！'
   root.append(style, button, mark)
   block.el.after(host)
   return host
+}
+
+/**
+ * Re-label the widgets already on the page. A widget copies the word into its shadow root when it
+ * is built, so a page holding failed blocks would keep the previous language until those blocks were
+ * retried (Codex on #161). Called when the interface's language changes under an open paper
+ */
+export function relabelFailed(doc: Document): number {
+  const hosts = doc.querySelectorAll<HTMLElement>(`.${ERROR_CLASS}`)
+  for (const host of hosts) {
+    const root = (host as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot
+    const button = root?.querySelector('button')
+    if (button) button.textContent = S.page.retry
+    // 悬停看到的那句同样要跟着换：它是从 kind 算出来的，原始诊断还留在属性里（Codex 在 #161 指出）
+    const reason = host.getAttribute(REASON_ATTR)
+    if (reason === null) continue
+    host.title = reasonText(parseFatal(reason).kind) || S.page.retry
+    const mark = root?.querySelector<HTMLElement>('.mark')
+    if (mark) mark.title = host.title
+  }
+  return hosts.length
 }

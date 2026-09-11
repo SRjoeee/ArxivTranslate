@@ -5,6 +5,7 @@ import { ERROR_CLASS, FOR_ATTR, INLINE_ATTR, PARTIAL_ATTR, PENDING_CLASS, STATE_
 import { TABLE_RULES } from '@/core/rules/latexml'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import type { TranslateCall } from '@/providers/translate-service'
+import { reasonText } from '@/ui/strings'
 
 const PAGE =
   '<h2 class="ltx_title ltx_title_section" id="s1">Introduction</h2>'
@@ -97,7 +98,7 @@ describe('startTranslation', () => {
     expect(requests).toHaveLength(2)
   })
 
-  it('请求期间原块后面是带圆环的 pending 节点，进度里算 inFlight；译文到达后被替换', async () => {
+  it('请求期间原块后面是带骨架屏的 pending 节点，进度里算 inFlight；译文到达后被替换', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     let release!: () => void
@@ -111,13 +112,13 @@ describe('startTranslation', () => {
     const pending = run.translate([byId(blocks, 'p1')])
     const node = doc.getElementById('p1')!.nextElementSibling!
     expect(node.classList.contains(PENDING_CLASS)).toBe(true)
-    expect(node.querySelector('.axt-spinner')).not.toBeNull()
+    expect(node.querySelector('.axt-skel')).not.toBeNull()
     expect(run.progress()).toMatchObject({ requested: 1, inFlight: 1, done: 0 })
     expect(seen.at(-1)).toMatchObject({ inFlight: 1 })
     release()
     await pending
     expect(doc.getElementById('p1')!.nextElementSibling!.classList.contains(PENDING_CLASS)).toBe(false)
-    expect(doc.querySelectorAll('.axt-spinner')).toHaveLength(0)
+    expect(doc.querySelectorAll('.axt-skel')).toHaveLength(0)
     expect(seen.at(-1)).toMatchObject({ inFlight: 0, done: 1 })
   })
 
@@ -169,7 +170,9 @@ describe('startTranslation', () => {
     // 失败块旁是带原因的小部件（§7.6），不是译文
     const widget = doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p1"]`)!
     expect(widget.classList.contains(ERROR_CLASS)).toBe(true)
-    expect(widget.getAttribute('title')).toBe('unknown: unknown')
+    // 悬停看到的是按界面语言写的那一句，原始诊断在属性里（Codex 在 #161 指出）
+    expect(widget.getAttribute('title')).toBe(reasonText('unknown'))
+    expect(widget.getAttribute('data-axt-reason')).toBe('unknown: unknown')
     expect(doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
     expect(doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="p2"]`)?.classList.contains(ERROR_CLASS)).toBe(false)
     // failed() 列出失败块；再交给 translate 就是重试，成功后小部件换成译文
@@ -313,7 +316,7 @@ describe('startTranslation', () => {
 })
 
 describe('onRendered：每批交出刚动过 DOM 的块（issue #46）', () => {
-  it('每批两次：插圆环后一次、渲染结果后一次，两次都是这批的块', async () => {
+  it('每批两次：插骨架屏后一次、渲染结果后一次，两次都是这批的块', async () => {
     const doc = docOf()
     const blocks = extract(doc)
     const { transport } = makeTransport()
@@ -339,7 +342,7 @@ describe('onRendered：每批交出刚动过 DOM 的块（issue #46）', () => {
     const seen: Block[][] = []
     const run = await start(doc, blocks, transport, { onRendered: b => seen.push(b) })
     const pending = run.translate([blocks[1]!])
-    expect(seen).toHaveLength(1) // 圆环那一次已经发出
+    expect(seen).toHaveLength(1) // 骨架屏那一次已经发出
     run.stop()
     release()
     await pending

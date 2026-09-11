@@ -10,7 +10,7 @@ import {
   applyStyle,
   clearPairMargins, createModeController, createPrep, installAnchorFallback,
   clearImageEverywhere, restore, setImageModes, startSentenceHighlight,
-  type Mode, type ModeController, type SentenceHighlight,
+  type Mode, type ModeController, type SentenceHighlight, relabelFailed,
 } from '@/core/renderer'
 import { escapeText, unescapeText } from '@/core/protector/text'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
@@ -19,6 +19,8 @@ import { isAxtMessage, type PageStatus, sendMessage } from '@/shared/messages'
 import type { ImageProgress } from '@/shared/ocr'
 import { createMessageTransport } from '@/shared/transport'
 import { enableDebug } from './debug'
+import { applyLocaleFrom } from '@/ui/apply-locale'
+import { S } from '@/ui/strings'
 
 // 注入 arxiv.org/html/*。页面加载只 extract（不写 DOM），Block[] 留在内存里；
 // popup 发 axt:translate-page 才开始翻译（DESIGN §4.1）。URL 带 #axt-debug 描边、#axt-translate 自动开始，便于调试与自动化验证。
@@ -43,7 +45,17 @@ export default defineContentScript({
     let uninstallAnchors: (() => void) | null = null
     /** 悬停对照高亮（§7.7）：跟着一次翻译会话起停，配置关掉时根本不装监听 */
     let highlight: SentenceHighlight | null = null
-    let savedMode: Mode = 'stack'
+    /**
+     * 读者存的模式。**问状态要等它读回来**：popup 一拿到非空的状态就不再重试，所以在这之前
+     * 任何猜测都可能把模式条钉在错的那一档上——升级上来的读者存着「上下」，而默认值是「左右」
+     *（Codex 在 #161 两轮分别指出这个默认值与「先猜」本身）。默认值只是读失败时的兜底
+     */
+    let savedMode: Mode = DEFAULT_CONFIG.mode
+    /** 首次读配置完成（无论成败）；`axt:page-status` 等它 */
+    let configRead: () => void = () => undefined
+    const configReady = new Promise<void>(resolve => { configRead = resolve })
+    /** 由 startImages 装上：识别助手后来装好时，把这一页停着的位图放出来 */
+    let resumeRaster: () => boolean = () => false
     /** 译文外观（§7.5）：读者选中的那一份样式与高亮配置，写成 <html> 上的属性与变量 */
     let look: Look = lookOf(DEFAULT_CONFIG)
     /**
@@ -57,7 +69,21 @@ export default defineContentScript({
     const adoptStyle = (next: Look) => {
       if (!styleFromWatcher) look = next
     }
-    void getConfig().then(config => { savedMode = config.mode; adoptStyle(lookOf(config)) })
+    /**
+     * The same gate for the interface's language: this read is a snapshot from when it was issued,
+     * and a language chosen while it was in flight would be undone by its continuation — the paper
+     * would keep the previous language until some other configuration event came along
+     * (Codex on #161, the same shape as the appearance read above)
+     */
+    const adoptLocale = (uiLanguage: string) => {
+      if (!styleFromWatcher) applyLocaleFrom(uiLanguage)
+    }
+    // The words this script puts on the page follow the interface's language too (UI.md §6)
+    void getConfig()
+      .then(config => { savedMode = config.mode; adoptLocale(config.uiLanguage); adoptStyle(lookOf(config)) })
+      // 读失败也要放行：popup 等不到回答会一直显示「正在读取」，而默认值至少是个能用的答案
+      .catch(e => console.debug('[axt] 读配置失败，先按默认值答', e))
+      .finally(() => configRead())
     // 设置页改完外观立刻生效（#47）：只重算注入表与 <html data-axt-style>，一个译文节点都不碰，
     // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
     // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
@@ -92,6 +118,9 @@ export default defineContentScript({
         setImageModes(document, [])
         if (config.image.enabled) startImages(current.session, config, current.context, current.renderPath)
       }
+      // 语言变了：已经画出来的失败控件把词抄进了自己的 shadow root，要重新写一遍（Codex 在 #161 指出）
+      applyLocaleFrom(config.uiLanguage)
+      relabelFailed(document)
       const next = lookOf(config)
       if (JSON.stringify(next) === JSON.stringify(look)) return
       look = next
@@ -140,10 +169,10 @@ export default defineContentScript({
      * more requests (Codex on #157). A restart the reader asked for passes no session and always runs
      */
     async function start(requested?: Mode, restart = false, from?: string): Promise<{ started: boolean; reason?: string }> {
-      if (progress.state === 'on' && !restart) return { started: false, reason: '翻译已开启，滚动会继续翻' }
-      if (from !== undefined && getSessionId() !== from) return { started: false, reason: '会话已结束' }
-      if (!paper) return { started: false, reason: '不是 arXiv HTML 页面' }
-      if (blocks.length === 0) return { started: false, reason: '页面里没有可翻译的块' }
+      if (progress.state === 'on' && !restart) return { started: false, reason: S.page.alreadyOn }
+      if (from !== undefined && getSessionId() !== from) return { started: false, reason: S.page.sessionOver }
+      if (!paper) return { started: false, reason: S.page.notPaper }
+      if (blocks.length === 0) return { started: false, reason: S.page.nothingToTranslate }
       const tStart = performance.now()
       const config = await getConfig()
       // 术语表随每批发出（§8.2）。**空表不带这个字段**：带上会让所有既有缓存键变一遍，一次性全失效
@@ -153,12 +182,12 @@ export default defineContentScript({
       try {
         status = await backend.status()
       } catch (e) {
-        return { started: false, reason: `扩展后台未响应：${e instanceof Error ? e.message : String(e)}` }
+        return { started: false, reason: `${S.page.backendSilent}：${e instanceof Error ? e.message : String(e)}` }
       }
       // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上（§8.5）
-      if (!status.available && !status.fallback) return { started: false, reason: '未配置 API key，请先到设置页填写' }
+      if (!status.available && !status.fallback) return { started: false, reason: S.page.noService }
       // The reader may have restored the page while the two reads above were in flight
-      if (from !== undefined && getSessionId() !== from) return { started: false, reason: '会话已结束' }
+      if (from !== undefined && getSessionId() !== from) return { started: false, reason: S.page.sessionOver }
       console.debug(`[axt] start: ready in ${Math.round(performance.now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
       modes?.stop()
@@ -311,6 +340,13 @@ export default defineContentScript({
         if (available) images?.resume()
         else for (const t of targets) if (t.kind === 'raster') clearImageEverywhere(t)
       }
+      // 装好识别助手之后要能把这一页放出来（Codex 在 #161 指出）：会话开始时探测扑空的话，
+      // 位图一直停在 parked 里，而这一页自己没有任何再问一次的由头
+      resumeRaster = () => {
+        if (helperReady || getSessionId() !== session) return false
+        settleRaster(true)
+        return true
+      }
       sendMessage({ type: 'axt:helper-status' })
         .then(helper => settleRaster(helper.available))
         .catch(e => { console.debug('[axt] helper-status 失败', e); settleRaster(false) })
@@ -411,8 +447,14 @@ export default defineContentScript({
           sendResponse({ retried: failed.length + failedImages.length })
           return true
         }
+        case 'axt:helper-ready':
+          sendResponse({ resumed: resumeRaster() })
+          return true
         case 'axt:page-status':
-          sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, session: getSessionId(), ...(imageProgress ? { images: imageProgress } : {}), ...(running ? { running } : {}) })
+          // 等首次读配置：答一次就定了这一轮 popup 的模式条（见 savedMode 的注释）
+          void configReady.then(() => {
+            sendResponse({ paper, mode: modes?.effective() ?? savedMode, preference: modes?.preference() ?? savedMode, progress, session: getSessionId(), ...(imageProgress ? { images: imageProgress } : {}), ...(running ? { running } : {}) })
+          })
           return true
       }
     })

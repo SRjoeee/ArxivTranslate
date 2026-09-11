@@ -7,13 +7,21 @@
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
-import { addService, chooseBuiltIn, chooseLanguage, chooseStyle, clearKeyAndReconnect, openOptions, openSection, pick, setImageMode, setPreload, setSwitch } from './options-page.mjs'
+import { addService, chooseBuiltIn, chooseLanguage, chooseStyle, chooseUiLanguage, clearKeyAndReconnect, openOptions, openSection, pick, setImageMode, setPreload, setSwitch } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
 const PROFILE = `${HERE}.profile`
 const SHOTS = `${HERE}.shots`
 const PAPER = process.env.AXT_PAPER ?? '2410.00260'
+/** popup 里那一行的名字（S-P-82）；与设置页「译文样式」同名 */
+const S_STYLE = '译文样式'
+/**
+ * 「真正的译文」：加载骨架屏、失败控件，以及 side 模式的镜像与拆图副本都带 .axt-t，
+ * 但外观不装饰它们、几何也另有一套。默认模式是 side（2026-09-11），所以每一处按译文取样的
+ * 断言都要带上这个排除条件，否则取到的可能是结构性副本
+ */
+const REAL = ':not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
 const PAPER2 = process.env.AXT_PAPER2 ?? '2312.17527'
 /** 第三篇：前面的用例都没碰过它，缓存是冷的——导航那条要靠真实积压才测得出东西 */
 const PAPER3 = process.env.AXT_PAPER3 ?? '2312.17141'
@@ -45,6 +53,9 @@ const context = await chromium.launchPersistentContext(PROFILE, {
   args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--js-flags=--expose-gc'],
   viewport: { width: 1440, height: 900 },
 })
+// 真实论文的导航给足时间：Playwright 默认 30 s，而 arXiv 在连着跑几十轮之后会明显变慢
+// （实测同一篇 curl 要 26 s）。断言各自的等待没有放宽，放宽的只是「把页面拿到手」这一步
+context.setDefaultNavigationTimeout(90_000)
 let [worker] = context.serviceWorkers()
 if (!worker) worker = await context.waitForEvent('serviceworker')
 const extId = worker.url().split('/')[2]
@@ -97,21 +108,21 @@ async function openPaper(id, host) {
   // 插入与移除落在同一批里时，回调里 querySelectorAll 数到的已经是 0——峰值就永远是 0。
   // 记录被插入过的圆环节点数与时序无关
   await page.addInitScript(() => {
-    window.__axtSpinnersSeen = 0
+    window.__axtSkeletonsSeen = 0
     const count = node => {
       if (node.nodeType !== 1) return 0
       const el = node
-      return (el.classList?.contains('axt-spinner') ? 1 : 0) + (el.querySelectorAll?.('.axt-spinner').length ?? 0)
+      return (el.classList?.contains('axt-skel') ? 1 : 0) + (el.querySelectorAll?.('.axt-skel').length ?? 0)
     }
     const start = () => new MutationObserver(list => {
-      for (const m of list) for (const node of m.addedNodes) window.__axtSpinnersSeen += count(node)
+      for (const m of list) for (const node of m.addedNodes) window.__axtSkeletonsSeen += count(node)
     }).observe(document.documentElement, { childList: true, subtree: true })
     if (document.documentElement) start()
     else document.addEventListener('readystatechange', start, { once: true })
   })
   await page.goto(`https://arxiv.org/html/${id}#axt-translate`, { waitUntil: 'domcontentloaded' })
   const originalTitle = await page.title()
-  return { page, logs, requests, originalTitle, spinnersSeen: () => page.evaluate(() => window.__axtSpinnersSeen ?? 0).catch(() => 0) }
+  return { page, logs, requests, originalTitle, skeletonsSeen: () => page.evaluate(() => window.__axtSkeletonsSeen ?? 0).catch(() => 0) }
 }
 
 async function waitForLog(logs, pattern, timeoutMs, predicate = () => true) {
@@ -319,7 +330,6 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
   // 只认真正的译文：加载圆环 / 失败控件 / 镜像与拆分克隆也带 .axt-t，但外观刻意不装饰它们，
   // 轮询撞上 pending 节点会把「透明度没生效」误报成配置坏了（Codex 在 #52 指出）
-  const REAL = ':not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
   await page.waitForFunction(sel => document.querySelector(sel) !== null, `.axt-t:not([data-axt-inline])${REAL}`, { timeout: 60_000 }).catch(() => undefined)
   await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')).opacity) < 1, null, { timeout: 30_000 }).catch(() => undefined)
   const styled = await page.evaluate(real => {
@@ -333,6 +343,28 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   }, REAL)
   check('译文外观「淡一档」：译文透明度降下来，原文不受影响', styled.opacity > 0 && styled.opacity < 1 && styled.sourceOpacity === 1, JSON.stringify(styled))
   await page.screenshot({ path: `${SHOTS}/style-muted.png` })
+
+  // popup 也能换样式（S-P-82）：走的是「popup 写配置 → 页面的配置监听重画」，与设置页那条不同，
+  // 而且**页面正开着**，所以它同时证明了换样式不需要重开会话
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await page.bringToFront()
+  await popup.getByRole('button', { name: S_STYLE, exact: false }).click()
+  await popup.getByRole('option', { name: '绿色', exact: true }).click()
+  await popup.close()
+  await page.bringToFront()
+  const green = await page.evaluate(async real => {
+    const el = () => document.querySelector(`.axt-t:not([data-axt-inline])${real}`)
+    for (let i = 0; i < 40; i++) {
+      const color = el() ? getComputedStyle(el()).color : ''
+      // 与原文相同时译文用页面的正文色；绿色预设把它换掉
+      if (color && color !== getComputedStyle(document.querySelector('.ltx_p:not(.axt-t)')).color) return color
+      await new Promise(r => setTimeout(r, 250))
+    }
+    return el() ? getComputedStyle(el()).color : 'no translation'
+  }, REAL)
+  const sourceColor = await page.evaluate(() => getComputedStyle(document.querySelector('.ltx_p:not(.axt-t)')).color)
+  check('popup 的译文样式：选「绿色」后开着的页面立刻换色，不重开会话', green !== sourceColor && green !== 'no translation', `译文 ${green}，原文 ${sourceColor}`)
   await page.close()
 
   // 下划线要画到公式上：text-decoration 不传播到 math 这类原子行内盒，用户反馈过公式处虚线断掉。
@@ -351,23 +383,24 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   // 可能还没写上——enable() 在 startTranslation 里写它，而 #axt-translate 触发的会话与设置页刚存的预设
   // 之间隔着一次配置读取。一次实测就撞到过：量到 22 个公式、块级 none/solid，重跑同一构建是 51 个 underline/dashed
   await dashedPage.waitForFunction(
-    () => document.documentElement.dataset.axtUnderline === 'dashed' && document.querySelectorAll('.axt-t math').length > 0,
-    null, { timeout: 60_000 },
+    real => document.documentElement.dataset.axtUnderline === 'dashed' && document.querySelectorAll(`.axt-t${real} math`).length > 0,
+    REAL, { timeout: 60_000 },
   ).catch(() => undefined)
   // 再等公式数稳定：翻译还在进行时读到的是半截状态
   let stableMaths = -1
   for (let i = 0; i < 40; i++) {
     await sleep(500)
-    const n = await dashedPage.evaluate(() => document.querySelectorAll('.axt-t math').length)
+    const n = await dashedPage.evaluate(real => document.querySelectorAll(`.axt-t${real} math`).length, REAL)
     if (n === stableMaths && n > 0) break
     stableMaths = n
   }
-  const dashed = await dashedPage.evaluate(() => {
+  const dashed = await dashedPage.evaluate(real => {
     const deco = el => { const cs = getComputedStyle(el); return `${cs.textDecorationLine}/${cs.textDecorationStyle}` }
-    const maths = [...document.querySelectorAll('.axt-t math')]
-    const block = document.querySelector('.axt-t:not([data-axt-inline])')
+    // 只认真正的译文：side 模式的镜像与拆图副本也带 .axt-t，外观刻意不装饰它们（同 §7.5 的排除条件）
+    const maths = [...document.querySelectorAll(`.axt-t${real} math`)]
+    const block = document.querySelector(`.axt-t:not([data-axt-inline])${real}`)
     return { count: maths.length, math: maths.slice(0, 3).map(deco), block: block ? deco(block) : null }
-  })
+  }, REAL)
   check('译文外观 · 虚线：线画到译文里的公式上（text-decoration 不传播到原子行内盒）',
     dashed.count > 0 && dashed.block === 'underline/dashed' && dashed.math.every(d => d === 'underline/dashed'),
     `${dashed.count} 个公式，块级 ${dashed.block}，公式 ${dashed.math.join(' ')}`)
@@ -378,11 +411,11 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 
 // ── 论文 1：看到哪翻到哪（§10）：不滚动只翻首屏附近；逐屏滚到底其余跟上；标题翻译；速率 ────
 {
-  const { page, logs, requests, originalTitle, spinnersSeen } = await openPaper(PAPER, GOOGLE)
+  const { page, logs, requests, originalTitle, skeletonsSeen } = await openPaper(PAPER, GOOGLE)
   const first = idleOf(await waitForLog(logs, IDLE, 120_000))
   check(`论文 ${PAPER}：不滚动只翻首屏附近（google-web）`, !!first && first.requested > 0 && first.requested < first.total && first.done === first.requested && first.failed === 0, first?.text ?? '(no idle line)')
-  const spinners = await spinnersSeen()
-  check('请求期间插入过加载圆环（§7.6）', spinners > 0, `插入过 ${spinners} 个圆环`)
+  const skeletons = await skeletonsSeen()
+  check('请求期间插入过骨架屏（§7.6）', skeletons > 0, `插入过 ${skeletons} 块骨架屏`)
   const translated = await page.title()
   check('标签页标题被翻译', translated !== originalTitle && /[\u4e00-\u9fff]/.test(translated), `${originalTitle} → ${translated}`)
   await page.screenshot({ path: `${SHOTS}/paper-first-screen.png` })
@@ -457,7 +490,15 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     !!idle && idle.requested > 0 && idle.done === idle.requested && idle.failed === 0 && !/fatal/.test(idle.text),
     idle?.text ?? '(no idle line)')
 
-  // 记号方案的两条硬承诺：受保护节点一个不少，且没有记号漏进可见文字
+  // 记号方案的两条硬承诺：受保护节点一个不少，且没有记号漏进可见文字。
+  // 先往下滚两屏再取样：左右对照下首屏是标题与作者，一个公式都没有，取到的样本证明不了什么
+  for (let i = 0; i < 6; i++) {
+    const withMath = await page.evaluate(real => [...document.querySelectorAll(`.axt-t${real}`)]
+      .some(t => t.querySelector('math, .ltx_Math, img, a.ltx_ref') !== null), REAL)
+    if (withMath) break
+    await page.mouse.wheel(0, 900)
+    await sleep(1500)
+  }
   const shape = await page.evaluate(() => {
     const pairs = []
     for (const t of document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')) {
@@ -659,6 +700,9 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       if (!next?.classList.contains('axt-img')) continue
       out.overlays++
       out.sibling++
+      // side 下插图拆成两份，叠加层只显示在「只有译文」的那份上，原件那份 display:none
+      //（styles/image.css §7.2）。量看得见的那一份：藏起来的没有几何可言
+      if (getComputedStyle(next).display === 'none') { out.overlays--; out.sibling--; continue }
       const a = o.getBoundingClientRect()
       const b = next.getBoundingClientRect()
       // 锚点定位：叠加层的矩形应当与 <object> 的矩形重合
@@ -1193,6 +1237,30 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await options.bringToFront()
   const cleared = await clearKeyAndReconnect(options)
   check('设置页：清除 API Key 后连接报「尚未配置」，不是把旧 key 写回去', /尚未配置/.test(cleared ?? ''), cleared)
+}
+
+// ── 界面语言（UI.md §6）─────────────────────────────────────────────
+// 最后一段：它把设置页整页重载，也把配置里的 uiLanguage 留在英文，别的用例不必受这个影响
+{
+  await options.bringToFront()
+  await options.reload({ waitUntil: 'domcontentloaded' })
+  await chooseUiLanguage(options, '界面语言', 'English')
+  const nav = (await options.locator('nav').innerText()).replace(/\n+/g, ' ')
+  check('设置页跟着界面语言换成英文', /Services/.test(nav) && !/翻译服务/.test(nav), nav.slice(0, 60))
+
+  // popup 与论文页读的是同一份配置：三处都要跟着换，不是只有设置页
+  const enPopup = await context.newPage()
+  await enPopup.goto(`chrome-extension://${extId}/popup.html`)
+  await enPopup.waitForTimeout(600)
+  const popupText = await enPopup.locator('main').innerText()
+  check('popup 跟着界面语言换成英文', /Open the HTML version|Translate this page/.test(popupText) && !/翻译本页|打开 arXiv/.test(popupText), popupText.split('\n')[0] ?? '')
+  await enPopup.close()
+
+  // 换回中文，把配置留在这套测试的其余部分预期的样子
+  await options.bringToFront()
+  await chooseUiLanguage(options, 'Interface language', '简体中文')
+  const back = await options.locator('nav').innerText()
+  check('换回中文之后设置页也跟着回来', /翻译服务/.test(back), back.replace(/\n+/g, ' ').slice(0, 40))
 }
 
 await context.close()

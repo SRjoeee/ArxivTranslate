@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { COMMAND_ID, MENU_CONTEXTS, MENU_ID, MENU_PATTERNS, MENU_TITLE, actionFor, installContextMenu, installToggleCommand } from '@/entrypoints/background/context-menu'
+import { COMMAND_ID, MENU_CONTEXTS, MENU_ID, MENU_PATTERNS, actionFor, installContextMenu, installToggleCommand, menuTitle } from '@/entrypoints/background/context-menu'
 import type { Progress } from '@/core/pipeline/run'
 
 /** 真实形状的进度：第一版这里写的是随手编的 `{ state: 'off' }`，而 `Progress` 根本没有这个值，
@@ -36,9 +36,25 @@ describe('右键菜单的翻译开关（#146）', () => {
     // 这两样到处都是，只注册 `page` 的话最容易点到的地方反而没有菜单（Codex 在 #147 指出）
     const menu = fakeMenu()
     await Promise.resolve()
-    expect(menu.created).toEqual([{ id: MENU_ID, title: MENU_TITLE, contexts: MENU_CONTEXTS, documentUrlPatterns: MENU_PATTERNS }])
+    expect(menu.created).toEqual([{ id: MENU_ID, title: menuTitle(), contexts: MENU_CONTEXTS, documentUrlPatterns: MENU_PATTERNS }])
     expect(MENU_PATTERNS).toEqual(['https://arxiv.org/html/*'])
     for (const ctx of ['link', 'image', 'selection', 'page']) expect(MENU_CONTEXTS).toContain(ctx)
+  })
+
+  it('点击处理同步注册：worker 被这次点击唤醒时，监听器必须已经在了（Codex 在 #161 指出）', () => {
+    let removed: () => void = () => undefined
+    const menu: { created: unknown[]; clicked: ((info: { menuItemId: string | number }, tab?: { id?: number }) => void) | null } = { created: [], clicked: null }
+    installContextMenu({
+      // removeAll 挂着不结算，模拟「读配置还没回来」
+      create: options => menu.created.push(options),
+      removeAll: () => new Promise(resolve => { removed = resolve }),
+      onClicked: handler => { menu.clicked = handler },
+      send: <T>() => Promise.resolve({} as T),
+    })
+    // 菜单还没建出来，但监听器已经在：这一次唤醒的点击不会掉地上
+    expect(menu.created).toHaveLength(0)
+    expect(menu.clicked).not.toBeNull()
+    removed()
   })
 
   it('三个真实状态各自去哪：idle 去翻，其余去恢复', () => {

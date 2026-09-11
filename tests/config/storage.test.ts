@@ -31,8 +31,8 @@ describe('config storage', () => {
     vi.resetModules()
     const fresh = await import('@/config/storage')
     expect(await fresh.getConfig()).toEqual(DEFAULT_CONFIG)
-    expect(fresh.configFallbackReason()).toContain(`v${CONFIG_VERSION + 1}`)
-    expect(fresh.configFallbackReason()).toContain('更旧的版本')
+    // 回的是成因，不是句子：句子按界面语言写（UI.md §6）
+    expect(fresh.configFallbackReason()).toEqual({ kind: 'tooNew', stored: CONFIG_VERSION + 1, supported: CONFIG_VERSION })
   })
 
   it('结构坏掉时指出是哪个字段，不只说「不合法」', async () => {
@@ -40,7 +40,7 @@ describe('config storage', () => {
     vi.resetModules()
     const fresh = await import('@/config/storage')
     expect(await fresh.getConfig()).toEqual(DEFAULT_CONFIG)
-    expect(fresh.configFallbackReason()).toContain('targetLanguage')
+    expect(fresh.configFallbackReason()).toMatchObject({ kind: 'invalid', where: 'targetLanguage' })
   })
 
   it('配置正常时不留回退原因：不能对着好配置报警', async () => {

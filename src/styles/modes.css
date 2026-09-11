@@ -7,14 +7,47 @@
   color: var(--axt-color, inherit);
 }
 
-/* 等待态（§7.6）：pending 译文节点里只有一个圆环，圆环颜色照 Read Frog 的 host-theme.css（浅 / 深两档） */
+/* 等待态（§7.6）：pending 节点里是一块骨架屏——几条按论文字号排的条，用 arXiv 红染进透明里，
+   论文自己的底色透过来，浅底深底都不违和。**只染色，不发光**：条上不放渐变扫光，
+   那是每帧对每一块重绘，一页几百块时正是主线程被吃满的那条路（§7.6 记了取舍）。 */
 html[data-axt-on] {
-  --axt-muted: oklch(0.556 0 0);
+  --axt-skel: color-mix(in oklab, #b31b1b 14%, transparent);
 }
 @media (prefers-color-scheme: dark) {
   html[data-axt-on] {
-    --axt-muted: oklch(0.708 0 0);
+    --axt-skel: color-mix(in oklab, #d63c3c 24%, transparent);
   }
+}
+
+/* 尺寸一律用 em：跟着所在块的字号走，摘要、正文、图注、脚注各自合身，不需要逐处特判。
+   条是 inline-block、容器 line-height 归零：这样条会**跟着块自己的 text-align 走**——
+   居中的标题下面是一条居中的条，正文下面是靠左的条；块级的条做不到这件事（实测标题下的条会甩到左边）。
+   行距靠条自己的 margin 给，不靠行盒，免得字号一变高度就跳 */
+.axt-skel {
+  display: block;
+  line-height: 0;
+  padding: 0.18em 0;
+}
+
+.axt-skel-line {
+  display: inline-block;
+  height: 0.62em;
+  margin: 0.22em 0;
+  border-radius: 0.2em;
+  background: var(--axt-skel);
+}
+
+/* 同行的短标题（§7.3）：一条跟在标题后面，基线对齐 */
+.axt-skel[data-axt-inline] {
+  display: inline-block;
+  padding: 0;
+  vertical-align: baseline;
+}
+
+.axt-skel[data-axt-inline] .axt-skel-line {
+  display: inline-block;
+  margin: 0;
+  vertical-align: -0.06em;
 }
 
 /* stack / only：译文紧跟原文，压掉站点为该标签留的大边距。

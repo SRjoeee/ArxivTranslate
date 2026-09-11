@@ -35,6 +35,8 @@ export interface PopupActions {
   chooseService(id: string): void
   chooseLanguage(code: Config['targetLanguage']): void
   choosePrompt(id: string): void
+  /** An appearance style id; the page's own config watcher applies it, so no restart */
+  chooseStyle(id: string): void
   setHighlight(on: boolean): void
   setImages(on: boolean): void
   downloadPack(): void
@@ -88,7 +90,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
     browser.commands.getAll()
       .then(all => setShortcut(all.find(c => c.name === COMMAND_ID)?.shortcut || null))
       .catch(() => setShortcut(null))
-    sendMessage({ type: 'axt:helper-status' }).then(setHelper).catch(() => setHelper({ available: false }))
+    sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ available: false }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
   }, [refresh, checkPack, loadProvider])
 
@@ -199,6 +201,16 @@ export function usePopupData(): { input: PopupInput; error: string | null; copie
       // Any of the reader's services is an LLM, and each is chosen through its own id — comparing
       // against 'openai-compat' was never true after v12, so the page kept the old prompt (Codex on #157)
       if (isLlmChosen(next)) await restartIfOn(next, pack, s => s.promptId === id)
+    }),
+    // The page's config watcher redraws the translations in the new style; no session restarts
+    chooseStyle: id => void guard(async () => {
+      setMenu(null)
+      // Same as the service menu: this list may have been built before another tab deleted the
+      // profile, and a dangling id leaves every profile unmarked while the page reads the first
+      // one (Codex on #161)
+      await patchConfig(latest => (
+        latest.appearance.styles.some(p => p.id === id) ? { ...latest, appearance: { ...latest.appearance, activeStyle: id } } : latest
+      ))
     }),
     // Both switches are applied live by the page's own config watcher; nothing to send
     setHighlight: on => void guard(async () => {

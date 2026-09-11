@@ -896,11 +896,19 @@ export function englishName(code: string): string {
   return isLangCode(code) ? LANG_CODE_TO_EN_NAME[code] : code
 }
 
-/** 设置页显示：中文名（本地写法），对应 Read Frog language-labels.ts 的 getLanguageLabel */
-export function label(code: LangCode): string {
-  const zh = LANG_CODE_TO_ZH_NAME[code]
+/**
+ * 语言名：先按界面语言写一遍，再补上它自己的写法——「日语（日本語）」。对应 Read Frog
+ * language-labels.ts 的 getLanguageLabel。
+ *
+ * `inLocale` 是界面语言的名字表；不给就用中文表。**目标语言与界面语言是两件事**（UI.md §6）：
+ * 英文界面下这一行要读作 "Japanese (日本語)"，否则读者会以为界面没换干净
+ */
+export function label(code: LangCode, inLocale: Partial<Record<LangCode, string>> = LANG_CODE_TO_ZH_NAME): string {
+  const named = inLocale[code] ?? LANG_CODE_TO_EN_NAME[code]
   const local = LANG_CODE_TO_LOCALE_NAME[code]
-  return zh === local ? zh : `${zh}（${local}）`
+  if (named === local) return named
+  // 括号跟着外面那半句走：中文用全角，其余用半角。「Japanese（日本語）」两种括号混在一句里最难看
+  return /\p{Script=Han}/u.test(named) ? `${named}（${local}）` : `${named} (${local})`
 }
 
 /** 给按 BCP-47 收目标语言的引擎（google-web）；没有两字母码的语言原样传 ISO 639-3 码 */

@@ -8,10 +8,13 @@
  * `@`（at 规则）与 `<`（`</style>`）同理。这不是安全边界（用户本来就能装任何扩展），
  * 是防手滑：一个多余的花括号会把整篇论文的排版改掉，而且很难看出原因。
  */
-export function sanitizeCustomCss(css: string): { ok: true; css: string } | { ok: false; reason: string } {
+/** 拒绝的理由**是哪一种**；句子在语言包里，这一层不认识界面语言（Codex 在 #161 指出） */
+export type CssRejection = 'closeBrace' | 'openBrace' | 'atRule' | 'angle'
+
+export function sanitizeCustomCss(css: string): { ok: true; css: string } | { ok: false; reason: CssRejection } {
   const trimmed = css.trim()
   if (trimmed === '') return { ok: true, css: '' }
-  for (const [char, reason] of [['}', '不要写右花括号：这里只填声明，选择器由扩展补上'], ['{', '不要写左花括号：这里只填声明，选择器由扩展补上'], ['@', '不支持 @ 规则'], ['<', '不能包含 <']] as const) {
+  for (const [char, reason] of [['}', 'closeBrace'], ['{', 'openBrace'], ['@', 'atRule'], ['<', 'angle']] as const) {
     if (trimmed.includes(char)) return { ok: false, reason }
   }
   return { ok: true, css: trimmed }

@@ -42,12 +42,12 @@ describe('译文节点标注语言（同行审计漏掉的一条）', () => {
 })
 
 describe('纯装饰的副本对屏幕阅读器隐藏', () => {
-  it('加载圆环带 aria-hidden：逐块的等待状态不该被逐个念出来', () => {
+  it('加载骨架屏带 aria-hidden：逐块的等待状态不该被逐个念出来', () => {
     const doc = docOf('<p class="ltx_p" id="p1">Hello.</p>')
     const [block] = extract(doc) as TextBlock[]
     renderPending(block!)
-    const spinner = doc.querySelector('.axt-spinner')!
-    expect(spinner.getAttribute('aria-hidden')).toBe('true')
+    const skeleton = doc.querySelector('.axt-skel')!
+    expect(skeleton.getAttribute('aria-hidden')).toBe('true')
   })
 
   it('镜像带 aria-hidden：它是右栏的视觉配平副本，内容与左栏完全相同', async () => {

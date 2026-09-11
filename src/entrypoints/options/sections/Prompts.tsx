@@ -40,7 +40,7 @@ export function Prompts({ data }: { data: OptionsData }) {
         aria-label={O.prompts.glossary}
         value={text}
         rows={6}
-        placeholder={'token, 词元\nembedding, 嵌入'}
+        placeholder={O.prompts.glossaryPlaceholder}
         onChange={e => {
           setText(e.target.value)
           // Only a table that parses **and** fits the schema is written; the rest stays on screen
@@ -53,7 +53,7 @@ export function Prompts({ data }: { data: OptionsData }) {
         className="w-full rounded-control border border-line bg-card px-3 py-2 font-mono text-[12px] text-fg outline-none focus:border-fg-2"
       />
       {parsed.issues.map(issue => (
-        <p key={issue.line} className="mt-1 text-[11px] text-accent">第 {issue.line} 行{issue.reason}</p>
+        <p key={issue.line} className="mt-1 text-[11px] text-accent">{O.prompts.glossaryIssue[issue.reason](issue.line)}</p>
       ))}
       {overLimit && <p className="mt-1 text-[11px] text-accent">{O.prompts.glossaryTooBig}</p>}
     </>

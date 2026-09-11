@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { setLocale } from '@/ui/strings'
 import { S, parseFatal, reasonText, serviceName } from '@/ui/strings'
+
+// The copy tables of UI.md §3 are the Chinese ones; this file checks that pack
+setLocale('zh-CN')
 
 describe('reasonText', () => {
   it('has a reader-facing sentence for every kind, free of implementation words', () => {
@@ -35,7 +39,7 @@ describe('serviceName', () => {
 
 describe('the strings themselves', () => {
   it('carry the product name and no implementation words', () => {
-    expect(S.brand).toBe('Readarxiv')
+    expect(S.brand).toBe('Read arXiv')
     // Values only: keys are code (S.helper is a key, 识别助手 is the word a reader sees)
     const values = (v: unknown): string => typeof v === 'string' ? v : typeof v === 'function' ? String(v('x', 'y', 'z')) : v && typeof v === 'object' ? Object.values(v).map(values).join(' ') : ''
     const all = values(S)

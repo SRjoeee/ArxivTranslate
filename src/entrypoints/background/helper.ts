@@ -33,7 +33,13 @@ export interface HelperClientDeps {
 }
 
 export interface HelperClient {
-  status(): Promise<HelperStatus>
+  /**
+   * `recheck` forgets that the host was missing and probes again. Without it a worker that has once
+   * been told "no such native messaging host" answers from that memory for the rest of its life,
+   * which is right while nothing changes and wrong the moment the reader installs the helper and
+   * asks the settings page to look again (the guided install, UI.md S-O-30)
+   */
+  status(options?: { recheck?: boolean }): Promise<HelperStatus>
   /** 识别；version 是**回应所在连接**握手到的版本，缓存键按它算（重连后 helper 可能换了版本，Codex 在 #87 指出） */
   ocr(request: { image: string; langs?: string[] }, scope?: string): Promise<{ result: OcrResult; version: string }>
   /** 撤掉该 scope 排队与在飞的请求，返回撤掉的条数 */
@@ -217,7 +223,8 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
   }
 
   return {
-    async status() {
+    async status(options) {
+      if (options?.recheck) missing = null
       if (missing) return { available: false, reason: missing }
       if (known) return known
       try {

@@ -7,14 +7,21 @@ import type { PopupActions } from '@/entrypoints/popup/data'
 import { POPUP_FIXTURES } from '@/entrypoints/popup/fixtures'
 import { PopupView } from '@/entrypoints/popup/PopupView'
 import { derivePopupView } from '@/entrypoints/popup/view-model'
+import { applyLocale } from '@/ui/apply-locale'
+
+/** Dev-only page, so its name is not part of any pack */
+const GALLERY_TITLE = 'Popup states'
 
 const log = (name: string) => (...args: unknown[]) => console.log(`[gallery] ${name}`, ...args)
 const actions: PopupActions = {
   translate: log('translate'), retranslate: log('retranslate'), restore: log('restore'), chooseMode: log('chooseMode'), retryFailed: log('retryFailed'),
-  openMenu: log('openMenu'), closeMenu: log('closeMenu'), chooseService: log('chooseService'), chooseLanguage: log('chooseLanguage'), choosePrompt: log('choosePrompt'),
+  openMenu: log('openMenu'), closeMenu: log('closeMenu'), chooseService: log('chooseService'), chooseLanguage: log('chooseLanguage'), choosePrompt: log('choosePrompt'), chooseStyle: log('chooseStyle'),
   setHighlight: log('setHighlight'), setImages: log('setImages'), downloadPack: log('downloadPack'),
   copyInstallCommand: log('copyInstallCommand'), openGuide: log('openGuide'), openOptions: log('openOptions'),
 }
+
+// The gallery reviews the copy, so it reads the same pack the popup would
+await applyLocale(brand => `${brand} · ${GALLERY_TITLE}`)
 
 function Gallery() {
   return (

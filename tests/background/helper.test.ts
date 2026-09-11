@@ -301,6 +301,24 @@ describe('createHelperClient', () => {
     expect(ports).toHaveLength(1) // 没有第二次连接
   })
 
+  it('装好之后 status({ recheck: true }) 会重新连一次：引导式安装的「我已经运行了」靠它', async () => {
+    const { client, port, ports } = setup({ lastError: () => 'Specified native messaging host not found.' })
+    const first = client.status()
+    await flush()
+    port().drop()
+    expect((await first).available).toBe(false)
+    // 不带 recheck 的照旧从记忆里答，连都不连
+    expect((await client.status()).available).toBe(false)
+    expect(ports).toHaveLength(1)
+    // 带上就忘掉那次「没装」，重新连——这一次 host 在了
+    const again = client.status({ recheck: true })
+    await flush()
+    await handshake(port())
+    const ok = await again
+    expect(ok.available).toBe(true)
+    expect(ports).toHaveLength(2)
+  })
+
   it('cancel(scope)：排队中的不写进端口、以 aborted 拒绝；在飞的到达后按已撤处理；别的 scope 不受影响', async () => {
     const { client, port } = setup()
     const a = client.ocr({ image: 'A' }, 's1')

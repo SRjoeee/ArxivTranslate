@@ -18,18 +18,30 @@ export default defineConfig({
   },
   manifest: {
     // UI.md S-P-01 requires the store listing, the manifest and the site to carry one name
-    name: 'Readarxiv',
+    name: 'Read arXiv',
+    // Two marks, two surfaces (scripts/icons.mjs): `icons` is filled by WXT from public/icon/<size>.png,
+    // the tile, for the card the extensions page and the store put an icon on. Everywhere the mark
+    // stands on its own — this toolbar button, the page tabs, our own brand rows — it is the bare
+    // book, whose outline keeps it legible on a light and a dark surface alike
+    action: {
+      default_icon: { 16: 'icon/mark-16.png', 32: 'icon/mark-32.png', 48: 'icon/mark-48.png' },
+    },
     // 图片叠加层用 CSS 锚点定位，`anchor-scope` 要 Chrome 131（§15.2）。文档一直这么写，但没落到
     // manifest 上，低于这个版本的 Chrome 照样装得上、拿到一个错位的叠加层，而且滚动容器也不进
     // 顺序焦点（Codex 在 #99 指出）。声明出来，让文档写的下限真正生效
     minimum_chrome_version: '131',
-    description: '面向 arxiv.org/html 的保结构、可逆双语翻译',
+    // The two strings Chrome itself shows — the extensions page, the store listing and the shortcuts
+    // page — come from public/_locales, because only the browser reads them and only it can pick a
+    // language for them. Everything inside our own pages follows the reader's own choice instead
+    // (src/locales, UI.md §7)
+    default_locale: 'en',
+    description: '__MSG_description__',
     // nativeMessaging：Mac 上的图片翻译经本机 helper 做 OCR（DESIGN §15）；没装 helper 时这条权限闲着，不弹窗
     // contextMenus：右键菜单里的翻译开关（issue #146）。它不给页面内容的访问权，只是注册一个菜单项
     permissions: ['storage', 'nativeMessaging', 'contextMenus'],
     // The keyboard entry (UI.md S-P-50): the same toggle as the context menu. The popup shows the
     // binding Chrome reports, so a reader who rebinds or removes it sees the truth
-    commands: { 'axt-toggle': { suggested_key: { default: 'Alt+T' }, description: '翻译本页 / 显示原文' } },
+    commands: { 'axt-toggle': { suggested_key: { default: 'Alt+T' }, description: '__MSG_toggle__' } },
     // background 向 LLM 端点 fetch 需要 host 权限；默认只给 OpenRouter，自定义 baseURL 在设置页保存时按 origin 申请。
     // google-web 的端点也列进来（Codex 在 #59 指出）：它眼下返 CORS 头，普通跨域就能过，
     // 但那正是这次搬迁想摆脱的依赖——对方哪天不发这个头，免费引擎就整个不可用了

@@ -34,3 +34,14 @@ export function injectBilingualLink(doc: Document, label: string): boolean {
   item.after(li)
   return true
 }
+
+/**
+ * Rewrite the label of a link already on the page. The interface's language can change while an
+ * abstract page sits open, and this entry point reads the setting once (Codex on #161)
+ */
+export function relabelBilingualLink(doc: Document, label: string): boolean {
+  const link = doc.querySelector<HTMLAnchorElement>(`.${ABS_LINK_CLASS}`)
+  if (!link) return false
+  link.textContent = label
+  return true
+}

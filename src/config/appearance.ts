@@ -100,5 +100,11 @@ export function resetBuiltIns(a: Appearance, list: 'styles' | 'highlights'): App
   return { ...a, highlights: [...BUILT_IN_HIGHLIGHTS, ...a.highlights.filter(h => !ids.has(h.id))] }
 }
 
-export const duplicateStyle = (p: StyleProfile): StyleProfile => ({ ...p, id: newProfileId('style'), name: `${p.name} 副本` })
-export const duplicateHighlight = (p: HighlightProfile): HighlightProfile => ({ ...p, id: newProfileId('hl'), name: `${p.name} 副本` })
+/**
+ * 复制一份。**名字由调用方给**：它要按界面语言写（「绿色 副本」/「Green copy」），而随扩展一起发的
+ * 那几份的显示名也跟着语言走——这些都是 UI 层的事，配置层不认识语言包（Codex 在 #161 指出）。
+ * 名字仍然在这里夹进 schema 的上限：超了整份配置就存不下，读者只会看到「没保存」（Codex 在 #157 指出）
+ */
+export const NAME_MAX = 40
+export const duplicateStyle = (p: StyleProfile, name: string): StyleProfile => ({ ...p, id: newProfileId('style'), name: name.slice(0, NAME_MAX) })
+export const duplicateHighlight = (p: HighlightProfile, name: string): HighlightProfile => ({ ...p, id: newProfileId('hl'), name: name.slice(0, NAME_MAX) })

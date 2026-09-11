@@ -74,7 +74,7 @@ describe('localizeNotes', () => {
     expect(c.querySelector('.axt-note-s')!.textContent).toBe(' English note')
   })
 
-  it('does not localise a spinner or a failure widget: they are .axt-t siblings too', () => {
+  it('does not localise a skeleton or a failure widget: they are .axt-t siblings too', () => {
     for (const cls of ['axt-pending', 'axt-error']) {
       const doc = docOf(`
         <p class="ltx_p">body<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup

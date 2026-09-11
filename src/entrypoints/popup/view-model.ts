@@ -7,7 +7,8 @@
 // note at a time (paused > replaced > images paused > the chosen service cannot run); the menus
 // open at any time, a change while the page is on restarts it in place (data.ts), and only a
 // choice that cannot run leaves the page behind the settings.
-import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_LOCALE_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
+import { activeStyle } from '@/config/appearance'
+import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_LOCALE_NAME, LANG_CODE_TO_ZH_NAME, type LangCode } from '@/config/languages'
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { type Service, chosenService, isBuiltInService, isLlmChosen } from '@/config/services'
 import type { Mode } from '@/core/renderer'
@@ -18,12 +19,13 @@ import type { PageStatus } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
 import type { PackState } from '@/shared/pack'
 import type { MenuItem } from '@/ui/Menu'
-import { HELPER_GUIDE_URL, S, helperInstallCommand, parseFatal, reasonText, serviceName } from '@/ui/strings'
+import { styleTile } from '@/ui/appearance/tiles'
+import { HELPER_GUIDE_URL, PREVIEW_TARGET, S, helperInstallCommand, languageName, parseFatal, profileName, reasonText, serviceName } from '@/ui/strings'
 
 export type { PackState }
 /** The last row of the service menu: not a service, it opens the settings page */
 export const MANAGE_SERVICES = '__manage'
-export type MenuKind = 'service' | 'language' | 'prompt'
+export type MenuKind = 'service' | 'language' | 'prompt' | 'style'
 
 export interface PopupInput {
   page: PageStatus | null
@@ -51,6 +53,8 @@ export interface PopupView {
   language: Row
   /** Only while the LLM is the chosen service */
   prompt: Row | null
+  /** The chosen translation style (S-P-82); the menu lists what the settings page holds */
+  style: Row
   highlight: boolean
   images: boolean
   menu: { kind: MenuKind; label: string; items: MenuItem[]; search: boolean } | null
@@ -63,11 +67,16 @@ export interface PopupView {
   mode: { value: Mode; note: string | null }
 }
 
-const EMPTY: PopupView = {
+/**
+ * 「不是论文页」那一屏。**按调用时算，不在模块加载时算**：这个模块在 `applyLocale` 之前就被导入，
+ * 常量会把兜底语言冻在里面，于是中文界面上会出现一个英文按钮（Codex 在 #161 指出）
+ */
+const empty = (): PopupView => ({
   empty: true,
   service: { value: '' },
   language: { value: '' },
   prompt: null,
+  style: { value: '' },
   highlight: true,
   images: true,
   menu: null,
@@ -76,8 +85,8 @@ const EMPTY: PopupView = {
   failed: null,
   primary: { label: S.primary.translate, action: 'translate', disabled: true },
   secondary: null,
-  mode: { value: 'stack', note: null },
-}
+  mode: { value: DEFAULT_CONFIG.mode, note: null },
+})
 
 /** A local endpoint needs no key: Ollama and LM Studio answer without one */
 const isLoopback = (baseURL: string): boolean => {
@@ -124,8 +133,8 @@ function cannotRunWhy(config: Config, pack: PackState | null): string {
 
 export function derivePopupView(input: PopupInput): PopupView {
   const { page, provider, config, pack, helper, platform, menu, shortcut, extensionId } = input
-  if (page === null) return EMPTY
-  if (config === null) return { ...EMPTY, empty: false, mode: { value: page.preference, note: null } }
+  if (page === null) return empty()
+  if (config === null) return { ...empty(), empty: false, mode: { value: page.preference, note: null } }
 
   const progress = page.progress
   const on = progress.state === 'on'
@@ -148,9 +157,11 @@ export function derivePopupView(input: PopupInput): PopupView {
   const service: Row = demoted && provider
     ? { value: named(provider.engine.id), replaced: named(demoted.id) }
     : { value: named(config.provider) }
-  const language: Row = { value: label(config.targetLanguage) }
+  const language: Row = { value: languageName(config.targetLanguage) }
   // The prompt decides how an LLM translates; the free services do not read it
   const prompt: Row | null = isLlmChosen(config) ? { value: promptName(config) } : null
+  // How the translation looks. The page applies a change straight away, so this needs no restart
+  const style: Row = { value: profileName(activeStyle(config.appearance)) }
 
   const note: Note | null = paused ? { text: S.note.paused(reasonText(parseFatal(progress.fatal ?? '').kind)), settings: true }
     : demoted && provider ? { text: S.note.replaced(named(demoted.id), reasonText(demoted.kind), named(provider.engine.id)), settings: true }
@@ -166,7 +177,10 @@ export function derivePopupView(input: PopupInput): PopupView {
     : behind ? { label: S.primary.retranslate, action: 'retranslate', disabled: !canRun }
     : paused ? { label: S.primary.retranslate, action: 'retranslate', disabled: !canRun && !provider?.fallback }
     : { label: S.primary.translate, action: 'translate', disabled: !canRun && !provider?.fallback }
-  if (primary.action !== 'restore' && !primary.disabled && shortcut) primary.shortcut = shortcut
+  // On every action the key actually performs, 显示原文 included: ⌥T translates a page that is not
+  // translated and restores one that is, so the badge belongs on both faces of the same button
+  // (user 2026-09-11). A paused session retries rather than restores, which is what its label says
+  if (!primary.disabled && shortcut) primary.shortcut = shortcut
   const secondary = behind || paused ? { label: S.primary.restore, action: 'restore' as const } : null
 
   const helperHint: PopupView['helper'] = config.image.enabled && helper !== null && !helper.available && platform !== null
@@ -180,6 +194,7 @@ export function derivePopupView(input: PopupInput): PopupView {
     service,
     language,
     prompt,
+    style,
     highlight: config.reading.sentenceHighlight,
     images: config.image.enabled,
     menu: menu === null ? null : menuOf(menu, config, pack),
@@ -208,7 +223,7 @@ function menuOf(kind: MenuKind, config: Config, pack: PackState | null): NonNull
         search: true,
         items: LANG_CODES.map(code => ({
           id: code,
-          name: label(code),
+          name: languageName(code),
           keywords: `${LANG_CODE_TO_EN_NAME[code]} ${LANG_CODE_TO_LOCALE_NAME[code]} ${LANG_CODE_TO_ZH_NAME[code]} ${code}`,
           selected: code === config.targetLanguage,
         })),
@@ -219,6 +234,23 @@ function menuOf(kind: MenuKind, config: Config, pack: PackState | null): NonNull
         label: S.rows.prompt,
         search: false,
         items: [...Object.values(BUILT_IN_PROMPTS), ...config.prompts.patterns].map(p => ({ id: p.id, name: p.name, selected: p.id === config.prompts.promptId })),
+      }
+    case 'style':
+      // Whatever the settings page holds, in its order: the reader's own profiles sit among the
+      // built-in ones there, and a second order here would make the same list read as two lists.
+      // Each name carries the same sample sentence the settings tiles use, drawn in that style —
+      // the names alone ("淡一档", "模糊") do not show what they do
+      return {
+        kind,
+        label: S.rows.style,
+        search: false,
+        items: config.appearance.styles.map(p => ({
+          id: p.id,
+          name: profileName(p),
+          hint: PREVIEW_TARGET,
+          preview: styleTile(p),
+          selected: p.id === config.appearance.activeStyle,
+        })),
       }
   }
 }

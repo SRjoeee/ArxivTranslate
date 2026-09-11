@@ -9,11 +9,11 @@ describe('prompt-file', () => {
   })
 
   it('拒绝：不是数组、缺 name、缺 prompt、不是 JSON', () => {
-    expect(() => parsePromptFile('{"name":"A","prompt":"P"}')).toThrow(/格式不对/)
-    expect(() => parsePromptFile('[{"prompt":"P"}]')).toThrow(/格式不对/)
-    expect(() => parsePromptFile('[{"name":"A"}]')).toThrow(/格式不对/)
-    expect(() => parsePromptFile('[{"name":"","prompt":"P"}]')).toThrow(/格式不对/)
-    expect(() => parsePromptFile('nope')).toThrow(/不是合法 JSON/)
+    expect(() => parsePromptFile('{"name":"A","prompt":"P"}')).toThrow(/badShape/)
+    expect(() => parsePromptFile('[{"prompt":"P"}]')).toThrow(/badShape/)
+    expect(() => parsePromptFile('[{"name":"A"}]')).toThrow(/badShape/)
+    expect(() => parsePromptFile('[{"name":"","prompt":"P"}]')).toThrow(/badShape/)
+    expect(() => parsePromptFile('nope')).toThrow(/notJson/)
   })
 
   it('导出去掉 id，导入再分配；来回一致', () => {

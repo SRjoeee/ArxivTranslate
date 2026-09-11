@@ -39,7 +39,7 @@ export function AdvancedCss({ value, onChange }: { value: string; onChange: (nex
             placeholder="font-style: italic;"
             className="w-full rounded-control border border-line bg-card px-3 py-2 font-mono text-[12px] text-fg outline-none focus:border-fg-2"
           />
-          <p className={`mt-1 text-[11px] ${check.ok ? 'text-fg-2' : 'text-accent'}`}>{check.ok ? O.reading.advancedHint : check.reason}</p>
+          <p className={`mt-1 text-[11px] ${check.ok ? 'text-fg-2' : 'text-accent'}`}>{check.ok ? O.reading.advancedHint : O.reading.advancedRejected[check.reason]}</p>
         </div>
       )}
     </div>

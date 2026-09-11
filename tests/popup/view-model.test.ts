@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { setLocale } from '@/ui/strings'
 import { POPUP_FIXTURES } from '@/entrypoints/popup/fixtures'
 import { derivePopupView, runnable } from '@/entrypoints/popup/view-model'
 
@@ -6,6 +7,9 @@ const input = (id: string) => POPUP_FIXTURES.find(f => f.id === id)!.input
 const view = (id: string) => derivePopupView(input(id))
 /** Every string a reader could see in a view (values only; keys are code) */
 const words = (v: unknown): string => typeof v === 'string' ? v : v && typeof v === 'object' ? Object.values(v).map(words).join(' ') : ''
+
+// The copy tables of UI.md §3 are the Chinese ones; this file checks that pack
+setLocale('zh-CN')
 
 describe('derivePopupView (UI.md §4)', () => {
   it('derives every fixture, with no developer words and no state pill in the output', () => {
@@ -67,9 +71,10 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(cmn.keywords).toMatch(/Mandarin/)
     expect(cmn.keywords).toMatch(/cmn/)
   })
-  it('P4 translating: the button says it, the rows stay open, no counts anywhere', () => {
+  it('P4 translating: the button says it and keeps the shortcut, the rows stay open, no counts anywhere', () => {
     const v = view('P4')
-    expect(v.primary).toEqual({ label: '显示原文', action: 'restore', disabled: false })
+    // ⌥T restores a translated page, so the badge stays on this face of the button too（用户 2026-09-11）
+    expect(v.primary).toEqual({ label: '显示原文', action: 'restore', disabled: false, shortcut: '⌥T' })
     expect(v.note).toBeNull()
     expect(JSON.stringify(v)).not.toMatch(/24|31/)
   })
@@ -123,6 +128,15 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(v.helper).toEqual({ text: '图片翻译需要安装识别助手', command: expect.stringMatching(/^curl -fsSL .*install-remote\.sh \| bash -s -- abcdefghijklmnopabcdefghijklmnop\b/), guide: expect.stringMatching(/helper\/README/) })
     expect(derivePopupView({ ...input('P14'), platform: 'other' }).helper).toEqual({ text: '图片翻译目前仅支持 macOS' })
     expect(derivePopupView({ ...input('P14'), config: { ...input('P14').config!, image: { enabled: false, modes: [] } } }).helper).toBeNull()
+  })
+  it('P16 the style menu is what the settings page holds, in its order, with the chosen one marked', () => {
+    const v = view('P16')
+    const c = input('P16').config!
+    expect(v.style.value).toBe('与原文相同')
+    expect(v.menu!.kind).toBe('style')
+    expect(v.menu!.search).toBe(false)
+    expect(v.menu!.items.map(i => i.id)).toEqual(c.appearance.styles.map(p => p.id))
+    expect(v.menu!.items.filter(i => i.selected).map(i => i.id)).toEqual([c.appearance.activeStyle])
   })
   it('P15 prompt menu lists the built-ins and the reader\'s own', () => {
     const m = view('P15').menu!

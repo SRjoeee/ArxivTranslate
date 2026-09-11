@@ -2,16 +2,19 @@
 // the popup. Optional search (the language list has 179 entries). Keyboard: arrows move, Enter
 // picks, Escape closes; a click outside closes; a click on the row itself is the row's to toggle.
 //
-// Fixed-positioned and pinned to the bottom of the window: measured once when it opens (the row's
-// rectangle), then only written. Out of flow, so the popup window keeps its size; the list scrolls
-// inside whatever room is left below the row.
-import { type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+// Fixed-positioned: measured once when it opens (the row's rectangle), then only written. Out of
+// flow, so the popup window keeps its size. It fills the room below the row and the list scrolls
+// inside it — or, when that room is too small to hold anything, it opens upward from the row
+// instead and hugs its own content (the appearance row sits at the foot of the popup).
+import { type CSSProperties, type RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Spinner } from './Spinner'
 
 export interface MenuItem {
   id: string
   name: string
   hint?: string
+  /** Inline style for the hint line: the appearance menu shows each style on a sample sentence */
+  preview?: CSSProperties
   /** Extra words the search also matches (a language's other names, its code) */
   keywords?: string
   selected: boolean
@@ -22,10 +25,31 @@ export interface MenuItem {
 
 const GAP = 4
 const MARGIN = 8
+/**
+ * Under this much room below the row, the menu opens **upward** instead. A row near the foot of the
+ * popup otherwise gets a panel a few pixels tall: the window does not grow to fit it, it clips
+ * (the reader reported exactly that on the appearance row, 2026-09-11)
+ */
+const MIN_BELOW = 180
+/** A hugging menu is at least this wide, whatever its row measures */
+const HUG_MIN_WIDTH = 180
 
-export function Menu({ anchor, items, label, search, searchPlaceholder, empty, onSelect, onAction, onClose }: {
-  /** The row the menu belongs to: it is positioned under it, and clicks on it are not "outside" */
+export function Menu({ anchor, trigger, hug = false, items, label, search, searchPlaceholder, empty, onSelect, onAction, onClose }: {
+  /** The element the menu is measured against: its width, and the edge it opens from */
   anchor: RefObject<HTMLElement | null>
+  /**
+   * Hug the list instead of filling the room below the row. For a page that is a page — the settings
+   * page's own menus — where nothing resizes to fit it. The popup's menus keep the full-height
+   * layout: its window **does** size to the document, and a menu that grew the window was the
+   * defect that put this component on fixed positioning in the first place (Codex on #161)
+   */
+  hug?: boolean
+  /**
+   * The control that opened it, if that is not the anchor itself. Clicks on it are not "outside",
+   * so pressing it again closes rather than reopens; a click anywhere else in the anchor — the two
+   * switches sharing the appearance row — closes the menu and does its own thing
+   */
+  trigger?: RefObject<HTMLElement | null>
   items: MenuItem[]
   label: string
   search?: boolean
@@ -38,7 +62,8 @@ export function Menu({ anchor, items, label, search, searchPlaceholder, empty, o
   const [query, setQuery] = useState('')
   const root = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const [box, setBox] = useState<{ top: number; left: number; width: number } | null>(null)
+  /** `up` carries a max height instead of a top edge: the panel then hugs the row it grew from */
+  const [box, setBox] = useState<{ left: number; width: number; top?: number; bottom?: number; maxHeight?: number } | null>(null)
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return items
@@ -56,19 +81,31 @@ export function Menu({ anchor, items, label, search, searchPlaceholder, empty, o
     const r = el.getBoundingClientRect()
     let frame: HTMLElement | null = el.parentElement
     while (frame && getComputedStyle(frame).transform === 'none') frame = frame.parentElement
-    const f = frame?.getBoundingClientRect() ?? { top: 0, left: 0 }
-    setBox({ top: r.bottom - f.top + GAP, left: r.left - f.left, width: r.width })
-  }, [anchor])
+    const f = frame?.getBoundingClientRect() ?? { top: 0, left: 0, height: window.innerHeight, width: window.innerWidth }
+    const top = r.top - f.top
+    const bottom = r.bottom - f.top
+    const below = f.height - bottom
+    // A hugging menu is as wide as its row **or** wide enough to read, whichever is more: the
+    // settings sidebar is 140px and "Follow the browser" has to fit. It is kept inside the frame
+    const width = hug ? Math.max(r.width, HUG_MIN_WIDTH) : r.width
+    const left = Math.max(MARGIN, Math.min(r.left - f.left, (f.width ?? width) - width - MARGIN))
+    const common = { left, width }
+    setBox(below < MIN_BELOW && top > below
+      ? { ...common, bottom: f.height - top + GAP, maxHeight: Math.max(0, top - GAP - MARGIN) }
+      : hug
+        ? { ...common, top: bottom + GAP, maxHeight: Math.max(0, below - GAP - MARGIN) }
+        : { ...common, top: bottom + GAP, bottom: MARGIN })
+  }, [anchor, hug])
 
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node
-      if (root.current?.contains(t) || anchor.current?.contains(t)) return
+      if (root.current?.contains(t) || (trigger ?? anchor).current?.contains(t)) return
       onClose()
     }
     document.addEventListener('pointerdown', onDown)
     return () => document.removeEventListener('pointerdown', onDown)
-  }, [onClose, anchor])
+  }, [onClose, anchor, trigger])
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [active])
@@ -97,7 +134,7 @@ export function Menu({ anchor, items, label, search, searchPlaceholder, empty, o
       aria-label={label}
       tabIndex={-1}
       onKeyDown={onKey}
-      style={box ? { top: box.top, left: box.left, width: box.width, bottom: MARGIN } : { visibility: 'hidden' }}
+      style={box ? { top: box.top, bottom: box.bottom, left: box.left, width: box.width, maxHeight: box.maxHeight } : { visibility: 'hidden' }}
       className="fixed z-10 flex flex-col overflow-hidden rounded-control border border-line bg-card shadow-[0_8px_24px_rgba(0,0,0,0.14)] outline-none"
     >
       {search && (
@@ -126,7 +163,10 @@ export function Menu({ anchor, items, label, search, searchPlaceholder, empty, o
             >
               <span className="flex min-w-0 flex-col">
                 <span className="truncate text-[13px] font-semibold">{item.name}</span>
-                {item.hint && <span className="truncate text-[11px] text-fg-2">{item.hint}</span>}
+                {/* A preview is a sample drawn in the style, not information: it says nothing to a
+                    reader who cannot see it, and it would swallow the option's name in the
+                    accessible name. Every other hint here is real ("免费", "尚未配置 API Key") */}
+                {item.hint && <span aria-hidden={item.preview ? 'true' : undefined} style={item.preview} className={`truncate text-[11px] ${item.preview ? '' : 'text-fg-2'}`}>{item.hint}</span>}
               </span>
               {item.selected && <Check />}
             </button>

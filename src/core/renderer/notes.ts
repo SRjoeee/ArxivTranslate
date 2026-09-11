@@ -132,7 +132,7 @@ function mirrorNote(source: Element, translated: Element, wrapper: Element, fres
   mirrorPair(translated, { source: wrapper, target: fresh }, { source: node => sourceTwins.get(node), target: node => targetTwins.get(node) })
 }
 
-/** A translation that has actually arrived: not the spinner, not the failure widget, which are `.axt-t` siblings too */
+/** A translation that has actually arrived: not the skeleton, not the failure widget, which are `.axt-t` siblings too */
 const arrived = (el: Element | null): el is Element => !!el && el.classList.contains(T_CLASS) && !el.classList.contains(PENDING_CLASS) && !el.classList.contains('axt-error')
 
 /**
@@ -153,9 +153,9 @@ export function localizeNotes(root: Document | Element): number {
     if (sources.length !== copies.length) continue
     copies.forEach((copy, i) => {
       const source = sources[i]
-      // Only a translation that has arrived: the spinner and the failure widget are `.axt-t` siblings
+      // Only a translation that has arrived: the skeleton and the failure widget are `.axt-t` siblings
       // as well, and copying one of them would count as a translation — in only mode the English
-      // would be hidden behind a spinner, or gone for good after a failure (Codex on #153)
+      // would be hidden behind a skeleton, or gone for good after a failure (Codex on #153)
       const translated = source?.nextElementSibling ?? null
       if (!arrived(translated)) return
       const fresh = localizedCopy(translated)

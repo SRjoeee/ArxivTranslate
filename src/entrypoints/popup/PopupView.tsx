@@ -14,13 +14,16 @@ import { Switch } from '@/ui/Switch'
 import type { PopupActions } from './data'
 import type { MenuKind, PopupView as View } from './view-model'
 
-const MODE_PARTS: Record<Mode, { label: string; title: string; icon: ReactNode }> = {
-  side: { label: S.mode.side, title: S.mode.sideTitle, icon: <SideIcon /> },
-  stack: { label: S.mode.stack, title: S.mode.stackTitle, icon: <StackIcon /> },
-  only: { label: S.mode.only, title: S.mode.onlyTitle, icon: <OnlyIcon /> },
-}
+/** Only the marks are constant; the words come from the pack in use, which is chosen after this
+ *  module is imported (see the note at the top of ui/strings.ts) */
+const MODE_ICONS: Record<Mode, ReactNode> = { side: <SideIcon />, stack: <StackIcon />, only: <OnlyIcon /> }
 // The bar follows MODE_ORDER, the one place the order is decided (UI.md S-P-70)
-const MODES = MODE_ORDER.map(value => ({ value, ...MODE_PARTS[value] }))
+const modes = () => MODE_ORDER.map(value => ({
+  value,
+  label: S.mode[value],
+  title: S.mode[`${value}Title` as const],
+  icon: MODE_ICONS[value],
+}))
 
 const CARD = 'rounded-card bg-card shadow-[0_1px_2px_rgba(30,30,36,0.06)]'
 
@@ -79,18 +82,20 @@ export function PopupView({ view, error, copied, actions }: { view: View; error:
           <Button variant={view.primary.action === 'restore' ? 'secondary' : 'primary'} disabled={view.primary.disabled} aria-label={view.primary.label} onClick={actions[view.primary.action]}>
             {view.primary.label}
             {view.primary.shortcut && (
-              <kbd className="rounded-[6px] bg-white/20 px-1.5 py-0.5 font-ui text-[11px] font-semibold">{view.primary.shortcut}</kbd>
+              // `current`: the chip reads on the red 翻译本页 and on the plain 显示原文 alike, where a
+              // white chip would disappear into the button
+              <kbd className="rounded-[6px] bg-current/15 px-1.5 py-0.5 font-ui text-[11px] font-semibold">{view.primary.shortcut}</kbd>
             )}
           </Button>
           {view.secondary && <Button variant="text" className="self-center" onClick={actions[view.secondary.action]}>{view.secondary.label}</Button>}
 
-          <Segmented value={view.mode.value} options={MODES} onChange={actions.chooseMode} />
+          <Segmented value={view.mode.value} options={modes()} onChange={actions.chooseMode} />
           {view.mode.note && <p className="px-1 text-[11px] text-fg-2">{view.mode.note}</p>}
 
-          <div className="flex items-center justify-between px-1 text-[12px] font-semibold text-fg-2">
-            <Switch small checked={view.highlight} onChange={actions.setHighlight} label={S.rows.highlight} text={S.rows.highlight} title={S.rows.highlightTitle} />
-            <Switch small checked={view.images} onChange={actions.setImages} label={S.rows.images} text={S.rows.images} />
-          </div>
+          {/* The three reading choices on one row: two switches and the way in to the styles. The
+              row is what the menu is measured against — a menu the width of the 译文样式 button
+              alone would be a column of clipped names (S-P-82) */}
+          <ReadingRow view={view} actions={actions} />
         </>
       )}
 
@@ -112,8 +117,10 @@ function Bubble({ tone = 'alert', children }: { tone?: 'alert' | 'neutral'; chil
 function MenuRow({ kind, label, row, view, actions, compact = false, last = false }: { kind: MenuKind; label: string; row: { value: string; replaced?: string }; view: View; actions: PopupActions; compact?: boolean; last?: boolean }) {
   const open = view.menu?.kind === kind
   const anchor = useRef<HTMLDivElement>(null)
+  // The value is truncated when it is long — a language's full name runs to "Simplified Mandarin
+  // Chinese (简体中文)" — so the whole of it is on the row for a reader who needs to check
   const value = (
-    <span className="truncate font-semibold">
+    <span title={row.value} className="truncate font-semibold">
       {row.value}
       {row.replaced && <span className="ml-1.5 font-medium text-fg-2 line-through">{row.replaced}</span>}
     </span>
@@ -156,6 +163,50 @@ function MenuRow({ kind, label, row, view, actions, compact = false, last = fals
             else actions.choosePrompt(id)
           }}
           onAction={() => actions.downloadPack()}
+          onClose={actions.closeMenu}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * The last row of the popup: 对照高亮, 图片翻译 and the way in to 译文样式, side by side. All three
+ * are "how this reads", as against the card at the top, which is what translates (S-P-82).
+ *
+ * The **row** is the menu's anchor, not the button: the menu is then as wide as the card above it
+ * rather than as wide as four characters. The button is passed as the trigger, so pressing it again
+ * closes the menu while a click on either switch closes it and still toggles the switch.
+ */
+function ReadingRow({ view, actions }: { view: View; actions: PopupActions }) {
+  const open = view.menu?.kind === 'style'
+  const anchor = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  return (
+    <div ref={anchor} className="flex items-center justify-between gap-2 px-1 text-[12px] font-semibold text-fg-2">
+      <Switch small checked={view.highlight} onChange={actions.setHighlight} label={S.rows.highlight} text={S.rows.highlight} title={S.rows.highlightTitle} />
+      <Switch small checked={view.images} onChange={actions.setImages} label={S.rows.images} text={S.rows.images} />
+      <button
+        ref={trigger}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title={view.style.value}
+        onClick={() => (open ? actions.closeMenu() : actions.openMenu('style'))}
+        className={`flex shrink-0 cursor-pointer items-center gap-1 ${open ? 'text-fg' : 'hover:text-fg'}`}
+      >
+        {S.rows.style}
+        <Chevron up={open} />
+      </button>
+      {open && view.menu && (
+        <Menu
+          anchor={anchor}
+          trigger={trigger}
+          items={view.menu.items}
+          label={view.menu.label}
+          search={false}
+          empty={S.menu.noMatch}
+          onSelect={actions.chooseStyle}
           onClose={actions.closeMenu}
         />
       )}

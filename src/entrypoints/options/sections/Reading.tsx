@@ -12,7 +12,7 @@ import { bandTile, styleTile } from '@/ui/appearance/tiles'
 import { Row } from '@/ui/Field'
 import { Segmented } from '@/ui/Segmented'
 import { Switch } from '@/ui/Switch'
-import { O, S } from '@/ui/strings'
+import { O, copyName, S } from '@/ui/strings'
 import type { OptionsData } from '../data'
 
 /** The preload margin as screens rather than pixels: a number of pixels means nothing to a reader */
@@ -33,12 +33,12 @@ export function Reading({ data }: { data: OptionsData }) {
   const editingBand = editing?.list === 'highlight' ? a.highlights.find(h => h.id === editing.id) : undefined
 
   const addStyle = () => {
-    const next: StyleProfile = { ...BUILT_IN_STYLES[0]!, id: newProfileId('style'), name: '新配置' }
+    const next: StyleProfile = { ...BUILT_IN_STYLES[0]!, id: newProfileId('style'), name: O.reading.newProfile }
     setAppearance(c => ({ ...c, styles: [...c.styles, next], activeStyle: next.id }))
     setEditing({ list: 'style', id: next.id })
   }
   const addBand = () => {
-    const next: HighlightProfile = { ...BUILT_IN_HIGHLIGHTS[0]!, id: newProfileId('hl'), name: '新配置' }
+    const next: HighlightProfile = { ...BUILT_IN_HIGHLIGHTS[0]!, id: newProfileId('hl'), name: O.reading.newProfile }
     setAppearance(c => ({ ...c, highlights: [...c.highlights, next], activeHighlight: next.id }))
     setEditing({ list: 'highlight', id: next.id })
   }
@@ -61,6 +61,7 @@ export function Reading({ data }: { data: OptionsData }) {
   return (
     <>
       <ProfileGrid
+        kind="styles"
         title={O.reading.styles}
         hint={O.reading.stylesHint}
         items={a.styles}
@@ -78,6 +79,7 @@ export function Reading({ data }: { data: OptionsData }) {
         </Row>
       </div>
       <ProfileGrid
+        kind="highlights"
         title={O.reading.highlights}
         hint={O.reading.highlightsHint}
         items={a.highlights}
@@ -113,7 +115,7 @@ export function Reading({ data }: { data: OptionsData }) {
           highlight={highlight}
           onChange={next => setAppearance(c => ({ ...c, styles: c.styles.map(s => (s.id === next.id ? next : s)) }))}
           onDuplicate={() => {
-            const copy = duplicateStyle(editingStyle)
+            const copy = duplicateStyle(editingStyle, copyName(editingStyle, 'styles'))
             setAppearance(c => ({ ...c, styles: [...c.styles, copy], activeStyle: copy.id }))
             setEditing({ list: 'style', id: copy.id })
           }}
@@ -127,7 +129,7 @@ export function Reading({ data }: { data: OptionsData }) {
           style={style}
           onChange={next => setAppearance(c => ({ ...c, highlights: c.highlights.map(h => (h.id === next.id ? next : h)) }))}
           onDuplicate={() => {
-            const copy = duplicateHighlight(editingBand)
+            const copy = duplicateHighlight(editingBand, copyName(editingBand, 'highlights'))
             setAppearance(c => ({ ...c, highlights: [...c.highlights, copy], activeHighlight: copy.id }))
             setEditing({ list: 'highlight', id: copy.id })
           }}
