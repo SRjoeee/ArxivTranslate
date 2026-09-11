@@ -65,7 +65,7 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 
 | 编号 | 位置 / 何时 | 文案 | 备注 |
 |---|---|---|---|
-| S-P-01 | 品牌行 | Read arXiv | [定] 2026-09-11 定为分写、arXiv 照官方大小写；扩展 manifest `name`、三个页面的 `<title>` 与工具栏提示都同步了，商店名与 readarxiv.org 待办。品牌标记见 §5.1 |
+| S-P-01 | 品牌行 | Read arXiv | [定，2026-09-11 定为分写，09-12 复核维持] **读者看到的名字带空格**、arXiv 照官方大小写。仓库（`SRjoeee/ReadarXiv`）与域名（readarxiv.org）只能用无空格形式，**那不是对显示名的依据**——同一个产品的两种写法，别拿仓库名去改这一行（2026-09-12 差点据此改错）。路线图 #155 里的「the product becomes Readarxiv」说的是这个身份，不是这个字符串。扩展 manifest `name`、三个页面的 `<title>` 与工具栏提示都跟着这一行；商店名待办。品牌标记见 §5.1 |
 | S-P-02 | 品牌行齿轮 `aria-label`；每条说明旁的按钮 | 设置 | The one button of every note; opens the options page |
 | S-P-03 | 非 arXiv 页 / 页面加载中（P0） | 打开 arXiv 论文的 HTML 页面后即可翻译 | Same sentence for both cases; never "后台未响应" |
 | S-P-10 | 服务行标签 | 翻译服务 | The row opens the service menu (S-P-40…46) under itself |
@@ -372,7 +372,7 @@ two that differ. A simplified 16 is the fallback if it ever reads badly in the w
 
 ## 9. 待讨论
 
-1. ~~产品名。~~ [定] Read arXiv（2026-09-10 定名，2026-09-11 改为分写）。
+1. ~~产品名。~~ [定] 显示名 **Read arXiv**（2026-09-10 定名，09-11 改为分写，09-12 复核维持）；仓库与域名用无空格的 `ReadarXiv` / readarxiv.org。三处指同一个产品，改动一处不等于改动另一处。
 2. 「AI 模型」这个叫法 vs 「AI 翻译」。
 3. P8 已暂停：主按钮「重新翻译」+ 次按钮「显示原文」，还是只留一个？
 4. 语言行点开是原生 `<select>`（首字母跳转）还是带搜索的列表——先实测原生在 popup 里的表现。
