@@ -128,6 +128,9 @@ export default defineBackground(() => {
   }
   installContextMenu(menuDeps)
   void applyLocale().then(code => {
+    // 读者在这次读还没回来的时候改了界面语言：watcher 已经用新的那份画过菜单，这个旧快照不许再盖回去。
+    // `uiLanguage` 非空就说明 watcher 先到了（Codex 在 #161 指出，与内容脚本里那处同一个形状）
+    if (uiLanguage !== null) return
     uiLanguage = code
     refreshContextMenu(menuDeps)
   })
