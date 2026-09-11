@@ -10,7 +10,7 @@
 // The pack is chosen once, before anything renders (`applyLocale`), so nothing on screen is ever
 // half translated.
 import { BUILT_IN_HIGHLIGHTS, BUILT_IN_STYLES, NAME_MAX } from '@/config/appearance'
-import { LANG_CODE_TO_EN_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
+import { LANG_CODE_TO_EN_UI_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } from '@/config/languages'
 import type { FallbackReason } from '@/config/storage'
 import { FALLBACK_LOCALE, LOCALES, type Locale, type LocaleCode } from '@/locales'
 import type { ProviderErrorKind } from '@/providers/types'
@@ -24,7 +24,7 @@ export { PREVIEW_SOURCE, PREVIEW_TARGET } from '@/locales/preview'
  */
 export const LOCALE_LANGUAGE_NAMES: Record<LocaleCode, Partial<Record<LangCode, string>>> = {
   'zh-CN': LANG_CODE_TO_ZH_NAME,
-  en: LANG_CODE_TO_EN_NAME,
+  en: LANG_CODE_TO_EN_UI_NAME,
 }
 
 let currentCode: LocaleCode = FALLBACK_LOCALE
@@ -49,11 +49,22 @@ export function localeInUse(): LocaleCode {
 }
 
 /**
- * A target language's name for the reader: in the interface's language, with its own name beside it
- * ("日语（日本語）", "Japanese（日本語）"). The two choices are separate (UI.md §6), so the menu of
- * languages has to be readable whichever interface language is set
+ * A target language's name in the interface's language — what a **row** shows. One name, because
+ * the row is a line of the interface and has one line's worth of room: "Simplified Mandarin Chinese
+ * (简体中…)" truncated mid-word while the Chinese pack, whose two names happen to be identical,
+ * showed the tidy "简体中文" (reported 2026-09-11). The reader's own name for it lives in the menu
  */
 export function languageName(code: LangCode): string {
+  return LOCALE_LANGUAGE_NAMES[currentCode][code] ?? LANG_CODE_TO_EN_UI_NAME[code]
+}
+
+/**
+ * The same name with the language's own beside it ("日语（日本語）", "Japanese (日本語)") — what the
+ * **menu** shows. Target language and interface language are separate choices (UI.md §6), so the
+ * list has to be readable whichever interface language is set: a reader looking for their language
+ * finds it by how it is written at home
+ */
+export function languageLabel(code: LangCode): string {
   return label(code, LOCALE_LANGUAGE_NAMES[currentCode])
 }
 

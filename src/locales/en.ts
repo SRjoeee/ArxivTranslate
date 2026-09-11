@@ -14,7 +14,7 @@ const S: Locale['S'] = {
     service: 'Service',
     language: 'Language',
     prompt: 'Prompt',
-    highlight: 'Highlight',
+    highlight: 'Hover highlight',
     highlightTitle: 'Highlights the matching sentence on hover; in translation-only mode, rest on a sentence to see the original',
     images: 'Images',
     style: 'Style',
@@ -74,7 +74,7 @@ const S: Locale['S'] = {
   },
   primary: {
     translate: 'Translate this page',
-    restore: 'Show the original',
+    restore: 'Show original',
     retranslate: 'Translate again',
   },
   failed: {

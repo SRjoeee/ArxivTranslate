@@ -9,7 +9,7 @@ import { Button } from '@/ui/Button'
 import { MenuField } from '@/ui/MenuField'
 import { Row } from '@/ui/Field'
 import { Switch } from '@/ui/Switch'
-import { MODE_ORDER, O, S, languageName } from '@/ui/strings'
+import { MODE_ORDER, O, S, languageLabel, languageName } from '@/ui/strings'
 import type { OptionsData } from '../data'
 import { HelperSetup } from './HelperSetup'
 import { ServiceDrawer } from './ServiceDrawer'
@@ -98,7 +98,7 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
         empty={S.menu.noMatch}
         items={LANG_CODES.map(code => ({
           id: code,
-          name: languageName(code),
+          name: languageLabel(code),
           keywords: `${LANG_CODE_TO_EN_NAME[code]} ${LANG_CODE_TO_LOCALE_NAME[code]} ${LANG_CODE_TO_ZH_NAME[code]} ${code}`,
           selected: code === config.targetLanguage,
         }))}

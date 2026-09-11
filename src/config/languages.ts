@@ -420,30 +420,30 @@ export const LANG_CODE_TO_ZH_NAME = {
   "nld": "荷兰语",
   "srp": "塞尔维亚语",
   "tha": "泰语",
-  "ckb": "库尔德语",
+  "ckb": "库尔德语（索拉尼）",
   "yor": "约鲁巴语",
   "uzn": "乌兹别克语",
-  "zlm": "马来语",
+  "zlm": "马来语（爪夷文）",
   "ibo": "伊博语",
   "npi": "尼泊尔语",
   "ceb": "宿务语",
-  "skr": "旁遮普语",
+  "skr": "西赖基语",
   "tgl": "塔加路语",
   "hun": "匈牙利语",
-  "azj": "北阿塞拜疆语",
+  "azj": "阿塞拜疆语",
   "sin": "僧伽罗语",
   "koi": "科米-彼尔姆语",
-  "ell": "现代希腊语",
+  "ell": "希腊语",
   "ces": "捷克语",
   "mag": "马加哈语",
   "run": "鲁恩达语",
   "bel": "白俄罗斯语",
-  "plt": "高原马达加斯加语",
+  "plt": "马达加斯加语",
   "qug": "奇布查语",
   "mad": "马都拉语",
   "nya": "尼扬加语",
   "zyb": "壮语",
-  "pbu": "北部普什图语",
+  "pbu": "普什图语",
   "kin": "基尼亚卢旺达语",
   "zul": "祖鲁语",
   "bul": "保加利亚语",
@@ -518,7 +518,7 @@ export const LANG_CODE_TO_ZH_NAME = {
   "vol": "沃拉普克语",
   "wol": "沃洛夫语",
   "xho": "科萨语",
-  "ydd": "东意第绪语",
+  "ydd": "意第绪语",
   "aka": "阿坎语",
   "bam": "班巴拉语",
   "bis": "比斯拉马语",
@@ -897,6 +897,36 @@ export function englishName(code: string): string {
 }
 
 /**
+ * 界面里显示的英文语言名。上面那张表是 ISO 639-3 的**学名**（编的是「语言个体」），
+ * 对模型正好——`Simplified Mandarin Chinese` 半点不含糊；对读者就太拗口了，
+ * 没有哪个产品把简体中文写成这样（用户 2026-09-11 反馈：「这种整这么复杂干嘛」）。
+ *
+ * **只覆盖界面这一侧**，prompt 仍用学名：两个受众要的不是同一样东西，
+ * 而且改 prompt 会动 `PROMPT_VERSION`、让全站 LLM 缓存作废，为一个名字不值当。
+ * 只列读起来不像产品名的那些；`Western Frisian`、`Northern Sotho` 这类方位词是真区分，保留。
+ * 带文字的括号也保留（`Uzbek (Cyrillic)`、`Malay (Jawi)`）——读者拿到的确实是那种文字，
+ * 去掉就成了惊吓。改完全表零重名（脚本核过）
+ */
+const EN_UI_OVERRIDES: Partial<Record<LangCode, string>> = {
+  cmn: 'Chinese (Simplified)',
+  'cmn-Hant': 'Chinese (Traditional)',
+  arb: 'Arabic',
+  ell: 'Greek',
+  swh: 'Swahili',
+  npi: 'Nepali',
+  zlm: 'Malay (Jawi)',
+  pbu: 'Pashto',
+  ydd: 'Yiddish',
+  ckb: 'Kurdish (Sorani)',
+  jav: 'Javanese',
+  uzn: 'Uzbek (Cyrillic)',
+  azj: 'Azerbaijani (Cyrillic)',
+  plt: 'Malagasy',
+}
+
+export const LANG_CODE_TO_EN_UI_NAME: Record<LangCode, string> = { ...LANG_CODE_TO_EN_NAME, ...EN_UI_OVERRIDES }
+
+/**
  * 语言名：先按界面语言写一遍，再补上它自己的写法——「日语（日本語）」。对应 Read Frog
  * language-labels.ts 的 getLanguageLabel。
  *
@@ -904,7 +934,10 @@ export function englishName(code: string): string {
  * 英文界面下这一行要读作 "Japanese (日本語)"，否则读者会以为界面没换干净
  */
 export function label(code: LangCode, inLocale: Partial<Record<LangCode, string>> = LANG_CODE_TO_ZH_NAME): string {
-  const named = inLocale[code] ?? LANG_CODE_TO_EN_NAME[code]
+  // 兜底走**界面用的**那张表，与 `languageName` 同一条（Codex 在 #165 指出）：名字表可以是半张
+  //（`Partial`，见 UI.md §6「没有语言名表时读英文名」），两处兜底若不一样，同一种语言会在行里
+  // 写 `Chinese (Simplified)`、在菜单里写回 `Simplified Mandarin Chinese`
+  const named = inLocale[code] ?? LANG_CODE_TO_EN_UI_NAME[code]
   const local = LANG_CODE_TO_LOCALE_NAME[code]
   if (named === local) return named
   // 括号跟着外面那半句走：中文用全角，其余用半角。「Japanese（日本語）」两种括号混在一句里最难看

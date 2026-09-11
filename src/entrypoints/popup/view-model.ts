@@ -20,7 +20,7 @@ import type { HelperStatus } from '@/shared/ocr'
 import type { PackState } from '@/shared/pack'
 import type { MenuItem } from '@/ui/Menu'
 import { styleTile } from '@/ui/appearance/tiles'
-import { HELPER_GUIDE_URL, PREVIEW_TARGET, S, helperInstallCommand, languageName, parseFatal, profileName, reasonText, serviceName } from '@/ui/strings'
+import { HELPER_GUIDE_URL, PREVIEW_TARGET, S, helperInstallCommand, languageLabel, languageName, parseFatal, profileName, reasonText, serviceName } from '@/ui/strings'
 
 export type { PackState }
 /** The last row of the service menu: not a service, it opens the settings page */
@@ -225,7 +225,7 @@ function menuOf(kind: MenuKind, config: Config, pack: PackState | null): NonNull
         search: true,
         items: LANG_CODES.map(code => ({
           id: code,
-          name: languageName(code),
+          name: languageLabel(code),
           keywords: `${LANG_CODE_TO_EN_NAME[code]} ${LANG_CODE_TO_LOCALE_NAME[code]} ${LANG_CODE_TO_ZH_NAME[code]} ${code}`,
           selected: code === config.targetLanguage,
         })),
