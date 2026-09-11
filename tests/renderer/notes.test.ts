@@ -201,6 +201,17 @@ describe('localizeNotes', () => {
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
   })
 
+  // 同一个洞的另外两种副本（Codex 在 #163 第三轮指出）：拆图副本在 stack 被整块藏起来，
+  // 镜像在 side 以外被藏起来（modes.css）。里面那份脚注都不能算"唯一留下的一份"
+  it('拆图副本与镜像同样不算：它们也会被某个模式整块藏掉', () => {
+    for (const cls of ['axt-split', 'axt-mirror']) {
+      const doc = unregistered()
+      doc.querySelector(`.${T_CLASS}`)!.classList.add(cls)
+      expect([cls, localizeNotes(doc)]).toEqual([cls, 0])
+      expect([cls, sourceNote(doc).hasAttribute('data-axt-note')]).toEqual([cls, false])
+    }
+  })
+
   it('副本被引擎改过字就两份都留着：宁可重复也不丢内容', () => {
     const doc = unregistered('https://chat.openai.com/zh')
     expect(localizeNotes(doc)).toBe(0)

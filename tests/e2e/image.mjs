@@ -85,10 +85,14 @@ async function scrollThrough(page) {
     await sleep(150)
   }
   // 固定步长扫一遍还不够：译文是边滚边插的，文档在变高，两个位置之间可能整张图被跨过去
-  // （实测跑出过 `5/5 of 6`，第六张始终没进过视口）。最后按图逐张滚一次，让"都进过视口"这件事是确定的
-  const count = await page.evaluate(() => document.querySelectorAll('img.ltx_graphics').length)
+  // （实测跑出过 `5/5 of 6`，第六张始终没进过视口）。最后按图逐张滚一次，让"都进过视口"这件事是确定的。
+  // 选择器要与生产侧的目标集合一致（rules/latexml.ts 的 graphics + picture）：只滚位图的话，
+  // AXT_PAPER 换成带外链 SVG 或内联 TikZ 的论文时，被跳过的那张永远不会被认领，images idle 就等到超时
+  // （Codex 在 #163 指出）
+  const TARGETS = 'img.ltx_graphics, object.ltx_graphics[type="image/svg+xml"], svg.ltx_picture'
+  const count = await page.evaluate(sel => document.querySelectorAll(sel).length, TARGETS)
   for (let i = 0; i < count; i++) {
-    await page.evaluate(n => document.querySelectorAll('img.ltx_graphics')[n]?.scrollIntoView({ block: 'center' }), i)
+    await page.evaluate(([sel, n]) => document.querySelectorAll(sel)[n]?.scrollIntoView({ block: 'center' }), [TARGETS, i])
     await sleep(150)
   }
 }

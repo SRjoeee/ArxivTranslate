@@ -25,15 +25,27 @@ describe('stackShifts', () => {
     expect(shifts).toEqual([0, 40])
   })
 
-  // Codex 在 #163 指出：底线只能往下走。推不动的原件若自然落得比当前底线还高，
-  // 直接赋值会把底线拉回去，下一条副本只躲开了这个原件、又压回前面那条副本上
-  it('推不动的原件不会把底线拉回去', () => {
-    // 副本一被推到 0–100；原件自然落在 10–30（比底线高得多）；副本二自然落在 20
-    const shifts = stackShifts([box(0, 100), box(10, 20, false), box(20, 30)], 0)
-    expect(shifts).toEqual([0, 0, 80])
-    const tops = shifts.map((v, i) => [box(0, 100), box(10, 20, false), box(20, 30)][i]!.top + v)
-    // 副本二落在 100，正好接在副本一（0–100）下面，而不是接在原件（10–30）下面
-    expect(tops).toEqual([0, 10, 100])
+  // Codex 在 #163 两轮指出：先是底线被推不动的原件拉回去，再是"只躲开前面的"不够——
+  // 一条长副本会盖到**后面**那个块的原件身上，而原件不许动，只能让副本继续往下让
+  it('推不动的原件是不分先后的障碍，副本一路让开', () => {
+    const boxes = [box(0, 100), box(10, 20, false), box(20, 30)]
+    const shifts = stackShifts(boxes, 0)
+    const spans = shifts.map((v, i) => [boxes[i]!.top + v, boxes[i]!.top + v + boxes[i]!.height])
+    // 副本一自然占 0–100，盖住了后面那个原件（10–30）：让到原件下面，占 30–130
+    // 原件不动（10–30）；副本二接在副本一下面，占 130–160。三条两两不重叠
+    expect(spans).toEqual([[30, 130], [10, 30], [130, 160]])
+    for (let i = 1; i < spans.length; i++) {
+      for (let j = 0; j < i; j++) {
+        expect([i, j, spans[i]![0]! >= spans[j]![1]! || spans[j]![0]! >= spans[i]![1]!]).toEqual([i, j, true])
+      }
+    }
+  })
+
+  it('底线只往下走：落在上方的原件不会把它拉回去', () => {
+    // 副本一占 100–300；原件在它**上方**（40–60，两者不相碰，副本一不用让）；副本二自然落在 120。
+    // 底线若被原件拉回 60，副本二就不动、直接压在副本一身上
+    const shifts = stackShifts([box(100, 200), box(40, 20, false), box(120, 30)], 0)
+    expect(shifts).toEqual([0, 0, 180])
   })
 
   it('六条同一行上的短脚注排成一列（2509.10652v3 的形状）', () => {

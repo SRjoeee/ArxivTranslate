@@ -44,15 +44,30 @@ const applied = new WeakMap<HTMLElement, number>()
  * 原件那份推不动（`ours: false`），它照旧待在原地，只当成后面几条要让开的障碍。
  */
 export function stackShifts(boxes: readonly NoteBox[], gap: number): number[] {
+  // 推不动的那几条是**不分先后的障碍**：一条长副本会盖到后面那个块的原件身上，而原件不许动（§7.1），
+  // 只能让副本继续往下让（Codex 在 #163 两轮指出：先是底线被拉回去，再是只看前面不够）。
+  // 这些障碍会随着后面的块陆续译完而隐藏，让出来的位置下一趟就收回去，所以让得多只是过渡态
+  const blocks = boxes.filter(b => !b.ours).map(b => ({ top: b.top, bottom: b.top + b.height }))
   const out: number[] = []
   let floor = Number.NEGATIVE_INFINITY
   for (const box of boxes) {
-    const shift = box.ours ? Math.max(0, floor - box.top) : 0
-    out.push(shift)
-    // 底线只会往下走，不会回头（Codex 在 #163 指出）：推不动的原件若自然落得比当前底线还高，
-    // 直接赋值会把底线**拉回去**，下一条副本于是只躲开了这个原件、又压回前面那条被推下去的副本上。
-    // 浮动要躲开的是它前面**所有**条，所以取最大值——正常情况（原件在下一行、本来就更低）这一步是个空操作
-    floor = Math.max(floor, box.top + shift + box.height + gap)
+    let top = box.ours ? Math.max(box.top, floor) : box.top
+    if (box.ours) {
+      // 每让一次 top 只会变大，障碍有限，所以一定收敛
+      for (let moved = true; moved;) {
+        moved = false
+        for (const b of blocks) {
+          if (top < b.bottom + gap && b.top < top + box.height + gap) {
+            top = b.bottom + gap
+            moved = true
+          }
+        }
+      }
+    }
+    out.push(top - box.top)
+    // 底线只会往下走，不会回头：推不动的原件若自然落得比当前底线还高，直接赋值会把底线**拉回去**，
+    // 下一条副本于是只躲开了这个原件、又压回前面那条被推下去的副本上
+    floor = Math.max(floor, top + box.height + gap)
   }
   return out
 }

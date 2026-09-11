@@ -1,6 +1,8 @@
 // 从右往左的目标语言（§7.1）：`lang` 说的是"哪种语言"，段落的基方向由 `dir` 定。
 // 不写 `dir` 的话译文继承 arXiv 的 ltr，句末标点、数字、拉丁词、公式全排在错的一侧
 // （实测 2509.10652v3 译成阿拉伯语：「مساهمات متساوية.」渲染成「مساهمات .متساوية」）。
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { RTL_LANGUAGES, isRtl, isRtlTag, toBcp47 } from '@/config/languages'
 import { extract, type TableBlock, type TextBlock } from '@/core/extractor'
@@ -114,5 +116,23 @@ describe('译文表格单元格的 lang / dir', () => {
     const cell = node.querySelectorAll(TABLE_RULES.cell)[0]!
     expect(cell.getAttribute('lang')).toBe('zh')
     expect(cell.hasAttribute('dir')).toBe(false)
+  })
+})
+
+// happy-dom 没有双向算法，这里守规则本身（§7.1）
+describe('modes.css 的 RTL 规则', () => {
+  const RULES = readFileSync(join(import.meta.dirname, '../../src/styles/modes.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+
+  it('受保护的原文原子在 rtl 译文里都按 ltr 排，并且互相隔离', () => {
+    const rule = /html\[data-axt-dir="rtl"\] \.axt-t :is\(([^)]*)\) \{([^}]*)\}/.exec(RULES)
+    expect(rule).not.toBeNull()
+    // 公式之外，占位符回填进来的原文原子同样要管：行内代码、打字机体、引用、URL，
+    // 以及边注副本里那段英文原文（Codex 在 #163 指出原来只管了公式）
+    for (const sel of ['math', '.ltx_Math', '.ltx_ref', '.ltx_url', '.ltx_listing', 'code', '.ltx_font_typewriter', '.axt-note-s']) {
+      expect([sel, rule![1]!.includes(sel)]).toEqual([sel, true])
+    }
+    expect(rule![2]).toMatch(/direction:\s*ltr/)
+    // isolate 才能让 `f(x)` 末尾的中性字符不被周围的 rtl 拉走
+    expect(rule![2]).toMatch(/unicode-bidi:\s*isolate/)
   })
 })

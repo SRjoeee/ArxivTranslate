@@ -67,7 +67,13 @@ export type TranslateCall = TranslateMessageRequest & {
 export type TranslateMessageResponse =
   // `alignment` is plain number arrays, so it survives the structured clone across the message boundary
   | { ok: true; result: { segments: TranslatedSegment[]; provider: string; model?: string }; cached: number }
-  | { ok: false; error: { kind: ProviderErrorKind; message: string; isolatable: boolean } }
+  /**
+   * `partial` carries the segments of this call that did come through — a call can be split into
+   * several `BatchQueue` batches, and one batch failing must not bury another's finished work
+   * (Codex on #163): those translations are already in the cache, but without them here the caller
+   * marks every segment failed and the reader is told nothing arrived. Absent when none did.
+   */
+  | { ok: false; error: { kind: ProviderErrorKind; message: string; isolatable: boolean }; partial?: TranslatedSegment[] }
 
 export interface TranslateServiceDeps {
   getProvider: (providerId?: string) => Promise<TranslationProvider>
@@ -509,7 +515,16 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
           // 记在**调用方**这一层而不是执行路径上：去重会让两个标签页的相同段落并进同一个队列任务，
           // 执行那头只看得见第一个调用方的 QueueItem，第二个的 scope 就漏了，它后面的批次照样发得出去
           //（Codex 在 #113 指出）。而每个调用方都会各自拿到这个拒绝，在这里记一个都不漏
-          return { ok: false, error: toErrorInfo(error) }
+          // 成功的那些随失败一起回去：它们已经写进缓存，但调用方要据此**渲染**出来，
+          // 否则读者看到的是「这一批全失败」，重试时它们又从缓存里秒回（Codex 在 #163 指出）
+          const partial = request.segments.flatMap(s => {
+            const done = translated.get(s.id)
+            if (!done) return []
+            return [done.alignment ? { id: s.id, text: done.text, alignment: done.alignment } : { id: s.id, text: done.text }]
+          })
+          return partial.length > 0
+            ? { ok: false, error: toErrorInfo(error), partial }
+            : { ok: false, error: toErrorInfo(error) }
         }
       }
 

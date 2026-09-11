@@ -309,12 +309,17 @@ html[data-axt-on] .ltx_note[data-axt-note] > .ltx_note_outer {
   display: none;
 }
 
-/* 从右往左的译文里，公式仍然从左往右（Read Frog 的 inline atom 也写死 dir="ltr"）：
+/* 从右往左的译文里，**所有原文原子仍然从左往右**（Read Frog 的 inline atom 也写死 dir="ltr"）：
    MathML Core 把 `direction` 直接用在行的排布上，继承了 rtl 之后 `a+b` 会排成 `b+a`。
-   写在样式里而不是逐个节点写属性：回填进译文的公式、镜像里的、拆图副本里的是同一件事，
+   公式之外，占位符回填进来的也都是原文：行内代码、打字机体的标识符、引用、URL，以及边注副本里
+   那段英文原文（.axt-note-s）。它们在 rtl 基方向下由双向算法重排——`f(x)` 这种末尾是中性字符的
+   会把括号排到另一侧（Codex 在 #163 指出，原来这条只管了公式）。
+   `unicode-bidi: isolate` 把每个原子当成一个整体嵌进 rtl 段落里，两边互不影响。
+   写在样式里而不是逐个节点写属性：回填进译文的、镜像里的、拆图副本里的是同一件事，
    而它们是不同的代码路径插进去的 */
-html[data-axt-dir="rtl"] .axt-t :is(math, .ltx_Math) {
+html[data-axt-dir="rtl"] .axt-t :is(math, .ltx_Math, .ltx_ref, .ltx_url, .ltx_listing, code, .ltx_font_typewriter, .axt-note-s) {
   direction: ltr;
+  unicode-bidi: isolate;
 }
 
 /* 搬进副本的译文：另起一行接在原文下面。它已经被摘掉 .ltx_note_content，

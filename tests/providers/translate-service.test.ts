@@ -374,6 +374,9 @@ describe('createTranslateService', () => {
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.error.kind).toBe('invalid-response')
     expect(writes.flat().map(w => w.translation)).toEqual(['译:text-a', '译:text-b'])
+    // 写进缓存还不够，成功的那两段要随失败一起送回调用方：不然 run.ts 把整批标成失败，
+    // 读者看到"全失败"，一按重试它们又从缓存里秒回（Codex 在 #163 指出）
+    if (!res.ok) expect(res.partial?.map(p => `${p.id}=${p.text}`)).toEqual(['a=译:text-a', 'b=译:text-b'])
   })
 
   it('id 对不上：BatchQueue 整批重试后逐条兜底，RequestQueue 自己不重试（否则兜底前要打 12 次）', async () => {

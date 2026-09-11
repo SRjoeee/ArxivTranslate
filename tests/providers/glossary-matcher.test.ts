@@ -52,6 +52,20 @@ describe('createGlossaryMatcher', () => {
     expect(terms(entries(['流形', 'manifold']), '这是一个流形结构')).toEqual(['流形'])
   })
 
+  // Codex 在 #163 指出：目标语言表里还有几种连写的文字，少了它们术语永远匹配不上
+  it('高棉语、老挝语、缅甸语、藏语也是连写的，同样不要求词边界', () => {
+    // 每组：术语 + 把它夹在同文字的正文里
+    const cases: [string, string][] = [
+      ['ការបកប្រែ', 'នេះជាការបកប្រែដ៏ល្អ'], // 高棉语「翻译」
+      ['ການແປ', 'ນີ້ແມ່ນການແປທີ່ດີ'], // 老挝语
+      ['ဘာသာပြန်', 'ဤသည်ဘာသာပြန်ကောင်းသည်'], // 缅甸语
+      ['སྒྱུར', 'འདིསྒྱུརབཟང'], // 藏语
+    ]
+    for (const [term, text] of cases) {
+      expect([term, terms(entries([term, 'x']), text)]).toEqual([term, [term]])
+    }
+  })
+
   it('以符号收尾的术语照常命中：C++ 后面跟着句号不算词边界问题', () => {
     expect(terms(entries(['C++', 'C++']), 'written in C++.')).toEqual(['C++'])
     expect(terms(entries(['(a)', '（a）']), 'panel (a) shows')).toEqual(['(a)'])

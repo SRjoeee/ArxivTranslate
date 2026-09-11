@@ -25,7 +25,9 @@ import { ID_ATTR } from '@/core/extractor'
 import { T_CLASS, isInjected } from '@/core/marks'
 import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
 import { IDENTITY_ATTR } from './index'
+import { MIRROR_CLASS } from './mirror'
 import { PENDING_CLASS } from './pending'
+import { SPLIT_CLASS } from './split-figures'
 import { mirrorPair } from './sentences'
 
 /** 原件上的标记：译文已复制进副本，这份边注由样式隐藏 */
@@ -159,6 +161,10 @@ const reproduces = (source: Element, copy: Element): boolean => {
 export function localizeNotes(root: Document | Element): number {
   const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))
   if (!scope) return 0
+  // 这些副本整块由某个模式藏起来：identity 的与拆图的在 stack、镜像在 side 以外（modes.css）。
+  // 里面那份脚注副本不能当成"唯一留下的一份"。在函数里拼而不是模块级常量：
+  // 三个常量来自 renderer 内互相 import 的模块，模块初始化时取会踩到环
+  const hidableCopy = `.${T_CLASS}[${IDENTITY_ATTR}], .${MIRROR_CLASS}, .${SPLIT_CLASS}`
   let localized = 0
   for (const translation of Array.from(scope.querySelectorAll(`.${T_CLASS}`))) {
     const original = translation.previousElementSibling
@@ -189,12 +195,12 @@ export function localizeNotes(root: Document | Element): number {
         // it, and after a failure the widget the reader retries from (Codex on #153).
         // The mark goes on only while the copy reproduces the original word for word; against a copy
         // the engine mangled both stay on screen — a duplicate beats a note gone missing.
-        // Nor against a copy that stack mode hides: a clone whose own text came back unchanged
-        // carries `data-axt-identity` and is `display: none` there (modes.css), so hiding the
-        // original too would take the footnote off the page altogether (Codex on #163). Keeping the
-        // original leaves one note in stack (the clone is hidden) and two in side — the same
-        // duplicate-beats-missing trade, now for the one block whose translation is its source
-        const hidable = !!copy.closest(`.${T_CLASS}[${IDENTITY_ATTR}]`)
+        // Nor against a copy some mode hides whole (`hidableCopy`): hiding the original too would
+        // take the footnote off the page altogether (Codex on #163, in two rounds — first the
+        // identity clone, then the split-figure one). Keeping the original leaves one note in the
+        // mode that hides the clone and two in the mode that shows it — the same
+        // duplicate-beats-missing trade, for the few clones whose content is its own source
+        const hidable = !!copy.closest(hidableCopy)
         if (!registered && note && !hidable && !note.hasAttribute(LOCALIZED_ATTR) && reproduces(source, copy)) {
           note.setAttribute(LOCALIZED_ATTR, '')
           localized += 1

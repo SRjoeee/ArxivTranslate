@@ -97,8 +97,12 @@ export interface GlossaryMatcher {
   size: number
 }
 
-/** 不用空格分词的文字：这一侧不要求词边界 */
-const SCRIPTS_WITHOUT_SPACES = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u
+/**
+ * 不用空格分词的文字：这一侧不要求词边界。汉字、日文假名、泰文之外，目标语言表里还有
+ * 高棉语（khm）、老挝语（lao）、缅甸语（mya）、藏语（bod）也是连写的——少了它们，
+ * 这几种语言的术语夹在正文里永远匹配不上（Codex 在 #163 指出）
+ */
+const SCRIPTS_WITHOUT_SPACES = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Khmer}\p{Script=Lao}\p{Script=Myanmar}\p{Script=Tibetan}]/u
 /** 算作"词内部"的字符：两个词字符挨在一起就不是边界 */
 const WORD_CHAR = /[\p{L}\p{N}_]/u
 

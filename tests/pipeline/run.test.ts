@@ -18,7 +18,7 @@ const PAGE =
 const docOf = (page = PAGE) => new DOMParser().parseFromString(`<!doctype html><html><head></head><body><article class="ltx_document">${page}</article></body></html>`, 'text/html')
 
 /** 恒等 transport：原样返回；可用 mutate 篡改某些段 */
-function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: string }, calls: number) => string | { error: string; isolatable?: boolean }) {
+function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: string }, calls: number) => string | { error: string; isolatable?: boolean; partial?: boolean }) {
   const requests: TranslateCall[] = []
   const transport: Transport = async req => {
     requests.push(req)
@@ -27,7 +27,11 @@ function makeTransport(mutate?: (req: TranslateCall, seg: { id: string; text: st
       const out = mutate?.(req, seg, requests.length)
       // 默认按"某一段引起的"算：批次报错时 translateSegments 会对半拆到单段，
       // 现有用例正是靠这条路只标记真正失败的那一块。系统性失败另有用例显式传 isolatable: false
-      if (out && typeof out === 'object') return { ok: false, error: { kind: out.error as 'unknown', message: out.error, isolatable: out.isolatable ?? true } }
+      if (out && typeof out === 'object') {
+        // partial：这次调用里另一批已经译好的段落随失败一起回来（§8.2）
+        const partial = out.partial ? req.request.segments.filter(s => s.id !== seg.id).map(s => ({ id: s.id, text: s.text })) : undefined
+        return { ok: false, error: { kind: out.error as 'unknown', message: out.error, isolatable: out.isolatable ?? true }, ...(partial && partial.length > 0 ? { partial } : {}) }
+      }
       segments.push({ id: seg.id, text: typeof out === 'string' ? out : seg.text })
     }
     return { ok: true, result: { segments, provider: 'mock' }, cached: 1 }
@@ -233,6 +237,21 @@ describe('startTranslation', () => {
     const base = await requestSizes()
     const timedOut = await requestSizes(() => ({ error: 'timeout', isolatable: false }))
     expect(timedOut.sizes).toEqual(base.sizes)
+  })
+
+  // Codex 在 #163 指出：一次调用会被拆到多个批次，一批失败不代表另一批没成。
+  // service 把成功的那些随失败一起送回来，这一层要渲染出来——否则读者看到"全失败"，
+  // 而重试时它们又从缓存里秒回
+  it('系统性失败里成功的那些段照样渲染出来，只有真失败的才算失败', async () => {
+    const systemic = await requestSizes((_req, seg) => (seg.id === 'p1' ? { error: 'timeout', isolatable: false, partial: true } : undefined as unknown as string))
+    // 没有多打一次（系统性失败仍然不拆）
+    expect(systemic.sizes).toEqual((await requestSizes()).sizes)
+    // p1 失败，同一批里的其他段有译文
+    expect(systemic.doc.getElementById('p1')?.getAttribute(STATE_ATTR)).toBe('failed')
+    const others = ['p2', 'p3'].map(id => systemic.doc.querySelector(`.${T_CLASS}[${FOR_ATTR}="${id}"]`))
+    expect(others.map(el => el !== null && !el.classList.contains(ERROR_CLASS))).toEqual([true, true])
+    expect(systemic.run.progress().failed).toBe(1)
+    expect(systemic.doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
   })
 
   it('某一段引起的失败照旧拆到单段，好的段落照样救回来', async () => {
