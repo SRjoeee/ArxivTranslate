@@ -1,6 +1,6 @@
 # ADR-0002: OCR backends and the `nativeMessaging` permission
 
-- Status: accepted (owner, 2026-09-12); implementation scheduled with the image-pipeline rebuild
+- Status: accepted (owner, 2026-09-12); implemented 2026-09-13 (PR #179, see the note at the end)
 - Supersedes: DESIGN §15.4's "required permission for now, optional at distribution time"
 
 ## Context
@@ -24,3 +24,12 @@ Image translation today has exactly one way to read text out of a bitmap: the lo
 ### Verified 2026-09-13 (§4)
 
 A scratch extension on Chrome for Testing 153 (Playwright, persistent profile): v1 declared `permissions: ["nativeMessaging", "storage"]`; the same directory was then replaced by v2 declaring `permissions: ["storage"]`, `optional_permissions: ["nativeMessaging"]`, and the profile relaunched. `chrome.permissions.contains({ permissions: ['nativeMessaging'] })` answered **true** after the update (`getAll` listed both); a fresh profile installing v2 directly answered false. The granted set survives the move from required to optional, so the manifest change ships without an install-time regression for existing users; the unpacked-extension version bump is the closest local stand-in for a store update.
+
+### Implemented 2026-09-13 (PR #179)
+
+- `wxt.config.ts`: `nativeMessaging` under `optional_permissions`; `alarms` added to `permissions` (no install warning) for the restart below.
+- **Four states, not three.** `HelperStatus` is a union: `permission-missing`, `restarting`, `not-installed` (with `reason`), `ready` (with `version`). The fourth exists because of a Chrome fact met while implementing: **a permission granted at runtime does not reach a running service worker.** `chrome.runtime.connectNative` is absent from a context created before the grant and is not added afterwards — probe on Chrome for Testing 153: `permissions.remove` in a live worker left the function in place; `extensions/renderer/native_extension_bindings_system.cc` refreshes namespace accessors on a permission change and carries a TODO about objects already instantiated. So the background answers `restarting` when the permission is granted but its own context has no binding, sets a 45 s alarm (past the 30 s idle limit — an alarm landing in the same worker is an event that keeps it alive), and the fresh worker the alarm wakes re-probes and broadcasts `axt:helper-state` to the pages (`background/helper-restart.ts`). `runtime.reload()` was rejected: it closes every extension page and orphans the content scripts of the papers being read.
+- **The seam**: `background/ocr-backend.ts` — `OcrBackend { status(options?), ocr(request, scope?), cancel(scope) }` and `OcrBackendError`. No `signal` parameter: cancellation is by scope (ADR-0005), and a backend over `fetch` keeps its scope → controller map behind `cancel`. `createHelperClient` returns an `OcrBackend`; `createOcrService` takes `backend`.
+- The request runs in `ui/HelperPermission.tsx` from the 「允许」 click, on both surfaces; denial shows a line and keeps the button. The popup card and the settings section have one face per state (UI.md S-P-86b–d, S-O-86–86b). The install waiter ends on `permission-missing` and pauses on `restarting` (the fresh worker resumes it from storage).
+- e2e: `tests/e2e/ext-copy.mjs` copies the build with the permission moved back into `permissions`; `image.mjs` runs on such a copy, `extension.mjs` checks the permission step on the plain build and the guided install on a copy, `local-endpoint.mjs` uses the same helper for its host permission.
+- **Not verified by hand**: that Chrome's prompt leaves the popup open (`chrome/browser/ui/views/extensions/extension_popup.cc` keeps the popup while a web-modal dialog is showing — read, not seen), and the 45 s figure against a real grant (Playwright cannot drive the prompt; the test-only auto-confirm switch does not cover `permissions.request`). The alarm path is unit-tested.
