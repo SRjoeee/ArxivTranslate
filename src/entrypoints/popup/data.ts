@@ -139,9 +139,11 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
    * the target moved on re-checks the target of the moment rather than reclaiming its own (the local review of S1)
    */
   const wantedPack = useRef<string | null>(null)
+  /** A download in flight for this target: lookups meanwhile publish nothing (the API says `downloadable` until it ends) */
+  const downloading = useRef<string | null>(null)
   const checkPack = useCallback(async (target: string): Promise<PackState> => {
     const state = await packState(target)
-    if (wantedPack.current === target) setPack(state)
+    if (wantedPack.current === target && downloading.current !== target) setPack(state)
     return state
   }, [])
 
@@ -353,10 +355,12 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     downloadPack: () => void guard(async () => {
       if (!config) return
       const target = config.targetLanguage
+      downloading.current = target
       setPack('downloading')
       try {
         await downloadPack(target)
       } finally {
+        downloading.current = null
         // The target of the moment, not the one downloaded: it may have moved on meanwhile
         await checkPack(wantedPack.current ?? target)
       }

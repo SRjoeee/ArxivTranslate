@@ -64,9 +64,11 @@ export function useOptionsData(): OptionsData {
     wanted.current = target
     setPack(null)
   }, [])
+  /** A download in flight for this target: lookups meanwhile publish nothing — the API reports `downloadable` until the download ends, which would put the Download button back (Codex on #185) */
+  const downloading = useRef<string | null>(null)
   const checkPack = useCallback(async (target: string) => {
     const state = await packState(target)
-    if (wanted.current === target) setPack(state)
+    if (wanted.current === target && downloading.current !== target) setPack(state)
   }, [])
 
   const loadCache = useCallback(async () => {
@@ -166,6 +168,7 @@ export function useOptionsData(): OptionsData {
   /** From the click itself (shared/pack.ts says why); the row shows an indeterminate state meanwhile */
   const fetchPack = useCallback(async () => {
     const target = (await getConfig()).targetLanguage
+    downloading.current = target
     setPack('downloading')
     try {
       await downloadPack(target)
@@ -174,6 +177,7 @@ export function useOptionsData(): OptionsData {
       // translating into another language must keep the chain it started on (Codex on #157)
       await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).catch(() => undefined)
     } finally {
+      downloading.current = null
       await checkPack(wanted.current ?? target)
     }
   }, [checkPack])
