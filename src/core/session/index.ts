@@ -180,6 +180,11 @@ export function createPageSession(deps: SessionDeps): PageSession {
     if (blocks.length === 0) return { started: false, reason: S.page.nothingToTranslate }
     const tStart = now()
     const config = await deps.config.get()
+    // The identity of the settings this session runs on — its own configuration's, not the chain's: a change saved
+    // between this read and the status answer rebuilds the chain from the new settings while this session keeps the
+    // old target (the local review of INVENTORY S2). Computed here, with the reads: after the state below is
+    // committed nothing may await — a restore landing in such a gap would be undone by the continuation
+    const revision = await chainRevision(config)
     // 术语表随每批发出（§8.2）。**空表不带这个字段**：带上会让所有既有缓存键变一遍，一次性全失效
     const context: TranslateContext = config.glossary.length > 0 ? { ...deps.context, glossary: config.glossary } : deps.context
     // 引擎链在 background；这里只取规划批次与选择渲染路径要用的能力（§2 第 3 条）
@@ -210,10 +215,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     progress = { ...idle(), state: 'on' }
     restarted = false
     const startEngine = status.engine.id
-    // The identity of the settings this session runs on — its own configuration's, not the chain's: a change saved
-    // between the configuration read and the status answer rebuilds the chain from the new settings while this
-    // session keeps the old target (the local review of INVENTORY S2)
-    running = { provider: config.provider, target: config.targetLanguage, engine: startEngine, revision: await chainRevision(config) }
+    running = { provider: config.provider, target: config.targetLanguage, engine: startEngine, revision }
     current = { session, config, context, renderPath: status.renderPath }
     prep.reset() // 新会话：镜像允许再跑一次、量宽缓存清空、栏宽重读
     enterSide(modes.effective())

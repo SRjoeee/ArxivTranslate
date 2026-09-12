@@ -578,6 +578,8 @@ describe('createLocalTransport：状态', () => {
     const t = await withChain([engine(SVC.id, true), engine('google-web', true)])
     expect(await t.status()).toEqual({
       providerId: SVC.id,
+      chosen: SVC.id,
+      revision: expect.stringMatching(/^[0-9a-f]{16}$/),
       available: true,
       model: SVC.model,
       maxBatchChars: 1000,
@@ -589,6 +591,15 @@ describe('createLocalTransport：状态', () => {
       demotions: [],
       engine: { id: SVC.id, displayName: SVC.id },
     })
+  })
+
+  it('a saved service id naming nothing: the status says which service was chosen and which engine it resolved to, so the toggle can tell them apart (S2 review)', async () => {
+    // The chain head is whatever the saved id resolved to (a built-in, from getProvider's default); the status keeps the saved id beside it
+    const engine = mockProvider(async r => ({ segments: r.segments, provider: 'mock' }), { id: 'microsoft' })
+    const transport = await createLocalTransport({ ...DEFAULT_CONFIG, provider: 'svc-deleted-elsewhere', services: [] }, { cancelled: new CancelledScopeRegistry(), buildChain: async () => ({ chain: [engine], renderPath: 'tags' as const }) })
+    const status = await transport.status()
+    expect(status.chosen).toBe('svc-deleted-elsewhere')
+    expect(status.providerId).toBe('microsoft')
   })
 
   it('首选不可用但链上有兜底时报出来：popup 据此保持「翻译」可点（Codex 在 #50 指出）', async () => {

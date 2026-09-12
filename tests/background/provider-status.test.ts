@@ -10,7 +10,7 @@ import type { TranslationTransport } from '@/providers/transport'
 const chainOf = (provider: string): TranslationTransport => ({
   translate: async () => ({ ok: true, result: { segments: [], provider }, cached: 0 }),
   cancel: async () => 0,
-  status: async () => ({ providerId: provider, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', revision: provider, chain: [provider], demotions: [], engine: { id: provider, displayName: provider } }),
+  status: async () => ({ providerId: provider, chosen: provider, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', revision: provider, chain: [provider], demotions: [], engine: { id: provider, displayName: provider } }),
 })
 
 function harness() {

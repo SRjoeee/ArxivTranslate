@@ -22,8 +22,14 @@ export interface EngineStatus {
 }
 
 export interface ProviderStatus {
-  /** 配置里选的那个引擎 */
+  /** The engine at the head of the chain — what the chosen service resolved to */
   providerId: string
+  /**
+   * The service id as saved. Differs from `providerId` when the saved id names nothing (a service deleted from
+   * another tab): `getProvider` then substitutes a built-in, and the toggle must not call that runnable when the
+   * popup, deciding from the settings, says it is not (`savedFromStatus`, shared/page-action.ts)
+   */
+  chosen: string
   /** 它能不能用 */
   available: boolean
   /**
@@ -40,6 +46,8 @@ export interface ProviderStatus {
   /** The config this chain was built from: the popup waits for these to match what it just saved before restarting a page */
   targetLanguage: string
   promptId: string
+  /** `chainRevision` of the configuration this chain was built from; the toggle compares a page's revision with it */
+  revision: string
   engine: EngineStatus
   /** 链上引擎的 id，按优先级。popup 用它判断刚下好语言包的引擎有没有进链，e2e 用它断言降级 */
   chain: string[]
@@ -91,6 +99,7 @@ export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' |
  * 分享同一份并发预算，同时翻两篇的吞吐减半，但不会互相把对方打进限流。
  */
 export async function createLocalTransport(config: Config, deps: LocalTransportDeps): Promise<TranslationTransport> {
+  const revision = await chainRevision(config)
   const { chain, renderPath } = await (deps.buildChain ?? buildChain)(config)
   const primary = chain[0]!
   const chosen = chosenService(config)
@@ -180,6 +189,8 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     const active = chain.find(engine => engine.id === live.activeId) ?? primary
     return {
       providerId: primary.id,
+      chosen: config.provider,
+      revision,
       available,
       ...(fallback ? { fallback } : {}),
       model,
@@ -222,3 +233,4 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
 // The chain-config table and the digest live in config/revision.ts: the popup and the toggle compare a page with the
 // saved settings through the same digest, and neither may pull this module's providers into its bundle
 export { CHAIN_CONFIG_FIELDS, VOLATILE_CONFIG_FIELDS, chainConfigChanged, chainRevision } from '@/config/revision'
+import { chainRevision } from '@/config/revision'

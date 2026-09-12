@@ -25,6 +25,8 @@ function page(over: Partial<PageStatus['progress']> = {}, extra: Partial<PageSta
 function provider(over: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
     providerId: 'microsoft',
+    chosen: 'microsoft',
+    revision: 'r1',
     available: true,
     maxBatchChars: 4000,
     maxBatchItems: 20,
@@ -37,7 +39,7 @@ function provider(over: Partial<ProviderStatus> = {}): ProviderStatus {
     ...over,
   }
 }
-const llmProvider = (over: Partial<ProviderStatus> = {}) => provider({ providerId: SVC.id, model: SVC.model, renderPath: 'tags', engine: { id: SVC.id, displayName: SVC.name }, chain: [SVC.id, 'microsoft', 'google-web'], ...over })
+const llmProvider = (over: Partial<ProviderStatus> = {}) => provider({ providerId: SVC.id, chosen: SVC.id, model: SVC.model, renderPath: 'tags', engine: { id: SVC.id, displayName: SVC.name }, chain: [SVC.id, 'microsoft', 'google-web'], ...over })
 
 const base: PopupInput = {
   page: page(), provider: provider(), config, pack: 'available', helper: { state: 'ready', version: '1.0' }, platform: 'mac', menu: null, shortcut: '⌥T', extensionId: 'abcdefghijklmnopabcdefghijklmnop',

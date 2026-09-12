@@ -17,7 +17,7 @@ import { installContextMenu, refreshContextMenu, installToggleCommand } from './
 import { handlePing } from '@/shared/ping'
 import { applyLocaleFrom, resolveLocale } from '@/ui/apply-locale'
 import { setLocale } from '@/ui/strings'
-import { chainRevision } from '@/config/revision'
+import { savedFromStatus } from '@/shared/page-action'
 
 // background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
 // 异步响应必须用 sendResponse + return true。
@@ -187,10 +187,9 @@ export default defineBackground(() => {
    * from the chain in force, which is built from them. The popup decides the same from the settings it holds
    */
   const saved = async () => {
-    // Runnability comes from a chain built from what is stored now, in order with every other offer (provider-status.ts)
+    // One snapshot: the chain in force, built from what is stored now (offered in order with every other offer)
     await offers.offer()
-    const [config, status] = await Promise.all([getConfig(), transportOf().then(t => t.status())])
-    return { revision: await chainRevision(config), canRun: status.available, fallback: status.fallback !== undefined }
+    return savedFromStatus(await (await transportOf()).status())
   }
   const menuDeps = {
     create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>

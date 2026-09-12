@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Progress } from '@/core/pipeline/run'
-import { behindSettings, messageFor, pageAction, pageDecision } from '@/shared/page-action'
+import { behindSettings, messageFor, pageAction, pageDecision, savedFromStatus } from '@/shared/page-action'
 
 // One decision for the popup's main button and the toggle (INVENTORY S2)
 
@@ -48,5 +48,19 @@ describe('pageDecision', () => {
     expect(pageDecision({ progress: progress('idle') }, saved({ canRun: false, fallback: false }))).toEqual({ action: 'translate', behind: false, enabled: false })
     expect(pageDecision({ progress: progress('stopped', 'auth: bad key') }, saved({ canRun: false, fallback: true }))).toEqual({ action: 'retranslate', behind: false, enabled: true })
     expect(pageDecision(undefined, saved())).toBeUndefined()
+  })
+})
+
+describe('savedFromStatus', () => {
+  const status = (over: Partial<Parameters<typeof savedFromStatus>[0]> = {}) => ({ revision: 'r9', available: true, providerId: 'microsoft', chosen: 'microsoft', ...over })
+
+  it('takes all three from the one status: the chain\'s revision, whether the chosen service resolved to itself and runs, whether a fallback stands by', () => {
+    expect(savedFromStatus(status())).toEqual({ revision: 'r9', canRun: true, fallback: false })
+    expect(savedFromStatus(status({ fallback: { id: 'google-web', displayName: 'Google' } }))).toEqual({ revision: 'r9', canRun: true, fallback: true })
+    expect(savedFromStatus(status({ available: false }))).toEqual({ revision: 'r9', canRun: false, fallback: false })
+  })
+
+  it('a saved service id naming nothing resolves to a built-in the reader did not choose: that is not runnable, as the popup decides from the settings', () => {
+    expect(savedFromStatus(status({ chosen: 'svc-deleted-elsewhere', providerId: 'microsoft', available: true })).canRun).toBe(false)
   })
 })

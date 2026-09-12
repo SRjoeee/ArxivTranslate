@@ -1,4 +1,5 @@
 import type { PageStatus } from './messages'
+import type { ProviderStatus } from '@/providers/transport'
 
 // One decision for the popup's main button, the context menu and the keyboard command (INVENTORY S2). The key does
 // what the button shows (user 2026-09-11), so the two must not decide separately: they had, and diverged twice — the
@@ -59,6 +60,17 @@ export function pageDecision(page: Pick<PageStatus, 'progress' | 'running'> | un
   const behind = behindSettings(page, saved.revision)
   const enabled = action === 'restore' ? true : behind ? saved.canRun : saved.canRun || saved.fallback
   return { action, behind, enabled }
+}
+
+/**
+ * The saved settings as the background reads them — all three from **one** status of the chain in force, which is
+ * built from the stored configuration (`fresh` / `offers`): a revision from one read paired with availability from
+ * another could enable what the popup disables (the local review of S2, second pass). `canRun` is the popup's
+ * `runnable` seen from the chain: the chosen service resolved to itself (a saved id naming nothing resolves to a
+ * built-in) and is available (a language pack present, a key set)
+ */
+export function savedFromStatus(status: Pick<ProviderStatus, 'revision' | 'available' | 'providerId' | 'chosen' | 'fallback'>): SavedSettings {
+  return { revision: status.revision, canRun: status.available && status.providerId === status.chosen, fallback: status.fallback !== undefined }
 }
 
 /** The message each action is, the way the popup's buttons send them: a re-translation restarts the session in place */

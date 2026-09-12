@@ -14,6 +14,7 @@ import type { TranslateCall } from '@/providers/translate-service'
 import type { ImageBytes } from '@/core/image'
 import type { OcrCall, OcrLine } from '@/shared/ocr'
 import { S } from '@/ui/strings'
+import * as revision from '@/config/revision'
 import { chainRevision } from '@/config/revision'
 import { behindSettings } from '@/shared/page-action'
 
@@ -29,7 +30,7 @@ const settle = async (rounds = 4) => { for (let i = 0; i < rounds; i++) await ti
 function providerStatus(over: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
     providerId: 'microsoft', available: true, maxBatchChars: 100_000, maxBatchItems: 100, renderPath: 'tags',
-    targetLanguage: 'cmn', promptId: 'default', engine: { id: 'microsoft', displayName: 'Microsoft' },
+    targetLanguage: 'cmn', promptId: 'default', revision: 'r1', chosen: 'microsoft', engine: { id: 'microsoft', displayName: 'Microsoft' },
     chain: ['microsoft'], demotions: [], ...over,
   }
 }
@@ -165,6 +166,27 @@ describe('page session', () => {
     expect(status.running?.target).toBe(DEFAULT_CONFIG.targetLanguage)
     expect(status.running?.revision).toBe(await chainRevision(DEFAULT_CONFIG))
     expect(behindSettings(status, await chainRevision(changed))).toBe(true)
+  })
+
+  it('the digest is computed with the reads, before any state is committed: a restore landing during it is not undone (S2 review, second pass)', async () => {
+    let release: () => void = () => undefined
+    const held = new Promise<void>(resolve => { release = resolve })
+    // One digest per start, with the reads. A second call would be one made after the state was committed, and
+    // that one is held here: a restore landing while it is awaited would then be undone by the continuation
+    let calls = 0
+    const spy = vi.spyOn(revision, 'chainRevision').mockImplementation(async config => { if (++calls > 1) await held; return `digest-of-${config.targetLanguage}` })
+    const h = harness()
+    live = h.session
+    const pending = h.session.start()
+    await settle()
+    h.session.restore()
+    release()
+    await expect(pending).resolves.toEqual({ started: true })
+    const status = await h.session.status()
+    // Whatever the outcome of that race, the state is one thing: a session with its running record, or neither
+    expect(status.session === null).toBe(status.running === undefined)
+    expect(calls).toBe(1)
+    spy.mockRestore()
   })
 
   it('a second start is refused while the session is on; a restart replaces it and cancels the old scope', async () => {
