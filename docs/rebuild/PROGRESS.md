@@ -15,6 +15,7 @@ Checkpoint log for the rebuild toward V1.0 (mandate: `docs/rebuild/CHARTER.md`; 
 - Codex on the PR (P2, adopted): the session poll's generation, bumped every 500 ms, would have invalidated every answer slower than a tick; same-session polls are now coalesced, one in flight at a time.
 - Codex on the PR, second round (two P2, adopted): an interface language saved elsewhere now reloads the observing surface, as its own change does; the settings page refreshes its fallback warning on an external write.
 - Codex on the PR, third round (two P2, adopted): the reload test compares the stored choice's locale with the one in use rather than a recorded value; a session change clears the previous session's chain status.
+- Codex on the PR, fifth round (P2, adopted): committing another target now forgets the previous target's pack state at once, on both surfaces.
 - Tests 1 668 (unchanged — the two data layers are hooks without a unit harness, INVENTORY §4.5); `pnpm e2e` 73/73 with a new case: the target language changed on the settings tab shows in the open popup without reopening it. Still held in more than one place after this: the content script's subscription (session), the background's chain (its own offers), the abstract page's raw read (deliberate, bundle size) — each now follows the store; nothing shows a stale copy.
 
 ## 2026-09-13 — one decision for the popup's main button, the context menu and the keyboard command (INVENTORY S2)

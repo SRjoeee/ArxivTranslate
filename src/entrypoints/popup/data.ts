@@ -80,7 +80,11 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const config = local?.config ?? null
   const savedRevision = local?.revision ?? null
   const settle = useCallback(async (next: Config) => {
-    wantedPack.current = next.targetLanguage
+    // Another target forgets the previous one's pack state at once (Codex on #185); checkPack fills the new one
+    if (wantedPack.current !== next.targetLanguage) {
+      wantedPack.current = next.targetLanguage
+      setPack(null)
+    }
     setLocal({ config: next, revision: await chainRevision(next) })
   }, [])
   /** The offline service's language pack (§8.4); `downloadable` needs a click to create() (user gesture) */

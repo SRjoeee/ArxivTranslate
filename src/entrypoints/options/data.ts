@@ -55,8 +55,15 @@ export function useOptionsData(): OptionsData {
    */
   /**
    * The committed configuration owns the wanted target (set where the configuration lands); a lookup publishes only
-   * for it, and a download that ends after the target moved on re-checks the target of the moment (S1 review)
+   * for it, and a download that ends after the target moved on re-checks the target of the moment (S1 review).
+   * Committing another target forgets the previous one's pack state at once: until the lookup for the new one
+   * answers, the card must not show — and the popup must not act on — the old language's availability (Codex on #185)
    */
+  const commitTarget = useCallback((target: string) => {
+    if (wanted.current === target) return
+    wanted.current = target
+    setPack(null)
+  }, [])
   const checkPack = useCallback(async (target: string) => {
     const state = await packState(target)
     if (wanted.current === target) setPack(state)
@@ -79,7 +86,7 @@ export function useOptionsData(): OptionsData {
     // them showed newer settings (the local review of S1)
     const init = async () => {
       const c = await getConfig()
-      wanted.current = c.targetLanguage
+      commitTarget(c.targetLanguage)
       setLocal(c)
       setFallbackReason(configFallbackReason())
       void checkPack(c.targetLanguage)
@@ -99,7 +106,7 @@ export function useOptionsData(): OptionsData {
           location.reload()
           return stored
         }
-        wanted.current = stored.targetLanguage
+        commitTarget(stored.targetLanguage)
         setLocal(stored)
         // A valid write elsewhere is the repair of a configuration this page had to fall back from (Codex on #185)
         setFallbackReason(configFallbackReason())
@@ -131,7 +138,7 @@ export function useOptionsData(): OptionsData {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [loadCache, checkPack])
+  }, [loadCache, checkPack, commitTarget])
 
   /**
    * **Serialized**: each call reads storage, applies one change and writes it back, so two controls
@@ -145,7 +152,7 @@ export function useOptionsData(): OptionsData {
     const run = async () => {
       const next = fn(await getConfig())
       await setConfig(next)
-      wanted.current = next.targetLanguage
+      commitTarget(next.targetLanguage)
       setLocal(next)
       // A valid write **is** the repair: leaving the warning up would go on telling the reader that
       // the key and service they just fixed are not in effect (Codex on #157)
@@ -154,7 +161,7 @@ export function useOptionsData(): OptionsData {
     }
     writes.current = writes.current.then(run, run)
     return writes.current
-  }, [])
+  }, [commitTarget])
 
   /** From the click itself (shared/pack.ts says why); the row shows an indeterminate state meanwhile */
   const fetchPack = useCallback(async () => {
