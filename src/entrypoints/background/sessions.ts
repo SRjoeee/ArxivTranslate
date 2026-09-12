@@ -88,9 +88,10 @@ export interface SessionRouterDeps {
   /**
    * Retire every chain other than the one in force (ADR-0005). `dropAndRebindAll` calls it right after the
    * sessions are moved and before anything is awaited: a chain only a connection test used has no session that
-   * leads to it, and a retired chain refuses every call that wakes or retries inside it, scoped or not
+   * leads to it, and a retired chain refuses every call that wakes or retries inside it, scoped or not.
+   * `null` when nothing is in force — the rebuild failed — and everything must be retired
    */
-  retireOthers?: (inForce: TranslationTransport) => void
+  retireOthers?: (inForce: TranslationTransport | null) => void
 }
 
 /**
@@ -267,7 +268,18 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       // finish newer-first, and the configuration watcher rebuilds as well. Moving onto a stale build would put
       // every session on it and retire the chain current() still answers — fresh pages would then bind to a
       // retired chain and every translation would come back aborted (the local review of ADR-0005, fifth pass)
-      const transport = await deps.current()
+      let transport: TranslationTransport
+      try {
+        transport = await deps.current()
+      } catch (e) {
+        // No chain to move onto — the rebuild after the deletion failed. The deleted service must stop all the
+        // same: retire and drain every chain, and let the sessions go unmarked, so their next request binds
+        // whatever chain is in force by then (the local review of ADR-0005, ninth pass)
+        deps.retireOthers?.(null)
+        for (const [scope, session] of sessions) if (session.transport) await session.transport.cancel(scope)
+        sessions.clear()
+        throw e
+      }
       // Move every session first, synchronously, and only then drain the old chains: a forCall whose build lands
       // while a drain below is awaited finds its session already moved and keeps that (see forCall) — moving
       // one session per drain let it bind the chain being replaced and send its request there, while the loop

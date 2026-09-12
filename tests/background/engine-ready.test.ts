@@ -44,6 +44,36 @@ describe('engineReady', () => {
     expect(retired).toEqual(['build-1'])
   })
 
+  it('a deletion whose rebuild fails outright still retires every chain and lets the sessions go', async () => {
+    // Nothing to move onto, but the deleted service must stop: every chain is retired and drained, and the
+    // sessions are let go unmarked — their next request binds whatever chain is in force by then
+    // (the local review of ADR-0005, ninth pass)
+    const retired: string[] = []
+    let n = 0
+    const holder = createChainHolder({
+      owned: transport => router.sessionsOn(transport) > 0,
+      load: async () => {
+        const name = `build-${++n}`
+        if (name !== 'build-1') throw new Error(`${name} failed`)
+        return { config: DEFAULT_CONFIG, transport: chainOf(name, ['svc-new'], retired) }
+      },
+    })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: inForce => holder.retireOthers(inForce) })
+    await router.forCall('s1', 1)
+    expect(await engineReady(holder, router, { id: 'svc-new', rebindAll: true })).toEqual({ reset: false })
+    expect(retired).toEqual(['build-1'])
+    expect(router.bound()).toEqual([])
+  })
+
+  it('a language pack whose engine is not on the chain in force answers reset: false', async () => {
+    const retired: string[] = []
+    let n = 0
+    const holder = createChainHolder({ owned: transport => router.sessionsOn(transport) > 0, load: async () => ({ config: DEFAULT_CONFIG, transport: chainOf(`build-${++n}`, ['google-web'], retired) }) })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: inForce => holder.retireOthers(inForce) })
+    await router.forCall('s1', 1)
+    expect(await engineReady(holder, router, { id: 'chrome-builtin', scope: 's1' })).toEqual({ reset: false })
+  })
+
   it('moves one session for a downloaded language pack, and answers whether the engine is on the chain in force', async () => {
     const retired: string[] = []
     let n = 0

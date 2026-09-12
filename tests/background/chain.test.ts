@@ -23,7 +23,7 @@ describe('createChainHolder', () => {
     await holder.current()
     holder.onConfig({ ...DEFAULT_CONFIG, mode: 'only' }) // volatile: the display mode
     expect(nameOf(await holder.current())).toBe('build-1')
-    holder.onConfig({ ...DEFAULT_CONFIG, targetLanguage: 'ja' }) // shapes the chain
+    holder.onConfig({ ...DEFAULT_CONFIG, targetLanguage: 'arb' }) // shapes the chain
     expect(nameOf(await holder.current())).toBe('build-2')
   })
 
@@ -39,13 +39,32 @@ describe('createChainHolder', () => {
         return { config: built, transport: transport(built.targetLanguage) }
       },
     })
-    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'B' })
-    const asked = holder.current() // awaiting B
-    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'C' })
-    gates.get('C')!()
-    gates.get('B')!()
-    expect(nameOf(await asked)).toBe('C')
-    expect(nameOf(await holder.current())).toBe('C')
+    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'afr' })
+    const asked = holder.current() // awaiting afr
+    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'amh' })
+    gates.get('amh')!()
+    gates.get('afr')!()
+    expect(nameOf(await asked)).toBe('amh')
+    expect(nameOf(await holder.current())).toBe('amh')
+  })
+
+  it('a superseded build that never settles does not hold current() up', async () => {
+    // An engine probe can hang. A caller that awaited that build — a deletion's clean-up among them — must get the
+    // build that took over instead (the local review of ADR-0005, ninth pass)
+    const gates = new Map<string, () => void>()
+    const holder = createChainHolder({
+      owned: () => false,
+      load: async config => {
+        const built = config as Config
+        await new Promise<void>(resolve => { gates.set(built.targetLanguage, resolve) })
+        return { config: built, transport: transport(built.targetLanguage) }
+      },
+    })
+    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'afr' }) // never released
+    const asked = holder.current()
+    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'amh' })
+    gates.get('amh')!()
+    expect(nameOf(await asked)).toBe('amh')
   })
 
   it('a superseded build that fails is ignored: current() follows the build in force', async () => {
@@ -61,12 +80,12 @@ describe('createChainHolder', () => {
         return { config: built, transport: transport(built.targetLanguage) }
       },
     })
-    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'B' }).catch(() => undefined)
+    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'afr' }).catch(() => undefined)
     const asked = holder.current()
-    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'C' })
-    gates.get('C')!.ok()
-    gates.get('B')!.fail()
-    expect(nameOf(await asked)).toBe('C')
+    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'amh' })
+    gates.get('amh')!.ok()
+    gates.get('afr')!.fail()
+    expect(nameOf(await asked)).toBe('amh')
   })
 
   it('retireOthers() retires every build but the one in force, once', async () => {

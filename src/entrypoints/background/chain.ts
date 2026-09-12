@@ -30,9 +30,10 @@ export interface ChainHolder {
   /**
    * Retire every build but the one in force, and forget them. A service was deleted: the sessions have just been
    * moved onto the chain in force by the router, and every other chain — including one only a connection test
-   * used, which no session leads to — must refuse whatever wakes or retries inside it (ADR-0005)
+   * used, which no session leads to — must refuse whatever wakes or retries inside it (ADR-0005). `null` when
+   * nothing is in force (the rebuild failed): then everything is retired
    */
-  retireOthers(inForce: TranslationTransport): void
+  retireOthers(inForce: TranslationTransport | null): void
   /** Rebuild and make the result the chain in force: the reader's explicit actions (`axt:engine-ready`) */
   activate(config?: Config): Promise<Built>
   /**
@@ -45,8 +46,25 @@ export interface ChainHolder {
   onConfig(next: Config): void
 }
 
+const defer = () => {
+  let resolve: () => void = () => {}
+  const promise = new Promise<void>(done => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
 export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
   let active: Promise<Built> | null = null
+  /** Fires when `active` is reassigned: a `current()` awaiting the previous build stops waiting for it */
+  let replaced = defer()
+  const take = (next: Promise<Built>): Promise<Built> => {
+    active = next
+    const fired = replaced
+    replaced = defer()
+    fired.resolve()
+    return next
+  }
   /**
    * Every chain built and neither retired nor let go: the one in force, the ones sessions are still on, the ones
    * with a call still inside (a connection test in its retry backoff) that nothing else leads to. Superseded
@@ -60,10 +78,7 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
       built.add(result.transport)
       return result
     })
-  const activate = (config?: Config): Promise<Built> => {
-    active = build(config)
-    return active
-  }
+  const activate = (config?: Config): Promise<Built> => take(build(config))
   const sweep = (inForce: TranslationTransport): void => {
     for (const transport of built) {
       if (transport === inForce || transport.busy?.() || deps.owned(transport)) continue
@@ -75,8 +90,12 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
     async current() {
       for (;;) {
         const promise = active ?? activate()
+        const signal = replaced.promise
         try {
-          const result = await promise
+          // A build superseded while it is awaited is no longer waited for — one that never settles must not hold
+          // up whoever asked, least of all a deletion's clean-up (the local review of ADR-0005, ninth pass)
+          const result = await Promise.race([promise, signal.then(() => null)])
+          if (result === null) continue
           if (promise === active) {
             sweep(result.transport)
             return result.transport
@@ -89,10 +108,10 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
     },
     onConfig(next) {
       if (!active) return
-      active = active.then(
+      take(active.then(
         result => (chainConfigChanged(result.config, next) ? build(next) : { config: next, transport: result.transport }),
         () => build(next),
-      )
+      ))
     },
     retireOthers(inForce) {
       for (const transport of built) {
