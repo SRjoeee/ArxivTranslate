@@ -16,7 +16,7 @@ import { expectationsFromText, validate } from '@/core/protector/validate'
 import { createGlossaryMatcher, type GlossaryEntry } from './glossary'
 import { getRandomUUID } from '@/shared/uuid'
 import { BatchCountMismatchError, BatchQueue, type BatchExecutionMeta, type BatchOptions } from './request/batch-queue'
-import { CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
+import { type CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
 import { REQUEST_TIMEOUT_ERROR_NAME, RequestQueue, type QueueOptions } from './request/request-queue'
 import { attachRequestErrorMeta } from './request/retry-policy'
 import { ProviderError, isPermanentErrorKind, type ProviderErrorKind, type TranslatedSegment, type TranslateRequest, type TranslationProvider, type TranslateSegment } from './types'
@@ -85,24 +85,18 @@ export interface TranslateServiceDeps {
   cacheReadBudgetMs?: number
   /** 攒批参数覆盖（测试用） */
   batch?: Partial<Pick<BatchOptions<QueueItem, TranslationOutcome>, 'batchDelay' | 'maxRetries' | 'enableFallbackToIndividual'>>
-}
-
-export interface CancelOptions {
   /**
-   * 记住这个 scope 已经撤过，之后带它的调用一律直接 aborted（默认 true）。
-   *
-   * 用户按停止、标签页关掉——这些是**确定**的终结，记住它才能堵住「请求正挂在读缓存上、撤完才醒来」
-   * 那个窗口（#1881）。而**猜**出来的终结不能记：同文档换 hash 与真的跳走在 `tabs.onUpdated` 里
-   * 长得一模一样（实测 `changeInfo` 都只有 `{status:'loading'}`），猜错时页面还活着，记下去就等于
-   * 把它后半篇的翻译永久判死（用户 2026-09-09 报的参考文献全失败）
+   * Scopes the session router has ended for certain (ADR-0005). Read after the cache read, before the cache write
+   * and by the batch queue's liveness hook, so a call that was suspended when its scope was drained never enters a
+   * queue and never writes a result (#1881)
    */
-  remember?: boolean
+  cancelled: Pick<CancelledScopeRegistry, 'has'>
 }
 
 export interface TranslateService {
   translate(call: TranslateCall): Promise<TranslateMessageResponse>
-  /** 撤掉该 scope 排队与在飞的请求；返回撤掉的条数。默认之后带同一 scope 的调用直接返回 aborted */
-  cancel(scope: string, options?: CancelOptions): number
+  /** Drain the scope's queued and in-flight requests; returns how many. Refusing the scope's later calls is the registry's job, not this method's */
+  cancel(scope: string): number
 }
 
 /** Read Frog 的默认队列参数（DEFAULT_CONFIG.pageTranslation.requestQueueConfig 与 translation-queues.ts 里的常量） */
@@ -216,7 +210,6 @@ export async function readWithBudget(store: CachePort, keys: string[], budgetMs:
 
 export function createTranslateService(deps: TranslateServiceDeps): TranslateService {
   const queues = new Map<string, ProviderQueues>()
-  const cancelledScopes = new CancelledScopeRegistry()
   const baseTimeoutMs = deps.queue?.timeoutMs ?? DEFAULT_QUEUE_OPTIONS.timeoutMs
   const timeoutFor = (chars: number) => Math.min(baseTimeoutMs + chars * BATCH_TIMEOUT_PER_CHAR_MS, MAX_BATCH_TIMEOUT_MS)
 
@@ -347,7 +340,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       getCharacters: item => item.text.length,
       getDedupKey: item => item.dedupKey,
       getScope: item => item.scope,
-      isScopeCancelled: scope => cancelledScopes.has(scope),
+      isScopeCancelled: scope => deps.cancelled.has(scope),
       executeBatch: (items, meta) => {
         // 这一批所属的会话已经致命：当场拒，不进 RequestQueue、不打端点。BatchQueue 只对
         // BatchCountMismatchError 重试或走逐条兜底，所以这里拒了就是终局，不会绕出第二条路
@@ -428,7 +421,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         }
       }
       // 读缓存时让出过主线程，这期间 scope 可能已被撤销（Read Frog translation-queues.ts 也在 await 之后查一次）
-      if (scope && cancelledScopes.has(scope)) return { ok: false, error: { kind: 'aborted', message: `已取消（scope: ${scope}）`, isolatable: false } }
+      if (scope && deps.cancelled.has(scope)) return { ok: false, error: { kind: 'aborted', message: `已取消（scope: ${scope}）`, isolatable: false } }
       const cached = translated.size
 
       // 2. 未命中的逐段入队；同一次调用的段落批次键相同，会攒在一起
@@ -500,7 +493,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         // 写之前再查一次取消（Codex 在 #33 指出）：一次调用会被拆到多个批次，先完成的那些
         // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，
         // 与「恢复原文之后不再写缓存」的承诺不符
-        if (store && writes.length > 0 && !(scope && cancelledScopes.has(scope))) await store.putMany(writes)
+        if (store && writes.length > 0 && !(scope && deps.cancelled.has(scope))) await store.putMany(writes)
         if (failures.length > 0) {
           const error = pickError(failures)
           // key 没配 / 不认：这轮里再打多少次都是同一个 401。`failQueue` 只排空**那一刻**排在
@@ -534,10 +527,12 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     }
   }
 
-  const cancel = (scope: string, { remember = true }: CancelOptions = {}): number => {
-    // 先登记再排空：登记是同步的，还挂在读缓存上的调用醒来就能看到；
-    // 先撤批处理再撤请求队列，反过来攒着的批次会在两次排空之间刷出新任务（Read Frog translation-queues.ts:616）
-    if (remember) cancelledScopes.markScope(scope)
+  /**
+   * Drain only: whether the scope is dead from now on is the session router's decision, written to the registry
+   * this service reads before anything here is drained (ADR-0005). Batch queue before request queue — the other
+   * way round, a batch still gathering flushes new tasks between the two drains (Read Frog translation-queues.ts:616)
+   */
+  const cancel = (scope: string): number => {
     let cancelled = 0
     for (const { requestQueue, batchQueue } of queues.values()) {
       cancelled += batchQueue.cancelByScope(scope)

@@ -3,7 +3,8 @@ import type { RenderPath } from '@/cache/key'
 import { BatchCountMismatchError } from '@/providers/request/batch-queue'
 import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
 import type { CachedEntry } from '@/cache/store'
-import { createTranslateService, toErrorInfo, type CacheEntry, type CachePort } from '@/providers/translate-service'
+import { CancelledScopeRegistry } from '@/providers/request/cancellation'
+import { createTranslateService, toErrorInfo, type CacheEntry, type CachePort, type TranslateServiceDeps } from '@/providers/translate-service'
 import { ProviderError, type TranslationProvider } from '@/providers/types'
 
 const provider = (translate: TranslationProvider['translate'], id = 'mock', extra: Partial<TranslationProvider> = {}): TranslationProvider => ({
@@ -12,6 +13,10 @@ const provider = (translate: TranslationProvider['translate'], id = 'mock', extr
   isAvailable: async () => true, translate,
   ...extra,
 })
+
+/** A service over a registry of its own; the cancellation test passes the one it marks */
+const build = (deps: Omit<TranslateServiceDeps, 'cancelled'> & Partial<Pick<TranslateServiceDeps, 'cancelled'>>) =>
+  createTranslateService({ cancelled: new CancelledScopeRegistry(), ...deps })
 
 /** 记录调用的假缓存端口 */
 function fakePort(seed: Record<string, string> = {}) {
@@ -51,7 +56,7 @@ describe('sentence alignment through the queue (#105)', () => {
     // The queue was string-valued, so the alignment reached the type at the message boundary but
     // the data was dropped on the way. This is the test that the value actually crosses.
     const { port } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => withAlignment({ a: { source: [3, 3], target: [4, 4] } }),
       cache: port,
     })
@@ -63,7 +68,7 @@ describe('sentence alignment through the queue (#105)', () => {
 
   it('keeps each segment’s own alignment when a batch mixes aligned and unaligned', async () => {
     const { port } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => withAlignment({ a: { source: [6], target: [8] }, c: { source: [6], target: [8] } }),
       cache: port,
     })
@@ -79,7 +84,7 @@ describe('sentence alignment through the queue (#105)', () => {
 
   it('a cache hit brings its alignment back', async () => {
     const { port, store } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => withAlignment({ a: { source: [6], target: [8] } }),
       cache: port,
     })
@@ -99,7 +104,7 @@ describe('sentence alignment through the queue (#105)', () => {
     // The source text only exists at this point, so a key collision or a changed source is caught
     // here rather than putting the highlight on the wrong sentence.
     const { port, store } = fakePort()
-    const service = createTranslateService({ getProvider: async () => withAlignment({}), cache: port })
+    const service = build({ getProvider: async () => withAlignment({}), cache: port })
     const first = await service.translate(req(['a']))
     expect(first.ok).toBe(true)
     const [key] = [...store.keys()]
@@ -116,7 +121,7 @@ describe('createTranslateService', () => {
   it('缓存读写各一次批量调用，不是每段一次；同一次调用的段落攒成一批发给 provider', async () => {
     const { port, reads, writes } = fakePort()
     const calls: string[][] = []
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => { calls.push(r.segments.map(s => s.id)); return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' } }),
       getModel: async () => 'm/1',
       cache: port,
@@ -133,7 +138,7 @@ describe('createTranslateService', () => {
   it('命中的段落不再发给 provider，返回按原顺序合并', async () => {
     const { port } = fakePort()
     const calls: string[][] = []
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => { calls.push(r.segments.map(s => s.id)); return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' } }),
       getModel: async () => 'm/1',
       cache: port,
@@ -149,7 +154,7 @@ describe('createTranslateService', () => {
 
   it('不带 cache 字段时完全不碰缓存（设置页的连接测试）', async () => {
     const { port, reads, writes } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => ({ segments: r.segments, provider: 'mock' })),
       cache: port,
     })
@@ -163,7 +168,7 @@ describe('createTranslateService', () => {
     // `failQueue` 排空的是**那一刻**排在 RequestQueue 里的任务。并发槽占满时等待区恰好是空的，
     // 剩下的块还在 BatchQueue 里攒批，攒完照常派发——实测第一个 401 之后 +744 ms 又发了 7 个请求
     let calls = 0
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }),
     })
     expect(await service.translate({ ...req(['a']), scope: 's1' })).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key', isolatable: false } })
@@ -185,7 +190,7 @@ describe('createTranslateService', () => {
     // 它后面的批次照样发得出去，第二波又回来了
     let calls = 0
     const { port } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }),
       cache: port,
     })
@@ -206,7 +211,7 @@ describe('createTranslateService', () => {
     // 满批按条数立刻派发、秒失败，尾巴还在等 batchDelay。等 allSettled 才记状态的话，
     // 它得先把尾巴等出来——而尾巴是**发出去**才失败的
     let calls = 0
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }, 'mock', { maxBatchItems: 2 }),
     })
     const res = await service.translate({ ...req(['a', 'b', 'c', 'd', 'e']), scope: 's1' })
@@ -221,7 +226,7 @@ describe('createTranslateService', () => {
     // 只看 item.scope 的话会把这一批当死的拒掉，把陈旧的 auth 回给新调用方，再把新 scope 也标成致命
     let calls = 0
     const { port } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => {
         calls++
         if (calls === 1) throw new ProviderError('auth', 'bad key')
@@ -246,7 +251,7 @@ describe('createTranslateService', () => {
     // 与 fallback.ts 的 PERMANENT_KINDS 同一份判断。bad-request 是「这一批的问题」，
     // 换一批就可能好，黏住它等于因为一个坏块放弃整篇
     let calls = 0
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async () => {
         calls++
         if (calls === 1) throw new ProviderError('bad-request', '400')
@@ -263,7 +268,7 @@ describe('createTranslateService', () => {
 
   it('provider 抛错转成错误响应，不抛出；auth 不重试', async () => {
     let calls = 0
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async () => { calls++; throw new ProviderError('auth', 'bad key') }),
     })
     expect(await service.translate(req(['a']))).toEqual({ ok: false, error: { kind: 'auth', message: 'bad key', isolatable: false } })
@@ -272,7 +277,7 @@ describe('createTranslateService', () => {
 
   it('缓存读失败不影响翻译（端口自行降级为未命中）', async () => {
     const port: CachePort = { getMany: async keys => keys.map(() => null), putMany: vi.fn(async () => {}) }
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => ({ segments: r.segments.map(s => ({ ...s, text: '译' })), provider: 'mock' })),
       cache: port,
     })
@@ -284,7 +289,7 @@ describe('createTranslateService', () => {
   it('cache.bypass：只写不读，重发不会拿回缓存里那份坏译文（Codex 在 #9 指出）', async () => {
     const { port, reads, writes } = fakePort()
     let calls = 0
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => { calls++; return { segments: r.segments.map(s => ({ ...s, text: `译${calls}:${s.text}` })), provider: 'mock' } }),
       getModel: async () => 'm/1',
       cache: port,
@@ -304,7 +309,7 @@ describe('createTranslateService', () => {
   it('占位符校验不过的译文照常返回，但不写缓存（Codex 在 #30 指出）', async () => {
     // 期望从请求文本反推，不再靠调用方传 accept 回调（issue #42）：a 的译文丢了 <x id="1"/>
     const { port, writes } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => ({
         segments: r.segments.map(s => ({ ...s, text: s.id === 'a' ? '译文丢了占位符' : `译:${s.text}` })),
         provider: 'mock',
@@ -326,7 +331,7 @@ describe('createTranslateService', () => {
     // 这是本次改动最容易漏的那个洞：expectationsFromText 若不按格式分派，slots 为空 → 校验恒真 →
     // 被打烂的译文静默进缓存。b 的译文完整、a 丢了记号，只有 b 该入库
     const { port, writes } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => ({
         segments: r.segments.map(s => ({ ...s, text: s.id === 'a' ? '译文丢了记号' : `译:${s.text}` })),
         provider: 'mock',
@@ -347,7 +352,7 @@ describe('createTranslateService', () => {
 
   it('反推的期望对纯文本同样生效：runs 路径的译文凭空多出标签也不入库', async () => {
     const { port, writes } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => ({
         segments: r.segments.map(s => ({ ...s, text: s.id === 'a' ? '译文 <x id="7"/>' : `译:${s.text}` })),
         provider: 'mock',
@@ -361,7 +366,7 @@ describe('createTranslateService', () => {
 
   it('一次调用横跨两批、一批失败：成功的那批照样写缓存，调用整体报失败', async () => {
     const { port, writes } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       // 每批最多 2 条：a、b 一批，c 一批；含 c 的批报错
       getProvider: async () => provider(async r => {
         if (r.segments.some(s => s.id === 'c')) throw new ProviderError('invalid-response', 'bad')
@@ -381,7 +386,7 @@ describe('createTranslateService', () => {
 
   it('id 对不上：BatchQueue 整批重试后逐条兜底，RequestQueue 自己不重试（否则兜底前要打 12 次）', async () => {
     const seen: string[][] = []
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => {
         seen.push(r.segments.map(s => s.id))
         if (r.segments.length > 1) throw new ProviderError('invalid-response', 'id 对不上')
@@ -416,7 +421,7 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
   it('免费引擎（kind: mt）的多次调用攒进同一个请求：以前只有 LLM 攒批，它一次调用一个请求', async () => {
     vi.useFakeTimers()
     const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 100, maxBatchChars: 8000 })
-    const service = createTranslateService({ getProvider: async () => mt })
+    const service = build({ getProvider: async () => mt })
     const all = Promise.all([service.translate(req(['a'])), service.translate(req(['b'])), service.translate(req(['c']))])
     await vi.advanceTimersByTimeAsync(200)
     expect(calls).toEqual([['a', 'b', 'c']])
@@ -426,7 +431,7 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
   it('装得下多少就攒多少：超过 maxBatchItems 的部分另起一批', async () => {
     vi.useFakeTimers()
     const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 2, maxBatchChars: 8000 })
-    const service = createTranslateService({ getProvider: async () => mt })
+    const service = build({ getProvider: async () => mt })
     const all = Promise.all(['a', 'b', 'c'].map(id => service.translate(req([id]))))
     await vi.advanceTimersByTimeAsync(200)
     expect(calls).toEqual([['a', 'b'], ['c']])
@@ -436,7 +441,7 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
   it('不看上下文的引擎，章节标题不进批次键：否则每换一节就换一次键，跨不了章节攒批', async () => {
     vi.useFakeTimers()
     const { calls, provider: mt } = recorder({ kind: 'mt', maxBatchItems: 100, maxBatchChars: 8000 })
-    const service = createTranslateService({ getProvider: async () => mt })
+    const service = build({ getProvider: async () => mt })
     const all = Promise.all([service.translate(withContext(['a'], '第一节')), service.translate(withContext(['b'], '第二节'))])
     await vi.advanceTimersByTimeAsync(200)
     expect(calls).toEqual([['a', 'b']])
@@ -446,7 +451,7 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
   it('有提示词的引擎照旧按上下文分批：章节标题会进 prompt，混批会串味', async () => {
     vi.useFakeTimers()
     const { calls, provider: llm } = recorder({ kind: 'llm', maxBatchItems: 100, maxBatchChars: 8000, promptKey: 'default' })
-    const service = createTranslateService({ getProvider: async () => llm })
+    const service = build({ getProvider: async () => llm })
     const all = Promise.all([service.translate(withContext(['a'], '第一节')), service.translate(withContext(['b'], '第二节'))])
     await vi.advanceTimersByTimeAsync(200)
     expect(calls.map(c => c.join()).sort()).toEqual(['a', 'b'])
@@ -466,7 +471,7 @@ describe('攒批不看引擎种类，只看它能装多少（§8.3，2026-09-06�
       inFlight--
       return { segments: r.segments, provider: 'mock' }
     }, 'mock', { kind: 'mt', maxBatchItems: 1, rateLimit: { rate: 20, capacity: 20 }, maxConcurrent: 2 })
-    const service = createTranslateService({ getProvider: async () => mt })
+    const service = build({ getProvider: async () => mt })
     const all = Promise.all(['a', 'b', 'c', 'd'].map(id => service.translate(req([id]))))
     await vi.advanceTimersByTimeAsync(500)
     expect(peak).toBe(2)
@@ -488,7 +493,7 @@ describe('系统性失败不该被批级重试放大（Codex 在 #61 指出）',
 
   it('声明 isolatable: false 的 invalid-response 立刻上报，不重试不逐条兜底', async () => {
     let calls = 0
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async () => {
         calls++
         // 免费引擎返回的整个响应就不是 JSON：拆多小都一样
@@ -503,7 +508,7 @@ describe('系统性失败不该被批级重试放大（Codex 在 #61 指出）',
 
   it('可拆分的 invalid-response 照旧重试并逐条兜底：拆小能定位到闯祸的那一段', async () => {
     let calls = 0
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => {
         calls++
         // 只有多段一起发才坏；单段发就好了
@@ -530,7 +535,7 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
     vi.spyOn(Math, 'random').mockReturnValue(0)
     const { calls, note } = log()
     let first = true
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => {
         note(r.segments.map(s => s.id))
         if (first) { first = false; throw rateLimited() }
@@ -561,7 +566,7 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
     vi.spyOn(Math, 'random').mockReturnValue(0)
     const { calls, note } = log()
     let hits = 0
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async r => {
         note(r.segments.map(s => s.id))
         if (hits++ < 2) throw rateLimited()
@@ -587,7 +592,7 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
     // 实测 2312.17527：最后一块等了 220s 还没回，整篇停在"进行中"
     vi.useFakeTimers()
     let calls = 0
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(() => { calls++; return new Promise(() => {}) }), // 不配合 signal 也不返回
       queue: { timeoutMs: 20, maxRetries: 1, baseRetryDelayMs: 0 },
     })
@@ -599,22 +604,26 @@ describe('createTranslateService：限流、超时、取消（fake timers）', (
     expect(calls).toBe(2) // 首次 + 重试一次
   })
 
-  it('cancel(scope)：排队与在飞的请求一起撤，signal 被 abort，不写缓存；同 scope 的后续调用直接 aborted', async () => {
-    // 真计时器：算缓存键要走 crypto.subtle，fake timers 下不会返回
+  it('cancel(scope) drains queued and in-flight requests — the signal aborts, nothing is cached; a scope the registry holds is refused next time', async () => {
+    // Real timers: the cache key goes through crypto.subtle, which never returns under fake timers
     const { port, writes } = fakePort()
     let signal: AbortSignal | undefined
     let calls = 0
-    const service = createTranslateService({
+    const registry = new CancelledScopeRegistry()
+    const service = build({
       getProvider: async () => provider(async r => {
         calls++
         signal = r.signal
-        await new Promise(() => {}) // 挂住，等被取消
+        await new Promise(() => {}) // hang until cancelled
         return { segments: r.segments, provider: 'mock' }
       }, 'mock', { maxBatchItems: 1 }),
       cache: port,
+      cancelled: registry,
     })
     const a = service.translate({ ...req(['a']), scope: 'run-1' })
     await vi.waitFor(() => expect(calls).toBe(1))
+    // The way the router drops: mark, then drain
+    registry.markScope('run-1')
     expect(service.cancel('run-1')).toBeGreaterThan(0)
     expect(signal?.aborted).toBe(true)
     const ra = await a
@@ -641,7 +650,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
 
   it('插标记、摘标记，并把两侧边界作为对齐带出来', async () => {
     let sent = ''
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => echoing(t => { sent = t; return t.replace('One sentence here. ', '第一句。').replace('Two sentences here.', '第二句。') }),
     })
     const res = await service.translate(twoSentences(['a']))
@@ -657,7 +666,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
 
   it('调用方没给切点就不插——选哪里切要看块本身（§8.6）', async () => {
     let sent = ''
-    const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
+    const service = build({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
     await service.translate({
       request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.' }], source: 'en', target: 'zh-CN' },
       cache: { paper: 'p', renderPath: 'tags' as RenderPath },
@@ -667,7 +676,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
 
   it('引擎自己汇报的就不插', async () => {
     let sent = ''
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => echoing(t => { sent = t; return '译文' }, { reportsSentences: true }),
     })
     await service.translate(twoSentences(['a']))
@@ -676,7 +685,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
 
   it('标记被引擎丢了：不给对齐，但文本照样干净', async () => {
     // 没有对齐只是没有高亮；而残留的标记会让 validate 判定占位符对不上、整块翻译作废
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => echoing(() => '第一句。第二句。'),
     })
     const res = await service.translate(twoSentences(['a']))
@@ -686,7 +695,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
   })
 
   it('标记乱序：不给对齐，且把残留的标记摘干净', async () => {
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => echoing(t => {
         const ids = [...t.matchAll(/<x id="(\d+)"\/>/g)].map(m => m[1])
         return `第二句。<x id="${ids[0]}"/>第一句。<x id="${ids[0]}"/>`
@@ -702,7 +711,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
     // 空切点数组说的是「这一块只有一句」。整段对整段是安全的对齐，不需要任何标记，
     // 而单句块占正文一大半——把它和「不该对齐」混为一谈等于把它们全排除在高亮之外
     let sent = ''
-    const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '一句译文。' }) })
+    const service = build({ getProvider: async () => echoing(t => { sent = t; return '一句译文。' }) })
     const res = await service.translate({
       request: { segments: [{ id: 'a', text: 'Only one sentence here.', cuts: [] }], source: 'en', target: 'zh-CN' },
       cache: { paper: 'p', renderPath: 'tags' as RenderPath },
@@ -717,7 +726,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
     // 没有对齐只是没有高亮，而超限是整批失败
     let sent = ''
     const text = `${'x'.repeat(40)}. ${'y'.repeat(40)}.`
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => echoing(t => { sent = t; return '译文' }, { maxBatchChars: text.length + 5 }),
     })
     await service.translate({
@@ -731,7 +740,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
     // 两个块可以序列化成同一份线上文本而槽位语义不同，`cutsOf` 因此给出不同切点。
     // 键里不带它，第二个块会命中第一个的条目，连同对不上的那份对齐（Codex 在 #137 指出）
     const { port, writes } = fakePort()
-    const service = createTranslateService({ getProvider: async () => echoing(() => '译文一。译文二。'), cache: port })
+    const service = build({ getProvider: async () => echoing(() => '译文一。译文二。'), cache: port })
     const text = 'One sentence here. Two sentences here.'
     await service.translate({ request: { segments: [{ id: 'a', text, cuts: [19] }], source: 'en', target: 'zh-CN' }, cache: { paper: 'p', renderPath: 'tags' as RenderPath } })
     await service.translate({ request: { segments: [{ id: 'b', text, cuts: [] }], source: 'en', target: 'zh-CN' }, cache: { paper: 'p', renderPath: 'tags' as RenderPath } })
@@ -742,7 +751,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
   it('只有 tags 这条路插：markers 没有活得下来的标记，runs 的段拼回去没有线上偏移', async () => {
     for (const renderPath of ['markers', 'runs'] as RenderPath[]) {
       let sent = ''
-      const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
+      const service = build({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
       await service.translate({
         request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.', cuts: [19] }], source: 'en', target: 'zh-CN' },
         cache: { paper: 'p', renderPath },
@@ -753,7 +762,7 @@ describe('句子标记：引擎不汇报句边界时由服务层插（§8.6）',
 
   it('不带缓存的调用（连接测试）也不插', async () => {
     let sent = ''
-    const service = createTranslateService({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
+    const service = build({ getProvider: async () => echoing(t => { sent = t; return '译文' }) })
     await service.translate({ request: { segments: [{ id: 'a', text: 'One sentence here. Two sentences here.', cuts: [19] }], source: 'en', target: 'zh-CN' } })
     expect(sent).toBe('One sentence here. Two sentences here.')
   })
@@ -798,7 +807,7 @@ describe('术语表只发用得上的那几条（§8.2）', () => {
   const run = async (segments: { id: string; text: string }[], context?: Record<string, unknown>) => {
     const seen: unknown[] = []
     const { port, reads } = fakePort()
-    const service = createTranslateService({
+    const service = build({
       getProvider: async () => provider(async req => {
         seen.push(req.context)
         return { segments: req.segments.map(s => ({ id: s.id, text: `[${s.text}]` })), provider: 'llm' }

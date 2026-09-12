@@ -2,6 +2,7 @@ import { IDBKeyRange, indexedDB } from 'fake-indexeddb'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { TranslationCache, createCacheDb } from '@/cache/store'
 import { DEFAULT_CONFIG, type Config } from '@/config/schema'
+import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
 import { CHAIN_CONFIG_FIELDS, VOLATILE_CONFIG_FIELDS, chainConfigChanged, createLocalTransport } from '@/providers/transport'
 import type { CachePort } from '@/providers/translate-service'
@@ -20,9 +21,9 @@ function mockProvider(translate: TranslationProvider['translate'], extra: Partia
 
 /** The reader's own service; its id is the engine's id, so status and cache keys need no special case */
 const SVC = { id: 'svc-abcd1234', kind: 'openai-compat' as const, name: 'Mine', baseURL: 'https://openrouter.ai/api/v1', apiKey: 'sk-x', model: 'x/y', thinking: 'disabled' as const }
-/** 链由测试直接给：不碰真的 buildChain，也就不需要真的 API key */
-const withChain = (chain: TranslationProvider[], extra: Parameters<typeof createLocalTransport>[1] = {}) =>
-  createLocalTransport({ ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC] }, { buildChain: async () => ({ chain, renderPath: 'tags' as const }), ...extra })
+/** The chain comes from the test: the real buildChain is not touched, so no real API key is needed; the registry is a fresh one unless the test passes its own */
+const withChain = (chain: TranslationProvider[], extra: Partial<Parameters<typeof createLocalTransport>[1]> = {}) =>
+  createLocalTransport({ ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC] }, { cancelled: new CancelledScopeRegistry(), buildChain: async () => ({ chain, renderPath: 'tags' as const }), ...extra })
 
 const portOf = (cache: TranslationCache): CachePort => ({
   getMany: keys => Promise.all(keys.map(key => cache.get(key))),
@@ -106,7 +107,7 @@ describe('createLocalTransport：翻译', () => {
     const spare = { ...SVC, id: 'svc-99999999', apiKey: '' }
     const t = await createLocalTransport(
       { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC, spare] },
-      { buildChain: async () => ({ chain: [{ ...mockProvider(async r => ({ segments: r.segments, provider: 'mock' })), id: SVC.id }], renderPath: 'tags' as const }) },
+      { cancelled: new CancelledScopeRegistry(), buildChain: async () => ({ chain: [{ ...mockProvider(async r => ({ segments: r.segments, provider: 'mock' })), id: SVC.id }], renderPath: 'tags' as const }) },
     )
     expect(await t.translate({ request: req, providerId: spare.id })).toEqual({ ok: false, error: { kind: 'no-key', message: '未配置 API key', isolatable: false } })
   })
@@ -123,6 +124,27 @@ describe('createLocalTransport：翻译', () => {
     await vi.advanceTimersByTimeAsync(200)
     expect(await t.cancel('session-1')).toBeGreaterThan(0)
     expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+  })
+
+  it('the registry the router writes is the one every service reads — on the chain, by name, off the chain: a marked scope is refused without a request (ADR-0005)', async () => {
+    const calls: string[] = []
+    const engine = (id: string) => ({ ...mockProvider(async r => { calls.push(id); return { segments: r.segments, provider: id } }), id })
+    const registry = new CancelledScopeRegistry()
+    const spare = { ...SVC, id: 'svc-99999999' }
+    const t = await createLocalTransport(
+      { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC, spare] },
+      { cancelled: registry, buildChain: async () => ({ chain: [engine(SVC.id), engine('google-web')], renderPath: 'tags' as const }) },
+    )
+    registry.markScope('dead')
+    const dead = { request: req, scope: 'dead' }
+    expect(await t.translate(dead)).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(await t.translate({ ...dead, providerId: 'google-web' })).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    // A configured service the chain is not built around gets a service of its own; it must read the same registry
+    expect(await t.translate({ ...dead, providerId: spare.id })).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(calls).toEqual([])
+    // A scope nobody marked goes through
+    expect((await t.translate({ request: req, scope: 'live' })).ok).toBe(true)
+    expect(calls).toEqual([SVC.id])
   })
 })
 

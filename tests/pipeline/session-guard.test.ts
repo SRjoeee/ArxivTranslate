@@ -1,5 +1,6 @@
 // 会话边界的回归测试（issue #45）。原文是三个「断言缺陷存在」的诊断探针，这里改写成期望行为。
 import { describe, expect, it, vi } from 'vitest'
+import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import { extract } from '@/core/extractor'
 import { startTranslation } from '@/core/pipeline'
 import { restore } from '@/core/renderer/page'
@@ -56,6 +57,7 @@ describe('缓存读取的等待预算：换任何 CachePort 都不会被拖死�
       }),
       cache,
       cacheReadBudgetMs,
+      cancelled: new CancelledScopeRegistry(),
     })
     return { service, calls }
   }
@@ -187,13 +189,15 @@ describe('取消跨了消息边界（issue #42）', () => {
     expect(doc.documentElement.outerHTML).toBe(before)
   })
 })
-describe('取消之后不再写缓存（Codex 在 #33 指出）', () => {
-  it('一次调用横跨两批，先完成的那批在取消后也不入库', async () => {
+describe('no cache write after a drop (Codex on #33)', () => {
+  it('one call spanning two batches: the batch that finished first is not stored once the scope is dropped', async () => {
     const { createTranslateService } = await import('@/providers/translate-service')
     const writes: string[][] = []
     let release: (() => void) | null = null
     const held = new Promise<void>(resolve => { release = resolve })
+    const registry = new CancelledScopeRegistry()
     const service = createTranslateService({
+      cancelled: registry,
       // 每批最多 1 条：a 立刻回，b 挂住，等取消之后再放行
       getProvider: async () => ({
         id: 'mock', displayName: 'mock', kind: 'llm', wireFormats: ['tags'] as const, maxBatchChars: 1000, maxBatchItems: 1,
@@ -211,12 +215,13 @@ describe('取消之后不再写缓存（Codex 在 #33 指出）', () => {
       cache: { paper: '0000.00000', renderPath: 'tags' },
       scope: 'session-1',
     })
-    // 等 a 那批落地，再取消整个 scope，然后放行 b
+    // Wait for a's batch to land, then drop the scope the way the router does — mark, then drain — and release b
     await new Promise(r => setTimeout(r, 200))
+    registry.markScope('session-1')
     service.cancel('session-1')
     release!()
     await pending
-    // a 早就成功了，但会话已经撤销：不该有任何写入
+    // a succeeded long ago, but the session is over: nothing may be written
     expect(writes).toEqual([])
   })
 })

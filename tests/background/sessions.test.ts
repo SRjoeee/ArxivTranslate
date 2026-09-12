@@ -1,20 +1,25 @@
 // 会话与链的绑定（Codex 在 #59 指出的两条 P1）
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createSessionRouter } from '@/entrypoints/background/sessions'
+import { createSessionRouter, type SessionRouterDeps } from '@/entrypoints/background/sessions'
+import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import type { TranslationTransport } from '@/providers/transport'
 
-/** 只记帐的假 transport：认得出是哪一条，并记下被撤过哪些 scope */
+/** A transport that only keeps books: which chain it is, and which scopes it was asked to drain */
 function fakeTransport(name: string, cancelled: string[] = []): TranslationTransport & { name: string; cancelled: string[] } {
   return {
     name,
     cancelled,
     translate: async () => ({ ok: true, result: { segments: [], provider: name }, cached: 0 }),
-    cancel: async (scope, options) => { cancelled.push(`${name}:${scope}${options?.remember === false ? ':soft' : ''}`); return 1 },
+    cancel: async scope => { cancelled.push(`${name}:${scope}`); return 1 },
     status: async () => ({ providerId: name, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', chain: [name], demotions: [], revision: 1, engine: { id: name, displayName: name } }),
   } as TranslationTransport & { name: string; cancelled: string[] }
 }
 
 const nameOf = (t: TranslationTransport) => (t as unknown as { name: string }).name
+
+/** A router over a registry of its own; tests that read the registry pass theirs */
+const routerOver = (current: SessionRouterDeps['current'], rest: Partial<Omit<SessionRouterDeps, 'current'>> = {}) =>
+  createSessionRouter({ current, cancelled: new CancelledScopeRegistry(), ...rest })
 
 afterEach(() => vi.useRealTimers())
 
@@ -25,7 +30,7 @@ describe('createSessionRouter', () => {
     // 那一整块的译文全部 aborted（2026-09-09 实测 86 块全失败）
     vi.useFakeTimers()
     const transport = fakeTransport('链')
-    const router = createSessionRouter(async () => transport, { stillThere: async () => 'same' })
+    const router = routerOver(async () => transport, { stillThere: async () => 'same' })
     await router.forCall('session-1', 7)
 
     router.mayHaveLeft(7)
@@ -44,7 +49,7 @@ describe('createSessionRouter', () => {
     vi.useFakeTimers()
     const transport = fakeTransport('链')
     const asked: [number, string][] = []
-    const router = createSessionRouter(async () => transport, {
+    const router = routerOver(async () => transport, {
       stillThere: async (tabId, scope) => { asked.push([tabId, scope]); return 'same' },
     })
     await router.forCall('session-1', 7)
@@ -62,7 +67,7 @@ describe('createSessionRouter', () => {
     // 新文档一提交 content script 就没了、也没人再武装一次，旧会话的队列会一直跑（Codex 在 #143 指出）
     vi.useFakeTimers()
     const transport = fakeTransport('链')
-    const router = createSessionRouter(async () => transport, { stillThere: async () => 'other' })
+    const router = routerOver(async () => transport, { stillThere: async () => 'other' })
     await router.forCall('session-1', 7)
 
     router.mayHaveLeft(7)
@@ -78,7 +83,7 @@ describe('createSessionRouter', () => {
     vi.useFakeTimers()
     const transport = fakeTransport('链')
     let answer: 'same' | 'other' | 'unknown' = 'same'
-    const router = createSessionRouter(async () => transport, { stillThere: async () => answer })
+    const router = routerOver(async () => transport, { stillThere: async () => answer })
     await router.forCall('session-1', 7)
 
     // loading：旧文档还在，答「还在」——不撤
@@ -101,7 +106,7 @@ describe('createSessionRouter', () => {
     let loading = true
     let answer: 'same' | 'other' | 'unknown' = 'same'
     const asked: string[] = []
-    const router = createSessionRouter(async () => transport, {
+    const router = routerOver(async () => transport, {
       stillThere: async () => { asked.push(answer); return answer },
       stillLoading: async () => loading,
     })
@@ -124,7 +129,7 @@ describe('createSessionRouter', () => {
     vi.useFakeTimers()
     const transport = fakeTransport('链')
     const asked: number[] = []
-    const router = createSessionRouter(async () => transport, {
+    const router = routerOver(async () => transport, {
       stillThere: async () => { asked.push(Date.now()); return 'same' },
       stillLoading: async () => true,
     })
@@ -137,51 +142,60 @@ describe('createSessionRouter', () => {
     expect(transport.cancelled).toEqual([])
   })
 
-  it('页面答不上来：排空，但不判死', async () => {
-    // 消息没送到可能是真没了，也可能是新文档的 content script 还没装上——分不清就不能判死，
-    // 判错了那个还活着的页面后半篇会永久 aborted（Codex 在 #143 指出两种情况要分开）
+  it('the page does not answer: drained, but not marked', async () => {
+    // An undelivered message may mean the page is gone, or that the new document's content script is not installed
+    // yet — undecidable, so the scope must not be marked: marked wrongly, the living page's second half is aborted
+    // for good (Codex on #143: the two cases must be kept apart)
     vi.useFakeTimers()
     const transport = fakeTransport('链')
-    const router = createSessionRouter(async () => transport, { stillThere: async () => 'unknown' })
-    await router.forCall('session-1', 7)
-
-    router.mayHaveLeft(7)
-    await vi.advanceTimersByTimeAsync(10_000)
-
-    expect(transport.cancelled).toEqual(['链:session-1:soft'])
-  })
-
-  it('页面答上来了但换了会话：确定走了，判死', async () => {
-    // 这时不是猜：页面自己说它已经不是刚才那个会话了。判死才拦得住那些挂在 helper 握手上、
-    // 还没进任何队列、醒来会照发不误的请求（Codex 在 #143 指出）
-    vi.useFakeTimers()
-    const transport = fakeTransport('链')
-    const router = createSessionRouter(async () => transport, { stillThere: async () => 'other' })
+    const registry = new CancelledScopeRegistry()
+    const router = routerOver(async () => transport, { cancelled: registry, stillThere: async () => 'unknown' })
     await router.forCall('session-1', 7)
 
     router.mayHaveLeft(7)
     await vi.advanceTimersByTimeAsync(10_000)
 
     expect(transport.cancelled).toEqual(['链:session-1'])
+    expect(registry.has('session-1')).toBe(false)
   })
 
-  it('猜出来的终结在 OCR 那条队列上同样不判死', async () => {
-    // 撤会话时图片 OCR 的排队一起撤（onDrop）。但那条队列自己也记「撤过的 scope」，
-    // 猜错时页面还活着，它后面滚到的每一张图都会直接 aborted（Codex 在 #143 指出）
+  it('the page answers with another session: gone for certain, marked', async () => {
+    // No guess here: the page itself says it is no longer that session. Only the mark stops the requests still
+    // hanging on the helper handshake, in no queue yet, that would otherwise go out when they wake (Codex on #143)
     vi.useFakeTimers()
     const transport = fakeTransport('链')
-    const soft: boolean[] = []
-    const router = createSessionRouter(async () => transport, { onDrop: (_scope, options) => { soft.push(options.remember); return 0 } })
+    const registry = new CancelledScopeRegistry()
+    const router = routerOver(async () => transport, { cancelled: registry, stillThere: async () => 'other' })
     await router.forCall('session-1', 7)
 
     router.mayHaveLeft(7)
     await vi.advanceTimersByTimeAsync(10_000)
-    expect(soft).toEqual([false])
 
-    // 确定的终结照旧判死
+    expect(transport.cancelled).toEqual(['链:session-1'])
+    expect(registry.has('session-1')).toBe(true)
+  })
+
+  it('a guessed end drains the OCR queue too and marks nothing; a certain end marks', async () => {
+    // Image OCR queues by scope as well and is drained with the session (onDrop). It used to keep its own record of
+    // cancelled scopes, so a wrong guess left every image the living page scrolled to aborted (Codex on #143); now
+    // it reads the one registry, and only the router writes it
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    const registry = new CancelledScopeRegistry()
+    const drained: string[] = []
+    const router = routerOver(async () => transport, { cancelled: registry, onDrop: scope => { drained.push(scope); return 0 } })
+    await router.forCall('session-1', 7)
+
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(drained).toEqual(['session-1'])
+    expect(registry.has('session-1')).toBe(false)
+
+    // A certain end: drained and marked
     await router.forCall('session-2', 8)
     await router.dropTab(8)
-    expect(soft).toEqual([false, true])
+    expect(drained).toEqual(['session-1', 'session-2'])
+    expect(registry.has('session-2')).toBe(true)
   })
 
   it('猜错之后回来的会话仍走它开始时的那条链', async () => {
@@ -191,7 +205,7 @@ describe('createSessionRouter', () => {
     const first = fakeTransport('旧链')
     const second = fakeTransport('新链')
     let current = first
-    const router = createSessionRouter(async () => current)
+    const router = routerOver(async () => current)
     expect(nameOf(await router.forCall('session-1', 7))).toBe('旧链')
 
     router.mayHaveLeft(7)
@@ -202,19 +216,21 @@ describe('createSessionRouter', () => {
     expect(nameOf(await router.forCall('session-1', 7))).toBe('旧链')
   })
 
-  it('真的跳走：宽限到点撤掉，但不把 scope 判死', async () => {
-    // 判死是给「确定的终结」用的（用户按停止、关标签页）。猜出来的不能判死：猜错时页面还活着，
-    // 它后半篇的每一次请求都会被直接 aborted，而且永远好不了
+  it('a navigation without a probe: drained when the grace period ends, the scope not marked', async () => {
+    // Marking is for certain ends (the reader stopped, the tab closed). A guessed end cannot mark: if the guess is
+    // wrong the page is alive, and every request of its second half would be aborted, for good
     vi.useFakeTimers()
     const transport = fakeTransport('链')
-    const router = createSessionRouter(async () => transport)
+    const registry = new CancelledScopeRegistry()
+    const router = routerOver(async () => transport, { cancelled: registry })
     await router.forCall('session-1', 7)
 
     router.mayHaveLeft(7)
     await vi.advanceTimersByTimeAsync(10_000)
 
-    expect(transport.cancelled).toEqual(['链:session-1:soft'])
-    // 猜错了也能回来：同一个 scope 再来请求，不会再被撤一次
+    expect(transport.cancelled).toEqual(['链:session-1'])
+    expect(registry.has('session-1')).toBe(false)
+    // A wrong guess recovers: the same scope's next request is not drained again
     transport.cancelled.length = 0
     await router.forCall('session-1', 7)
     expect(transport.cancelled).toEqual([])
@@ -224,7 +240,7 @@ describe('createSessionRouter', () => {
     const first = fakeTransport('旧链')
     const second = fakeTransport('新链')
     let current = first
-    const router = createSessionRouter(async () => current)
+    const router = routerOver(async () => current)
 
     expect(nameOf(await router.forCall('session-1', 1))).toBe('旧链')
     // 用户在 popup 里换了提示词 / 目标语言，background 重建了链
@@ -239,7 +255,7 @@ describe('createSessionRouter', () => {
     const first = fakeTransport('旧链')
     const second = fakeTransport('新链')
     let current = first
-    const router = createSessionRouter(async () => current)
+    const router = routerOver(async () => current)
     expect(nameOf(await router.forCall(undefined, undefined))).toBe('旧链')
     current = second
     expect(nameOf(await router.forCall(undefined, undefined))).toBe('新链')
@@ -250,7 +266,7 @@ describe('createSessionRouter', () => {
     const first = fakeTransport('旧链')
     const second = fakeTransport('新链')
     let current = first
-    const router = createSessionRouter(async () => current)
+    const router = routerOver(async () => current)
     await router.forCall('session-1', 1)
     current = second
     expect(await router.drop(['session-1'])).toBe(1)
@@ -261,14 +277,14 @@ describe('createSessionRouter', () => {
 
   it('没绑过的 scope 也照撤：worker 中途重启过，绑定丢了但队列里可能还有它的任务', async () => {
     const only = fakeTransport('链')
-    const router = createSessionRouter(async () => only)
+    const router = routerOver(async () => only)
     expect(await router.drop(['幽灵会话'])).toBe(1)
     expect(only.cancelled).toEqual(['链:幽灵会话'])
   })
 
   it('标签页关闭：撤掉挂在它上面的会话，别的标签页不受影响', async () => {
     const t = fakeTransport('链')
-    const router = createSessionRouter(async () => t)
+    const router = routerOver(async () => t)
     await router.forCall('session-1', 1)
     await router.forCall('session-2', 2)
     expect(await router.dropTab(1)).toBe(1)
@@ -280,7 +296,7 @@ describe('createSessionRouter', () => {
 
   it('同一标签页出现新 scope：上一轮没走 endRun（导航 / 刷新），把它撤掉', async () => {
     const t = fakeTransport('链')
-    const router = createSessionRouter(async () => t)
+    const router = routerOver(async () => t)
     await router.forCall('session-1', 1)
     await router.forCall('session-2', 1)
     expect(t.cancelled).toEqual(['链:session-1'])
@@ -291,7 +307,7 @@ describe('createSessionRouter', () => {
     const first = fakeTransport('旧链')
     const second = fakeTransport('新链')
     let current = first
-    const router = createSessionRouter(async () => current)
+    const router = routerOver(async () => current)
     await router.forCall('session-1', 1)
     await router.forCall('session-2', 2)
     current = second
@@ -304,26 +320,28 @@ describe('createSessionRouter', () => {
     expect(second.cancelled).toEqual(['新链:session-1'])
   })
 
-  it('dropAndRebindAll 先撤掉旧链上的活再迁：删掉的服务不能继续用它的 key 发请求', async () => {
+  it('dropAndRebindAll drains the old chain before moving: a deleted service must not go on spending its key', async () => {
     const first = fakeTransport('旧链')
     const second = fakeTransport('新链')
     let current = first
-    const router = createSessionRouter(async () => current)
+    const registry = new CancelledScopeRegistry()
+    const router = routerOver(async () => current, { cancelled: registry })
     await router.forCall('session-1', 1)
     await router.forCall('session-2', 2)
     current = second
-    // 只换指针的话，排着的与在飞的请求还在旧链上跑，用的是那个已被删掉的服务的 key（Codex 在 #157 指出）
+    // Re-pointing alone leaves the queued and in-flight requests running on the old chain, with the deleted service's key (Codex on #157)
     await router.dropAndRebindAll(second)
-    // `soft` = remember: false — the scope keeps living on the new chain, only the old chain's work goes
-    expect(first.cancelled).toEqual(['旧链:session-1:soft', '旧链:session-2:soft'])
+    expect(first.cancelled).toEqual(['旧链:session-1', '旧链:session-2'])
     expect(nameOf(await router.forCall('session-1', 1))).toBe('新链')
-    // 会话没被判死：它继续活在新链上，只是旧链上的活被清空了
+    // Not marked: the sessions live on, on the new chain — only the old chain's work is gone
+    expect(registry.has('session-1')).toBe(false)
+    expect(registry.has('session-2')).toBe(false)
     expect(router.bound()).toEqual(['session-1', 'session-2'])
   })
 
   it('transportFor 只读地取出会话自己那条链，不会顺手绑一个新的', async () => {
     const t = fakeTransport('链')
-    const router = createSessionRouter(async () => t)
+    const router = routerOver(async () => t)
     await router.forCall('session-1', 1)
     expect(nameOf(router.transportFor('session-1')!)).toBe('链')
     expect(router.transportFor('从没有过的')).toBeUndefined()
@@ -332,7 +350,7 @@ describe('createSessionRouter', () => {
 
   it('不同标签页的同名 scope 互不影响（会话 id 本来就唯一，这条是护栏）', async () => {
     const t = fakeTransport('链')
-    const router = createSessionRouter(async () => t)
+    const router = routerOver(async () => t)
     await router.forCall('s', 1)
     await router.forCall('s', 1)
     expect(router.bound()).toEqual(['s'])
@@ -342,7 +360,7 @@ describe('createSessionRouter', () => {
   it('onDrop：撤 scope 时连带撤掉别的按 scope 排队的东西（图片 OCR，§15.2），条数计入返回值', async () => {
     const transport = fakeTransport('链')
     const dropped: string[] = []
-    const router = createSessionRouter(async () => transport, { onDrop: scope => { dropped.push(scope); return 2 } })
+    const router = routerOver(async () => transport, { onDrop: scope => { dropped.push(scope); return 2 } })
     await router.forCall('s1', 1)
     await router.forCall('s2', 2)
     expect(await router.drop(['s1'])).toBe(3) // transport 撤 1 + onDrop 撤 2
@@ -354,7 +372,7 @@ describe('createSessionRouter', () => {
     const transport = fakeTransport('链')
     let built = 0
     const dropped: string[] = []
-    const router = createSessionRouter(async () => { built++; return transport }, { onDrop: scope => { dropped.push(scope); return 1 } })
+    const router = routerOver(async () => { built++; return transport }, { onDrop: scope => { dropped.push(scope); return 1 } })
     router.bind('s1', 7)
     expect(built).toBe(0)
     expect(router.bound()).toEqual(['s1'])
@@ -373,7 +391,7 @@ describe('createSessionRouter', () => {
   it('drop：onDrop 先于建链；只经 bind 绑过的会话不为撤它建链（建链可能挂在引擎探测上，Codex 在 #87 指出）', async () => {
     const transport = fakeTransport('链')
     const order: string[] = []
-    const router = createSessionRouter(async () => { order.push('current'); return transport }, { onDrop: scope => { order.push(`onDrop:${scope}`); return 1 } })
+    const router = routerOver(async () => { order.push('current'); return transport }, { onDrop: scope => { order.push(`onDrop:${scope}`); return 1 } })
     router.bind('ocr-only', 3)
     expect(await router.dropTab(3)).toBe(1)
     expect(order).toEqual(['onDrop:ocr-only']) // 没有 current
@@ -389,11 +407,13 @@ describe('createSessionRouter', () => {
     const transport = fakeTransport('链')
     let release: () => void = () => {}
     const held = new Promise<void>(resolve => { release = resolve })
-    const router = createSessionRouter(async () => { await held; return transport }, { onDrop: () => 1 })
+    const registry = new CancelledScopeRegistry()
+    const router = routerOver(async () => { await held; return transport }, { cancelled: registry, onDrop: () => 1 })
     router.bind('s1', 5)
     const pending = router.forCall('s1', 5) // 正在 await current()
     await Promise.resolve()
     expect(await router.dropTab(5)).toBe(1) // 只有 onDrop：这时没链可撤
+    expect(registry.has('s1')).toBe(true) // marked at once, while the chain is still being built
     release()
     await pending
     expect(router.bound()).toEqual([]) // 没复活
@@ -404,5 +424,46 @@ describe('createSessionRouter', () => {
     await router.forCall('s1', 5)
     expect(router.bound()).toEqual([])
     expect(transport.cancelled).toEqual(['链:s1', '链:s1'])
+  })
+
+  it('a certain drop is never forgotten: hundreds of later drops and ten minutes on, a forCall held on the chain build still finds the scope dead', async () => {
+    // The ported registry expired entries (a TTL and a size cap). Under that, a forCall held on a chain build while
+    // its tab closed could wake after the mark had been evicted, bind the dead session and let its request through
+    // (the local Codex review of ADR-0005 reproduced it with 256 further drops); nothing expires now
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    const registry = new CancelledScopeRegistry()
+    const router = routerOver(async () => { await held; return transport }, { cancelled: registry, onDrop: () => 0 })
+    router.bind('s1', 5)
+    const pending = router.forCall('s1', 5) // held on the chain build
+    await Promise.resolve()
+    await router.dropTab(5)
+    // Bound-only sessions are dropped without a chain, so these do not queue behind the held build
+    for (let i = 0; i < 300; i++) {
+      router.bind(`other-${i}`, 100 + i)
+      await router.dropTab(100 + i)
+    }
+    await vi.advanceTimersByTimeAsync(11 * 60_000)
+    release()
+    await pending
+    expect(registry.has('s1')).toBe(true)
+    expect(router.bound()).toEqual([])
+    expect(transport.cancelled).toEqual(['链:s1'])
+  })
+
+  it('a certain drop marks every scope before any chain is asked to drain', async () => {
+    // The mark is what a call suspended on its cache read sees when it wakes; draining may await a chain build, so
+    // every scope of the drop is marked up front, not one by one between drains (ADR-0005)
+    const registry = new CancelledScopeRegistry()
+    const seen: Record<string, boolean[]> = {}
+    const transport = fakeTransport('链')
+    transport.cancel = async scope => { seen[scope] = ['a', 'b'].map(s => registry.has(s)); return 1 }
+    const router = routerOver(async () => transport, { cancelled: registry })
+    await router.forCall('a', 1)
+    // `b` was never bound: draining it builds a chain first — `a` is drained before that await resolves
+    expect(await router.drop(['a', 'b'])).toBe(2)
+    expect(seen).toEqual({ a: [true, true], b: [true, true] })
   })
 })

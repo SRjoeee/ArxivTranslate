@@ -1,6 +1,7 @@
 import type { Config } from '@/config/schema'
 import { cachePortOf, translationCache } from '@/cache'
 import { getConfig, watchConfig } from '@/config/storage'
+import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import { chainConfigChanged, createLocalTransport, type TranslationTransport } from '@/providers/transport'
 import { toErrorInfo } from '@/providers/translate-service'
 import { isAxtMessage } from '@/shared/messages'
@@ -18,6 +19,8 @@ import { setLocale } from '@/ui/strings'
 // 异步响应必须用 sendResponse + return true。
 export default defineBackground(() => {
   const cache = cachePortOf(translationCache)
+  /** Scopes ended for certain — one registry (ADR-0005): the session router writes it, the chain's services and OCR read it */
+  const cancelled = new CancelledScopeRegistry()
 
   /**
    * 全浏览器共用一条链、一套队列（§8.2 的跨标签页额度策略）。懒建：worker 每次被唤醒都要重建，
@@ -26,7 +29,7 @@ export default defineBackground(() => {
   let active: Promise<{ config: Config; transport: TranslationTransport }> | null = null
   const load = async (config?: Config) => {
     const resolved = config ?? await getConfig()
-    return { config: resolved, transport: await createLocalTransport(resolved, { cache }) }
+    return { config: resolved, transport: await createLocalTransport(resolved, { cache, cancelled }) }
   }
   const activate = (config?: Config) => {
     active = load(config)
@@ -71,9 +74,11 @@ export default defineBackground(() => {
     lastError: () => browser.runtime.lastError?.message,
     keepAlive: () => void browser.runtime.getPlatformInfo(),
   })
-  const ocr = createOcrService({ helper, cache })
-  const router = createSessionRouter(transportOf, {
-    onDrop: (scope, options) => ocr.cancel(scope, options),
+  const ocr = createOcrService({ helper, cache, cancelled })
+  const router = createSessionRouter({
+    current: transportOf,
+    cancelled,
+    onDrop: scope => ocr.cancel(scope),
     /**
      * 那个标签页还是不是刚才那个页面：问它自己。
      *

@@ -9,7 +9,8 @@ import type { RenderPath } from '@/cache/key'
 import { buildChain } from '.'
 import { createOpenAICompatProvider } from './openai-compat'
 import { createFallbackService } from './fallback'
-import { createTranslateService, type CachePort, type CancelOptions, type TranslateCall, type TranslateMessageResponse, type TranslateServiceDeps } from './translate-service'
+import type { CancelledScopeRegistry } from './request/cancellation'
+import { createTranslateService, type CachePort, type TranslateCall, type TranslateMessageResponse, type TranslateServiceDeps } from './translate-service'
 import type { ProviderErrorKind, TranslationProvider } from './types'
 
 /** 此刻实际在用的引擎与最近一次降级原因（§8.5）；popup 据此解释译文为什么换了引擎 */
@@ -59,13 +60,15 @@ export interface ProviderStatus {
 
 export interface TranslationTransport {
   translate(call: TranslateCall): Promise<TranslateMessageResponse>
-  /** 撤掉该 scope 排队与在飞的请求，返回撤掉的条数。`remember: false` 只排空、不判死（见 `CancelOptions`） */
-  cancel(scope: string, options?: CancelOptions): Promise<number>
+  /** Drain the scope's queued and in-flight requests; returns how many. Whether the scope is dead afterwards is the session router's decision (ADR-0005) */
+  cancel(scope: string): Promise<number>
   /** `scope` asks about that session's own chain rather than the current global one (§8.5) */
   status(scope?: string): Promise<ProviderStatus>
 }
 
 export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' | 'batch' | 'cacheReadBudgetMs'> {
+  /** The registry of scopes ended for certain, shared with the session router that writes it (ADR-0005); every service built here reads it */
+  cancelled: Pick<CancelledScopeRegistry, 'has'>
   /** 缓存端口。background 传本地 Dexie；不传就不缓存（测试） */
   cache?: CachePort
   /** 换掉建链（测试用） */
@@ -80,7 +83,7 @@ export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' |
 /** Bumped by every build, so a session can tell whether the chain moved on without it */
 let revision = 0
 
-export async function createLocalTransport(config: Config, deps: LocalTransportDeps = {}): Promise<TranslationTransport> {
+export async function createLocalTransport(config: Config, deps: LocalTransportDeps): Promise<TranslationTransport> {
   const built = ++revision
   const { chain, renderPath } = await (deps.buildChain ?? buildChain)(config)
   const primary = chain[0]!
@@ -92,6 +95,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
       getProvider: async () => engine,
       // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
       getModel: async () => (engine.id === chosen?.id ? chosen.model : undefined),
+      cancelled: deps.cancelled,
       ...(deps.cache ? { cache: deps.cache } : {}),
       ...(deps.queue ? { queue: deps.queue } : {}),
       ...(deps.batch ? { batch: deps.batch } : {}),
@@ -111,7 +115,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     const own = serviceOf(config, id)
     if (!own) return undefined
     const engine = createOpenAICompatProvider(own, { prompts: config.prompts })
-    return { provider: engine, service: createTranslateService({ getProvider: async () => engine, getModel: async () => own.model }) }
+    return { provider: engine, service: createTranslateService({ getProvider: async () => engine, getModel: async () => own.model, cancelled: deps.cancelled }) }
   }
 
   /**
@@ -166,7 +170,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
 
   return {
     translate,
-    cancel: async (scope, options) => service.cancel(scope, options),
+    cancel: async scope => service.cancel(scope),
     status,
   }
 }
