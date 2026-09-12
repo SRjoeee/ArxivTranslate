@@ -35,8 +35,9 @@ function harness() {
   }
   const offers = createConfigOffers({ load, chain: holder })
   const sessions = new Map<string, TranslationTransport>()
-  const deps = { chain: holder, router: { transportFor: (scope: string) => sessions.get(scope) }, offers }
-  return { deps, holder, offers, builds, sessions, save: (next: Config) => { stored = next }, hold: () => { holdReads = true }, release: () => reads.shift()?.(), releaseLast: () => reads.pop()?.() }
+  const bound: { scope: string; transport: TranslationTransport; tabId: number | undefined }[] = []
+  const deps = { chain: holder, router: { transportFor: (scope: string) => sessions.get(scope), bindTo: (scope: string, transport: TranslationTransport, tabId: number | undefined) => bound.push({ scope, transport, tabId }) }, offers }
+  return { deps, holder, offers, builds, sessions, bound, save: (next: Config) => { stored = next }, hold: () => { holdReads = true }, release: () => reads.shift()?.(), releaseLast: () => reads.pop()?.() }
 }
 
 describe('providerStatus', () => {
@@ -80,6 +81,19 @@ describe('providerStatus', () => {
     expect(h.builds.at(-1)).toBe('chrome-builtin')
   })
 
+  it('fresh with a scope binds the session to the chain it is told about, on the sender\'s tab (seventh pass)', async () => {
+    const h = harness()
+    h.save({ ...DEFAULT_CONFIG, provider: 'google-web' })
+    const status = await providerStatus(h.deps, { scope: 's-new', fresh: true }, 7)
+    expect(status.providerId).toBe('google-web')
+    expect(h.bound).toHaveLength(1)
+    expect(h.bound[0]).toMatchObject({ scope: 's-new', tabId: 7 })
+    expect(await h.bound[0]!.transport.status()).toMatchObject({ providerId: 'google-web' })
+    // Without fresh, nothing is bound here: forCall binds at the first request
+    await providerStatus(h.deps, { scope: 's-other' })
+    expect(h.bound).toHaveLength(1)
+  })
+
   it('a session asks about its own chain; fresh is about the chain in force, which a restart binds the page to', async () => {
     const h = harness()
     await providerStatus(h.deps, {})
@@ -113,7 +127,7 @@ describe('statusInForce', () => {
     await new Promise(resolve => setTimeout(resolve, 0))
     h.replace(chainOf('new')) // a save landed while the old chain's probes were out
     release()
-    expect((await status).providerId).toBe('new')
+    expect((await status).status.providerId).toBe('new')
   })
 
   it('a probe that never settles on a chain that was replaced is not waited for: the replacement answers (fourth pass)', async () => {
@@ -121,7 +135,7 @@ describe('statusInForce', () => {
     const status = statusInForce(h.chain)
     await new Promise(resolve => setTimeout(resolve, 0))
     h.replace(chainOf('healthy'))
-    expect((await status).providerId).toBe('healthy')
+    expect((await status).status.providerId).toBe('healthy')
   })
 
   it('a replacement landing after the transport was taken but before its status is awaited is not missed (fifth pass)', async () => {
@@ -135,7 +149,7 @@ describe('statusInForce', () => {
       current: async () => { const taken = inForce; if (++handed === 1) replace(chainOf('healthy')); return taken },
       replaced: () => signal,
     }
-    expect((await statusInForce(chain)).providerId).toBe('healthy')
+    expect((await statusInForce(chain)).status.providerId).toBe('healthy')
   })
 
   it('a probe that never settles with nothing replacing the chain rejects at the deadline, with no obsolete answer', async () => {
@@ -153,7 +167,7 @@ describe('statusInForce', () => {
 
   it('answers at once when nothing replaced the chain', async () => {
     const h = holderOf(chainOf('only'))
-    const status = await statusInForce(h.chain)
+    const { status } = await statusInForce(h.chain)
     expect(status.providerId).toBe('only')
     expect(h.asked()).toBe(2)
   })

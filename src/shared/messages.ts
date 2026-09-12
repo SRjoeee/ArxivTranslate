@@ -45,8 +45,8 @@ export interface AxtMessages {
    * cannot undo what the reader did in between (the local review of INVENTORY S2, sixth pass)
    */
   'axt:translate-page': { request: { mode?: Mode; restart?: boolean; from?: string }; response: { started: boolean; reason?: string } }
-  /** popup → content：中止并恢复原文. `from` as above: a restore decided on a session that has since ended does nothing */
-  'axt:restore-page': { request: { from?: string }; response: { removedNodes: number } }
+  /** popup → content：中止并恢复原文. `from` as above: a restore decided on a session that has since ended is `refused` */
+  'axt:restore-page': { request: { from?: string }; response: { removedNodes: number; refused?: true } }
   /** popup → content：切换模式（只改 <html> 上的属性，不重新翻译；§4 第 9 步） */
   'axt:set-mode': { request: { mode: Mode }; response: { mode: Mode; preference: Mode } }
   /** popup → content：进度 */
@@ -71,7 +71,8 @@ export interface AxtMessages {
    * popup / options / content → background: the chain's status. `scope` asks about the chain a session is on;
    * `fresh` asks for a chain built from the configuration as stored now — what a page sends after saving a
    * setting and before restarting on it (background/provider-status.ts says how the race with the storage event
-   * is closed)
+   * is closed). Both together: a session starting on freshly saved settings is **bound** to that chain, so what it
+   * records (target, revision) and what serves its requests are one chain
    */
   'axt:provider-status': { request: { scope?: string; fresh?: boolean }; response: ProviderStatus }
   /** 清空缓存，或只清某篇论文 */

@@ -18,6 +18,7 @@ import type { HelperStatus } from '@/shared/ocr'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
 import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, pollsBackground, runnable } from './view-model'
 import { chainRevision } from '@/config/revision'
+import { S } from '@/ui/strings'
 
 const scriptStart = performance.now()
 
@@ -202,11 +203,18 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
       const r = await sendToActiveTab({ type: 'axt:translate-page' })
       if (!r.started) throw new Error(r.reason ?? '')
     }),
+    // The session a click acts on is read at the click, not from the last poll: an automatic hand-over restart
+    // between polls would make the poll's session stale and the command refused (the local review of S2, seventh pass)
     retranslate: () => void guard(async () => {
-      const r = await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(page?.session ? { from: page.session } : {}) })
+      const from = (await sendToActiveTab({ type: 'axt:page-status' })).session
+      const r = await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(from ? { from } : {}) })
       if (!r.started) throw new Error(r.reason ?? '')
     }),
-    restore: () => void guard(async () => { await sendToActiveTab({ type: 'axt:restore-page', ...(page?.session ? { from: page.session } : {}) }) }),
+    restore: () => void guard(async () => {
+      const from = (await sendToActiveTab({ type: 'axt:page-status' })).session
+      const r = await sendToActiveTab({ type: 'axt:restore-page', ...(from ? { from } : {}) })
+      if (r.refused) throw new Error(S.page.sessionOver)
+    }),
     chooseMode: mode => void guard(async () => { await sendToActiveTab({ type: 'axt:set-mode', mode }) }),
     retryFailed: () => void guard(async () => { await sendToActiveTab({ type: 'axt:retry-failed' }) }),
     openMenu: kind => setMenu(kind),

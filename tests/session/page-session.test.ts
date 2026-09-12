@@ -14,7 +14,6 @@ import type { TranslateCall } from '@/providers/translate-service'
 import type { ImageBytes } from '@/core/image'
 import type { OcrCall, OcrLine } from '@/shared/ocr'
 import { S } from '@/ui/strings'
-import * as revision from '@/config/revision'
 import { chainRevision } from '@/config/revision'
 import { behindSettings } from '@/shared/page-action'
 
@@ -41,7 +40,7 @@ interface HarnessOptions {
   config?: Partial<Config>
   /** What the backend says it translated with */
   provider?: string
-  status?: (scope: string | undefined, calls: number) => ProviderStatus | Promise<ProviderStatus>
+  status?: (scope: string | undefined, call: number, options?: { fresh?: boolean }) => ProviderStatus | Promise<ProviderStatus>
   helper?: boolean
   /** Hold the very first configuration read until `releaseConfig()` */
   holdFirstConfig?: boolean
@@ -69,10 +68,10 @@ function harness(options: HarnessOptions = {}) {
       return { ok: true, result: { segments: call.request.segments.map(s => ({ id: s.id, text: s.text })), provider: options.provider ?? 'microsoft' }, cached: 0 }
     },
     async cancel(scope) { cancelled.push(scope); return 0 },
-    async status(scope) {
+    async status(scope, statusOptions) {
       statusCalls.push(scope)
       if (options.holdStatusAt === statusCalls.length) await new Promise<void>(resolve => { releaseStatus = resolve })
-      return options.status ? options.status(scope, statusCalls.length) : providerStatus()
+      return options.status ? options.status(scope, statusCalls.length, statusOptions) : providerStatus()
     },
   }
   let releaseConfig: () => void = () => undefined
@@ -147,59 +146,42 @@ describe('page session', () => {
     expect(status.preference).toBe(DEFAULT_CONFIG.mode)
     expect(status.mode).toBe(effective)
     expect(status.progress.state).toBe('on')
-    expect(status.running).toEqual({ provider: DEFAULT_CONFIG.provider, target: DEFAULT_CONFIG.targetLanguage, engine: 'microsoft', revision: await chainRevision(DEFAULT_CONFIG) })
+    // What the chain reported: the fake status says revision r1 and chosen microsoft
+    expect(status.running).toEqual({ provider: 'microsoft', target: DEFAULT_CONFIG.targetLanguage, engine: 'microsoft', revision: 'r1' })
     expect(status.images).toBeUndefined()
   })
 
-  it('the revision is the settings the session started on: a change saved while the status was awaited leaves the page behind them (INVENTORY S2 review)', async () => {
-    const h = harness({ holdStatusAt: 1 })
+  it('the session runs on the chain it is told about, bound to it: target and revision come from the status, asked fresh with the session\'s own scope (S2 review)', async () => {
+    // The chain in force was built from a save the configuration read here does not see yet (target jpn); the
+    // session runs on the chain's settings, which is what the status, asked fresh, reports
+    const h = harness({ holdStatusAt: 1, status: (_scope, _call, statusOptions) => providerStatus(statusOptions?.fresh ? { targetLanguage: 'jpn', revision: 'r-jpn' } : {}) })
     live = h.session
     const pending = h.session.start()
     await settle()
-    // The configuration was read; the status is still on its way; the reader saves a new target meanwhile
-    const changed = { ...h.config(), targetLanguage: 'jpn' as Config['targetLanguage'] }
-    await h.deps.config.set(changed)
+    expect(h.config().targetLanguage).toBe('cmn')
     h.releaseStatus()
     expect(await pending).toEqual({ started: true })
     const status = await h.session.status()
-    // The session translates into what it read; its revision says so, and the saved settings' digest says the page is behind
-    expect(status.running?.target).toBe(DEFAULT_CONFIG.targetLanguage)
-    expect(status.running?.revision).toBe(await chainRevision(DEFAULT_CONFIG))
-    expect(behindSettings(status, await chainRevision(changed))).toBe(true)
+    expect(status.running).toMatchObject({ target: 'jpn', revision: 'r-jpn', provider: 'microsoft' })
+    expect(h.statusCalls[0]).toBe(status.session)
+    // The store having moved on past the chain is what "behind" means; the same settings are not
+    expect(behindSettings(status, await chainRevision({ ...h.config(), targetLanguage: 'fra' as Config['targetLanguage'] }))).toBe(true)
+    expect(behindSettings(status, 'r-jpn')).toBe(false)
+    await h.session.translate(h.blocks.slice(0, 1))
+    expect(h.calls.length).toBeGreaterThan(0)
+    expect(h.calls.every(c => c.request.target === 'jpn')).toBe(true)
   })
 
-  it('the digest is computed with the reads, before any state is committed: a restore landing during it is not undone (S2 review, second pass)', async () => {
-    let release: () => void = () => undefined
-    const held = new Promise<void>(resolve => { release = resolve })
-    // One digest per start, with the reads. A second call would be one made after the state was committed, and
-    // that one is held here: a restore landing while it is awaited would then be undone by the continuation
-    let calls = 0
-    const spy = vi.spyOn(revision, 'chainRevision').mockImplementation(async config => { if (++calls > 1) await held; return `digest-of-${config.targetLanguage}` })
-    const h = harness()
-    live = h.session
-    const pending = h.session.start()
-    await settle()
-    h.session.restore()
-    release()
-    await expect(pending).resolves.toEqual({ started: true })
-    const status = await h.session.status()
-    // Whatever the outcome of that race, the state is one thing: a session with its running record, or neither
-    expect(status.session === null).toBe(status.running === undefined)
-    expect(calls).toBe(1)
-    spy.mockRestore()
-  })
-
-  it('a restore decided on a session that has since ended does nothing: the page is not undone by a command that was slow to arrive (S2 review, sixth pass)', async () => {
+  it('a restore decided on a session that has since ended is refused, and says so (S2 review, sixth and seventh passes)', async () => {
     const h = harness()
     live = h.session
     await h.session.start()
     const first = (await h.session.status()).session!
-    await h.session.start(undefined, true) // the reader restarted meanwhile
+    await h.session.start(undefined, true) // the page restarted meanwhile (a permanent hand-over does this by itself)
     const second = (await h.session.status()).session!
-    expect(h.session.restore(first)).toEqual({ removedNodes: 0 })
+    expect(h.session.restore(first)).toEqual({ removedNodes: 0, refused: true })
     expect((await h.session.status()).session).toBe(second)
-    // The same restore, decided on the session that is on, restores
-    expect(h.session.restore(second).removedNodes).toBeGreaterThanOrEqual(0)
+    expect(h.session.restore(second).refused).toBeUndefined()
     expect((await h.session.status()).session).toBeNull()
   })
 
@@ -320,8 +302,9 @@ describe('page session', () => {
     let handedOver = false
     const h = harness({
       provider: 'google-web',
-      status: scope => {
-        if (scope !== undefined) { handedOver = true; return providerStatus({ demotions: [{ id: 'microsoft', kind: 'auth' }] }) }
+      // A session's start asks fresh with its own scope; the hand-over check asks about its scope without fresh
+      status: (scope, _call, statusOptions) => {
+        if (scope !== undefined && !statusOptions?.fresh) { handedOver = true; return providerStatus({ demotions: [{ id: 'microsoft', kind: 'auth' }] }) }
         return providerStatus(handedOver ? { engine: { id: 'google-web', displayName: 'Google' }, chain: ['microsoft', 'google-web'] } : {})
       },
     })
@@ -342,7 +325,7 @@ describe('page session', () => {
 
     const temporary = harness({
       provider: 'google-web',
-      status: scope => providerStatus(scope !== undefined ? { demotions: [{ id: 'microsoft', kind: 'rate-limit' }] } : {}),
+      status: (scope, _call, statusOptions) => providerStatus(scope !== undefined && !statusOptions?.fresh ? { demotions: [{ id: 'microsoft', kind: 'rate-limit' }] } : {}),
     })
     live?.restore()
     live = temporary.session

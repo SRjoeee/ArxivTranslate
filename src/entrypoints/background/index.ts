@@ -190,7 +190,7 @@ export default defineBackground(() => {
     // One snapshot: the chain in force, built from what is stored now (offered in order with every other offer),
     // and still in force once its probes have answered
     await offers.offer()
-    return savedFromStatus(await statusInForce(chain))
+    return savedFromStatus((await statusInForce(chain)).status)
   }
   const menuDeps = {
     create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>
@@ -266,7 +266,7 @@ export default defineBackground(() => {
         // A session's own chain, the chain in force, or — after a save — one built from what is stored now
         // A failure (a build that failed, the status deadline) is replied, not only logged: the page that asked
         // must see its request settle
-        replyWith(providerStatus({ chain, router, offers }, message), sendResponse)
+        replyWith(providerStatus({ chain, router, offers }, message, sender.tab?.id), sendResponse)
         return true
       case 'axt:engine-ready':
         // Rebuild and move whom the sender says (./engine-ready.ts): a downloaded language pack moves one tab, a

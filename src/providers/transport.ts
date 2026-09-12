@@ -65,7 +65,13 @@ export interface TranslationTransport {
   /** Drain the scope's queued and in-flight requests; returns how many. Whether the scope is dead afterwards is the session router's decision (ADR-0005) */
   cancel(scope: string): Promise<number>
   /** `scope` asks about that session's own chain rather than the current global one (§8.5) */
-  status(scope?: string): Promise<ProviderStatus>
+  /**
+   * `scope`: the session's own chain. `fresh` (with a scope, over the message transport): a chain built from the
+   * configuration as stored now, and the session bound to it — what a session starting on freshly saved settings asks
+   * for, so what it records and what serves it are one chain (background/provider-status.ts). The local transport
+   * is one chain and ignores the option
+   */
+  status(scope?: string, options?: { fresh?: boolean }): Promise<ProviderStatus>
   /**
    * Local chains only (absent on the content side). Every scoped request queued or in flight on the chain is
    * drained, whichever session left it here — a session moved on by a language pack leaves its earlier requests

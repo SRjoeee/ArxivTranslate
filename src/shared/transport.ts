@@ -28,6 +28,6 @@ export function createMessageTransport(send: Send = sendMessage): TranslationTra
         return 0
       }
     },
-    status: (scope?: string) => send({ type: 'axt:provider-status', ...(scope ? { scope } : {}) }),
+    status: (scope?: string, options?: { fresh?: boolean }) => send({ type: 'axt:provider-status', ...(scope ? { scope } : {}), ...(options?.fresh ? { fresh: true } : {}) }),
   }
 }

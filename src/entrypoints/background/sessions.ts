@@ -18,6 +18,11 @@ export interface SessionRouter {
    * 但不能让它等翻译链构造（Codex 在 #87 指出）。同一标签页的旧 scope 顺手撤掉
    */
   bind(scope: string, tabId: number | undefined): void
+  /**
+   * Bind a session to a given chain — the one whose status it was just told, so the settings it records are the
+   * settings that serve it (provider-status.ts). Nothing happens for a scope already on a chain or already dropped
+   */
+  bindTo(scope: string, transport: TranslationTransport, tabId: number | undefined): void
   /** 撤掉这些 scope 并解绑，返回撤掉的条数 */
   drop(scopes: readonly string[]): Promise<number>
   /** 标签页关闭：撤掉挂在它上面的会话 */
@@ -266,6 +271,16 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
         if (stale.length > 0) void drop(stale)
       }
       sessions.set(scope, tabId !== undefined ? { tabId } : {})
+    },
+    bindTo(scope, transport, tabId) {
+      if (deps.cancelled.has(scope) || transport.isRetired?.()) return
+      const bound = sessions.get(scope)
+      if (bound?.transport) return
+      if (!bound && tabId !== undefined) {
+        const stale = scopesOfTab(tabId)
+        if (stale.length > 0) void drop(stale)
+      }
+      sessions.set(scope, { ...bound, transport, ...(tabId !== undefined ? { tabId } : {}) })
     },
     drop,
     dropTab: tabId => {
