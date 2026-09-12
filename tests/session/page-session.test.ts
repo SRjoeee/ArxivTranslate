@@ -14,6 +14,8 @@ import type { TranslateCall } from '@/providers/translate-service'
 import type { ImageBytes } from '@/core/image'
 import type { OcrCall, OcrLine } from '@/shared/ocr'
 import { S } from '@/ui/strings'
+import { chainRevision } from '@/config/revision'
+import { behindSettings } from '@/shared/page-action'
 
 const PAGE =
   '<h2 class="ltx_title ltx_title_section" id="s1">Introduction</h2>'
@@ -27,7 +29,7 @@ const settle = async (rounds = 4) => { for (let i = 0; i < rounds; i++) await ti
 function providerStatus(over: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
     providerId: 'microsoft', available: true, maxBatchChars: 100_000, maxBatchItems: 100, renderPath: 'tags',
-    targetLanguage: 'cmn', promptId: 'default', revision: 'r1', engine: { id: 'microsoft', displayName: 'Microsoft' },
+    targetLanguage: 'cmn', promptId: 'default', revision: 'r1', chosen: 'microsoft', engine: { id: 'microsoft', displayName: 'Microsoft' },
     chain: ['microsoft'], demotions: [], ...over,
   }
 }
@@ -38,7 +40,7 @@ interface HarnessOptions {
   config?: Partial<Config>
   /** What the backend says it translated with */
   provider?: string
-  status?: (scope: string | undefined, calls: number) => ProviderStatus | Promise<ProviderStatus>
+  status?: (scope: string | undefined, call: number, options?: { fresh?: boolean }) => ProviderStatus | Promise<ProviderStatus>
   helper?: boolean
   /** Hold the very first configuration read until `releaseConfig()` */
   holdFirstConfig?: boolean
@@ -66,10 +68,10 @@ function harness(options: HarnessOptions = {}) {
       return { ok: true, result: { segments: call.request.segments.map(s => ({ id: s.id, text: s.text })), provider: options.provider ?? 'microsoft' }, cached: 0 }
     },
     async cancel(scope) { cancelled.push(scope); return 0 },
-    async status(scope) {
+    async status(scope, statusOptions) {
       statusCalls.push(scope)
       if (options.holdStatusAt === statusCalls.length) await new Promise<void>(resolve => { releaseStatus = resolve })
-      return options.status ? options.status(scope, statusCalls.length) : providerStatus()
+      return options.status ? options.status(scope, statusCalls.length, statusOptions) : providerStatus()
     },
   }
   let releaseConfig: () => void = () => undefined
@@ -124,7 +126,7 @@ describe('page session', () => {
     expect(answered).toBe(false)
     h.releaseConfig()
     const status = await pending
-    expect(status).toEqual({ paper: '2410.00260', mode: 'stack', preference: 'stack', progress: { state: 'idle', total: 3, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 }, session: null })
+    expect(status).toEqual({ paper: '2410.00260', mode: 'stack', preference: 'stack', progress: { state: 'idle', total: 3, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 }, session: null, epoch: expect.any(String) })
   })
 
   it('start: marks the page, mints a session, reports what it runs on', async () => {
@@ -144,8 +146,131 @@ describe('page session', () => {
     expect(status.preference).toBe(DEFAULT_CONFIG.mode)
     expect(status.mode).toBe(effective)
     expect(status.progress.state).toBe('on')
-    expect(status.running).toEqual({ provider: DEFAULT_CONFIG.provider, target: DEFAULT_CONFIG.targetLanguage, engine: 'microsoft', revision: 'r1' })
+    // What the chain reported: the fake status says revision r1 and chosen microsoft
+    expect(status.running).toEqual({ provider: 'microsoft', target: DEFAULT_CONFIG.targetLanguage, engine: 'microsoft', revision: 'r1' })
     expect(status.images).toBeUndefined()
+  })
+
+  it('the session runs on the chain it is told about, bound to it: target and revision come from the status, asked fresh with the session\'s own scope (S2 review)', async () => {
+    // The chain in force was built from a save the configuration read here does not see yet (target jpn); the
+    // session runs on the chain's settings, which is what the status, asked fresh, reports
+    const h = harness({ holdStatusAt: 1, status: (_scope, _call, statusOptions) => providerStatus(statusOptions?.fresh ? { targetLanguage: 'jpn', revision: 'r-jpn' } : {}) })
+    live = h.session
+    const pending = h.session.start()
+    await settle()
+    expect(h.config().targetLanguage).toBe('cmn')
+    h.releaseStatus()
+    expect(await pending).toEqual({ started: true })
+    const status = await h.session.status()
+    expect(status.running).toMatchObject({ target: 'jpn', revision: 'r-jpn', provider: 'microsoft' })
+    expect(h.statusCalls[0]).toBe(status.session)
+    // The store having moved on past the chain is what "behind" means; the same settings are not
+    expect(behindSettings(status, await chainRevision({ ...h.config(), targetLanguage: 'fra' as Config['targetLanguage'] }))).toBe(true)
+    expect(behindSettings(status, 'r-jpn')).toBe(false)
+    await h.session.translate(h.blocks.slice(0, 1))
+    expect(h.calls.length).toBeGreaterThan(0)
+    expect(h.calls.every(c => c.request.target === 'jpn')).toBe(true)
+  })
+
+  it('the action epoch moves with every start and restore; a command from an earlier epoch is refused, a translate decided on an idle page included (S2 review, sixth, seventh and twelfth passes)', async () => {
+    const h = harness()
+    live = h.session
+    const idle = (await h.session.status()).epoch!
+    await h.session.start()
+    const on = (await h.session.status()).epoch!
+    expect(on).not.toBe(idle)
+    // A restore decided on the epoch before the (automatic) restart is refused and says so
+    await h.session.start(undefined, true)
+    expect(h.session.restore(on)).toEqual({ removedNodes: 0, refused: true })
+    expect((await h.session.status()).session).not.toBeNull()
+    const restarted = (await h.session.status()).epoch!
+    expect(h.session.restore(restarted).refused).toBeUndefined()
+    expect((await h.session.status()).session).toBeNull()
+    // The restore moved the epoch too: a translate decided on the page as it was just before the restore is refused
+    expect((await h.session.status()).epoch).not.toBe(restarted)
+    expect(await h.session.start(undefined, false, undefined, restarted)).toEqual({ started: false, reason: S.page.sessionOver })
+    // Idle → on → idle: a translate decided on the first idle epoch must not translate the page the reader restored
+    expect(await h.session.start(undefined, false, undefined, idle)).toEqual({ started: false, reason: S.page.sessionOver })
+    expect((await h.session.status()).session).toBeNull()
+    expect((await h.session.status()).progress.state).toBe('idle')
+    // Decided on the current epoch, it starts
+    expect(await h.session.start(undefined, false, undefined, (await h.session.status()).epoch)).toEqual({ started: true })
+  })
+
+  it('an epoch belongs to its document: the same tab reloaded starts a new document whose epochs never match the old one\'s (thirteenth pass)', async () => {
+    // Both documents at the same count: the old one translated once (count 1), the new one translated once (count 1)
+    const before = harness()
+    await before.session.start()
+    const stale = (await before.session.status()).epoch!
+    before.session.restore()
+    const after = harness()
+    live = after.session
+    await after.session.start()
+    // A restore decided on the old document, arriving after the reload, must not undo the new document's translation
+    expect(after.session.restore(stale)).toEqual({ removedNodes: 0, refused: true })
+    expect((await after.session.status()).session).not.toBeNull()
+    const kept = (await after.session.status()).session
+    // Refused either way — the page is on (alreadyOn) and the epoch is another document's; the session stays
+    expect(await after.session.start(undefined, false, undefined, stale)).toMatchObject({ started: false })
+    after.session.restore()
+    expect(await after.session.start(undefined, false, undefined, stale)).toEqual({ started: false, reason: S.page.sessionOver })
+    expect((await after.session.status()).session).toBeNull()
+    expect(kept).not.toBeNull()
+  })
+
+  it('a start made obsolete while it waits does not swallow the different start asked for after it (thirteenth pass)', async () => {
+    const h = harness({ holdStatusAt: 2 })
+    live = h.session
+    await h.session.start()
+    const first = (await h.session.status()).epoch!
+    // A restart decided on the page as it is; its status is held. Meanwhile the reader restores, then asks to translate
+    const restart = h.session.start(undefined, true, undefined, first)
+    await settle()
+    expect(h.session.restore().refused).toBeUndefined()
+    const idle = (await h.session.status()).epoch!
+    const translate = h.session.start(undefined, false, undefined, idle)
+    h.releaseStatus()
+    expect(await restart).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(await translate).toEqual({ started: true })
+    expect((await h.session.status()).progress.state).toBe('on')
+  })
+
+  it('a start refused after its status was asked releases the session the status bound provisionally (Codex on #184)', async () => {
+    // No usable service: the chain answered, so the scope is bound over there; the refusal cancels it
+    const none = harness({ status: () => providerStatus({ available: false }) })
+    live = none.session
+    expect(await none.session.start()).toEqual({ started: false, reason: S.page.noService })
+    expect(none.statusCalls).toHaveLength(1)
+    expect(none.cancelled).toEqual([none.statusCalls[0]])
+    live.restore()
+    // The page moved while the status was on its way (an epoch decided before): refused, and released just the same
+    const moved = harness({ holdStatusAt: 2 })
+    live = moved.session
+    await moved.session.start()
+    const first = (await moved.session.status()).epoch!
+    const restart = moved.session.start(undefined, true, undefined, first)
+    await settle()
+    moved.session.restore()
+    moved.releaseStatus()
+    expect(await restart).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(moved.cancelled).toContain(moved.statusCalls[1])
+  })
+
+  it('overlapping starts are one start: a second click while the first is asking its status mints no second session (S2 review, tenth pass)', async () => {
+    const h = harness({ holdStatusAt: 1 })
+    live = h.session
+    const first = h.session.start()
+    const second = h.session.start()
+    await settle()
+    expect(h.statusCalls).toHaveLength(1)
+    h.releaseStatus()
+    expect(await first).toEqual({ started: true })
+    expect(await second).toEqual({ started: true })
+    const status = await h.session.status()
+    expect(status.session).toBe(h.statusCalls[0])
+    expect(h.cancelled).toEqual([])
+    // Once the start has settled, a start is a start again: refused while on, as before
+    expect(await h.session.start()).toEqual({ started: false, reason: S.page.alreadyOn })
   })
 
   it('a second start is refused while the session is on; a restart replaces it and cancels the old scope', async () => {
@@ -227,7 +352,10 @@ describe('page session', () => {
     expect((await h.session.status()).session).toBeNull()
     expect(document.documentElement.hasAttribute(ON_ATTR)).toBe(false)
     expect(h.calls.length).toBe(before)
-    expect(h.cancelled).toEqual([id])
+    // The restore cancelled the session; the refused restart released the session its status had bound provisionally
+    expect(h.cancelled[0]).toBe(id)
+    expect(h.cancelled).toHaveLength(2)
+    expect(h.cancelled[1]).toBe(h.statusCalls.at(-1))
   })
 
   it('every request — text, title, OCR and image labels — carries the active session id, and a restart moves them to the new one', async () => {
@@ -265,8 +393,9 @@ describe('page session', () => {
     let handedOver = false
     const h = harness({
       provider: 'google-web',
-      status: scope => {
-        if (scope !== undefined) { handedOver = true; return providerStatus({ demotions: [{ id: 'microsoft', kind: 'auth' }] }) }
+      // A session's start asks fresh with its own scope; the hand-over check asks about its scope without fresh
+      status: (scope, _call, statusOptions) => {
+        if (scope !== undefined && !statusOptions?.fresh) { handedOver = true; return providerStatus({ demotions: [{ id: 'microsoft', kind: 'auth' }] }) }
         return providerStatus(handedOver ? { engine: { id: 'google-web', displayName: 'Google' }, chain: ['microsoft', 'google-web'] } : {})
       },
     })
@@ -287,7 +416,7 @@ describe('page session', () => {
 
     const temporary = harness({
       provider: 'google-web',
-      status: scope => providerStatus(scope !== undefined ? { demotions: [{ id: 'microsoft', kind: 'rate-limit' }] } : {}),
+      status: (scope, _call, statusOptions) => providerStatus(scope !== undefined && !statusOptions?.fresh ? { demotions: [{ id: 'microsoft', kind: 'rate-limit' }] } : {}),
     })
     live?.restore()
     live = temporary.session

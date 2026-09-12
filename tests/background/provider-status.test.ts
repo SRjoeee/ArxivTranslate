@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { createChainHolder } from '@/entrypoints/background/chain'
-import { createConfigOffers, providerStatus } from '@/entrypoints/background/provider-status'
+import { createConfigOffers, providerStatus, statusInForce } from '@/entrypoints/background/provider-status'
 import type { TranslationTransport } from '@/providers/transport'
 
 // The provider-status action (INVENTORY P4): a session's chain, the chain in force, or — after a save — a chain
@@ -10,7 +10,7 @@ import type { TranslationTransport } from '@/providers/transport'
 const chainOf = (provider: string): TranslationTransport => ({
   translate: async () => ({ ok: true, result: { segments: [], provider }, cached: 0 }),
   cancel: async () => 0,
-  status: async () => ({ providerId: provider, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', revision: provider, chain: [provider], demotions: [], engine: { id: provider, displayName: provider } }),
+  status: async () => ({ providerId: provider, chosen: provider, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', revision: provider, chain: [provider], demotions: [], engine: { id: provider, displayName: provider } }),
 })
 
 function harness() {
@@ -35,8 +35,9 @@ function harness() {
   }
   const offers = createConfigOffers({ load, chain: holder })
   const sessions = new Map<string, TranslationTransport>()
-  const deps = { chain: holder, router: { transportFor: (scope: string) => sessions.get(scope) }, offers }
-  return { deps, holder, offers, builds, sessions, save: (next: Config) => { stored = next }, hold: () => { holdReads = true }, release: () => reads.shift()?.(), releaseLast: () => reads.pop()?.() }
+  const bound: { scope: string; transport: TranslationTransport; tabId: number | undefined }[] = []
+  const deps = { chain: holder, router: { transportFor: (scope: string) => sessions.get(scope), bindTo: (scope: string, transport: TranslationTransport, tabId: number | undefined) => bound.push({ scope, transport, tabId }) }, offers }
+  return { deps, holder, offers, builds, sessions, bound, save: (next: Config) => { stored = next }, hold: () => { holdReads = true }, release: () => reads.shift()?.(), releaseLast: () => reads.pop()?.() }
 }
 
 describe('providerStatus', () => {
@@ -80,6 +81,19 @@ describe('providerStatus', () => {
     expect(h.builds.at(-1)).toBe('chrome-builtin')
   })
 
+  it('fresh with a scope binds the session to the chain it is told about, on the sender\'s tab (seventh pass)', async () => {
+    const h = harness()
+    h.save({ ...DEFAULT_CONFIG, provider: 'google-web' })
+    const status = await providerStatus(h.deps, { scope: 's-new', fresh: true }, 7)
+    expect(status.providerId).toBe('google-web')
+    expect(h.bound).toHaveLength(1)
+    expect(h.bound[0]).toMatchObject({ scope: 's-new', tabId: 7 })
+    expect(await h.bound[0]!.transport.status()).toMatchObject({ providerId: 'google-web' })
+    // Without fresh, nothing is bound here: forCall binds at the first request
+    await providerStatus(h.deps, { scope: 's-other' })
+    expect(h.bound).toHaveLength(1)
+  })
+
   it('a session asks about its own chain; fresh is about the chain in force, which a restart binds the page to', async () => {
     const h = harness()
     await providerStatus(h.deps, {})
@@ -87,5 +101,74 @@ describe('providerStatus', () => {
     expect((await providerStatus(h.deps, { scope: 's1' })).providerId).toBe('pinned')
     h.save({ ...DEFAULT_CONFIG, provider: 'google-web' })
     expect((await providerStatus(h.deps, { scope: 's1', fresh: true })).providerId).toBe('google-web')
+  })
+})
+
+describe('statusInForce', () => {
+  /** A holder whose chain in force the test replaces; `replace` fires the signal a real holder fires when a build starts */
+  function holderOf(first: TranslationTransport) {
+    let inForce = first
+    let asked = 0
+    let fire: () => void = () => undefined
+    let signal = new Promise<void>(resolve => { fire = resolve })
+    return {
+      chain: { current: async () => { asked++; return inForce }, replaced: () => signal },
+      replace: (next: TranslationTransport) => { inForce = next; const done = fire; signal = new Promise<void>(resolve => { fire = resolve }); done() },
+      asked: () => asked,
+    }
+  }
+  const never = (name: string): TranslationTransport => ({ ...chainOf(name), status: () => new Promise<never>(() => {}) })
+
+  it('a chain replaced while its probes answer is not the answer: the status describes the chain in force afterwards (S2 review, third pass)', async () => {
+    let release: () => void = () => undefined
+    const slow: TranslationTransport = { ...chainOf('old'), status: async () => { await new Promise<void>(resolve => { release = resolve }); return { ...(await chainOf('old').status()) } } }
+    const h = holderOf(slow)
+    const status = statusInForce(h.chain)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    h.replace(chainOf('new')) // a save landed while the old chain's probes were out
+    release()
+    expect((await status).status.providerId).toBe('new')
+  })
+
+  it('a probe that never settles on a chain that was replaced is not waited for: the replacement answers (fourth pass)', async () => {
+    const h = holderOf(never('stalled'))
+    const status = statusInForce(h.chain)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    h.replace(chainOf('healthy'))
+    expect((await status).status.providerId).toBe('healthy')
+  })
+
+  it('a replacement landing after the transport was taken but before its status is awaited is not missed (fifth pass)', async () => {
+    // current() hands over the old chain and the replacement lands in the same turn, before the caller subscribes
+    let inForce = never('stalled')
+    let fire: () => void = () => undefined
+    let signal = new Promise<void>(resolve => { fire = resolve })
+    const replace = (next: TranslationTransport) => { inForce = next; const done = fire; signal = new Promise<void>(resolve => { fire = resolve }); done() }
+    let handed = 0
+    const chain = {
+      current: async () => { const taken = inForce; if (++handed === 1) replace(chainOf('healthy')); return taken },
+      replaced: () => signal,
+    }
+    expect((await statusInForce(chain)).status.providerId).toBe('healthy')
+  })
+
+  it('a probe that never settles with nothing replacing the chain rejects at the deadline, with no obsolete answer', async () => {
+    vi.useFakeTimers()
+    try {
+      const h = holderOf(never('stalled'))
+      const status = statusInForce(h.chain, 1_000)
+      const outcome = expect(status).rejects.toThrow(/did not settle/)
+      await vi.advanceTimersByTimeAsync(1_000)
+      await outcome
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('answers at once when nothing replaced the chain', async () => {
+    const h = holderOf(chainOf('only'))
+    const { status } = await statusInForce(h.chain)
+    expect(status.providerId).toBe('only')
+    expect(h.asked()).toBe(2)
   })
 })

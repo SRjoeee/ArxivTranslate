@@ -12,7 +12,6 @@ import { createFallbackService } from './fallback'
 import type { CancelledScopeRegistry } from './request/cancellation'
 import { createTranslateService, type CachePort, type TranslateCall, type TranslateMessageResponse, type TranslateService, type TranslateServiceDeps } from './translate-service'
 import type { ProviderErrorKind, TranslationProvider } from './types'
-import { sha256Hex } from '@/shared/digest'
 
 /** 此刻实际在用的引擎与最近一次降级原因（§8.5）；popup 据此解释译文为什么换了引擎 */
 export interface EngineStatus {
@@ -23,8 +22,14 @@ export interface EngineStatus {
 }
 
 export interface ProviderStatus {
-  /** 配置里选的那个引擎 */
+  /** The engine at the head of the chain — what the chosen service resolved to */
   providerId: string
+  /**
+   * The service id as saved. Differs from `providerId` when the saved id names nothing (a service deleted from
+   * another tab): `getProvider` then substitutes a built-in, and the toggle must not call that runnable when the
+   * popup, deciding from the settings, says it is not (`savedFromStatus`, shared/page-action.ts)
+   */
+  chosen: string
   /** 它能不能用 */
   available: boolean
   /**
@@ -41,11 +46,7 @@ export interface ProviderStatus {
   /** The config this chain was built from: the popup waits for these to match what it just saved before restarting a page */
   targetLanguage: string
   promptId: string
-  /**
-   * The identity of the settings this chain was built from (`chainRevision`). A page records it at session start,
-   * so the popup can say "this page is on older settings" for **any** change — a new key, model, endpoint or prompt
-   * keeps the service id and the target, and comparing those alone missed all of them (Codex on #157)
-   */
+  /** `chainRevision` of the configuration this chain was built from; the toggle compares a page's revision with it */
   revision: string
   engine: EngineStatus
   /** 链上引擎的 id，按优先级。popup 用它判断刚下好语言包的引擎有没有进链，e2e 用它断言降级 */
@@ -64,7 +65,13 @@ export interface TranslationTransport {
   /** Drain the scope's queued and in-flight requests; returns how many. Whether the scope is dead afterwards is the session router's decision (ADR-0005) */
   cancel(scope: string): Promise<number>
   /** `scope` asks about that session's own chain rather than the current global one (§8.5) */
-  status(scope?: string): Promise<ProviderStatus>
+  /**
+   * `scope`: the session's own chain. `fresh` (with a scope, over the message transport): a chain built from the
+   * configuration as stored now, and the session bound to it — what a session starting on freshly saved settings asks
+   * for, so what it records and what serves it are one chain (background/provider-status.ts). The local transport
+   * is one chain and ignores the option
+   */
+  status(scope?: string, options?: { fresh?: boolean }): Promise<ProviderStatus>
   /**
    * Local chains only (absent on the content side). Every scoped request queued or in flight on the chain is
    * drained, whichever session left it here — a session moved on by a language pack leaves its earlier requests
@@ -188,6 +195,8 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     const active = chain.find(engine => engine.id === live.activeId) ?? primary
     return {
       providerId: primary.id,
+      chosen: config.provider,
+      revision,
       available,
       ...(fallback ? { fallback } : {}),
       model,
@@ -196,7 +205,6 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
       renderPath,
       targetLanguage: config.targetLanguage,
       promptId: config.prompts.promptId,
-      revision,
       chain: chain.map(engine => engine.id),
       demotions: live.demotions.map(d => ({ id: d.id, kind: d.kind })),
       engine: {
@@ -228,46 +236,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
   }
 }
 
-/**
- * 建链要读的配置字段。其余字段（模式、样式、预加载、术语表）改了**不能**重建：
- * content 每切一次显示模式就写一次配置，而那时页面往往正在翻，重建会把令牌桶和降级记录一起清掉。
- * `tests/providers/transport.test.ts` 守着这张表：新增配置字段必须显式归类。
- */
-export const CHAIN_CONFIG_FIELDS = ['provider', 'services', 'prompts', 'targetLanguage', 'fallback'] as const
-/** 与 CHAIN_CONFIG_FIELDS 互补，两者之和必须覆盖 Config 的全部字段 */
-export const VOLATILE_CONFIG_FIELDS = ['version', 'mode', 'glossary', 'appearance', 'preload', 'image', 'reading', 'uiLanguage'] as const
-
-export function chainConfigChanged(a: Config, b: Config): boolean {
-  return CHAIN_CONFIG_FIELDS.some(field => !deepEqual(a[field], b[field]))
-}
-
-/**
- * The identity of the settings a chain is built from: a digest of the chain fields above, so a page can tell whether
- * the settings moved on since its session started. Not a build counter — that restarted with the worker, so a page
- * that outlived one worker looked "behind the settings" once the next had rebuilt the same chain, and a rebuild from
- * unchanged settings bumped it too (INVENTORY S8, open question 2). API keys go in as their own digests: the
- * serialised document never holds one, the rule `deepEqual` keeps. Sixteen hex digits are plenty for "same or not"
- */
-export async function chainRevision(config: Config): Promise<string> {
-  const picked: Record<string, unknown> = {}
-  for (const field of CHAIN_CONFIG_FIELDS) picked[field] = config[field]
-  picked.services = await Promise.all(config.services.map(async service => ({ ...service, apiKey: await sha256Hex(service.apiKey) })))
-  return (await sha256Hex(JSON.stringify(canonical(picked)))).slice(0, 16)
-}
-
-/** Objects with their keys sorted, recursively: the digest must not depend on the order storage hands the fields back in */
-function canonical(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonical)
-  if (typeof value !== 'object' || value === null) return value
-  return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical((value as Record<string, unknown>)[key])]))
-}
-
-/** 逐字段比较而不是序列化：配置里有 API key，不给它多留一份副本（硬规则 7） */
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
-  if (Array.isArray(a) !== Array.isArray(b)) return false
-  const keys = Object.keys(a)
-  if (keys.length !== Object.keys(b).length) return false
-  return keys.every(key => deepEqual((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]))
-}
+// The chain-config table and the digest live in config/revision.ts: the popup and the toggle compare a page with the
+// saved settings through the same digest, and neither may pull this module's providers into its bundle
+export { CHAIN_CONFIG_FIELDS, VOLATILE_CONFIG_FIELDS, chainConfigChanged, chainRevision } from '@/config/revision'
+import { chainRevision } from '@/config/revision'

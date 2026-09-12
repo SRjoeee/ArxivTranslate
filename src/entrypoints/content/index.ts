@@ -48,10 +48,10 @@ export default defineContentScript({
           sendResponse(statsOf(blocks))
           return true
         case 'axt:translate-page':
-          session.start(message.mode, message.restart === true).then(sendResponse)
+          session.start(message.mode, message.restart === true, undefined, message.epoch).then(sendResponse)
           return true
         case 'axt:restore-page':
-          sendResponse(session.restore())
+          sendResponse(session.restore(message.epoch))
           return true
         case 'axt:set-mode':
           session.setMode(message.mode).then(r => sendResponse({ mode: r.effective, preference: r.mode }))

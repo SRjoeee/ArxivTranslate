@@ -3,20 +3,21 @@ import { getConfig, watchConfig } from '@/config/storage'
 import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import { createLocalTransport } from '@/providers/transport'
 import { toErrorInfo } from '@/providers/translate-service'
-import { isAxtMessage } from '@/shared/messages'
+import { isAxtMessage, replyWith } from '@/shared/messages'
 import { HELPER_HOST, type HelperStatus } from '@/shared/ocr'
 import { createChainHolder } from './chain'
 import { engineReady } from './engine-ready'
 import { createHelperClient } from './helper'
 import { createHelperWaiter } from './helper-await'
 import { createHelperRestart } from './helper-restart'
-import { createConfigOffers, providerStatus } from './provider-status'
+import { createConfigOffers, providerStatus, statusInForce } from './provider-status'
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { installContextMenu, refreshContextMenu, installToggleCommand } from './context-menu'
 import { handlePing } from '@/shared/ping'
 import { applyLocaleFrom, resolveLocale } from '@/ui/apply-locale'
 import { setLocale } from '@/ui/strings'
+import { savedFromStatus } from '@/shared/page-action'
 
 // background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
 // 异步响应必须用 sendResponse + return true。
@@ -181,12 +182,23 @@ export default defineBackground(() => {
     if (alarm.name === RESTART_ALARM) void helperRestart.fired()
   })
 
+  /**
+   * The saved settings as the toggle decides on them (shared/page-action.ts): their identity, and whether they run —
+   * from the chain in force, which is built from them. The popup decides the same from the settings it holds
+   */
+  const saved = async () => {
+    // One snapshot: the chain in force, built from what is stored now (offered in order with every other offer),
+    // and still in force once its probes have answered
+    await offers.offer()
+    return savedFromStatus((await statusInForce(chain)).status)
+  }
   const menuDeps = {
     create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>
       browser.contextMenus.create(options as Parameters<typeof browser.contextMenus.create>[0]),
     removeAll: () => browser.contextMenus.removeAll(),
     onClicked: (handler: Parameters<typeof browser.contextMenus.onClicked.addListener>[0]) => browser.contextMenus.onClicked.addListener(handler),
     send: (tabId: number, message: unknown) => browser.tabs.sendMessage(tabId, message as never),
+    saved,
   }
   installContextMenu(menuDeps)
   // 读者在这次读还没回来的时候改了界面语言：watcher 已经换过语言包，这个旧快照不许再盖回去。
@@ -203,6 +215,7 @@ export default defineBackground(() => {
     onCommand: handler => browser.commands.onCommand.addListener(handler),
     activeTab: async () => (await browser.tabs.query({ active: true, currentWindow: true }))[0],
     send: (tabId, message) => browser.tabs.sendMessage(tabId, message),
+    saved,
   })
 
   browser.tabs.onRemoved.addListener(tabId => dropTab(tabId, '关闭'))
@@ -251,9 +264,9 @@ export default defineBackground(() => {
         return true
       case 'axt:provider-status':
         // A session's own chain, the chain in force, or — after a save — one built from what is stored now
-        providerStatus({ chain, router, offers }, message)
-          .then(sendResponse)
-          .catch((e: unknown) => console.error('[axt] provider-status 失败', e))
+        // A failure (a build that failed, the status deadline) is replied, not only logged: the page that asked
+        // must see its request settle
+        replyWith(providerStatus({ chain, router, offers }, message, sender.tab?.id), sendResponse)
         return true
       case 'axt:engine-ready':
         // Rebuild and move whom the sender says (./engine-ready.ts): a downloaded language pack moves one tab, a

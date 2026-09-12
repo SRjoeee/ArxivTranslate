@@ -18,6 +18,12 @@ export interface SessionRouter {
    * 但不能让它等翻译链构造（Codex 在 #87 指出）。同一标签页的旧 scope 顺手撤掉
    */
   bind(scope: string, tabId: number | undefined): void
+  /**
+   * Bind a session to a given chain — the one whose status it was just told, so the settings it records are the
+   * settings that serve it (provider-status.ts). Provisional: the tab's earlier sessions are dropped by this one's
+   * first request (`forCall`), not now. Nothing happens for a scope already on a chain or already dropped
+   */
+  bindTo(scope: string, transport: TranslationTransport, tabId: number | undefined): void
   /** 撤掉这些 scope 并解绑，返回撤掉的条数 */
   drop(scopes: readonly string[]): Promise<number>
   /** 标签页关闭：撤掉挂在它上面的会话 */
@@ -112,7 +118,12 @@ const NAVIGATION_GRACE_MS = 3000
 
 export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
   /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
-  const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number }>()
+  /**
+   * `provisional`: bound to a chain at status time (`bindTo`), before the session has made a request. Such a binding
+   * takes nothing from the tab's other sessions yet — a restart whose status came back late must not cancel the
+   * restart that won (the local review of INVENTORY S2, eighth pass); the first request makes it the tab's session
+   */
+  const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number; provisional?: true }>()
   /** 按住的「可能跳走了」，按标签页；这个标签页再来一次请求就取消 */
   const leaving = new Map<number, ReturnType<typeof setTimeout>>()
 
@@ -212,6 +223,15 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
 
   const scopesOfTab = (tabId: number): string[] =>
     [...sessions].filter(([, session]) => session.tabId === tabId).map(([scope]) => scope)
+  /**
+   * The tab's sessions a newly registering scope supersedes: not the provisional ones. A provisional entry is a
+   * replacement whose status is on its way to the page; the page's session of the moment may still send a request
+   * meanwhile — after a worker restart it has no entry here and registers anew — and must not cancel the
+   * replacement it is about to hand over to (the local review of INVENTORY S2, eleventh pass). A replacement's own
+   * first request drops everything else on the tab
+   */
+  const supersededOn = (tabId: number, by: string): string[] =>
+    [...sessions].filter(([scope, session]) => session.tabId === tabId && scope !== by && !session.provisional).map(([scope]) => scope)
 
   return {
     async forCall(scope, tabId) {
@@ -220,7 +240,20 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       // 也没人再武装一次，旧会话的队列会一直跑（Codex 在 #143 指出）。到点问页面自己才是判据
       if (scope === undefined) return deps.current()
       const bound = sessions.get(scope)
-      if (bound?.transport) return bound.transport
+      if (bound?.transport && !bound.provisional) return bound.transport
+      if (bound?.provisional) {
+        // The first request of a session bound at status time: now it is the tab's session, and the tab's earlier
+        // ones are stale (a refresh, a navigation without endRun) — the same drop a new scope gets below, deferred
+        // to here so that a binding made for a restart that lost cancels nothing (eighth pass). The drop happens
+        // whether the provisional chain still stands or was retired meanwhile (ninth pass); a retired one is let go
+        // and the loop below binds the chain in force, as for a fresh scope
+        const { provisional: _, transport, ...rest } = bound
+        const standing = transport && !transport.isRetired?.() ? transport : undefined
+        sessions.set(scope, { ...rest, ...(standing ? { transport: standing } : {}), ...(tabId !== undefined ? { tabId } : {}) })
+        const stale = tabId !== undefined ? scopesOfTab(tabId).filter(other => other !== scope) : []
+        if (stale.length > 0) await drop(stale)
+        if (standing) return standing
+      }
       if (!bound && deps.cancelled.has(scope)) {
         // A dropped session calling again (the old content script in this worker still sends): hand it the current
         // chain, drained of the scope first — the registry refuses the request anyway
@@ -231,7 +264,7 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       if (!bound) {
         // 一个标签页同时只有一个会话：出现新 scope 说明上一轮没走 endRun（导航、刷新），把它撤掉。
         // bind 过的（bound 有值、没 transport）已经在 bind 里撤过了
-        const stale = tabId !== undefined ? scopesOfTab(tabId) : []
+        const stale = tabId !== undefined ? supersededOn(tabId, scope) : []
         // Register before the first await, as bind() does for OCR: a tab closed while the chain is being built
         // must find this scope among its sessions, or dropTab marks nothing and the continuation below binds a
         // dead scope and lets its request out — one paid batch per request suspended here, and the binding
@@ -262,10 +295,16 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
     bind(scope, tabId) {
       if (sessions.has(scope) || deps.cancelled.has(scope)) return
       if (tabId !== undefined) {
-        const stale = scopesOfTab(tabId)
+        const stale = supersededOn(tabId, scope)
         if (stale.length > 0) void drop(stale)
       }
       sessions.set(scope, tabId !== undefined ? { tabId } : {})
+    },
+    bindTo(scope, transport, tabId) {
+      if (deps.cancelled.has(scope) || transport.isRetired?.()) return
+      const bound = sessions.get(scope)
+      if (bound?.transport) return
+      sessions.set(scope, { ...bound, transport, provisional: true, ...(tabId !== undefined ? { tabId } : {}) })
     },
     drop,
     dropTab: tabId => {
@@ -295,7 +334,8 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       for (const [scope, session] of sessions) {
         if (!session.transport?.isRetired?.()) continue
         taken.push(scope)
-        sessions.set(scope, session.tabId !== undefined ? { tabId: session.tabId } : {})
+        // A provisional session stays provisional: its deferred drop of the tab's earlier sessions is still owed
+        sessions.set(scope, { ...(session.tabId !== undefined ? { tabId: session.tabId } : {}), ...(session.provisional ? { provisional: true as const } : {}) })
       }
       // 2. The replacement. A session binds it on its next request anyway (forCall); binding the ones taken off
       //    a chain now keeps status answers and the holder's ownership current. A failed rebuild surfaces here

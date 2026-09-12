@@ -26,9 +26,18 @@ export interface PageStatus {
    */
   session?: string | null
   /**
+   * The page's action epoch: bumped by every start that commits and every restore. A command carries the epoch it
+   * was decided on, and the page refuses one from an earlier epoch — a decision that took a while (the toggle waits
+   * for the chain's probes) must not undo what the reader did in between, a translate decided on an idle page that
+   * was translated and restored meanwhile included (the local review of INVENTORY S2, sixth and twelfth passes).
+   * Opaque: the document's own id and the count, so another document's epoch never matches (thirteenth pass)
+   */
+  epoch?: string
+  /**
    * What the current session runs on: the service chosen when it started, its target language,
-   * and the service actually serving right now (a hand-over down the chain changes it). The popup
-   * compares it with the saved settings to know when the page is behind them
+   * the service actually serving right now (a hand-over down the chain changes it), and `revision` —
+   * `chainRevision` of the configuration the session started on. The popup and the toggle compare
+   * it with the saved settings' digest to know when the page is behind them (shared/page-action.ts)
    */
   running?: { provider: string; target: string; engine: string; revision: string }
 }
@@ -38,11 +47,14 @@ export interface AxtMessages {
   /**
    * popup → content: start translating the page. `restart` starts a new session over a running one
    * without showing the original first: the settings changed and the page follows them paragraph
-   * by paragraph as each is requested again (cached ones at once)
+   * by paragraph as each is requested again (cached ones at once).
+   * `epoch` is the page's action epoch the command was decided on (`PageStatus.epoch`): the page refuses it once the
+   * page has moved — the reader restored, restarted or translated meanwhile — so a decision that took a while (the
+   * toggle waits for the chain's probes) cannot undo what the reader did in between (sixth and twelfth passes)
    */
-  'axt:translate-page': { request: { mode?: Mode; restart?: boolean }; response: { started: boolean; reason?: string } }
-  /** popup → content：中止并恢复原文 */
-  'axt:restore-page': { request: Record<never, never>; response: { removedNodes: number } }
+  'axt:translate-page': { request: { mode?: Mode; restart?: boolean; epoch?: string }; response: { started: boolean; reason?: string } }
+  /** popup → content：中止并恢复原文. `epoch` as above: a restore decided on an earlier epoch is `refused` */
+  'axt:restore-page': { request: { epoch?: string }; response: { removedNodes: number; refused?: true } }
   /** popup → content：切换模式（只改 <html> 上的属性，不重新翻译；§4 第 9 步） */
   'axt:set-mode': { request: { mode: Mode }; response: { mode: Mode; preference: Mode } }
   /** popup → content：进度 */
@@ -67,7 +79,8 @@ export interface AxtMessages {
    * popup / options / content → background: the chain's status. `scope` asks about the chain a session is on;
    * `fresh` asks for a chain built from the configuration as stored now — what a page sends after saving a
    * setting and before restarting on it (background/provider-status.ts says how the race with the storage event
-   * is closed)
+   * is closed). Both together: a session starting on freshly saved settings is **bound** to that chain, so what it
+   * records (target, revision) and what serves its requests are one chain
    */
   'axt:provider-status': { request: { scope?: string; fresh?: boolean }; response: ProviderStatus }
   /** 清空缓存，或只清某篇论文 */
@@ -133,9 +146,35 @@ export function isAxtMessage(value: unknown): value is AxtMessage {
     && (value as { type: string }).type.startsWith('axt:')
 }
 
+/**
+ * What a handler replies when the work behind a message failed. A handler that returns `true` and never replies
+ * leaves the sender waiting for as long as the worker lives — a rejection logged in the background is invisible to
+ * the page that asked (the local review of INVENTORY S2, fifth pass). `sendMessage` turns this reply back into a
+ * rejection, so a caller's `.catch` sees the failure it would have seen from a local call
+ */
+export interface FailureReply {
+  axtError: string
+}
+
+export const failure = (error: unknown): FailureReply => ({ axtError: error instanceof Error ? error.message : String(error) })
+
+export const isFailure = (value: unknown): value is FailureReply =>
+  typeof value === 'object' && value !== null && typeof (value as { axtError?: unknown }).axtError === 'string'
+
+/** Reply to a message with the outcome of a promise: the value, or a typed failure the sender rejects on */
+export function replyWith<T>(promise: Promise<T>, sendResponse: (reply: T | FailureReply) => void): void {
+  promise.then(sendResponse, error => sendResponse(failure(error)))
+}
+
+/** The sender's side of `replyWith`: a failure reply becomes a rejection */
+export function decodeReply<T>(reply: T | FailureReply): T {
+  if (isFailure(reply)) throw new Error(reply.axtError)
+  return reply
+}
+
 /** 发给 background；MV3 下 sendMessage 不传回调即返回 Promise */
 export function sendMessage<T extends AxtMessageType>(message: AxtMessage<T>): Promise<AxtResponse<T>> {
-  return browser.runtime.sendMessage(message) as Promise<AxtResponse<T>>
+  return (browser.runtime.sendMessage(message) as Promise<AxtResponse<T> | FailureReply>).then(decodeReply)
 }
 
 /** 发给当前活动标签页的 content script；标签页上没有接收方时 Promise 会 reject。不读 url，无需 tabs 权限 */

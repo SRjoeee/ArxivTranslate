@@ -17,6 +17,8 @@ import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages
 import type { HelperStatus } from '@/shared/ocr'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
 import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, pollsBackground, runnable } from './view-model'
+import { chainRevision } from '@/config/revision'
+import { S } from '@/ui/strings'
 
 const scriptStart = performance.now()
 
@@ -60,7 +62,15 @@ function openOptions(section?: OptionsSection): void {
 export function usePopupData(): { input: PopupInput; error: string | null; actions: PopupActions } {
   const [page, setPage] = useState<PageStatus | null>(null)
   const [provider, setProvider] = useState<ProviderStatus | null>(null)
-  const [config, setLocalConfig] = useState<Config | null>(null)
+  /**
+   * The configuration this popup shows, with the digest of its chain settings — **one** state, set once the digest
+   * is known: a configuration shown beside the previous one's digest would call a page current that is behind it,
+   * and the button would restore where the toggle refuses (the local review of INVENTORY S2, third pass)
+   */
+  const [local, setLocal] = useState<{ config: Config; revision: string } | null>(null)
+  const config = local?.config ?? null
+  const savedRevision = local?.revision ?? null
+  const settle = useCallback(async (next: Config) => setLocal({ config: next, revision: await chainRevision(next) }), [])
   /** The offline service's language pack (§8.4); `downloadable` needs a click to create() (user gesture) */
   const [pack, setPack] = useState<PackState | null>(null)
   const [helper, setHelper] = useState<HelperStatus | null>(null)
@@ -93,17 +103,17 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   useEffect(() => {
     console.debug(`[axt] popup mounted ${Math.round(performance.now() - scriptStart)} ms after script start`)
     loadProvider()
-    getConfig().then(c => {
-      setLocalConfig(c)
+    getConfig().then(async c => {
+      await settle(c)
       void checkPack(c.targetLanguage)
-    }).catch(() => setLocalConfig(null))
+    }).catch(() => setLocal(null))
     refresh()
     browser.commands.getAll()
       .then(all => setShortcut(all.find(c => c.name === COMMAND_ID)?.shortcut || null))
       .catch(() => setShortcut(null))
     sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ state: 'not-installed' }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
-  }, [refresh, checkPack, loadProvider])
+  }, [refresh, checkPack, loadProvider, settle])
 
   // The background broadcasts the helper's state when it changes on its own — the guided install's wait found it,
   // or the fresh worker after a runtime grant reported (ADR-0002). Without this the card would stay up until the
@@ -170,7 +180,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     const run = async () => {
       const next = patch(await getConfig())
       await setConfig(next)
-      setLocalConfig(next)
+      await settle(next)
       loadProvider()
       return next
     }
@@ -185,19 +195,29 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     if (!runnable(next, packState)) return // the view shows the page as behind the settings
     // The chain the restart will run on: one built from what was just saved (background/provider-status.ts)
     setProvider(await sendMessage({ type: 'axt:provider-status', fresh: true }).catch(() => null))
-    await sendToActiveTab({ type: 'axt:translate-page', restart: true })
+    await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(status.epoch !== undefined ? { epoch: status.epoch } : {}) })
   }
 
   const actions: PopupActions = {
     translate: () => void guard(async () => {
-      const r = await sendToActiveTab({ type: 'axt:translate-page' })
+      // The epoch at the click, as for the other two: a translate delivered late must not translate a page the reader
+      // translated and restored meanwhile (the local review of S2, fourteenth pass)
+      const { epoch } = await sendToActiveTab({ type: 'axt:page-status' })
+      const r = await sendToActiveTab({ type: 'axt:translate-page', ...(epoch !== undefined ? { epoch } : {}) })
       if (!r.started) throw new Error(r.reason ?? '')
     }),
+    // The epoch a click acts on is read at the click, not from the last poll: an automatic hand-over restart between
+    // polls would make the poll's stale and the command refused (the local review of S2, seventh pass)
     retranslate: () => void guard(async () => {
-      const r = await sendToActiveTab({ type: 'axt:translate-page', restart: true })
+      const { epoch } = await sendToActiveTab({ type: 'axt:page-status' })
+      const r = await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(epoch !== undefined ? { epoch } : {}) })
       if (!r.started) throw new Error(r.reason ?? '')
     }),
-    restore: () => void guard(async () => { await sendToActiveTab({ type: 'axt:restore-page' }) }),
+    restore: () => void guard(async () => {
+      const { epoch } = await sendToActiveTab({ type: 'axt:page-status' })
+      const r = await sendToActiveTab({ type: 'axt:restore-page', ...(epoch !== undefined ? { epoch } : {}) })
+      if (r.refused) throw new Error(S.page.sessionOver)
+    }),
     chooseMode: mode => void guard(async () => { await sendToActiveTab({ type: 'axt:set-mode', mode }) }),
     retryFailed: () => void guard(async () => { await sendToActiveTab({ type: 'axt:retry-failed' }) }),
     openMenu: kind => setMenu(kind),
@@ -268,5 +288,5 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     helperStatus: setHelper,
   }
 
-  return { input: { page, provider, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id }, error, actions }
+  return { input: { page, provider, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id, savedRevision }, error, actions }
 }

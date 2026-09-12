@@ -123,6 +123,16 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(v.primary).toEqual({ label: '重新翻译', action: 'retranslate', disabled: true })
     expect(v.secondary).toEqual({ label: '显示原文', action: 'restore' })
   })
+  it('behind is the page\'s revision against the saved settings\' digest: a key or model change alone puts the page behind, the page\'s own chain never does', () => {
+    // The old test compared the page with the chain it was itself running on (the scoped provider status) — never
+    // behind after the first poll. The digest of the saved settings is what the toggle compares with too
+    const on = { ...input('P1'), page: { ...input('P1').page!, progress: { ...input('P1').page!.progress, state: 'on' as const, requested: 10, done: 10 }, running: { provider: 'microsoft', target: 'cmn', engine: 'microsoft', revision: 'r1' } } }
+    expect(derivePopupView(on).primary).toMatchObject({ label: '显示原文', action: 'restore' })
+    const behind = derivePopupView({ ...on, savedRevision: 'r2' })
+    expect(behind.primary).toMatchObject({ label: '重新翻译', action: 'retranslate', disabled: false })
+    expect(behind.secondary).toEqual({ label: '显示原文', action: 'restore' })
+    expect(derivePopupView({ ...on, savedRevision: null }).primary).toMatchObject({ action: 'restore' })
+  })
   it('P14 helper missing on macOS: install text plus the id the guided install needs', () => {
     const v = view('P14')
     // 带着 extensionId 才有得装：命令要按这个 id 拼（引导本身在 HelperSetup 里，§15.4）

@@ -63,9 +63,12 @@ export interface PageSession {
    * decided in: the reads inside are awaited, and the reader may restore the page during them —
    * a stale continuation must not translate the page again (Codex on #157)
    */
-  start(requested?: Mode, restart?: boolean, from?: string): Promise<StartResult>
+  /** `from`: the session a restart was decided on; `epoch`: the page's action epoch a command was decided on — either, stale, refuses the start */
+  start(requested?: Mode, restart?: boolean, from?: string, epoch?: string): Promise<StartResult>
   /** Back to the original page: stop everything, remove every injected node and attribute */
-  restore(): { removedNodes: number }
+  /** `from`: the session the restore was decided on; once it has ended the restore is not the reader's and does nothing */
+  /** `epoch`: the page's action epoch the restore was decided on; an earlier one, or another document's, is refused */
+  restore(epoch?: string): { removedNodes: number; refused?: true }
   /** Switch side / stack / only without a new session; the preference is persisted */
   setMode(mode: Mode): Promise<{ mode: Mode; effective: Mode }>
   /** Hand blocks to the running text pipeline (retry, tests); nothing outside a session */
@@ -151,6 +154,14 @@ export function createPageSession(deps: SessionDeps): PageSession {
   let restarted = false
   /** The current session's id; null outside a session. Every callback of a run closes over its own copy */
   let active: string | null = null
+  /**
+   * The page's action epoch (PageStatus.epoch): every start that commits and every restore moves the counter, and
+   * the document's own id keeps a command decided on another document — the same tab before a reload — from
+   * matching by count alone (the local review of INVENTORY S2, thirteenth pass)
+   */
+  const documentId = newSessionId()
+  let actions = 0
+  const epochNow = () => `${documentId}#${actions}`
   const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
   let progress: Progress = idle()
 
@@ -172,9 +183,34 @@ export function createPageSession(deps: SessionDeps): PageSession {
     if (session) void backend.cancel(session)
   }
 
-  async function start(requested?: Mode, restart = false, from?: string): Promise<StartResult> {
+  /**
+   * Overlapping starts are one start. A second click or key press while the first is still asking its status must
+   * not mint a second session: both would be bound provisionally, the first's first request would drop the second
+   * as the tab's stale scope, and the second would then take the page over with a dead scope — every request of
+   * it aborted (the local review of INVENTORY S2, tenth pass). The later caller gets the earlier start's outcome
+   */
+  let starting: { key: string; promise: Promise<StartResult> } | null = null
+  function start(requested?: Mode, restart = false, from?: string, epoch?: string): Promise<StartResult> {
+    // The same request twice is one start; a different one — another epoch, a restart over a plain start — waits for
+    // the one in flight and is then judged on its own terms against the page as it is by then: a restart made
+    // obsolete by a restore must not swallow the translate the reader asked for after it (thirteenth pass)
+    const key = `${requested ?? ''}|${restart}|${from ?? ''}|${epoch ?? ''}`
+    if (starting?.key === key) return starting.promise
+    const run = () => begin(requested, restart, from, epoch)
+    const promise: Promise<StartResult> = (starting ? starting.promise.then(run, run) : run()).finally(() => { if (starting?.promise === promise) starting = null })
+    starting = { key, promise }
+    return promise
+  }
+
+  /**
+   * `from`: the session a restart was decided on (the automatic restart after a permanent hand-over names its own).
+   * `epoch`: the page's action epoch a command from the popup or the toggle was decided on. Either, when given and
+   * stale, refuses the start: the page moved on since the decision
+   */
+  async function begin(requested?: Mode, restart = false, from?: string, epoch?: string): Promise<StartResult> {
     if (progress.state === 'on' && !restart) return { started: false, reason: S.page.alreadyOn }
     if (from !== undefined && active !== from) return { started: false, reason: S.page.sessionOver }
+    if (epoch !== undefined && epoch !== epochNow()) return { started: false, reason: S.page.sessionOver }
     if (!paper) return { started: false, reason: S.page.notPaper }
     if (blocks.length === 0) return { started: false, reason: S.page.nothingToTranslate }
     const tStart = now()
@@ -182,16 +218,30 @@ export function createPageSession(deps: SessionDeps): PageSession {
     // 术语表随每批发出（§8.2）。**空表不带这个字段**：带上会让所有既有缓存键变一遍，一次性全失效
     const context: TranslateContext = config.glossary.length > 0 ? { ...deps.context, glossary: config.glossary } : deps.context
     // 引擎链在 background；这里只取规划批次与选择渲染路径要用的能力（§2 第 3 条）
+    // The session id is minted before the status is asked: the status request carries it, and the background binds
+    // the session to the chain it answers about — a chain built from the configuration as stored now (`fresh`). The
+    // target and the revision the session runs on come from that chain, not from the configuration read above: a
+    // save between the two would otherwise leave the session pinned to a chain other than the settings it records
+    // (the local review of INVENTORY S2, seventh pass). Nothing awaits after the state below is committed
+    const session = newSessionId()
     let status: Awaited<ReturnType<typeof backend.status>>
     try {
-      status = await backend.status()
+      status = await backend.status(session, { fresh: true })
     } catch (e) {
       return { started: false, reason: `${S.page.backendSilent}：${e instanceof Error ? e.message : String(e)}` }
     }
+    // The status request bound this session to a chain provisionally (provider-status.ts). A start refused from here
+    // on never makes the request that would settle that binding, and the abandoned scope would keep its chain and
+    // engines alive until the tab's next session took over (Codex on #184): a refusal releases it
+    const release = (reason: string): StartResult => {
+      void backend.cancel(session)
+      return { started: false, reason }
+    }
     // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上（§8.5）
-    if (!status.available && !status.fallback) return { started: false, reason: S.page.noService }
+    if (!status.available && !status.fallback) return release(S.page.noService)
     // The reader may have restored the page while the two reads above were in flight
-    if (from !== undefined && active !== from) return { started: false, reason: S.page.sessionOver }
+    if (from !== undefined && active !== from) return release(S.page.sessionOver)
+    if (epoch !== undefined && epoch !== epochNow()) return release(S.page.sessionOver)
     trace(`start: ready in ${Math.round(now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
     modes?.stop()
@@ -203,13 +253,14 @@ export function createPageSession(deps: SessionDeps): PageSession {
     uninstallAnchors = installAnchorFallback(doc)
     // 只在这条路径上装：没开翻译时没有译文，也就没有对照可言
     if (config.reading.sentenceHighlight) highlight = startSentenceHighlight(doc) ?? null
-    const session = newSessionId()
     active = session
+    actions++
     const alive = () => active === session
     progress = { ...idle(), state: 'on' }
     restarted = false
     const startEngine = status.engine.id
-    running = { provider: config.provider, target: config.targetLanguage, engine: startEngine, revision: status.revision }
+    const target = status.targetLanguage
+    running = { provider: status.chosen, target, engine: startEngine, revision: status.revision }
     current = { session, config, context, renderPath: status.renderPath }
     prep.reset() // 新会话：镜像允许再跑一次、量宽缓存清空、栏宽重读
     enterSide(modes.effective())
@@ -219,7 +270,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     run = startTranslation({
       doc,
       blocks,
-      target: config.targetLanguage,
+      target,
       mode: modes.effective(),
       appearance: look,
       paper,
@@ -268,7 +319,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       isCurrent: alive,
       translate: async text => {
         const res = await backend.translate({
-          request: { segments: [{ id: 'document.title', text: escapeText(text, wireFormatOf(status.renderPath)) }], source: 'en', target: config.targetLanguage, context },
+          request: { segments: [{ id: 'document.title', text: escapeText(text, wireFormatOf(status.renderPath)) }], source: 'en', target, context },
           cache: { paper, renderPath: status.renderPath },
           scope: session,
         })
@@ -307,7 +358,8 @@ export function createPageSession(deps: SessionDeps): PageSession {
       doc,
       targets,
       paper,
-      target: config.targetLanguage,
+      // The target the session runs on — the chain's, recorded at start (see `running`); the configuration's only before a session exists
+      target: running?.target ?? config.targetLanguage,
       scope: session,
       preload: config.preload,
       context,
@@ -409,7 +461,9 @@ export function createPageSession(deps: SessionDeps): PageSession {
     return { mode, effective }
   }
 
-  function restorePage(): { removedNodes: number } {
+  function restorePage(epoch?: string): { removedNodes: number; refused?: true } {
+    if (epoch !== undefined && epoch !== epochNow()) return { removedNodes: 0, refused: true }
+    actions++
     endRun()
     modes?.stop()
     modes = null
@@ -495,6 +549,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       preference: modes?.preference() ?? savedMode,
       progress,
       session: active,
+      epoch: epochNow(),
       ...(imageProgress ? { images: imageProgress } : {}),
       ...(running ? { running } : {}),
     })),

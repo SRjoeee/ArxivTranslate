@@ -16,6 +16,7 @@ import { supportsTarget } from '@/providers/microsoft'
 import { BUILT_IN_PROMPTS } from '@/providers/prompt-library'
 import type { ProviderStatus } from '@/providers/transport'
 import type { PageStatus } from '@/shared/messages'
+import { pageDecision } from '@/shared/page-action'
 import type { HelperStatus } from '@/shared/ocr'
 import type { PackState } from '@/shared/pack'
 import type { MenuItem } from '@/ui/Menu'
@@ -47,6 +48,8 @@ export interface PopupInput {
   /** The image-recognition helper; null until asked */
   helper: HelperStatus | null
   platform: 'mac' | 'other' | null
+  /** `chainRevision` of the saved configuration; null until computed. A page whose `running.revision` differs is behind */
+  savedRevision: string | null
   /** Which menu is open (the popup's own state) */
   menu: MenuKind | null
   /** The translate shortcut as Chrome reports it; null when unbound or unknown */
@@ -147,7 +150,7 @@ function cannotRunWhy(config: Config, pack: PackState | null): string {
 }
 
 export function derivePopupView(input: PopupInput): PopupView {
-  const { page, provider, config, pack, helper, platform, menu, shortcut, extensionId } = input
+  const { page, provider, config, pack, helper, platform, menu, shortcut, extensionId, savedRevision } = input
   if (page === null) return empty()
   if (config === null) return { ...empty(), empty: false, mode: { value: page.preference, note: null } }
 
@@ -159,14 +162,10 @@ export function derivePopupView(input: PopupInput): PopupView {
   // The page runs on settings other than the saved ones. A change made here restarts the page at
   // once (data.ts), so this is what is left: a choice that cannot start, and a change made from
   // another tab, which leaves this page pinned to the session it began (Codex on #157). Either way
-  // the reader is offered 重新翻译 — enabled when the saved settings can actually run
-  // The chain's revision catches every change, including the ones that keep the service id and the
-  // target: a new key, model, endpoint, thinking mode or prompt (Codex on #157). The other two are
-  // kept for the case where the chain has not been rebuilt yet
-  const behind = on && page.running !== undefined && provider !== null
-    && (page.running.provider !== config.provider
-      || page.running.target !== config.targetLanguage
-      || page.running.revision !== provider.revision)
+  // the reader is offered 重新翻译 — enabled when the saved settings can actually run. The rule is
+  // the toggle's too (shared/page-action.ts): the page's revision against the saved settings' digest
+  const decision = pageDecision(page, { revision: savedRevision, canRun, fallback: !!provider?.fallback }) ?? { action: 'translate' as const, behind: false, enabled: canRun || !!provider?.fallback }
+  const { action, behind } = decision
   const named = (id: string) => serviceName(id, config.services)
 
   const service: Row = demoted && provider
@@ -188,10 +187,7 @@ export function derivePopupView(input: PopupInput): PopupView {
   const failedCount = progress.failed + (page.images?.failed ?? 0)
   const failed = failedCount > 0 && progress.state !== 'idle' && !progress.fatal && !page.images?.fatal ? S.failed.text(failedCount) : null
 
-  const primary: PopupView['primary'] = on && !behind ? { label: S.primary.restore, action: 'restore', disabled: false }
-    : behind ? { label: S.primary.retranslate, action: 'retranslate', disabled: !canRun }
-    : paused ? { label: S.primary.retranslate, action: 'retranslate', disabled: !canRun && !provider?.fallback }
-    : { label: S.primary.translate, action: 'translate', disabled: !canRun && !provider?.fallback }
+  const primary: PopupView['primary'] = { label: action === 'restore' ? S.primary.restore : action === 'retranslate' ? S.primary.retranslate : S.primary.translate, action, disabled: !decision.enabled }
   // On every action the key actually performs, 显示原文 included: ⌥T translates a page that is not
   // translated and restores one that is, so the badge belongs on both faces of the same button
   // (user 2026-09-11). A paused session retries rather than restores, which is what its label says

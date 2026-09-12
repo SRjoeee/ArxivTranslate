@@ -14,7 +14,7 @@ function fakeTransport(name: string, cancelled: string[] = []): TranslationTrans
     cancel: async scope => { cancelled.push(`${name}:${scope}`); return 1 },
     retire: () => { retired = true; cancelled.push(`${name} retired`); return 1 },
     isRetired: () => retired,
-    status: async () => ({ providerId: name, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', chain: [name], demotions: [], revision: 'r1', engine: { id: name, displayName: name } }),
+    status: async () => ({ providerId: name, chosen: name, revision: name, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', chain: [name], demotions: [], engine: { id: name, displayName: name } }),
   } as TranslationTransport & { name: string; cancelled: string[] }
 }
 
@@ -370,6 +370,84 @@ describe('createSessionRouter', () => {
     expect(await router.drop(['s1'])).toBe(3) // transport 撤 1 + onDrop 撤 2
     expect(await router.dropTab(2)).toBe(3)
     expect(dropped).toEqual(['s1', 's2'])
+  })
+
+  it('bindTo is provisional: a session bound at status time takes nothing from the tab until its first request, which then drops the tab\'s earlier sessions (S2 review, eighth pass)', async () => {
+    const chain = fakeTransport('链')
+    const router = routerOver(async () => chain)
+    // The tab's session, on its chain, with a request made
+    expect(nameOf(await router.forCall('winner', 7))).toBe('链')
+    // A restart that lost: its status came back late and bound it — nothing happens to the winner
+    router.bindTo('loser', chain, 7)
+    expect(router.bound().sort()).toEqual(['loser', 'winner'])
+    expect(router.transportFor('winner')).toBe(chain)
+    expect(chain.cancelled).toEqual([])
+    // The next session of the tab makes its first request: the winner and the lingering loser are its stale predecessors
+    router.bindTo('next', chain, 7)
+    expect(nameOf(await router.forCall('next', 7))).toBe('链')
+    expect(router.bound()).toEqual(['next'])
+    expect(chain.cancelled.sort()).toEqual(['链:loser', '链:winner'])
+    // Its second request is an ordinary bound call: nothing more is dropped
+    await router.forCall('next', 7)
+    expect(chain.cancelled).toHaveLength(2)
+  })
+
+  it('a page\'s old session registering anew — after a worker restart — does not cancel the provisional replacement waiting for it (eleventh pass)', async () => {
+    const chain = fakeTransport('链')
+    const router = routerOver(async () => chain)
+    // A fresh worker: the page's active session S has no entry. Its restart N is bound provisionally first
+    router.bindTo('N', chain, 7)
+    // Then S sends a request (text) and an OCR bind before N's status has reached the page
+    expect(nameOf(await router.forCall('S', 7))).toBe('链')
+    router.bind('S', 7)
+    expect(router.bound().sort()).toEqual(['N', 'S'])
+    expect(chain.cancelled).toEqual([])
+    // N starts and makes its first request: now S is the one superseded
+    expect(nameOf(await router.forCall('N', 7))).toBe('链')
+    expect(router.bound()).toEqual(['N'])
+    expect(chain.cancelled).toEqual(['链:S'])
+  })
+
+  it('a provisional binding to a chain since retired is let go, and the first request still drops the tab\'s earlier session before binding the chain in force (ninth pass)', async () => {
+    const old = fakeTransport('旧')
+    const fresh = fakeTransport('新')
+    let current = old
+    const router = routerOver(async () => current)
+    // The tab's earlier session made its requests on the old chain; the new document's session is bound to it provisionally
+    router.bind('earlier', 7)
+    await router.forCall('earlier', 7)
+    router.bindTo('s1', old, 7)
+    old.retire?.()
+    current = fresh
+    expect(nameOf(await router.forCall('s1', 7))).toBe('新')
+    expect(router.transportFor('s1')).toBe(fresh)
+    expect(router.bound()).toEqual(['s1'])
+    expect(old.cancelled).toContain('旧:earlier')
+  })
+
+  it('dropAndRebindAll keeps a provisional session provisional: its first request still drops the tab\'s earlier session', async () => {
+    const old = fakeTransport('旧')
+    const fresh = fakeTransport('新')
+    let current = old
+    const router = routerOver(async () => current, { retireOthers: () => { old.retire?.(); return 0 } })
+    router.bind('earlier', 7)
+    await router.forCall('earlier', 7)
+    router.bindTo('s1', old, 7)
+    current = fresh
+    await router.dropAndRebindAll()
+    expect(router.bound().sort()).toEqual(['earlier', 's1'])
+    expect(nameOf(await router.forCall('s1', 7))).toBe('新')
+    expect(router.bound()).toEqual(['s1'])
+  })
+
+  it('a provisional binding to a chain since retired is not used: the first request binds the chain in force', async () => {
+    const old = fakeTransport('旧')
+    const fresh = fakeTransport('新')
+    const router = routerOver(async () => fresh)
+    router.bindTo('s1', old, 7)
+    old.retire?.()
+    expect(nameOf(await router.forCall('s1', 7))).toBe('新')
+    expect(router.transportFor('s1')).toBe(fresh)
   })
 
   it('bind：只记 tab 关联、同步返回、不建链；之后 dropTab 撤得到，forCall 再填链并保留 tab', async () => {

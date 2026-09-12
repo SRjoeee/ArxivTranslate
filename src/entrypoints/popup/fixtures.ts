@@ -17,6 +17,7 @@ function page(over: Partial<PageStatus['progress']> = {}, extra: Partial<PageSta
     mode: 'stack',
     preference: 'stack',
     progress: { state, total: 120, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0, ...over },
+    epoch: 'doc#1',
     ...(state === 'on' ? { running: { provider: 'microsoft', target: 'cmn', engine: 'microsoft', revision: 'r1' } } : {}),
     ...extra,
   }
@@ -25,6 +26,8 @@ function page(over: Partial<PageStatus['progress']> = {}, extra: Partial<PageSta
 function provider(over: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
     providerId: 'microsoft',
+    chosen: 'microsoft',
+    revision: 'r1',
     available: true,
     maxBatchChars: 4000,
     maxBatchItems: 20,
@@ -34,14 +37,15 @@ function provider(over: Partial<ProviderStatus> = {}): ProviderStatus {
     engine: { id: 'microsoft', displayName: 'Microsoft' },
     chain: ['microsoft', 'google-web'],
     demotions: [],
-    revision: 'r1',
     ...over,
   }
 }
-const llmProvider = (over: Partial<ProviderStatus> = {}) => provider({ providerId: SVC.id, model: SVC.model, renderPath: 'tags', engine: { id: SVC.id, displayName: SVC.name }, chain: [SVC.id, 'microsoft', 'google-web'], ...over })
+const llmProvider = (over: Partial<ProviderStatus> = {}) => provider({ providerId: SVC.id, chosen: SVC.id, model: SVC.model, renderPath: 'tags', engine: { id: SVC.id, displayName: SVC.name }, chain: [SVC.id, 'microsoft', 'google-web'], ...over })
 
 const base: PopupInput = {
   page: page(), provider: provider(), config, pack: 'available', helper: { state: 'ready', version: '1.0' }, platform: 'mac', menu: null, shortcut: '⌥T', extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+  // The saved settings' digest equals the running page's revision: nothing is behind unless a fixture says so
+  savedRevision: 'r1',
 }
 
 export const POPUP_FIXTURES: { id: string; name: string; when: string; input: PopupInput }[] = [
@@ -58,7 +62,7 @@ export const POPUP_FIXTURES: { id: string; name: string; when: string; input: Po
   { id: 'P10', name: 'Chrome 翻译语言包下载中', when: 'chrome ∧ pack = downloading', input: { ...base, config: { ...config, provider: 'chrome-builtin' }, provider: provider({ providerId: 'chrome-builtin', available: false, fallback: { id: 'google-web', displayName: 'Google' }, engine: { id: 'chrome-builtin', displayName: 'Chrome' } }), pack: 'downloading' } },
   { id: 'P11', name: '图片翻译已暂停', when: 'images.fatal', input: { ...base, config: llm, provider: llmProvider(), page: page({ state: 'on', requested: 20, done: 12 }, { running: { provider: SVC.id, target: 'cmn', engine: SVC.id, revision: 'r1' }, images: { total: 6, requested: 2, done: 0, failed: 0, fatal: 'auth: User not found.' } }) } },
   { id: 'P12', name: '窄窗口按上下显示', when: 'mode !== preference', input: { ...base, page: page({ state: 'on', requested: 10, done: 10 }, { preference: 'side', mode: 'stack' }) } },
-  { id: 'P13', name: '改选了跑不起来的服务', when: 'on ∧ running ≠ settings ∧ !runnable', input: { ...base, config: llmNoKey, provider: llmProvider({ available: false, fallback: { id: 'microsoft', displayName: 'Microsoft' } }), page: page({ state: 'on', requested: 31, done: 24 }) } },
+  { id: 'P13', name: '改选了跑不起来的服务', when: 'on ∧ running.revision ≠ savedRevision ∧ !runnable', input: { ...base, savedRevision: 'r2', config: llmNoKey, provider: llmProvider({ available: false, fallback: { id: 'microsoft', displayName: 'Microsoft' } }), page: page({ state: 'on', requested: 31, done: 24 }) } },
   { id: 'P14', name: '识别助手未安装', when: 'images.enabled ∧ helper = not-installed', input: { ...base, helper: { state: 'not-installed', reason: 'host not registered' } } },
   { id: 'P14a', name: '识别助手待授权', when: 'images.enabled ∧ helper = permission-missing', input: { ...base, helper: { state: 'permission-missing' } } },
   { id: 'P14b', name: '识别助手授权生效中', when: 'images.enabled ∧ helper = restarting', input: { ...base, helper: { state: 'restarting' } } },
