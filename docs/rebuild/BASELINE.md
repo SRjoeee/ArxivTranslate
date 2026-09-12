@@ -17,7 +17,7 @@ Recorded 2026-09-12 on the untouched baseline so that every later "faster", "sma
 |---|---|---|---|
 | `pnpm e2e` | **67/67** | 181 s | whole-page translation with Google and Microsoft, batching and concurrency caps, cache hits on refresh, restore, tab close / navigation cancel, wrong-key fallback on and off, hover highlight, only-mode peek and anchors, SVG overlays, options persistence, UI language switch, helper onboarding (macOS) |
 | `pnpm e2e:layout` | **23/23** | 80 s | side-mode layout contract at 1440 / 2000 px, list markers, flex figures, footnotes, resizebox tables, mode round-trip, observer thresholds, **long-task and prep budgets** |
-| `pnpm e2e:a11y` | **5/5** | ? s | A/B axe: the extension introduces no finding the host page did not already have, in all three modes |
+| `pnpm e2e:a11y` | **5/5** | 31 s | A/B axe: the extension introduces no finding the host page did not already have, in all three modes |
 | `pnpm e2e:local-endpoint` | **5/5** | 5 s | an http endpoint without CORS headers translates a whole page from the background (#42): zero preflights, zero page-origin requests |
 | `pnpm e2e:image` | not run this pass | — | needs macOS and an installed helper; prints SKIP otherwise |
 | `pnpm e2e:placeholders` | not run | — | a live-engine survival probe, not a regression suite |
