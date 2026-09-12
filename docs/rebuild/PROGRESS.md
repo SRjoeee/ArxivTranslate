@@ -4,9 +4,14 @@ Checkpoint log for the rebuild toward V1.0 (mandate: `docs/rebuild/CHARTER.md`; 
 
 ## Open questions
 
-- Verify before the manifest change ships (ADR-0002 §4): Chrome keeps a permission moved from `permissions` to `optional_permissions` in the granted set across an update.
 - `pnpm e2e:image` is not deterministic: `stack：6 张图都进入并处理完` fails run to run on the baseline as well (`5/5 of 6` or `1/1 of 6`, 0 failed — images not requested, not refused), despite the scroll-per-image pass `image.mjs:88` added for exactly this. Look at the viewport scheduling of bitmaps when the image run is next touched (P1).
 - Since ~17:58 on 2026-09-12 the `e2e` check `导航离开后 background 不再发新请求` fails on every build **including the untouched baseline** (`530 个块待译，只有 3 发（47 段）…这条断言无效`): its precondition `fillQueue` sees a third request at the stalled endpoint against google-web's `maxConcurrent: 2` and no new request body after a slot is released; the property itself holds. Eleven builds of `rebuild/cancellation` passed it earlier that day. Something outside the repository changed (the live page, the endpoint or the browser); find out before reading the check as a signal again. **Update 2026-09-13 00:34**: a diagnostic copy of the suite (the same tests, every arrival at the stalled endpoint logged) passed 67/67 on the final build of PR #176 — the page is unchanged (same 1 600 731 bytes as the fixture saved that morning), `scrollThrough` takes 15 s on its 530 blocks, and the third request arrived only after a slot was released. The failing window was 17:58–19:49; the cause is still unknown, the check is a signal again until it is not.
+
+## 2026-09-13 — one ledger for the text and image runs (ADR-0006)
+
+- Branch `rebuild/run-ledger` (PR #177), based on `rebuild/v1` in a second worktree while #176 waited for review. `core/run/ledger.ts` (`createRunLedger`) owns what the text run and the image run kept twice — outcomes and failure reasons, the counts behind their progress, the permanent-error record with the scheduler disconnect, the stopped flag and the liveness question, the intake skeleton, the lazy scheduler, the failure list; `pipeline/run.ts` and `image/run.ts` keep what is their own (rendering, batching, retries; parking, the content-side pool) and their own consequence of a permanent error and of stop. Wire shapes unchanged; the forty-seven run tests untouched, six ledger tests added.
+- Gate green by exit code (1 570 tests, 1.25 MB); `e2e` 67/67, `e2e:image` 13/13 on the build; local Codex adversarial review: approve on the first pass.
+- Follow-up named in the ADR, not done here: the session's two idle traces share one busy → idle detection.
 
 ## 2026-09-12 — one registry of cancelled scopes, and the chain bookkeeping behind it (ADR-0005)
 
