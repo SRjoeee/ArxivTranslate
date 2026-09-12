@@ -26,6 +26,7 @@ import { isPermanentErrorKind, type TranslateContext } from '@/providers/types'
 import type { PageStatus } from '@/shared/messages'
 import type { HelperStatus, ImageProgress, OcrCall, OcrMessageResponse } from '@/shared/ocr'
 import { S } from '@/ui/strings'
+import { createIdleTrace } from './idle-trace'
 
 export interface SessionDeps {
   doc: Document
@@ -212,8 +213,9 @@ export function createPageSession(deps: SessionDeps): PageSession {
     current = { session, config, context, renderPath: status.renderPath }
     prep.reset() // 新会话：镜像允许再跑一次、量宽缓存清空、栏宽重读
     enterSide(modes.effective())
-    const t1 = now()
-    let wasBusy = false
+    // Each busy → idle transition is one line the e2e suites read (idle-trace.ts)
+    const traceIdle = createIdleTrace<Progress>({ now, trace }, p => p.inFlight > 0, (p, ms) =>
+      `session idle: ${p.done}/${p.requested} requested of ${p.total}, ${p.failed} failed, ${p.cached} cached, ${ms} ms${p.fatal ? `, fatal: ${p.fatal}` : ''}`)
     run = startTranslation({
       doc,
       blocks,
@@ -254,15 +256,10 @@ export function createPageSession(deps: SessionDeps): PageSession {
         }).catch(() => undefined)
       },
       onProgress: p => {
-        // 会话已结束（恢复原文 / 重开）：旧运行的回调一律忽略
+        // The session has ended (restore / restart): an old run's callbacks are ignored
         if (!alive()) return
         progress = p
-        // 翻译是"开着"的状态，没有终点；每次从忙到闲打一条日志，e2e 与手测靠它
-        const busy = p.inFlight > 0
-        if (wasBusy && !busy) {
-          trace(`session idle: ${p.done}/${p.requested} requested of ${p.total}, ${p.failed} failed, ${p.cached} cached, ${Math.round(now() - t1)} ms${p.fatal ? `, fatal: ${p.fatal}` : ''}`)
-        }
-        wasBusy = busy
+        traceIdle(p)
       },
     })
     run.ready.catch(e => console.error('[axt] translation crashed', e))
@@ -304,8 +301,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
      *（Codex 在 #134 指出）。位图目标先停在 parked 里，探测回来再放。
      */
     let helperReady = false
-    const t1 = now()
-    let wasBusy = false
+    const traceIdle = createIdleTrace<ImageProgress>({ now, trace }, p => p.requested - p.done - p.failed > 0, (p, ms) => `images idle: ${p.done}/${p.requested} of ${p.total}, ${p.failed} failed, ${ms} ms`)
     images = startImageTranslation({
       renderPath,
       doc,
@@ -324,9 +320,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       onProgress: p => {
         if (!alive()) return
         imageProgress = p
-        const busy = p.requested - p.done - p.failed > 0
-        if (wasBusy && !busy) trace(`images idle: ${p.done}/${p.requested} of ${p.total}, ${p.failed} failed, ${Math.round(now() - t1)} ms`)
-        wasBusy = busy
+        traceIdle(p)
       },
       // 叠加层插好了：side 模式下所在插图要拆两份（§7.2），交给整理层
       onRendered: rendered => {
