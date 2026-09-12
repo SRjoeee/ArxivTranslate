@@ -2,10 +2,11 @@
 // 译文到达后被真译文替换——renderText / renderTable 开头的 clearTranslation 会删掉同 data-axt-for 的兄弟。
 // 与 §7.1 一致：它只是原块的下一个兄弟，原节点不动。
 import type { Block, TextBlock } from '@/core/extractor'
-import { FOR_ATTR, INLINE_ATTR, clearTranslation, setState, shouldInline, translationClass, translationShell } from './index'
+import { FOR_ATTR, INLINE_ATTR, PENDING_CLASS } from './attrs'
+import { shouldInline, translationClass, translationShell } from './shell'
 import { cancelSkeletonsIn, createSkeletonInside } from './skeleton'
+import { clearTranslation, setState } from './translation'
 
-export const PENDING_CLASS = 'axt-pending'
 
 function pendingOf(block: Block): Element | null {
   const next = block.el.nextElementSibling

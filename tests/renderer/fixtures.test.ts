@@ -3,8 +3,10 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks, type TableBlock, type TextBlock } from '@/core/extractor'
 import { rehydrate, serialize } from '@/core/protector'
-import { FOR_ATTR, STATE_ATTR, T_CLASS, enable, renderTable, renderText, restore } from '@/core/renderer'
-
+import { T_CLASS } from '@/core/marks'
+import { FOR_ATTR, STATE_ATTR } from '@/core/renderer/attrs'
+import { enable, restore } from '@/core/renderer/page'
+import { renderTable, renderText } from '@/core/renderer/translation'
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 
 describe('renderer × fixture：DOM 不变量', () => {

@@ -8,7 +8,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
-import { MULTI_PANEL_FLEX, SIDE_DENY, SIDE_DENY_SUBTREE, SIDE_STACK, T_CLASS, isSideContainer } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { MULTI_PANEL_FLEX, SIDE_DENY, SIDE_DENY_SUBTREE, SIDE_STACK, isSideContainer } from '@/core/renderer/side-layout'
 import { docOf } from './helpers'
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { extract, markBlocks, type TextBlock } from '@/core/extractor'
-import { SPLIT_ATTR, installAnchorFallback, renderFailed, renderPending, renderText, splitFigures } from '@/core/renderer'
+import { installAnchorFallback } from '@/core/renderer/anchors'
+import { SPLIT_ATTR } from '@/core/renderer/attrs'
+import { renderFailed } from '@/core/renderer/failed'
+import { renderPending } from '@/core/renderer/pending'
+import { splitFigures } from '@/core/renderer/split-figures'
+import { renderText } from '@/core/renderer/translation'
 import { docOf, frag } from './helpers'
 
 // happy-dom 没有布局引擎：getClientRects 一律为空，那样所有元素都"不可见"。

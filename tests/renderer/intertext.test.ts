@@ -5,7 +5,12 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks, type TextBlock } from '@/core/extractor'
 import { rehydrate, serialize } from '@/core/protector'
-import { ERROR_CLASS, FOR_ATTR, PENDING_CLASS, SPLIT_ATTR, SPLIT_CLASS, T_CLASS, renderFailed, renderPending, renderText, splitFigures } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { ERROR_CLASS, FOR_ATTR, PENDING_CLASS, SPLIT_ATTR, SPLIT_CLASS } from '@/core/renderer/attrs'
+import { renderFailed } from '@/core/renderer/failed'
+import { renderPending } from '@/core/renderer/pending'
+import { splitFigures } from '@/core/renderer/split-figures'
+import { renderText } from '@/core/renderer/translation'
 import { docOf, frag } from './helpers'
 
 const GROUP = `<table class="ltx_equationgroup ltx_eqn_table" id="E1"><tbody>

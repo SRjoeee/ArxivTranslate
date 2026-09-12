@@ -1,9 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import {
-  MAX_ANIMATED_SKELETONS, SKELETON_CLASS, SKELETON_LINE_CLASS, activeSkeletonAnimations, cancelSkeletonAnimation,
-  cancelSkeletonsIn, createSkeleton, createSkeletonInside, skeletonLines,
-} from '@/core/renderer/skeleton'
-
+import { MAX_ANIMATED_SKELETONS, SKELETON_CLASS, SKELETON_LINE_CLASS, activeSkeletonAnimations, cancelSkeletonAnimation, cancelSkeletonsIn, createSkeleton, createSkeletonInside, skeletonLines } from '@/core/renderer/skeleton'
 // 骨架屏保留了 Read Frog 圆环的性能做法：WAAPI、最多 60 个在动、句柄可取消（§7.6）。
 // happy-dom 是否有 Element.animate 决定走哪个分支
 const canAnimate = typeof HTMLElement.prototype.animate === 'function'

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { extract, type TextBlock } from '@/core/extractor'
-import { FOR_ATTR, IDENTITY_ATTR, INLINE_ATTR, STATE_ATTR, T_CLASS, renderText, setState, shouldInline } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { FOR_ATTR, IDENTITY_ATTR, INLINE_ATTR, STATE_ATTR } from '@/core/renderer/attrs'
+import { shouldInline } from '@/core/renderer/shell'
+import { renderText, setState } from '@/core/renderer/translation'
 import { docOf, frag } from './helpers'
 
 describe('renderText', () => {

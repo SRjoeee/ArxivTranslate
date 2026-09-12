@@ -11,11 +11,8 @@
 // 与 §7.1 一致：不改 DOM，只挂事件；side / stack 下目标本来就可见，这里一次都不介入。
 import type { Block } from '@/core/extractor'
 import { ID_ATTR } from '@/core/extractor'
-import { FOR_ATTR, T_CLASS } from './index'
-import { MIRROR_CLASS } from './mirror'
-import { SPLIT_ATTR, SPLIT_CLASS, SPLIT_OF_ATTR } from './split-figures'
-import { PENDING_CLASS } from './pending'
-import { ERROR_CLASS } from './failed'
+import { T_CLASS } from '@/core/marks'
+import { ERROR_CLASS, FOR_ATTR, MIRROR_CLASS, PENDING_CLASS, SPLIT_ATTR, SPLIT_CLASS, SPLIT_OF_ATTR } from './attrs'
 
 /** 有布局盒才谈得上滚过去；`display: none` 的元素 `getClientRects()` 是空的 */
 function visible(el: Element): boolean {

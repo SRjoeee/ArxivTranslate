@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { T_CLASS, alignPairMargins, clearPairMargins, readPairMargins, writePairMargins } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { alignPairMargins, clearPairMargins, readPairMargins, writePairMargins } from '@/core/renderer/pair-margins'
 import { docOf } from './helpers'
 
 /** 站点里形如 ar5iv `.ltx_role_affiliation + .ltx_role_affiliation` 的相邻兄弟边距规则 */

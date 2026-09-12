@@ -2,6 +2,7 @@ import { type RenderPath, wireFormatOf } from '@/cache/key'
 import { type Look, lookOf } from '@/config/appearance'
 import { DEFAULT_CONFIG, type Config } from '@/config/schema'
 import { getConfig, setConfig, watchConfig } from '@/config/storage'
+import { AUTO_TRANSLATE_HASH } from '@/core/abstract/link'
 import { extract, paperContext, type Block } from '@/core/extractor'
 import { collectImageTargets, startImageTranslation, type ImageRun } from '@/core/image'
 import { statsOf } from '@/core/extractor/stats'
@@ -462,6 +463,6 @@ export default defineContentScript({
     })
 
     if (location.hash === '#axt-debug') enableDebug(blocks)
-    if (location.hash === '#axt-translate') void start()
+    if (location.hash === AUTO_TRANSLATE_HASH) void start()
   },
 })

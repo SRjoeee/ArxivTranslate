@@ -3,7 +3,10 @@
 // 而且改它们会违反 §7.1 的 DOM 不变量。真正属于我们的是这里守的几条。
 import { describe, expect, it } from 'vitest'
 import { extract, type TextBlock } from '@/core/extractor'
-import { LANG_ATTR, T_CLASS, enable, renderText, restore } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { LANG_ATTR } from '@/core/renderer/attrs'
+import { enable, restore } from '@/core/renderer/page'
+import { renderText } from '@/core/renderer/translation'
 import { renderPending } from '@/core/renderer/pending'
 import { docOf, frag } from './helpers'
 
@@ -51,7 +54,7 @@ describe('纯装饰的副本对屏幕阅读器隐藏', () => {
   })
 
   it('镜像带 aria-hidden：它是右栏的视觉配平副本，内容与左栏完全相同', async () => {
-    const { createMirrors } = await import('@/core/renderer')
+    const { createMirrors } = await import('@/core/renderer/mirror')
     // 一个已翻译的段落让容器成为镜像容器，一个公式作为镜像目标
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" data-axt-id="p1">A.</p><p class="ltx_p axt-t" data-axt-for="p1">甲。</p><table class="ltx_equation"><tbody><tr><td>x</td></tr></tbody></table></div>')
     const made = createMirrors(doc)

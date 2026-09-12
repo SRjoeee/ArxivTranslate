@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { extract } from '@/core/extractor'
 import { startTranslation, type Transport } from '@/core/pipeline/run'
-import { T_CLASS, restore } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { restore } from '@/core/renderer/page'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 
 describe('pipeline × fixture', () => {

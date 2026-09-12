@@ -9,11 +9,10 @@
 // 所以模式切换仍然只改 <html> 上的一个属性。
 import { DOCUMENT_ROOT, MARGIN_ASIDE } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
-import { INJECTED_SELECTOR, isInjected, stripInjected } from '@/core/marks'
-import { FOR_ATTR, T_CLASS } from './index'
+import { INJECTED_SELECTOR, T_CLASS, isInjected, stripInjected } from '@/core/marks'
+import { FOR_ATTR, MIRROR_CLASS } from './attrs'
 import { MIRROR_CONTAINER, SIDE_STACK, isMirrorContainer } from './side-layout'
 
-export const MIRROR_CLASS = 'axt-mirror'
 /** 镜像用的 data-axt-for 前缀，避免与真实块 id 撞车 */
 const MIRROR_ID_PREFIX = 'mirror:'
 /** 没有文字也没有这些内容的元素不值得镜像（纯装饰、空白） */

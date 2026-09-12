@@ -1,5 +1,6 @@
 // 论文级上下文（DESIGN §8.2）：标题与摘要，页面加载时抽一次（那时 DOM 里还没有译文；翻译过再抽会把上一轮的译文也算进摘要），每批 prompt 都带上。
 // Read Frog 是多调一次 LLM 给网页生成摘要；论文自带 abstract，直接用。
+import { AXT_CLASS_PREFIX } from '@/core/marks'
 import { ABSTRACT, DOCUMENT_ROOT, DOCUMENT_TITLE, classify } from '@/core/rules/latexml'
 
 /** 摘要截断长度：每批都要带，太长就是白花 token */
@@ -21,7 +22,7 @@ const HIDDEN_MATH_META = new Set(['annotation', 'annotation-xml'])
  */
 function excluded(el: Element): boolean {
   if (HIDDEN_MATH_META.has(el.localName)) return true
-  if (Array.from(el.classList).some(c => c.startsWith('axt-'))) return true
+  if (Array.from(el.classList).some(c => c.startsWith(AXT_CLASS_PREFIX))) return true
   return classify(el)?.kind === 'skip'
 }
 

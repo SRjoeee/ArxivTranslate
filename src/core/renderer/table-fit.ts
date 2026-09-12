@@ -16,7 +16,8 @@
 // 再只写有变化的那几个；量过的表按「栏宽 + 译文节点」缓存——每条渲染路径（renderTable / renderPending /
 // 重试）都会换掉那个兄弟节点，镜像整个会话只造一次，所以**节点身份就是内容版本**，不必哈希。
 import { DOCUMENT_ROOT, EQUATION_PAD_CELL, EQUATION_TABLE, FIT_TARGETS } from '@/core/rules/latexml'
-import { FOR_ATTR, T_CLASS } from './index'
+import { T_CLASS } from '@/core/marks'
+import { FOR_ATTR } from './attrs'
 
 /** 原节点只允许追加 data-axt-*（§7.1），所以比例用属性而不是内联样式表达 */
 export const FIT_ATTR = 'data-axt-fit'

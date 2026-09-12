@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks, type TableBlock } from '@/core/extractor'
-import { FOR_ATTR, STATE_ATTR, T_CLASS, renderTable, setState } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { FOR_ATTR, STATE_ATTR } from '@/core/renderer/attrs'
+import { renderTable, setState } from '@/core/renderer/translation'
 import { TABLE_RULES } from '@/core/rules/latexml'
 import { docOf, frag } from './helpers'
 

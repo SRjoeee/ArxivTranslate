@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { extract, type TableBlock, type TextBlock } from '@/core/extractor'
-import {
-  FOR_ATTR, INLINE_ATTR, PENDING_CLASS, SKELETON_CLASS, T_CLASS, clearAllPending, clearPending, clearTranslation, renderPending, renderText,
-  restore,
-} from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { FOR_ATTR, INLINE_ATTR, PENDING_CLASS } from '@/core/renderer/attrs'
+import { restore } from '@/core/renderer/page'
+import { clearAllPending, clearPending, renderPending } from '@/core/renderer/pending'
+import { SKELETON_CLASS } from '@/core/renderer/skeleton'
+import { clearTranslation, renderText } from '@/core/renderer/translation'
 import { docOf, frag } from './helpers'
 
 const page = '<h2 class="ltx_title ltx_title_section" id="s1">Intro</h2><p class="ltx_p" id="p1">Text.</p>'
