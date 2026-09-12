@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { createChainHolder } from '@/entrypoints/background/chain'
 import { createConfigOffers, providerStatus, statusInForce } from '@/entrypoints/background/provider-status'
@@ -91,23 +91,56 @@ describe('providerStatus', () => {
 })
 
 describe('statusInForce', () => {
+  /** A holder whose chain in force the test replaces; `replace` fires the signal a real holder fires when a build starts */
+  function holderOf(first: TranslationTransport) {
+    let inForce = first
+    let asked = 0
+    let fire: () => void = () => undefined
+    let signal = new Promise<void>(resolve => { fire = resolve })
+    return {
+      chain: { current: async () => { asked++; return inForce }, replaced: () => signal },
+      replace: (next: TranslationTransport) => { inForce = next; const done = fire; signal = new Promise<void>(resolve => { fire = resolve }); done() },
+      asked: () => asked,
+    }
+  }
+  const never = (name: string): TranslationTransport => ({ ...chainOf(name), status: () => new Promise<never>(() => {}) })
+
   it('a chain replaced while its probes answer is not the answer: the status describes the chain in force afterwards (S2 review, third pass)', async () => {
     let release: () => void = () => undefined
     const slow: TranslationTransport = { ...chainOf('old'), status: async () => { await new Promise<void>(resolve => { release = resolve }); return { ...(await chainOf('old').status()) } } }
-    const fresh = chainOf('new')
-    let inForce = slow
-    const status = statusInForce({ current: async () => inForce })
+    const h = holderOf(slow)
+    const status = statusInForce(h.chain)
     await new Promise(resolve => setTimeout(resolve, 0))
-    inForce = fresh // a save landed while the old chain's probes were out
+    h.replace(chainOf('new')) // a save landed while the old chain's probes were out
     release()
     expect((await status).providerId).toBe('new')
   })
 
+  it('a probe that never settles on a chain that was replaced is not waited for: the replacement answers (fourth pass)', async () => {
+    const h = holderOf(never('stalled'))
+    const status = statusInForce(h.chain)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    h.replace(chainOf('healthy'))
+    expect((await status).providerId).toBe('healthy')
+  })
+
+  it('a probe that never settles with nothing replacing the chain rejects at the deadline, with no obsolete answer', async () => {
+    vi.useFakeTimers()
+    try {
+      const h = holderOf(never('stalled'))
+      const status = statusInForce(h.chain, 1_000)
+      const outcome = expect(status).rejects.toThrow(/did not settle/)
+      await vi.advanceTimersByTimeAsync(1_000)
+      await outcome
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('answers at once when nothing replaced the chain', async () => {
-    const chain = chainOf('only')
-    let asked = 0
-    const status = await statusInForce({ current: async () => { asked++; return chain } })
+    const h = holderOf(chainOf('only'))
+    const status = await statusInForce(h.chain)
     expect(status.providerId).toBe('only')
-    expect(asked).toBe(2)
+    expect(h.asked()).toBe(2)
   })
 })

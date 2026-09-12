@@ -44,6 +44,11 @@ export interface ChainHolder {
   /** Rebuild and make the result the chain in force: the reader's explicit actions (`axt:engine-ready`) */
   activate(config?: Config): Promise<Built>
   /**
+   * Resolves when the next build starts — the chain in force is about to change. What awaits a chain's answer races
+   * it against this, so an answer that will never come from a chain nobody wants any more does not hold anyone up
+   */
+  replaced(): Promise<void>
+  /**
    * A configuration change. Only the fields that shape the chain rebuild it: the content script writes the
    * configuration on every display-mode switch, usually while a page is translating, and an indiscriminate
    * rebuild would clear the token bucket and the hand-over records with it (`chainConfigChanged` has the table).
@@ -118,6 +123,7 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
   }
   return {
     activate,
+    replaced: () => replaced.promise,
     async current() {
       for (;;) {
         const promise = active ?? activate()

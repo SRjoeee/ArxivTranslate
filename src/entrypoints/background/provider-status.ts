@@ -26,22 +26,37 @@ export function createConfigOffers(deps: { load: () => Promise<Config>; chain: P
   }
 }
 
+/** How long the status of the chain in force may take altogether; a probe that stalls for longer answers nobody */
+export const STATUS_DEADLINE_MS = 5_000
+
 /**
  * The status of the chain in force — still in force once the status has come back. `status()` waits for the
  * engines' availability probes, and a configuration change can replace the chain meanwhile; the answer would then
  * describe a superseded chain, and a decision made on it would be the previous settings' (the local review of
- * INVENTORY S2, third pass). Re-asked until the chain that answered is the one in force
+ * INVENTORY S2, third pass). Re-asked until the chain that answered is the one in force. A probe is not waited for
+ * past its chain's replacement — a stalled native probe on a chain nobody wants any more must not hold the toggle
+ * (fourth pass) — nor past the deadline, which rejects: an obsolete status is not an answer, and the callers treat
+ * "unknown" as they did before there was a status to ask
  */
-export async function statusInForce(chain: Pick<ChainHolder, 'current'>): Promise<ProviderStatus> {
-  for (;;) {
-    const transport = await chain.current()
-    const status = await transport.status()
-    if ((await chain.current()) === transport) return status
+export async function statusInForce(chain: Pick<ChainHolder, 'current' | 'replaced'>, deadlineMs = STATUS_DEADLINE_MS): Promise<ProviderStatus> {
+  let expire: ReturnType<typeof setTimeout> | undefined
+  const deadline = new Promise<never>((_, reject) => {
+    expire = setTimeout(() => reject(new Error(`the chain's status did not settle within ${deadlineMs} ms`)), deadlineMs)
+  })
+  try {
+    for (;;) {
+      const transport = await Promise.race([chain.current(), deadline])
+      const status = await Promise.race([transport.status(), chain.replaced().then(() => null), deadline])
+      if (status === null) continue
+      if ((await Promise.race([chain.current(), deadline])) === transport) return status
+    }
+  } finally {
+    clearTimeout(expire)
   }
 }
 
 export interface ProviderStatusDeps {
-  chain: Pick<ChainHolder, 'current'>
+  chain: Pick<ChainHolder, 'current' | 'replaced'>
   router: Pick<SessionRouter, 'transportFor'>
   offers: ConfigOffers
 }
