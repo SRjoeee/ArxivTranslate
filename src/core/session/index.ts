@@ -230,11 +230,18 @@ export function createPageSession(deps: SessionDeps): PageSession {
     } catch (e) {
       return { started: false, reason: `${S.page.backendSilent}：${e instanceof Error ? e.message : String(e)}` }
     }
+    // The status request bound this session to a chain provisionally (provider-status.ts). A start refused from here
+    // on never makes the request that would settle that binding, and the abandoned scope would keep its chain and
+    // engines alive until the tab's next session took over (Codex on #184): a refusal releases it
+    const release = (reason: string): StartResult => {
+      void backend.cancel(session)
+      return { started: false, reason }
+    }
     // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上（§8.5）
-    if (!status.available && !status.fallback) return { started: false, reason: S.page.noService }
+    if (!status.available && !status.fallback) return release(S.page.noService)
     // The reader may have restored the page while the two reads above were in flight
-    if (from !== undefined && active !== from) return { started: false, reason: S.page.sessionOver }
-    if (epoch !== undefined && epoch !== epochNow()) return { started: false, reason: S.page.sessionOver }
+    if (from !== undefined && active !== from) return release(S.page.sessionOver)
+    if (epoch !== undefined && epoch !== epochNow()) return release(S.page.sessionOver)
     trace(`start: ready in ${Math.round(now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
     modes?.stop()

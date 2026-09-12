@@ -235,6 +235,27 @@ describe('page session', () => {
     expect((await h.session.status()).progress.state).toBe('on')
   })
 
+  it('a start refused after its status was asked releases the session the status bound provisionally (Codex on #184)', async () => {
+    // No usable service: the chain answered, so the scope is bound over there; the refusal cancels it
+    const none = harness({ status: () => providerStatus({ available: false }) })
+    live = none.session
+    expect(await none.session.start()).toEqual({ started: false, reason: S.page.noService })
+    expect(none.statusCalls).toHaveLength(1)
+    expect(none.cancelled).toEqual([none.statusCalls[0]])
+    live.restore()
+    // The page moved while the status was on its way (an epoch decided before): refused, and released just the same
+    const moved = harness({ holdStatusAt: 2 })
+    live = moved.session
+    await moved.session.start()
+    const first = (await moved.session.status()).epoch!
+    const restart = moved.session.start(undefined, true, undefined, first)
+    await settle()
+    moved.session.restore()
+    moved.releaseStatus()
+    expect(await restart).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(moved.cancelled).toContain(moved.statusCalls[1])
+  })
+
   it('overlapping starts are one start: a second click while the first is asking its status mints no second session (S2 review, tenth pass)', async () => {
     const h = harness({ holdStatusAt: 1 })
     live = h.session
@@ -331,7 +352,10 @@ describe('page session', () => {
     expect((await h.session.status()).session).toBeNull()
     expect(document.documentElement.hasAttribute(ON_ATTR)).toBe(false)
     expect(h.calls.length).toBe(before)
-    expect(h.cancelled).toEqual([id])
+    // The restore cancelled the session; the refused restart released the session its status had bound provisionally
+    expect(h.cancelled[0]).toBe(id)
+    expect(h.cancelled).toHaveLength(2)
+    expect(h.cancelled[1]).toBe(h.statusCalls.at(-1))
   })
 
   it('every request — text, title, OCR and image labels — carries the active session id, and a restart moves them to the new one', async () => {
