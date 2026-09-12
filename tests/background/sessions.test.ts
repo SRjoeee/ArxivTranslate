@@ -4,13 +4,16 @@ import { createSessionRouter, type SessionRouterDeps } from '@/entrypoints/backg
 import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import type { TranslationTransport } from '@/providers/transport'
 
-/** A transport that only keeps books: which chain it is, and which scopes it was asked to drain */
+/** A transport that only keeps books: which chain it is, which scopes it was asked to drain, whether it was retired */
 function fakeTransport(name: string, cancelled: string[] = []): TranslationTransport & { name: string; cancelled: string[] } {
+  let retired = false
   return {
     name,
     cancelled,
     translate: async () => ({ ok: true, result: { segments: [], provider: name }, cached: 0 }),
     cancel: async scope => { cancelled.push(`${name}:${scope}`); return 1 },
+    retire: () => { retired = true; cancelled.push(`${name} retired`) },
+    isRetired: () => retired,
     status: async () => ({ providerId: name, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', chain: [name], demotions: [], revision: 1, engine: { id: name, displayName: name } }),
   } as TranslationTransport & { name: string; cancelled: string[] }
 }
@@ -325,13 +328,13 @@ describe('createSessionRouter', () => {
     const second = fakeTransport('新链')
     let current = first
     const registry = new CancelledScopeRegistry()
-    const router = routerOver(async () => current, { cancelled: registry })
+    const router = routerOver(async () => current, { cancelled: registry, retireOthers: () => { for (const chain of [first, second]) if (chain !== current) chain.retire?.() } })
     await router.forCall('session-1', 1)
     await router.forCall('session-2', 2)
     current = second
     // Re-pointing alone leaves the queued and in-flight requests running on the old chain, with the deleted service's key (Codex on #157)
     await router.dropAndRebindAll()
-    expect(first.cancelled).toEqual(['旧链:session-1', '旧链:session-2'])
+    expect(first.cancelled).toEqual(['旧链 retired', '旧链:session-1', '旧链:session-2'])
     expect(nameOf(await router.forCall('session-1', 1))).toBe('新链')
     // Not marked: the sessions live on, on the new chain — only the old chain's work is gone
     expect(registry.has('session-1')).toBe(false)
@@ -510,7 +513,7 @@ describe('createSessionRouter', () => {
     let current = first
     let building = false
     const router = routerOver(async () => { const chain = current; if (chain === first && building) await held; return chain }, {
-      retireOthers: inForce => { for (const chain of [first, second]) if (chain !== inForce) chain.retire?.() },
+      retireOthers: () => { for (const chain of [first, second]) if (chain !== current) chain.retire?.() },
     })
     await router.forCall('A', 1)
     building = true
@@ -520,7 +523,6 @@ describe('createSessionRouter', () => {
     // Draining A lets B's build finish before the loop would have reached B
     first.cancel = async scope => { first.cancelled.push(`旧链:${scope}`); release(); await new Promise(resolve => setTimeout(resolve, 0)); return 1 }
     // The replaced chain is retired before any drain: a call suspended inside it is refused when it wakes
-    first.retire = () => { first.cancelled.push('旧链 retired') }
     expect(await router.dropAndRebindAll()).toBe(1)
     expect(nameOf(await pendingB)).toBe('新链')
     expect(nameOf(router.transportFor('B')!)).toBe('新链')
@@ -532,13 +534,54 @@ describe('createSessionRouter', () => {
     // the caller's build would retire the chain current() answers, and every fresh page would bind to a retired
     // chain and get nothing but aborted (the local review of ADR-0005, fifth pass). The destination is current()
     const inForce = fakeTransport('新链')
-    inForce.retire = () => { inForce.cancelled.push('新链 retired') }
-    const router = routerOver(async () => inForce, { retireOthers: current => { for (const chain of [inForce]) if (chain !== current) chain.retire?.() } })
+    // The holder spares the build in force; the router must neither drain it nor take it off its sessions
+    const router = routerOver(async () => inForce, { retireOthers: () => undefined })
     await router.forCall('s1', 1)
     expect(await router.dropAndRebindAll()).toBe(0)
     await router.rebind('s1')
     expect(nameOf(router.transportFor('s1')!)).toBe('新链')
     expect(inForce.cancelled).toEqual([])
+  })
+
+  it('dropAndRebindAll stops the deleted service before its replacement exists: retired and drained at once, the sessions bound again when it lands', async () => {
+    // A rebuild can hang in an engine probe. Waiting for it before retiring let the deleted service's chain go on
+    // serving the sessions pinned to it (the local review of ADR-0005, thirteenth pass)
+    const first = fakeTransport('旧链')
+    const second = fakeTransport('新链')
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    let current = first
+    const router = routerOver(async () => { const chain = current; if (chain === second) await held; return chain }, {
+      retireOthers: () => { for (const chain of [first, second]) if (chain !== current || chain === first) chain.retire?.() },
+    })
+    await router.forCall('s1', 1)
+    router.bind('ocr-2', 2)
+    current = second // the service on 旧链 deleted, the replacement still building
+    const moving = router.dropAndRebindAll()
+    await Promise.resolve()
+    expect(first.cancelled).toEqual(['旧链 retired', '旧链:s1']) // stopped without waiting for 新链
+    expect(router.transportFor('s1')).toBeUndefined()
+    expect(router.bound()).toEqual(['s1', 'ocr-2']) // the tab entries stay
+    release()
+    expect(await moving).toBe(1)
+    expect(nameOf(router.transportFor('s1')!)).toBe('新链')
+    expect(router.transportFor('ocr-2')).toBeUndefined() // never had a chain, not given one
+  })
+
+  it('forCall does not bind a chain retired while its build was awaited: it waits for the replacement', async () => {
+    const first = fakeTransport('旧链')
+    const second = fakeTransport('新链')
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    let current = first
+    const router = routerOver(async () => { const chain = current; if (chain === first) await held; return chain })
+    const pending = router.forCall('s1', 7)
+    await Promise.resolve()
+    first.retire!() // the service on 旧链 deleted while the build was awaited
+    current = second
+    release()
+    expect(nameOf(await pending)).toBe('新链')
+    expect(nameOf(router.transportFor('s1')!)).toBe('新链')
   })
 
   it('a navigation probe superseded by a newer session on the tab stops: it must not re-arm its stale scopes over the newer timer', async () => {

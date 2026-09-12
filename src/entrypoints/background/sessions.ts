@@ -86,12 +86,12 @@ export interface SessionRouterDeps {
    */
   stillLoading?: (tabId: number) => Promise<boolean>
   /**
-   * Retire every chain other than the one in force (ADR-0005). `dropAndRebindAll` calls it right after the
-   * sessions are moved and before anything is awaited: a chain only a connection test used has no session that
-   * leads to it, and a retired chain refuses every call that wakes or retries inside it, scoped or not.
-   * `null` when nothing is in force — the rebuild failed — and everything must be retired
+   * Retire every chain other than the build in force, or every chain while that build has not landed (ADR-0005).
+   * `dropAndRebindAll` calls it first, before anything is awaited: a chain only a connection test used has no
+   * session that leads to it, and a retired chain refuses every call that wakes or retries inside it, scoped or
+   * not. The router then takes the retired chains off their sessions and drains them
    */
-  retireOthers?: (inForce: TranslationTransport | null) => void
+  retireOthers?: () => void
 }
 
 /**
@@ -225,20 +225,25 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
         sessions.set(scope, tabId !== undefined ? { tabId } : {})
         if (stale.length > 0) await drop(stale)
       }
-      const built = await deps.current()
-      // Dropped while the chain was being built (tab closed, page restored): the drop saw no transport and had
-      // nothing to drain, and binding now would revive the session and let its requests through (Codex on #87).
-      // Do not bind; drain this chain of the scope and hand it over — the registry refuses its calls anyway
-      if (deps.cancelled.has(scope)) {
-        await built.cancel(scope)
-        return built
+      for (;;) {
+        const built = await deps.current()
+        // Dropped while the chain was being built (tab closed, page restored): the drop saw no transport and had
+        // nothing to drain, and binding now would revive the session and let its requests through (Codex on #87).
+        // Do not bind; drain this chain of the scope and hand it over — the registry refuses its calls anyway
+        if (deps.cancelled.has(scope)) {
+          await built.cancel(scope)
+          return built
+        }
+        // A rebind during the build (engine-ready: `rebind`, `dropAndRebindAll`) already chose this session's chain;
+        // the one the build returns is the chain of the moment it started, and must not overrule that choice
+        const entry = sessions.get(scope)
+        const chosen = entry?.transport && !entry.transport.isRetired?.() ? entry.transport : built
+        // Retired while the build was awaited (a service deleted, its replacement still building): nobody's chain.
+        // Wait for the replacement instead of binding it (the local review of ADR-0005, thirteenth pass)
+        if (chosen.isRetired?.()) continue
+        sessions.set(scope, { ...entry, transport: chosen, ...(tabId !== undefined ? { tabId } : {}) })
+        return chosen
       }
-      // A rebind during the build (engine-ready: `rebind`, `dropAndRebindAll`) already chose this session's chain;
-      // the one the build returns is the chain of the moment it started, and must not overrule that choice
-      const entry = sessions.get(scope)
-      const transport = entry?.transport ?? built
-      sessions.set(scope, { ...entry, transport, ...(tabId !== undefined ? { tabId } : {}) })
-      return transport
     },
     bind(scope, tabId) {
       if (sessions.has(scope) || deps.cancelled.has(scope)) return
@@ -264,47 +269,29 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       if (session) sessions.set(scope, { ...session, transport })
     },
     async dropAndRebindAll() {
-      // The destination is the chain in force **now**, not one the caller built: two engine-ready rebuilds can
-      // finish newer-first, and the configuration watcher rebuilds as well. Moving onto a stale build would put
-      // every session on it and retire the chain current() still answers — fresh pages would then bind to a
-      // retired chain and every translation would come back aborted (the local review of ADR-0005, fifth pass)
-      let transport: TranslationTransport
-      try {
-        transport = await deps.current()
-      } catch (e) {
-        // No chain to move onto — the rebuild after the deletion failed. The deleted service must stop all the
-        // same: retire every chain, take the chains off the sessions synchronously, then drain. The scope → tab
-        // entries stay, unmarked: a tab closing later must still find them to drop (image recognition queues by
-        // scope too), and their next request binds whatever chain is in force by then (the local review of
-        // ADR-0005, ninth and tenth passes)
-        deps.retireOthers?.(null)
-        const old: [string, TranslationTransport][] = []
-        for (const [scope, session] of sessions) {
-          if (!session.transport) continue
-          old.push([scope, session.transport])
-          sessions.set(scope, session.tabId !== undefined ? { tabId: session.tabId } : {})
-        }
-        for (const [scope, chain] of old) await chain.cancel(scope)
-        throw e
-      }
-      // Move every session first, synchronously, and only then drain the old chains: a forCall whose build lands
-      // while a drain below is awaited finds its session already moved and keeps that (see forCall) — moving
-      // one session per drain let it bind the chain being replaced and send its request there, while the loop
-      // then recorded the replacement over it (the local review of ADR-0005, third pass)
+      // Stopping the deleted service must not wait for its replacement: a rebuild can hang in an engine probe,
+      // fail, or be superseded (the local review of ADR-0005, fourth, fifth, ninth and thirteenth passes).
+      // 1. Before anything is awaited: the holder retires every chain but the build in force — every chain, while
+      //    that build has not landed — and the sessions on a retired chain lose it, keeping their scope → tab
+      //    entries (a tab closing later must still find them: image recognition queues by scope too)
+      deps.retireOthers?.()
       const old: [string, TranslationTransport][] = []
       for (const [scope, session] of sessions) {
-        if (session.transport && session.transport !== transport) old.push([scope, session.transport])
-        sessions.set(scope, { ...session, transport })
+        if (!session.transport?.isRetired?.()) continue
+        old.push([scope, session.transport])
+        sessions.set(scope, session.tabId !== undefined ? { tabId: session.tabId } : {})
       }
-      // Retire every other chain before any drain is awaited — the ones the sessions just left and the ones nothing
-      // leads to: a call suspended inside one of them (its cache read, outside every queue) or retrying there is
-      // refused instead of reaching the deleted service, while the scope itself lives on, on the replacement
-      // (the local review of ADR-0005, fourth and seventh passes)
-      deps.retireOthers?.(transport)
-      // Drain, do not mark: the scope stays alive on the new chain, it is only being emptied of
-      // the work that belonged to the old one
+      // 2. Drain the retired chains — do not mark: the scope stays alive, only the work on the chain it left goes.
+      //    A call suspended or retrying inside a retired chain is refused by the chain itself
       let cancelled = 0
       for (const [scope, chain] of old) cancelled += await chain.cancel(scope)
+      // 3. The replacement. A session binds it on its next request anyway (forCall); binding the ones taken off
+      //    a chain now keeps status answers and the holder's ownership current. A failed rebuild surfaces here
+      const transport = await deps.current()
+      for (const [scope] of old) {
+        const session = sessions.get(scope)
+        if (session && !session.transport) sessions.set(scope, { ...session, transport })
+      }
       return cancelled
     },
     transportFor: scope => sessions.get(scope)?.transport,

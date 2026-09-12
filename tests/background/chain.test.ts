@@ -95,11 +95,35 @@ describe('createChainHolder', () => {
     const holder = createChainHolder({ owned: () => false, load: async config => ({ config: config ?? DEFAULT_CONFIG, transport: make(`build-${++n}`) }) })
     await holder.current()
     await holder.activate()
-    const inForce = await holder.activate()
-    holder.retireOthers(inForce.transport)
+    await holder.activate()
+    holder.retireOthers()
     expect(retired).toEqual(['build-1', 'build-2'])
-    holder.retireOthers(inForce.transport)
+    holder.retireOthers()
     expect(retired).toEqual(['build-1', 'build-2']) // forgotten once retired
+  })
+
+  it('retireOthers() while the build in force has not landed retires every build there is', async () => {
+    // A deletion whose replacement is still building: nothing may be spared, the sessions bind the replacement
+    // when it lands (the local review of ADR-0005, thirteenth pass)
+    const retired: string[] = []
+    const gates = new Map<number, () => void>()
+    let n = 0
+    const holder = createChainHolder({
+      owned: () => false,
+      load: async config => {
+        const k = ++n
+        if (k > 1) await new Promise<void>(resolve => { gates.set(k, resolve) })
+        return { config: config ?? DEFAULT_CONFIG, transport: { name: `build-${k}`, retire: () => { retired.push(`build-${k}`) } } as unknown as TranslationTransport }
+      },
+    })
+    await holder.current()
+    void holder.activate() // build 2, held
+    holder.retireOthers()
+    expect(retired).toEqual(['build-1'])
+    gates.get(2)!()
+    await holder.current()
+    holder.retireOthers()
+    expect(retired).toEqual(['build-1']) // build 2 landed and is in force: spared
   })
 
   it('a superseded build nothing uses is let go at the next current(); one with a session on it or a call inside is kept for retirement', async () => {
@@ -119,8 +143,8 @@ describe('createChainHolder', () => {
     busyOne = (await holder.activate()).transport // a connection test still inside it
     await holder.activate() // nothing on this one
     await holder.activate() // nor on this one
-    const inForce = await holder.current() // the sweep: build-3 and build-4 are let go
-    holder.retireOthers(inForce)
+    await holder.current() // the sweep: build-3 and build-4 are let go
+    holder.retireOthers()
     expect(retired).toEqual(['build-1', 'build-2'])
   })
 

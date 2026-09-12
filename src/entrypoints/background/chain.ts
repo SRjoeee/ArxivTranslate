@@ -28,12 +28,12 @@ export interface ChainHolderDeps {
 export interface ChainHolder {
   current(): Promise<TranslationTransport>
   /**
-   * Retire every build but the one in force, and forget them. A service was deleted: the sessions have just been
-   * moved onto the chain in force by the router, and every other chain — including one only a connection test
-   * used, which no session leads to — must refuse whatever wakes or retries inside it (ADR-0005). `null` when
-   * nothing is in force (the rebuild failed): then everything is retired
+   * Retire every build but the one in force, and forget them. A service was deleted: every chain other than the
+   * build in force — including one only a connection test used, which no session leads to — must refuse whatever
+   * wakes or retries inside it (ADR-0005). While the build in force has not landed (or failed), everything is
+   * retired: its sessions bind the replacement when it lands
    */
-  retireOthers(inForce: TranslationTransport | null): void
+  retireOthers(): void
   /** Rebuild and make the result the chain in force: the reader's explicit actions (`axt:engine-ready`) */
   activate(config?: Config): Promise<Built>
   /**
@@ -58,10 +58,13 @@ const defer = () => {
 
 export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
   let active: Promise<Built> | null = null
+  /** The build in force once it has landed; null while it is still building, or failed */
+  let landed: Built | null = null
   /** Fires when `active` is reassigned: a `current()` awaiting the previous build stops waiting for it */
   let replaced = defer()
   const take = (next: Promise<Built>): Promise<Built> => {
     active = next
+    landed = null
     const fired = replaced
     replaced = defer()
     fired.resolve()
@@ -91,6 +94,7 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
     const promise: Promise<Built> = deps.load(config).then(result => {
       built.add(result.transport)
       if (requested === null && generation === mine) requested = result.config
+      if (promise === active) landed = result
       return result
     })
     promise.catch(() => {
@@ -132,7 +136,8 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
       requested = next
       if (previous === null || failed || chainConfigChanged(previous, next)) take(build(next))
     },
-    retireOthers(inForce) {
+    retireOthers() {
+      const inForce = landed?.transport ?? null
       for (const transport of built) {
         if (transport === inForce) continue
         transport.retire?.()

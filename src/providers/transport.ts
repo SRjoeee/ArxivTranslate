@@ -70,6 +70,8 @@ export interface TranslationTransport {
    * replaces because a service on it is gone: the scope stays live, on the replacement (ADR-0005)
    */
   retire?(): void
+  /** Local chains only: whether retire() has been called — the router never binds a session to such a chain */
+  isRetired?(): boolean
   /**
    * Local chains only: a call is still inside the chain — suspended on its cache read, at the endpoint, in a
    * retry backoff. The chain holder keeps a superseded chain while this is true, so a deleted service's chain
@@ -205,6 +207,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     retire: () => {
       retired = true
     },
+    isRetired: () => retired,
     busy: () => inFlight > 0,
   }
 }

@@ -8,12 +8,16 @@ import type { TranslationTransport } from '@/providers/transport'
 
 // The engine-ready action acts on the chain in force, whatever became of its own rebuild (ADR-0005)
 
-const chainOf = (name: string, engines: string[], retired: string[]): TranslationTransport => ({
-  translate: async () => ({ ok: true, result: { segments: [], provider: name }, cached: 0 }),
-  cancel: async () => 0,
-  status: async () => ({ providerId: name, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', chain: engines, demotions: [], revision: 1, engine: { id: name, displayName: name } }),
-  retire: () => { retired.push(name) },
-})
+const chainOf = (name: string, engines: string[], retired: string[]): TranslationTransport => {
+  let gone = false
+  return {
+    translate: async () => ({ ok: true, result: { segments: [], provider: name }, cached: 0 }),
+    cancel: async () => 0,
+    status: async () => ({ providerId: name, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', chain: engines, demotions: [], revision: 1, engine: { id: name, displayName: name } }),
+    retire: () => { gone = true; retired.push(name) },
+    isRetired: () => gone,
+  }
+}
 
 describe('engineReady', () => {
   it('a deletion whose own rebuild fails after a newer one succeeded still moves every session and retires the old chains', async () => {
@@ -32,7 +36,7 @@ describe('engineReady', () => {
       },
     })
     const registry = new CancelledScopeRegistry()
-    const router = createSessionRouter({ current: () => holder.current(), cancelled: registry, retireOthers: inForce => holder.retireOthers(inForce) })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: registry, retireOthers: () => holder.retireOthers() })
     const old = await router.forCall('s1', 1) // on build-1
     const action = engineReady(holder, router, { id: 'svc-new', rebindAll: true }) // build-2, held
     void holder.activate() // build-3: the watcher's rebuild, finishes first
@@ -61,7 +65,7 @@ describe('engineReady', () => {
         return { config: DEFAULT_CONFIG, transport: chainOf(name, ['svc-new'], retired) }
       },
     })
-    const router = createSessionRouter({ current: () => holder.current(), cancelled: registry, retireOthers: inForce => holder.retireOthers(inForce), onDrop: scope => { drained.push(scope); return 1 } })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: registry, retireOthers: () => holder.retireOthers(), onDrop: scope => { drained.push(scope); return 1 } })
     await router.forCall('s1', 1)
     router.bind('ocr-2', 2) // an image-only session on another tab
     expect(await engineReady(holder, router, { id: 'svc-new', rebindAll: true })).toEqual({ reset: false })
@@ -74,6 +78,35 @@ describe('engineReady', () => {
     expect(drained).toEqual(['ocr-2', 's1'])
     expect(registry.has('ocr-2')).toBe(true)
     expect(registry.has('s1')).toBe(true)
+  })
+
+  it('a deletion whose replacement never settles stops the deleted service at once, with nothing else happening', async () => {
+    // No other rebuild comes to the rescue: the old chain is retired and drained before the replacement is awaited,
+    // the sessions keep their tab entries and bind the replacement if it ever lands (the local review of
+    // ADR-0005, thirteenth pass)
+    const retired: string[] = []
+    const gates = new Map<string, () => void>()
+    let n = 0
+    const holder = createChainHolder({
+      owned: transport => router.sessionsOn(transport) > 0,
+      load: async () => {
+        const name = `build-${++n}`
+        if (name !== 'build-1') await new Promise<void>(resolve => { gates.set(name, resolve) })
+        return { config: DEFAULT_CONFIG, transport: chainOf(name, ['svc-new'], retired) }
+      },
+    })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: () => holder.retireOthers() })
+    const old = await router.forCall('s1', 1)
+    const action = engineReady(holder, router, { id: 'svc-new', rebindAll: true }) // build-2: hangs
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+    expect(retired).toEqual(['build-1'])
+    expect(old.isRetired!()).toBe(true)
+    expect(router.transportFor('s1')).toBeUndefined()
+    expect(router.bound()).toEqual(['s1'])
+    gates.get('build-2')!() // it lands after all
+    expect(await action).toEqual({ reset: true })
+    expect(router.transportFor('s1')).toBeDefined()
+    expect(router.transportFor('s1')).not.toBe(old)
   })
 
   it('a deletion whose own rebuild never settles is carried out once the configuration watcher rebuilds', async () => {
@@ -91,7 +124,7 @@ describe('engineReady', () => {
         return { config: DEFAULT_CONFIG, transport: chainOf(name, ['svc-new'], retired) }
       },
     })
-    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: inForce => holder.retireOthers(inForce) })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: () => holder.retireOthers() })
     const old = await router.forCall('s1', 1)
     const action = engineReady(holder, router, { id: 'svc-new', rebindAll: true }) // build-2: never released
     holder.onConfig({ ...DEFAULT_CONFIG, targetLanguage: 'arb' }) // build-3: the watcher's rebuild
@@ -105,7 +138,7 @@ describe('engineReady', () => {
     const retired: string[] = []
     let n = 0
     const holder = createChainHolder({ owned: transport => router.sessionsOn(transport) > 0, load: async () => ({ config: DEFAULT_CONFIG, transport: chainOf(`build-${++n}`, ['google-web'], retired) }) })
-    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: inForce => holder.retireOthers(inForce) })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: () => holder.retireOthers() })
     await router.forCall('s1', 1)
     expect(await engineReady(holder, router, { id: 'chrome-builtin', scope: 's1' })).toEqual({ reset: false })
   })
@@ -114,7 +147,7 @@ describe('engineReady', () => {
     const retired: string[] = []
     let n = 0
     const holder = createChainHolder({ owned: transport => router.sessionsOn(transport) > 0, load: async () => ({ config: DEFAULT_CONFIG, transport: chainOf(`build-${++n}`, n > 1 ? ['chrome-builtin', 'google-web'] : ['google-web'], retired) }) })
-    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: inForce => holder.retireOthers(inForce) })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: () => holder.retireOthers() })
     const before = await router.forCall('s1', 1)
     await router.forCall('s2', 2)
     expect(await engineReady(holder, router, { id: 'chrome-builtin', scope: 's1' })).toEqual({ reset: true })

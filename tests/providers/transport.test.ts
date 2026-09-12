@@ -260,7 +260,7 @@ describe('createLocalTransport：翻译', () => {
         })], { cancelled: registry }),
       }),
     })
-    const router = createSessionRouter({ current: () => holder.current(), cancelled: registry, retireOthers: inForce => holder.retireOthers(inForce) })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: registry, retireOthers: () => holder.retireOthers() })
     const first = await holder.current()
     const pending = first.translate({ request: req }) // the connection test: no scope, no session
     await vi.advanceTimersByTimeAsync(300)
