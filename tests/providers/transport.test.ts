@@ -193,6 +193,36 @@ describe('createLocalTransport：翻译', () => {
     fetchSpy.mockRestore()
   })
 
+  it('retire() stops an unscoped batch still gathering: the dispatch gate, for work no scope can drain', async () => {
+    // Past its awaits and into the batch queue when the chain is retired: only the check at dispatch stands
+    // between it and the endpoint
+    vi.useFakeTimers()
+    const calls: string[] = []
+    const t = await withChain([mockProvider(async r => { calls.push('call'); return { segments: r.segments, provider: 'mock' } })], { batch: { batchDelay: 50 } })
+    const pending = t.translate({ request: req })
+    await vi.advanceTimersByTimeAsync(10)
+    t.retire!()
+    await vi.advanceTimersByTimeAsync(200)
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(calls).toEqual([])
+  })
+
+  it('retire() while an unscoped batch is in flight: its answer comes back, nothing is cached', async () => {
+    // Already at the endpoint when the chain is retired: the answer was paid for and is returned, but a retired
+    // chain writes nothing — the check before the cache write, which used to look at the scope alone
+    const writes: unknown[] = []
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    const cache: CachePort = { getMany: async keys => keys.map(() => null), putMany: async entries => { writes.push(entries) } }
+    const t = await withChain([mockProvider(async r => { await held; return { segments: r.segments, provider: 'mock' } })], { cache })
+    const pending = t.translate({ request: req, cache: { paper: '2410.00260', renderPath: 'tags' } })
+    await new Promise(resolve => setTimeout(resolve, 200)) // real timers: past the batch delay, the request is in flight
+    t.retire!()
+    release()
+    expect((await pending).ok).toBe(true)
+    expect(writes).toEqual([])
+  })
+
   it('router and chain together: a tab closed while the first chain builds leaves no request out and nothing bound (ADR-0005, second review pass)', async () => {
     // The scope's first request arrived on a fresh worker (the chain still building) and the reader closed the
     // tab before it finished: the request must come back aborted, the provider untouched, the session unbound
