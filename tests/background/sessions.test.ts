@@ -392,6 +392,22 @@ describe('createSessionRouter', () => {
     expect(chain.cancelled).toHaveLength(2)
   })
 
+  it('a page\'s old session registering anew — after a worker restart — does not cancel the provisional replacement waiting for it (eleventh pass)', async () => {
+    const chain = fakeTransport('链')
+    const router = routerOver(async () => chain)
+    // A fresh worker: the page's active session S has no entry. Its restart N is bound provisionally first
+    router.bindTo('N', chain, 7)
+    // Then S sends a request (text) and an OCR bind before N's status has reached the page
+    expect(nameOf(await router.forCall('S', 7))).toBe('链')
+    router.bind('S', 7)
+    expect(router.bound().sort()).toEqual(['N', 'S'])
+    expect(chain.cancelled).toEqual([])
+    // N starts and makes its first request: now S is the one superseded
+    expect(nameOf(await router.forCall('N', 7))).toBe('链')
+    expect(router.bound()).toEqual(['N'])
+    expect(chain.cancelled).toEqual(['链:S'])
+  })
+
   it('a provisional binding to a chain since retired is let go, and the first request still drops the tab\'s earlier session before binding the chain in force (ninth pass)', async () => {
     const old = fakeTransport('旧')
     const fresh = fakeTransport('新')

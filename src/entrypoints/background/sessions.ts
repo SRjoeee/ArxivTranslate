@@ -223,6 +223,15 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
 
   const scopesOfTab = (tabId: number): string[] =>
     [...sessions].filter(([, session]) => session.tabId === tabId).map(([scope]) => scope)
+  /**
+   * The tab's sessions a newly registering scope supersedes: not the provisional ones. A provisional entry is a
+   * replacement whose status is on its way to the page; the page's session of the moment may still send a request
+   * meanwhile — after a worker restart it has no entry here and registers anew — and must not cancel the
+   * replacement it is about to hand over to (the local review of INVENTORY S2, eleventh pass). A replacement's own
+   * first request drops everything else on the tab
+   */
+  const supersededOn = (tabId: number, by: string): string[] =>
+    [...sessions].filter(([scope, session]) => session.tabId === tabId && scope !== by && !session.provisional).map(([scope]) => scope)
 
   return {
     async forCall(scope, tabId) {
@@ -255,7 +264,7 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       if (!bound) {
         // 一个标签页同时只有一个会话：出现新 scope 说明上一轮没走 endRun（导航、刷新），把它撤掉。
         // bind 过的（bound 有值、没 transport）已经在 bind 里撤过了
-        const stale = tabId !== undefined ? scopesOfTab(tabId) : []
+        const stale = tabId !== undefined ? supersededOn(tabId, scope) : []
         // Register before the first await, as bind() does for OCR: a tab closed while the chain is being built
         // must find this scope among its sessions, or dropTab marks nothing and the continuation below binds a
         // dead scope and lets its request out — one paid batch per request suspended here, and the binding
@@ -286,7 +295,7 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
     bind(scope, tabId) {
       if (sessions.has(scope) || deps.cancelled.has(scope)) return
       if (tabId !== undefined) {
-        const stale = scopesOfTab(tabId)
+        const stale = supersededOn(tabId, scope)
         if (stale.length > 0) void drop(stale)
       }
       sessions.set(scope, tabId !== undefined ? { tabId } : {})
