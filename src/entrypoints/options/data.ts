@@ -70,11 +70,16 @@ export function useOptionsData(): OptionsData {
   }, [])
 
   useEffect(() => {
-    getConfig().then(c => {
+    // Queued on the write chain with the watcher reloads that follow: a slow first read must not land after one of
+    // them showed newer settings (the local review of S1)
+    const init = async () => {
+      const c = await getConfig()
       setLocal(c)
       setFallbackReason(configFallbackReason())
       void checkPack(c.targetLanguage)
-    })
+      return c
+    }
+    writes.current = writes.current.then(init, init)
     // A change saved elsewhere — the popup, another settings tab — shows here without a reload (INVENTORY S1). The
     // store is re-read on the same serialized chain the page's own writes use, not taken from the event: events
     // carry no order, and one for an earlier write can arrive after a later write was already shown (#182)

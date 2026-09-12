@@ -89,24 +89,40 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
    * Service availability. Re-queried after a pack download and after every config change, or the
    * translate button stays in the state it had when the popup mounted
    */
-  const loadProvider = useCallback((scope?: string | null) => {
+  /** Only the latest provider ask may publish: answers come back in any order, and a stale one would undo a newer */
+  const providerAsk = useRef(0)
+  const loadProvider = useCallback((scope?: string | null, fresh = false): Promise<void> => {
     // While a page is translating, ask **its** chain: it stays on the one it started with, so the
-    // global chain would describe someone else's hand-overs (Codex on #157)
-    sendMessage({ type: 'axt:provider-status', ...(scope ? { scope } : {}) }).then(setProvider).catch(() => setProvider(null))
+    // global chain would describe someone else's hand-overs (Codex on #157). `fresh` is the barrier
+    // for a refresh driven by a configuration change: the answer describes a chain built from what
+    // is stored now, not the previous chain still in force (the local review of S1)
+    const ask = ++providerAsk.current
+    return sendMessage({ type: 'axt:provider-status', ...(scope ? { scope } : {}), ...(fresh ? { fresh: true } : {}) })
+      .then(status => { if (ask === providerAsk.current) setProvider(status) })
+      .catch(() => { if (ask === providerAsk.current) setProvider(null) })
   }, [])
+  /** The target the pack state is for: a lookup that comes back for another target publishes nothing (as options/data.ts) */
+  const wantedPack = useRef<string | null>(null)
   const checkPack = useCallback(async (target: string): Promise<PackState> => {
+    wantedPack.current = target
     const state = await packState(target)
-    setPack(state)
+    if (wantedPack.current === target) setPack(state)
     return state
   }, [])
 
   useEffect(() => {
     console.debug(`[axt] popup mounted ${Math.round(performance.now() - scriptStart)} ms after script start`)
     loadProvider()
-    getConfig().then(async c => {
+    // The first read is queued on the write chain with everything that follows it: a slow first digest must not
+    // land after a watcher reload settled newer settings (the local review of S1)
+    const init = async () => {
+      const c = await getConfig()
       await settle(c)
       void checkPack(c.targetLanguage)
-    }).catch(() => setLocal(null))
+      return c
+    }
+    writes.current = writes.current.then(init, init)
+    writes.current.catch(() => setLocal(null))
     refresh()
     browser.commands.getAll()
       .then(all => setShortcut(all.find(c => c.name === COMMAND_ID)?.shortcut || null))
@@ -120,7 +136,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
         const stored = await getConfig()
         await settle(stored)
         void checkPack(stored.targetLanguage)
-        loadProvider()
+        void loadProvider(undefined, true)
         return stored
       }
       writes.current = writes.current.then(reload, reload)
@@ -207,7 +223,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     if (status?.progress.state !== 'on') return
     if (!runnable(next, packState)) return // the view shows the page as behind the settings
     // The chain the restart will run on: one built from what was just saved (background/provider-status.ts)
-    setProvider(await sendMessage({ type: 'axt:provider-status', fresh: true }).catch(() => null))
+    await loadProvider(undefined, true)
     await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(status.epoch !== undefined ? { epoch: status.epoch } : {}) })
   }
 
