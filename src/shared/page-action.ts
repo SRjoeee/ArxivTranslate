@@ -73,8 +73,13 @@ export function savedFromStatus(status: Pick<ProviderStatus, 'revision' | 'avail
   return { revision: status.revision, canRun: status.available && status.providerId === status.chosen, fallback: status.fallback !== undefined }
 }
 
-/** The message each action is, the way the popup's buttons send them: a re-translation restarts the session in place */
-export function messageFor(action: PageAction): { type: 'axt:translate-page'; restart?: true } | { type: 'axt:restore-page' } {
-  if (action === 'restore') return { type: 'axt:restore-page' }
-  return action === 'retranslate' ? { type: 'axt:translate-page', restart: true } : { type: 'axt:translate-page' }
+/**
+ * The message each action is, the way the popup's buttons send them: a re-translation restarts the session in place.
+ * `from` is the session the decision was made on; the page refuses a restart or a restore of a session that has
+ * ended meanwhile (the reader acted in between — sixth pass of the local review)
+ */
+export function messageFor(action: PageAction, from?: string | null): { type: 'axt:translate-page'; restart?: true; from?: string } | { type: 'axt:restore-page'; from?: string } {
+  const decidedOn = from ? { from } : {}
+  if (action === 'restore') return { type: 'axt:restore-page', ...decidedOn }
+  return action === 'retranslate' ? { type: 'axt:translate-page', restart: true, ...decidedOn } : { type: 'axt:translate-page' }
 }

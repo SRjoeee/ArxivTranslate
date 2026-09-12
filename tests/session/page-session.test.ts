@@ -189,6 +189,20 @@ describe('page session', () => {
     spy.mockRestore()
   })
 
+  it('a restore decided on a session that has since ended does nothing: the page is not undone by a command that was slow to arrive (S2 review, sixth pass)', async () => {
+    const h = harness()
+    live = h.session
+    await h.session.start()
+    const first = (await h.session.status()).session!
+    await h.session.start(undefined, true) // the reader restarted meanwhile
+    const second = (await h.session.status()).session!
+    expect(h.session.restore(first)).toEqual({ removedNodes: 0 })
+    expect((await h.session.status()).session).toBe(second)
+    // The same restore, decided on the session that is on, restores
+    expect(h.session.restore(second).removedNodes).toBeGreaterThanOrEqual(0)
+    expect((await h.session.status()).session).toBeNull()
+  })
+
   it('a second start is refused while the session is on; a restart replaces it and cancels the old scope', async () => {
     const h = harness()
     live = h.session

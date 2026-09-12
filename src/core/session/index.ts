@@ -66,7 +66,8 @@ export interface PageSession {
    */
   start(requested?: Mode, restart?: boolean, from?: string): Promise<StartResult>
   /** Back to the original page: stop everything, remove every injected node and attribute */
-  restore(): { removedNodes: number }
+  /** `from`: the session the restore was decided on; once it has ended the restore is not the reader's and does nothing */
+  restore(from?: string): { removedNodes: number }
   /** Switch side / stack / only without a new session; the preference is persisted */
   setMode(mode: Mode): Promise<{ mode: Mode; effective: Mode }>
   /** Hand blocks to the running text pipeline (retry, tests); nothing outside a session */
@@ -415,7 +416,8 @@ export function createPageSession(deps: SessionDeps): PageSession {
     return { mode, effective }
   }
 
-  function restorePage(): { removedNodes: number } {
+  function restorePage(from?: string): { removedNodes: number } {
+    if (from !== undefined && active !== from) return { removedNodes: 0 }
     endRun()
     modes?.stop()
     modes = null

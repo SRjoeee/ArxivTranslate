@@ -194,7 +194,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     if (!runnable(next, packState)) return // the view shows the page as behind the settings
     // The chain the restart will run on: one built from what was just saved (background/provider-status.ts)
     setProvider(await sendMessage({ type: 'axt:provider-status', fresh: true }).catch(() => null))
-    await sendToActiveTab({ type: 'axt:translate-page', restart: true })
+    await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(status.session ? { from: status.session } : {}) })
   }
 
   const actions: PopupActions = {
@@ -203,10 +203,10 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
       if (!r.started) throw new Error(r.reason ?? '')
     }),
     retranslate: () => void guard(async () => {
-      const r = await sendToActiveTab({ type: 'axt:translate-page', restart: true })
+      const r = await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(page?.session ? { from: page.session } : {}) })
       if (!r.started) throw new Error(r.reason ?? '')
     }),
-    restore: () => void guard(async () => { await sendToActiveTab({ type: 'axt:restore-page' }) }),
+    restore: () => void guard(async () => { await sendToActiveTab({ type: 'axt:restore-page', ...(page?.session ? { from: page.session } : {}) }) }),
     chooseMode: mode => void guard(async () => { await sendToActiveTab({ type: 'axt:set-mode', mode }) }),
     retryFailed: () => void guard(async () => { await sendToActiveTab({ type: 'axt:retry-failed' }) }),
     openMenu: kind => setMenu(kind),

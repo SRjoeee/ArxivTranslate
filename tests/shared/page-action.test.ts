@@ -26,10 +26,13 @@ describe('pageAction', () => {
     expect(behindSettings({ progress: progress('on') }, 'r2')).toBe(false)
   })
 
-  it('each action is the message the popup\'s button sends: a re-translation restarts the session in place', () => {
+  it('each action is the message the popup\'s button sends: a re-translation restarts the session in place, and both carry the session decided on', () => {
     expect(messageFor('translate')).toEqual({ type: 'axt:translate-page' })
     expect(messageFor('retranslate')).toEqual({ type: 'axt:translate-page', restart: true })
     expect(messageFor('restore')).toEqual({ type: 'axt:restore-page' })
+    expect(messageFor('retranslate', 's1')).toEqual({ type: 'axt:translate-page', restart: true, from: 's1' })
+    expect(messageFor('restore', 's1')).toEqual({ type: 'axt:restore-page', from: 's1' })
+    expect(messageFor('translate', null)).toEqual({ type: 'axt:translate-page' })
   })
 })
 

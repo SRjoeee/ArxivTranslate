@@ -39,11 +39,14 @@ export interface AxtMessages {
   /**
    * popup → content: start translating the page. `restart` starts a new session over a running one
    * without showing the original first: the settings changed and the page follows them paragraph
-   * by paragraph as each is requested again (cached ones at once)
+   * by paragraph as each is requested again (cached ones at once).
+   * `from` is the session the command was decided on: the page refuses it once that session has ended (the reader
+   * restored or restarted meanwhile), so a decision that took a while — the toggle waits for the chain's probes —
+   * cannot undo what the reader did in between (the local review of INVENTORY S2, sixth pass)
    */
-  'axt:translate-page': { request: { mode?: Mode; restart?: boolean }; response: { started: boolean; reason?: string } }
-  /** popup → content：中止并恢复原文 */
-  'axt:restore-page': { request: Record<never, never>; response: { removedNodes: number } }
+  'axt:translate-page': { request: { mode?: Mode; restart?: boolean; from?: string }; response: { started: boolean; reason?: string } }
+  /** popup → content：中止并恢复原文. `from` as above: a restore decided on a session that has since ended does nothing */
+  'axt:restore-page': { request: { from?: string }; response: { removedNodes: number } }
   /** popup → content：切换模式（只改 <html> 上的属性，不重新翻译；§4 第 9 步） */
   'axt:set-mode': { request: { mode: Mode }; response: { mode: Mode; preference: Mode } }
   /** popup → content：进度 */
