@@ -33,3 +33,6 @@ reference/
 
 # Swift helper 的构建产物（DESIGN §15）
 helper/.build/
+
+# Local git worktrees (rebuild workspace and PR checkouts)
+.worktrees/
