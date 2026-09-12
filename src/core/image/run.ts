@@ -19,6 +19,7 @@ import { isPermanentErrorKind, type TranslateContext } from '@/providers/types'
 import { sha256Hex } from '@/shared/digest'
 import type { ImageProgress, OcrCall, OcrLine, OcrMessageResponse } from '@/shared/ocr'
 import { isTranslatable, linesToBoxes, type Box } from './boxes'
+import { squash } from '@/core/text'
 
 export type { ImageTarget } from '@/core/renderer/image'
 
@@ -162,7 +163,7 @@ export function toBase64(bytes: ArrayBuffer): string {
 
 /** 译文与原文是不是一回事：折叠空白、忽略大小写与首尾标点 */
 export function sameText(a: string, b: string): boolean {
-  const norm = (t: string) => t.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase().replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, '')
+  const norm = (t: string) => squash(t.normalize('NFC')).toLowerCase().replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, '')
   return norm(a) === norm(b)
 }
 
@@ -175,7 +176,7 @@ export function sameText(a: string, b: string): boolean {
 export function captionOf(el: Element): string | undefined {
   for (let fig = el.closest('figure'); fig; fig = fig.parentElement?.closest('figure') ?? null) {
     const own = Array.from(fig.children).find(child => child.tagName === 'FIGCAPTION')
-    const text = own?.textContent?.replace(/\s+/g, ' ').trim()
+    const text = squash(own?.textContent)
     if (text) return text.slice(0, CAPTION_MAX_CHARS)
   }
   return undefined

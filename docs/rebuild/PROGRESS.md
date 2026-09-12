@@ -14,6 +14,12 @@ Checkpoint log for the rebuild toward V1.0 (mandate: `docs/rebuild/CHARTER.md`; 
 - Tests 1 634 (+4); five mutation checks; gate green by exit code; `pnpm e2e` 72/72.
 - INVENTORY §4 rows that no longer hold, checked while choosing this item: S4 (every fatal decision reads `isPermanentErrorKind`), S5 (`REAL_TRANSLATION` in `attrs.ts`, held by `translation-boundary.test.ts`), S9 (no hand-written session guard left) — all closed by ADR-0003 / 0004 / 0006 as side effects. Still open in §4.1–4.3: S1, S2, S6, S7, S10, S11 (an Explore pass tabled the seven walkers: five share one skeleton and differ in the barrier predicate, two are genuinely different), P2, P3, P5–P9, T3–T6.
 
+## 2026-09-13 — one text walker for the seven that were (INVENTORY S11)
+
+- Branch `rebuild/text-walker` (PR #183). `core/text.ts`: `collectText(el, barrier)` and `squash()`. The rules module's `textOf`, the extractor's `ownText` and `cellText`, the paper context's `text`, the SVG labels' `renderedText` and the renderer's identity `ownText` keep their own barrier predicates and lose their copies of the walk; nine hand-written whitespace collapses become `squash()`. `wireText` (a runtime set of slot nodes) and `visibleTextOf` (per node, `<br>` to newline, five HTML space characters only) stay — different walks, now said so. −92 +30 lines.
+- One behaviour change, stated: the identity check read comment nodes through `textContent` and now reads text nodes only, on both sides alike.
+- Eight mutation checks, each caught by a named existing test (the extractor's injected-node and unit barriers, the nested-table cell barrier, the rules module's protect barrier, the context's `axt-` barrier, the SVG label's annotation barrier, the identity check's barrier, comment nodes in the walker itself); gate green by exit code, 1 633 tests (+3).
+
 ## 2026-09-13 — the chain's revision is the settings' identity, not a build counter (INVENTORY S8)
 
 - Branch `rebuild/chain-revision` (PR #181). `ProviderStatus.revision` and `PageStatus.running.revision` are now `chainRevision(config)`: sixteen hex digits of a digest over `CHAIN_CONFIG_FIELDS` (API keys enter as their own digests, so the serialised document never holds one). The module-level counter restarted with every worker, so a page that outlived a worker was reported "behind the settings" by the popup once the next worker had rebuilt the same chain, and a rebuild from unchanged settings counted as a change too — INVENTORY §8 open question 2, now answered by construction: same settings, same revision, across builds and workers.

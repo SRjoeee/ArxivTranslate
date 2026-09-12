@@ -22,6 +22,7 @@
 // picture is touched, and §7.1 is unaffected.
 import { FIGURE_SELECTORS, classify, proseText } from '@/core/rules/latexml'
 import type { OcrLine, Quad } from '@/shared/ocr'
+import { collectText, squash } from '@/core/text'
 
 /**
  * MathML's own copy of the TeX source, which sits beside the rendered markup inside `<semantics>`.
@@ -41,19 +42,7 @@ const MATH_ANNOTATION = 'annotation, annotation-xml'
  * rules class as *skip* (a conversion error, a listing) and the annotation above.
  */
 function renderedText(label: Element): string {
-  const parts: string[] = []
-  const walk = (node: Element) => {
-    for (const child of Array.from(node.childNodes)) {
-      if (child.nodeType === child.TEXT_NODE) parts.push((child as Text).data)
-      else if (child.nodeType === child.ELEMENT_NODE) {
-        const el = child as Element
-        if (el.matches(MATH_ANNOTATION) || classify(el)?.kind === 'skip') continue
-        walk(el)
-      }
-    }
-  }
-  walk(label)
-  return parts.join('').replace(/\s+/g, ' ').trim()
+  return squash(collectText(label, el => el.matches(MATH_ANNOTATION) || classify(el)?.kind === 'skip'))
 }
 
 /**
