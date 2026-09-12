@@ -158,6 +158,8 @@ Consolidated from the four raw lists, deduplicated, grouped by what the charter 
 
 Everything above the line the rebuild can act on under the charter's autonomy; these five touch product promises, legal status or installed readers.
 
+*Resolved 2026-09-12 (kept here for the record):* A — exemption recorded, ADR-0001 §10. B — an agent is comparing the code with the upstream repository; register if derived, correct DESIGN §15.1 if not. C — the owner handles LICENSE / README on the `docs/readme` branch; the rebuild stays on the code side. D — the spelling stays, ADR-0001 §6. E — proposal in `PROGRESS.md`, pending the owner.
+
 - **A. `google-web.ts:13` hard-codes a Google API key** (the public key of Google's own web translator, inherited from KISS Translator). Hard rule 5 reads "API keys never enter git". Proposed reading: this is a public constant of a third-party client, not a secret of ours or of a reader; record the exemption next to the rule. Alternative: load it at runtime — which changes nothing about its exposure.
 - **B. ImageTrans provenance.** Either `renderer/image.ts` / `image/boxes.ts` port code from a GPL project and need the header + registry row, or DESIGN §15.1 is wrong and must be corrected. `reference/` is git-ignored so the comparison has to be done by whoever has the checkout.
 - **C. `LICENSE`.** The repo states GPL-3.0 everywhere but ships no license file (#167 backlog). This should land before any public-facing step.

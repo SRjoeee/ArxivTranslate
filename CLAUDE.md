@@ -22,7 +22,7 @@ Each is a product promise, a legal requirement, or a contract with something out
 2. **Prefixes**: every injected class, data attribute and CSS variable starts with `axt-` / `data-axt-` / `--axt-`.
 3. **Free and built-in translation APIs are unreliable by assumption**: their failure must be recoverable and must trigger the fallback chain; it must never take the extension down.
 4. **Cache key** carries `providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText`; bump the version whenever a prompt or a rule changes meaning.
-5. **Secrets**: API keys live only in WXT storage — never in logs, cache keys, fixtures or git.
+5. **Secrets**: API keys live only in WXT storage — never in logs, cache keys, fixtures or git. A third party's public client constant (the Google web translator's key in `providers/google-web.ts`) is not a secret — ADR-0001 §10.
 6. **Attribution**: code ported from `reference/` (KISS Translator, Read Frog, FluentRead — GPL-3.0, read-only, git-ignored) keeps the header `// Ported from reference/<repo>/<path>@<commit> (GPL-3.0), <YYYY-MM-DD>, modified` and an entry in `docs/THIRD_PARTY.md`.
 7. **External contracts** (ADR-0001 §6) get migration or compatibility handling, never silent replacement: the saved configuration schema, the Native Messaging protocol with the installed `axt-helper`, the installer surface.
 
