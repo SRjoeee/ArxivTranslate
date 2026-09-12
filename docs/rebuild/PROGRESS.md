@@ -10,7 +10,8 @@ Checkpoint log for the rebuild toward V1.0 (mandate: `docs/rebuild/CHARTER.md`; 
 ## 2026-09-13 — the chain's revision is the settings' identity, not a build counter (INVENTORY S8)
 
 - Branch `rebuild/chain-revision` (PR #181). `ProviderStatus.revision` and `PageStatus.running.revision` are now `chainRevision(config)`: sixteen hex digits of a digest over `CHAIN_CONFIG_FIELDS` (API keys enter as their own digests, so the serialised document never holds one). The module-level counter restarted with every worker, so a page that outlived a worker was reported "behind the settings" by the popup once the next worker had rebuilt the same chain, and a rebuild from unchanged settings counted as a change too — INVENTORY §8 open question 2, now answered by construction: same settings, same revision, across builds and workers.
-- Tests 1 630 (+2: same settings → same revision across builds and field order; every chain field moves it, no volatile field does); gate green by exit code.
+- Tests 1 630 (+2: same settings → same revision across builds and field order; every chain field moves it, no volatile field does); five mutation checks; gate green by exit code; local Codex review approve on the first pass.
+- `pnpm e2e` 72/72 with the open question as a browser case: a translating page, the worker's target closed over browser-level CDP (Playwright keeps a debugger attached, so a worker never idles out on its own; a birth stamp proves the next popup open started a fresh one), and the popup still says 显示原文. On the baseline build the same case fails with 重新翻译 as the primary button — the misreport, reproduced and closed.
 
 ## 2026-09-13 — one busy → idle detection for both runs (ADR-0006 follow-up)
 
