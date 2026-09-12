@@ -10,7 +10,7 @@ import { engineReady } from './engine-ready'
 import { createHelperClient } from './helper'
 import { createHelperWaiter } from './helper-await'
 import { createHelperRestart } from './helper-restart'
-import { providerStatus } from './provider-status'
+import { createConfigOffers, providerStatus } from './provider-status'
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { installContextMenu, refreshContextMenu, installToggleCommand } from './context-menu'
@@ -38,6 +38,9 @@ export default defineBackground(() => {
   /** 这个 worker 当前用的界面语言，用来认出「读者改了它」（右键菜单的标题要跟着重画） */
   let uiLanguage: string | null = null
 
+  // The chain learns of a change by reading the store, in order with the popup's `fresh` asks — never from the
+  // event's own value, which carries no order (provider-status.ts says why)
+  const offers = createConfigOffers({ load: getConfig, chain })
   watchConfig(next => {
     // 界面语言变了要重画菜单：worker 不会为此重启，不重画的话标题一直停在旧语言（Codex 在 #161 指出）
     if (next.uiLanguage !== uiLanguage) {
@@ -45,7 +48,7 @@ export default defineBackground(() => {
       applyLocaleFrom(next.uiLanguage)
       refreshContextMenu(menuDeps)
     }
-    chain.onConfig(next)
+    void offers.offer()
   })
 
   /**
@@ -248,7 +251,7 @@ export default defineBackground(() => {
         return true
       case 'axt:provider-status':
         // A session's own chain, the chain in force, or — after a save — one built from what is stored now
-        providerStatus({ chain, router, loadConfig: getConfig }, message)
+        providerStatus({ chain, router, offers }, message)
           .then(sendResponse)
           .catch((e: unknown) => console.error('[axt] provider-status 失败', e))
         return true
