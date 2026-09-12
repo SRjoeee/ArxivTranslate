@@ -77,8 +77,11 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const [local, setLocal] = useState<{ config: Config; revision: string } | null>(null)
   const config = local?.config ?? null
   const savedRevision = local?.revision ?? null
+  /** The interface language this popup rendered with */
+  const shownLanguage = useRef<string | null>(null)
   const settle = useCallback(async (next: Config) => {
     wantedPack.current = next.targetLanguage
+    shownLanguage.current = next.uiLanguage
     setLocal({ config: next, revision: await chainRevision(next) })
   }, [])
   /** The offline service's language pack (§8.4); `downloadable` needs a click to create() (user gesture) */
@@ -163,6 +166,11 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     const unwatch = watchConfig(() => {
       const reload = async () => {
         const stored = await getConfig()
+        // The interface language was applied once at mount; a change saved elsewhere takes a reload (as the settings page)
+        if (shownLanguage.current !== null && stored.uiLanguage !== shownLanguage.current) {
+          location.reload()
+          return stored
+        }
         await settle(stored)
         void checkPack(stored.targetLanguage)
         void loadProvider(undefined, true)

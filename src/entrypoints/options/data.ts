@@ -43,6 +43,8 @@ export function useOptionsData(): OptionsData {
   const [cacheCleared, setCacheCleared] = useState(false)
   /** Every config write queues behind the previous one; see `patch` */
   const writes = useRef<Promise<Config>>(Promise.resolve(DEFAULT_CONFIG))
+  /** The interface language this page rendered with; a different one saved elsewhere means a reload */
+  const shownLanguage = useRef<string | null>(null)
   /** The language the newest pack lookup was for; see `checkPack` */
   const wanted = useRef<string | null>(null)
 
@@ -78,6 +80,7 @@ export function useOptionsData(): OptionsData {
     const init = async () => {
       const c = await getConfig()
       wanted.current = c.targetLanguage
+      shownLanguage.current = c.uiLanguage
       setLocal(c)
       setFallbackReason(configFallbackReason())
       void checkPack(c.targetLanguage)
@@ -90,8 +93,16 @@ export function useOptionsData(): OptionsData {
     const unwatch = watchConfig(() => {
       const reload = async () => {
         const stored = await getConfig()
+        // The interface language is chosen once before the page renders (main.tsx): a change saved elsewhere takes
+        // the same way this page's own change does — a reload (Codex on #185)
+        if (shownLanguage.current !== null && stored.uiLanguage !== shownLanguage.current) {
+          location.reload()
+          return stored
+        }
         wanted.current = stored.targetLanguage
         setLocal(stored)
+        // A valid write elsewhere is the repair of a configuration this page had to fall back from (Codex on #185)
+        setFallbackReason(configFallbackReason())
         void checkPack(stored.targetLanguage)
         return stored
       }
@@ -135,6 +146,7 @@ export function useOptionsData(): OptionsData {
       const next = fn(await getConfig())
       await setConfig(next)
       wanted.current = next.targetLanguage
+      shownLanguage.current = next.uiLanguage
       setLocal(next)
       // A valid write **is** the repair: leaving the warning up would go on telling the reader that
       // the key and service they just fixed are not in effect (Codex on #157)
