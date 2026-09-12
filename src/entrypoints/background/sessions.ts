@@ -93,6 +93,12 @@ export interface SessionRouterDeps {
    * takes the retired chains off their sessions
    */
   retireOthers?: () => number
+  /**
+   * Drain a scope from every chain still holding its work, not only the one it is bound to: a session moved on
+   * by a language pack leaves its earlier requests on a chain other sessions may still use, which is therefore
+   * not retired (the local review of ADR-0005, seventeenth pass). Returns how many requests were cancelled
+   */
+  cancelScope?: (scope: string) => Promise<number>
 }
 
 /**
@@ -153,7 +159,14 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       if (remember) sessions.delete(scope)
       // 别的按 scope 排队的东西（图片 OCR）先撤，不等建链：建链可能挂在 Translator.availability() 上（Codex 在 #87 指出）
       cancelled += deps.onDrop?.(scope) ?? 0
-      // 只经 bind 绑过、从没翻过字的会话（bound 有值、没 transport）：这个 worker 里没有它的翻译请求，不用为撤它建一条链。
+      // Every chain still holding the scope's work, not only the one it is bound to (see `cancelScope`); it
+      // builds no chain and needs no binding — a scope never bound at all (the worker restarted, the binding
+      // lost) may still have work queued somewhere
+      if (deps.cancelScope) {
+        cancelled += await deps.cancelScope(scope)
+        continue
+      }
+      // Without the holder: 只经 bind 绑过、从没翻过字的会话（bound 有值、没 transport）：这个 worker 里没有它的翻译请求，不用为撤它建一条链。
       // 完全没绑过的也要撤：worker 中途重启过，绑定丢了但队列里可能还有这个 scope 的任务
       if (bound && !bound.transport) continue
       const transport = bound?.transport ?? await deps.current()

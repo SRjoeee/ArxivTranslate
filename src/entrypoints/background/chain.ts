@@ -35,6 +35,12 @@ export interface ChainHolder {
    * requests the retired chains drained
    */
   retireOthers(): number
+  /**
+   * Drain one scope from every chain still around — the one it is bound to and any it left work on when a
+   * language pack moved it (that chain may serve other sessions and is not retired). Returns how many requests
+   * were cancelled (ADR-0005)
+   */
+  cancelScope(scope: string): Promise<number>
   /** Rebuild and make the result the chain in force: the reader's explicit actions (`axt:engine-ready`) */
   activate(config?: Config): Promise<Built>
   /**
@@ -136,6 +142,11 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
       const previous = requested
       requested = next
       if (previous === null || failed || chainConfigChanged(previous, next)) take(build(next))
+    },
+    async cancelScope(scope) {
+      let cancelled = 0
+      for (const transport of built) cancelled += await transport.cancel(scope)
+      return cancelled
     },
     retireOthers() {
       const inForce = landed?.transport ?? null

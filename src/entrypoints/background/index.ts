@@ -68,6 +68,7 @@ export default defineBackground(() => {
     current: transportOf,
     cancelled,
     retireOthers: () => chain.retireOthers(),
+    cancelScope: scope => chain.cancelScope(scope),
     onDrop: scope => ocr.cancel(scope),
     /**
      * 那个标签页还是不是刚才那个页面：问它自己。

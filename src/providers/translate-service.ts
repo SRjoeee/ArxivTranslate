@@ -281,9 +281,11 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
 
   const translateItems = async (items: QueueItem[], ids: string[], signal: AbortSignal | undefined): Promise<TranslationOutcome[]> => {
     // The last check before the endpoint, and the only one a retry passes through: the request queue retries the
-    // stored thunk without re-entering the batch queue, so a chain retired between two attempts must stop here.
-    // Non-retryable, so the queue does not try a third time (ADR-0005)
-    if (deps.retired?.()) throw attachRequestErrorMeta(new TranslationCancelledError(items[0]?.scope), { isRetryable: false })
+    // stored thunk without re-entering the batch queue, so a chain retired between two attempts — or a batch whose
+    // every scope died meanwhile, waiting its turn on a chain nobody drained — must stop here. Non-retryable, so
+    // the queue does not try a third time (ADR-0005). Unscoped items keep a shared batch alive, as in the queues
+    const dead = items.length > 0 && items.every(item => item.scope !== undefined && deps.cancelled.has(item.scope))
+    if (deps.retired?.() || dead) throw attachRequestErrorMeta(new TranslationCancelledError(items[0]?.scope), { isRetryable: false })
     const first = items[0]!
     try {
       const result = await first.provider.translate({

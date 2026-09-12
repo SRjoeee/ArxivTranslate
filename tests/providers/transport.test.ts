@@ -416,6 +416,54 @@ describe('createLocalTransport：翻译', () => {
     release()
   })
 
+  it('closing the tab after a language pack moved the session drains its work from the old chain too: the request at the endpoint is aborted, the waiting ones never sent (ADR-0005, seventeenth review pass)', async () => {
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    let entered: () => void = () => {}
+    const atEndpoint = new Promise<void>(resolve => { entered = resolve })
+    const registry = new CancelledScopeRegistry()
+    let calls = 0
+    let signal: AbortSignal | undefined
+    const holder = createChainHolder({
+      owned: transport => router.sessionsOn(transport) > 0,
+      load: async () => ({
+        config: DEFAULT_CONFIG,
+        transport: await withChain([mockProvider(async r => { calls++; signal = r.signal; entered(); await held; return { segments: r.segments, provider: 'mock' } }, { maxBatchItems: 1, maxConcurrent: 1 })], { cancelled: registry }),
+      }),
+    })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: registry, retireOthers: () => holder.retireOthers(), cancelScope: scope => holder.cancelScope(scope) })
+    const first = await router.forCall('s1', 1)
+    const pending = first.translate({ request: { segments: [{ id: 'a', text: 'x' }, { id: 'b', text: 'y' }, { id: 'c', text: 'z' }], source: 'en', target: 'zh-CN' }, scope: 's1' })
+    await atEndpoint // one batch at the endpoint, two waiting behind the single slot
+    await holder.activate() // a language pack: the session moves on
+    await router.rebind('s1')
+    expect(await router.dropTab(1)).toBeGreaterThan(0)
+    expect(signal?.aborted).toBe(true)
+    release()
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(calls).toBe(1)
+  })
+
+  it('a dead scope\'s waiting batches never reach the endpoint, drained or not', async () => {
+    // Batches already flushed into the request queue dispatch through the attempt-time gate; a scope the registry
+    // holds is refused there even on a chain nobody drained
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    let entered: () => void = () => {}
+    const atEndpoint = new Promise<void>(resolve => { entered = resolve })
+    const registry = new CancelledScopeRegistry()
+    let calls = 0
+    const t = await withChain([mockProvider(async r => { calls++; entered(); await held; return { segments: r.segments, provider: 'mock' } }, { maxBatchItems: 1, maxConcurrent: 1 })], { cancelled: registry })
+    const pending = t.translate({ request: { segments: [{ id: 'a', text: 'x' }, { id: 'b', text: 'y' }, { id: 'c', text: 'z' }], source: 'en', target: 'zh-CN' }, scope: 'dead' })
+    await atEndpoint
+    registry.markScope('dead') // marked, never drained
+    release()
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(calls).toBe(1)
+  })
+
   it('router and chain together: a tab closed while the first chain builds leaves no request out and nothing bound (ADR-0005, second review pass)', async () => {
     // The scope's first request arrived on a fresh worker (the chain still building) and the reader closed the
     // tab before it finished: the request must come back aborted, the provider untouched, the session unbound

@@ -612,6 +612,23 @@ describe('createSessionRouter', () => {
     expect(transport.cancelled).toContain('链:B')
   })
 
+  it('drop drains the scope from every chain the holder still has, not only the one it is bound to', async () => {
+    // A language pack moved the session; its earlier requests are still on the old chain, which other sessions
+    // may use and which is therefore not retired (the local review of ADR-0005, seventeenth pass)
+    const first = fakeTransport('旧链')
+    const second = fakeTransport('新链')
+    let current = first
+    const router = routerOver(async () => current, {
+      cancelScope: async scope => { let n = 0; for (const chain of [first, second]) n += await chain.cancel(scope); return n },
+    })
+    await router.forCall('s1', 1)
+    current = second
+    await router.rebind('s1')
+    expect(await router.dropTab(1)).toBe(2)
+    expect(first.cancelled).toEqual(['旧链:s1'])
+    expect(second.cancelled).toEqual(['新链:s1'])
+  })
+
   it('a certain drop marks every scope before any chain is asked to drain', async () => {
     // The mark is what a call suspended on its cache read sees when it wakes; draining may await a chain build, so
     // every scope of the drop is marked up front, not one by one between drains (ADR-0005)
