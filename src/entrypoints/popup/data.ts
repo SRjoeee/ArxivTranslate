@@ -17,7 +17,7 @@ import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages
 import type { HelperStatus } from '@/shared/ocr'
 import { awaitChain } from '@/shared/chain'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
-import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, runnable } from './view-model'
+import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, pollsBackground, runnable } from './view-model'
 
 const scriptStart = performance.now()
 
@@ -136,14 +136,16 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   // measured at millisecond round-trips (RESEARCH §6.7)
   const on = page?.progress.state === 'on'
   const session = page?.session ?? null
+  // Paused while a grant takes effect: the background has to be left alone to idle out (view-model.ts says why)
+  const askBackground = pollsBackground(helper)
   useEffect(() => {
     if (!on) return
     const id = setInterval(() => {
       refresh()
-      loadProvider(session)
+      if (askBackground) loadProvider(session)
     }, 500)
     return () => clearInterval(id)
-  }, [on, session, refresh, loadProvider])
+  }, [on, session, askBackground, refresh, loadProvider])
 
   const guard = async (run: () => Promise<void>) => {
     setError(null)

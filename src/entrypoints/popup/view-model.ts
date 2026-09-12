@@ -29,6 +29,15 @@ export const MANAGE_SERVICES = '__manage'
 export const MANAGE_STYLES = '__manage-styles'
 export type MenuKind = 'service' | 'language' | 'prompt' | 'style'
 
+/**
+ * Whether the popup's 500 ms loop may ask the background for the provider line. Not while a grant is taking effect
+ * (ADR-0002): the stale worker is replaced only once it has idled out, and every message to it resets the idle
+ * timer — a popup left open on a translating page would keep it alive, and the grant pending, for as long as it
+ * stayed open (Codex, local review of #179). The page-status half of the loop goes to the content script and is
+ * unaffected
+ */
+export const pollsBackground = (helper: HelperStatus | null): boolean => helper?.state !== 'restarting'
+
 export interface PopupInput {
   page: PageStatus | null
   provider: ProviderStatus | null

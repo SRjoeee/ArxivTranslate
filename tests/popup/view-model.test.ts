@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { setLocale } from '@/ui/strings'
 import { POPUP_FIXTURES } from '@/entrypoints/popup/fixtures'
-import { MANAGE_STYLES, derivePopupView, runnable } from '@/entrypoints/popup/view-model'
+import { MANAGE_STYLES, derivePopupView, pollsBackground, runnable } from '@/entrypoints/popup/view-model'
 
 const input = (id: string) => POPUP_FIXTURES.find(f => f.id === id)!.input
 const view = (id: string) => derivePopupView(input(id))
@@ -137,6 +137,13 @@ describe('derivePopupView (UI.md §4)', () => {
     // Other platforms are told so before anything is asked of them
     expect(derivePopupView({ ...input('P14a'), platform: 'other' }).helper).toEqual({ text: '图片翻译目前仅支持 macOS', step: null })
     expect(derivePopupView({ ...input('P14a'), config: { ...input('P14a').config!, image: { enabled: false, modes: [] } } }).helper).toBeNull()
+  })
+  it('the provider poll leaves the background alone while a grant takes effect, so the stale worker can idle out (ADR-0002)', () => {
+    expect(pollsBackground({ state: 'restarting' })).toBe(false)
+    expect(pollsBackground({ state: 'permission-missing' })).toBe(true)
+    expect(pollsBackground({ state: 'not-installed' })).toBe(true)
+    expect(pollsBackground({ state: 'ready', version: '0.1.0' })).toBe(true)
+    expect(pollsBackground(null)).toBe(true)
   })
   it('P16 the style menu is what the settings page holds, in its order, with the chosen one marked', () => {
     const v = view('P16')
