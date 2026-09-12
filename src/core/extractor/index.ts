@@ -2,6 +2,7 @@
 // 遍历策略与分类解耦：分类来自 rules/latexml 的 classify()，这里只决定"是否产出"与"是否下钻"。
 import { isInjected } from '@/core/marks'
 import { YIELDS_TO_OUTER_BLOCK, classify, documentRoot, isNumericCell, tableCells } from '@/core/rules/latexml'
+import { collectText } from '@/core/text'
 
 export interface Cell {
   el: Element
@@ -31,8 +32,6 @@ export type Block = TextBlock | TableBlock
 /** §7.1 允许在原节点追加的属性 */
 export const ID_ATTR = 'data-axt-id'
 
-const ELEMENT_NODE = 1
-const TEXT_NODE = 3
 const LETTER = /\p{L}/u
 
 /**
@@ -41,15 +40,7 @@ const LETTER = /\p{L}/u
  * 我们自己插进去的译文 / 镜像也不算（再次提取时它们已经在原块内部）。
  */
 function ownText(el: Element): string {
-  const parts: string[] = []
-  const walk = (node: Element) => {
-    for (const child of Array.from(node.childNodes)) {
-      if (child.nodeType === TEXT_NODE) parts.push((child as Text).data)
-      else if (child.nodeType === ELEMENT_NODE && !isInjected(child as Element) && !classify(child as Element)) walk(child as Element)
-    }
-  }
-  walk(el)
-  return parts.join('')
+  return collectText(el, child => isInjected(child) || classify(child) !== null)
 }
 
 /**
@@ -57,22 +48,11 @@ function ownText(el: Element): string {
  * 它们不另成块，由 protector 序列化时走进去（§5.3）。
  */
 function cellText(el: Element): string {
-  const parts: string[] = []
-  const walk = (node: Element) => {
-    for (const child of Array.from(node.childNodes)) {
-      if (child.nodeType === TEXT_NODE) {
-        parts.push((child as Text).data)
-      } else if (child.nodeType === ELEMENT_NODE) {
-        const c = child as Element
-        if (isInjected(c)) continue
-        const kind = classify(c)?.kind
-        if (kind === 'skip' || kind === 'protect' || kind === 'table') continue
-        walk(c)
-      }
-    }
-  }
-  walk(el)
-  return parts.join('')
+  return collectText(el, child => {
+    if (isInjected(child)) return true
+    const kind = classify(child)?.kind
+    return kind === 'skip' || kind === 'protect' || kind === 'table'
+  })
 }
 
 /** 任意深度的格都算：嵌套 tabular 的格是外层块的格，只装着嵌套表的外层格没有自有文本、按数值格原样复制 */

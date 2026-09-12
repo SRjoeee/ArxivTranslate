@@ -2,6 +2,7 @@
 import { type RenderPath, wireFormatOf } from '@/cache/key'
 import type { Block, Cell, TableBlock } from '@/core/extractor'
 import { VOID_DENSE_THRESHOLD, serialize, type ProtectedBlock } from '@/core/protector'
+import { squash } from '@/core/text'
 
 export interface Segment {
   id: string
@@ -23,7 +24,7 @@ export interface Batch {
 
 const TITLE_MAX = 80
 
-const titleOf = (block: Block) => (block.el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX)
+const titleOf = (block: Block) => squash(block.el.textContent).slice(0, TITLE_MAX)
 
 /**
  * 每个块所属的章节标题：按文档序扫一遍，标题块之后的块都归它。

@@ -8,6 +8,7 @@ import { type BlockState, DIR_ATTR, FOR_ATTR, IDENTITY_ATTR, INLINE_ATTR, LANG_A
 import { delocalizeNotes } from './notes'
 import { shouldInline, translationClass, translationShell } from './shell'
 import { cancelSkeletonsIn } from './skeleton'
+import { collectText, squash } from '@/core/text'
 
 export function setState(block: Block, state: BlockState): void {
   block.el.setAttribute(STATE_ATTR, state)
@@ -100,20 +101,8 @@ export function renderText(block: TextBlock, content: DocumentFragment): Element
   return node
 }
 
-const squash = (text: string | null) => (text ?? '').replace(/\s+/g, ' ').trim()
-
-/** 元素自己的文本，不含我们注入的节点（译文 / 镜像 / 拆分副本 / 圆环 / 失败小部件） */
-function ownText(el: Element): string {
-  let text = ''
-  for (const child of Array.from(el.childNodes)) {
-    if (child.nodeType === 1) {
-      const element = child as Element
-      if (isInjected(element)) continue
-      text += ownText(element)
-    } else text += child.textContent ?? ''
-  }
-  return text
-}
+/** The element's own text, without the nodes we inject (translation, mirror, split copy, skeleton, failure widget) */
+const ownText = (el: Element): string => collectText(el, isInjected)
 
 /**
  * 表格块（§5.3）：整表克隆置于原表之后，克隆保留原有类名以沿用页面的表格样式；

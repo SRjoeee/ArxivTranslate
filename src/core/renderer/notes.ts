@@ -26,6 +26,7 @@ import { AXT_ATTR_PREFIX, T_CLASS, isInjected } from '@/core/marks'
 import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
 import { ERROR_CLASS, IDENTITY_ATTR, MIRROR_CLASS, PENDING_CLASS, SPLIT_CLASS } from './attrs'
 import { mirrorPair } from './sentences'
+import { squash } from '@/core/text'
 
 /** 原件上的标记：译文已复制进副本，这份边注由样式隐藏 */
 const LOCALIZED_ATTR = 'data-axt-note'
@@ -139,16 +140,14 @@ function mirrorNote(source: Element, translated: Element, wrapper: Element, fres
 /** A translation that has actually arrived: not the skeleton, not the failure widget, which are `.axt-t` siblings too */
 const arrived = (el: Element | null): el is Element => !!el && el.classList.contains(T_CLASS) && !el.classList.contains(PENDING_CLASS) && !el.classList.contains(ERROR_CLASS)
 
-const squeeze = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim()
-
 /**
  * The copy reproduces the original word for word, so only one of the two needs to be on screen.
  * It is rebuilt from the placeholder, not translated, so this is the normal state for a note with
  * nothing to translate in it — a bare URL, a lone formula.
  */
 const reproduces = (source: Element, copy: Element): boolean => {
-  const text = squeeze(source.textContent)
-  return text !== '' && text === squeeze(copy.textContent)
+  const text = squash(source.textContent)
+  return text !== '' && text === squash(copy.textContent)
 }
 
 /** 这些副本整块由某个模式藏起来：identity 的与拆图的在 stack、镜像在 side 以外（modes.css）。里面那份脚注副本不能当成"唯一留下的一份" */
