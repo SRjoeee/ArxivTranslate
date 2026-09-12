@@ -215,8 +215,9 @@ export default defineBackground(() => {
   // Named, because it comes off while a grant takes effect (ADR-0002): a tab whose title ticks — a clock, a chat
   // app's unread count — is an event every few seconds from a tab that is not ours, and each one resets the worker's
   // idle timer, which would keep the stale worker alive for good (Codex, local review pass 2). The fresh worker
-  // registers it again at start-up; until then a tab that closes still drops its sessions (onRemoved), a tab that
-  // navigates away only once the fresh worker's own probes run
+  // registers it again at start-up. Until then a tab that closes still drops its sessions (onRemoved); a tab that
+  // navigates away is not noticed — the old session's queued batches run until they finish or this worker dies with
+  // them, and the fresh worker starts with no sessions and learns them from the pages' next calls
   const onTabUpdated: Parameters<typeof browser.tabs.onUpdated.addListener>[0] = (tabId, changeInfo) => {
     // **loading 与 complete 都要按一次**。跨文档导航提交得慢时，旧文档在 loading 之后还活着，
     // 到点探针问到的是它、答的是同一个会话，撤销就被放掉了——而它随后就没了，再没人问第二次

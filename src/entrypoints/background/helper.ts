@@ -2,10 +2,13 @@
 // Messaging port. It is the helper implementation of `OcrBackend` (ocr-backend.ts, ADR-0002).
 //
 // Facts about MV3 that shape it:
-// - An open port does **not** keep the service worker alive; only messages and API calls reset the idle timer. So
-//   while a request is in flight a harmless API is called on a timer, and the timer stops when the queue is empty.
-//   When the worker is recycled the port closes, the helper sees EOF and exits, and every pending request is voided
-//   by `onDisconnect` — the next request reconnects and pings again (the version is part of the cache key, so a
+// - The keep-alive (a harmless API call every 20 s while a request is in flight) was built on the MVP-era belief that
+//   an open port does not keep the service worker alive. Chrome's lifecycle documentation says otherwise for native
+//   messaging since Chrome 105: a `connectNative` port keeps the worker alive, and the worker terminates after its
+//   timers once the host exits (correction 2026-09-13, from the local review). The timer is redundant by that
+//   account and harmless; removing it waits on a measurement on a current Chrome. What stays true: when the worker
+//   is recycled the port closes, the helper sees EOF and exits, and every pending request is voided by
+//   `onDisconnect` — the next request reconnects and pings again (the version is part of the cache key, so a
 //   reconnected port must not reuse the old one).
 // - With no host registered, `connectNative` does not throw: the port disconnects at once with "not found" in
 //   `lastError`. That is remembered for the worker's life; nothing reconnects until a `recheck`.
