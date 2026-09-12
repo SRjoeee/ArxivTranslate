@@ -1,13 +1,14 @@
-// OCR 服务（DESIGN §15.2）：查 OCR 缓存，未命中才叫 helper，结果写回。
-// 缓存与译文共用一个 Dexie 库（cachePortOf），键由 ocrCacheKey 算——只随图片字节与 helper 版本变。
+// The OCR service (DESIGN §15.2): the OCR cache first, the backend only on a miss, the result written back. The
+// cache is the Dexie store the translations use (cachePortOf); `ocrCacheKey` derives the key from the image bytes
+// and the recognizer's version alone. Which backend answers is `OcrBackend`'s business (ADR-0002).
 import { ocrCacheKey } from '@/cache/key'
 import type { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import { CACHE_READ_BUDGET_MS, type CachePort, readWithBudget } from '@/providers/translate-service'
 import type { HelperStatus, OcrCall, OcrMessageResponse, OcrResult } from '@/shared/ocr'
-import { HelperError, type HelperClient } from './helper'
+import { type OcrBackend, OcrBackendError } from './ocr-backend'
 
 export interface OcrServiceDeps {
-  helper: HelperClient
+  backend: OcrBackend
   cache: CachePort
   /**
    * Scopes the session router has ended for certain (ADR-0005), the same registry the translate services read.
@@ -20,7 +21,7 @@ export interface OcrServiceDeps {
 }
 
 export interface OcrService {
-  /** `recheck` re-probes a host reported missing; see HelperClient.status */
+  /** `recheck` re-probes a host reported missing; see OcrBackend.status */
   status(options?: { recheck?: boolean }): Promise<HelperStatus>
   ocr(call: OcrCall): Promise<OcrMessageResponse>
   /** Drain the scope's queued and in-flight recognitions; returns how many. Refusing the scope's later calls is the registry's job */
@@ -39,17 +40,23 @@ function parseCached(raw: string | null | undefined): OcrResult | null {
   }
 }
 
+/** Why nothing can be recognised right now — the image run records it as the failure reason */
+const unavailable = (status: Exclude<HelperStatus, { state: 'ready' }>): string =>
+  status.state === 'not-installed' ? status.reason ?? 'recognition helper not installed'
+    : status.state === 'permission-missing' ? 'recognition helper: permission not granted'
+    : 'recognition helper: waiting for a fresh background worker'
+
 export function createOcrService(deps: OcrServiceDeps): OcrService {
   const aborted = (): OcrMessageResponse => ({ ok: false, error: { kind: 'aborted', message: '会话已撤销' } })
 
   return {
-    status: options => deps.helper.status(options),
+    status: options => deps.backend.status(options),
 
     async ocr(call) {
       if (call.scope && deps.cancelled.has(call.scope)) return aborted()
-      const status = await deps.helper.status()
-      if (!status.available) return { ok: false, error: { kind: 'network', message: status.reason ?? 'helper 不可用' } }
-      const key = await ocrCacheKey(call.imageHash, status.version ?? 'unknown')
+      const status = await deps.backend.status()
+      if (status.state !== 'ready') return { ok: false, error: { kind: 'network', message: unavailable(status) } }
+      const key = await ocrCacheKey(call.imageHash, status.version)
       // IndexedDB 可能挂住而不是拒绝：超预算当未命中，否则 helper 的超时永远开始不了、消息通道一直开着（Codex 在 #87 指出）
       const [hit] = await readWithBudget(deps.cache, [key], deps.cacheReadBudgetMs ?? CACHE_READ_BUDGET_MS)
       // Dropped while the status or the cache was being read: a hit is not returned either, and nothing goes to
@@ -59,14 +66,14 @@ export function createOcrService(deps: OcrServiceDeps): OcrService {
       const cached = parseCached(hit?.translation)
       if (cached) return { ok: true, result: cached, cached: true }
       try {
-        const { result, version } = await deps.helper.ocr({ image: call.image }, call.scope)
+        const { result, version } = await deps.backend.ocr({ image: call.image }, call.scope)
         // 读缓存期间端口断过、重连的 helper 换了版本：按回应所在连接的版本落缓存，别记在旧键下。
         // 写缓存是优化，不等它：IndexedDB 挂住时识别结果照样回去（Codex 在 #87 指出）
         const storeKey = version === status.version ? key : await ocrCacheKey(call.imageHash, version)
         deps.cache.putMany([{ key: storeKey, translation: JSON.stringify(result), paper: call.paper }]).catch((e: unknown) => console.warn('[axt] OCR 结果写缓存失败', e))
         return { ok: true, result, cached: false }
       } catch (e) {
-        if (e instanceof HelperError) return { ok: false, error: { kind: e.kind, message: e.message } }
+        if (e instanceof OcrBackendError) return { ok: false, error: { kind: e.kind, message: e.message } }
         return { ok: false, error: { kind: 'unknown', message: e instanceof Error ? e.message : String(e) } }
       }
     },
@@ -74,6 +81,6 @@ export function createOcrService(deps: OcrServiceDeps): OcrService {
     // Drain only: whether the scope is dead from now on is the session router's decision, recorded in the shared
     // registry (ADR-0005) — a guessed end (`tabs.onUpdated` cannot tell a hash change from a navigation) must not
     // leave every image the page scrolls to afterwards aborted (Codex on #143)
-    cancel: scope => deps.helper.cancel(scope),
+    cancel: scope => deps.backend.cancel(scope),
   }
 }

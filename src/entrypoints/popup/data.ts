@@ -17,7 +17,7 @@ import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages
 import type { HelperStatus } from '@/shared/ocr'
 import { awaitChain } from '@/shared/chain'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
-import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, runnable } from './view-model'
+import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, pollsBackground, runnable } from './view-model'
 
 const scriptStart = performance.now()
 
@@ -41,6 +41,8 @@ export interface PopupActions {
   downloadPack(): void
   /** `section` 省略时开到设置页自己的默认分节；带上时直接开到那一节 */
   openOptions(section?: OptionsSection): void
+  /** What the permission step found after a grant (ui/HelperPermission.tsx) */
+  helperStatus(status: HelperStatus): void
 }
 
 /** 设置页的分节名，与 options/App.tsx 的 SECTIONS 一致 */
@@ -100,19 +102,20 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     browser.commands.getAll()
       .then(all => setShortcut(all.find(c => c.name === COMMAND_ID)?.shortcut || null))
       .catch(() => setShortcut(null))
-    sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ available: false }))
+    sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ state: 'not-installed' }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
   }, [refresh, checkPack, loadProvider])
 
-  // The guided install ends in the background finding the helper, and it says so by broadcasting.
-  // Without this the card would stay up until the reader closed and reopened the popup (§15.4)
+  // The background broadcasts the helper's state when it changes on its own — the guided install's wait found it,
+  // or the fresh worker after a runtime grant reported (ADR-0002). Without this the card would stay up until the
+  // reader closed and reopened the popup (§15.4)
   useEffect(() => {
-    const onReady = (message: unknown) => {
-      if ((message as { type?: string } | null)?.type !== 'axt:helper-ready') return
-      sendMessage({ type: 'axt:helper-status' }).then(setHelper).catch(() => undefined)
+    const onState = (message: unknown) => {
+      const m = message as { type?: string; status?: HelperStatus } | null
+      if (m?.type === 'axt:helper-state' && m.status) setHelper(m.status)
     }
-    browser.runtime.onMessage.addListener(onReady)
-    return () => browser.runtime.onMessage.removeListener(onReady)
+    browser.runtime.onMessage.addListener(onState)
+    return () => browser.runtime.onMessage.removeListener(onState)
   }, [])
 
   // While the page is still loading the content script is not injected yet (document_idle), so
@@ -133,14 +136,16 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   // measured at millisecond round-trips (RESEARCH §6.7)
   const on = page?.progress.state === 'on'
   const session = page?.session ?? null
+  // Paused while a grant takes effect: the background has to be left alone to idle out (view-model.ts says why)
+  const askBackground = pollsBackground(helper)
   useEffect(() => {
     if (!on) return
     const id = setInterval(() => {
       refresh()
-      loadProvider(session)
+      if (askBackground) loadProvider(session)
     }, 500)
     return () => clearInterval(id)
-  }, [on, session, refresh, loadProvider])
+  }, [on, session, askBackground, refresh, loadProvider])
 
   const guard = async (run: () => Promise<void>) => {
     setError(null)
@@ -260,6 +265,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
       loadProvider()
     }),
     openOptions: section => void openOptions(section),
+    helperStatus: setHelper,
   }
 
   return { input: { page, provider, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id }, error, actions }

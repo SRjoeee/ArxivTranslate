@@ -47,13 +47,23 @@ export interface OcrResult {
   frames?: number
 }
 
-export interface HelperStatus {
-  available: boolean
-  /** helper 自报的版本；进 OCR 缓存键 */
-  version?: string
-  /** 不可用时的原因（host 没注册、端口断开……），给设置页显示 */
-  reason?: string
-}
+/**
+ * Where the recognition helper stands (ADR-0002 §3, plus the one state the implementation needed):
+ * - `permission-missing`: the optional `nativeMessaging` permission is not granted, so nothing can be asked of the
+ *   helper. The popup and the settings page request it from the reader's own click.
+ * - `restarting`: granted a moment ago, while the background worker was already running. Chrome adds an API to a
+ *   context when the context is created, never later (verified 2026-09-13), so this worker cannot connect; an alarm
+ *   brings a fresh one once it has gone idle, and the pages are told what that one found.
+ * - `not-installed`: no usable helper answered — host not registered, handshake refused, wrong protocol; `reason`
+ *   says which. The guided install is the way out of all of them.
+ * - `ready`: the helper answered the handshake; `version` is what it reported and goes into the OCR cache key.
+ */
+export type HelperStatus =
+  | { state: 'permission-missing' }
+  | { state: 'restarting' }
+  | { state: 'not-installed'; reason?: string }
+  | { state: 'ready'; version: string }
+export type HelperState = HelperStatus['state']
 
 /** content → background：给一张图做 OCR。图片字节已经在 content 侧哈希过，background 只按它查缓存 */
 export interface OcrCall {

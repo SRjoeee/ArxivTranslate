@@ -29,6 +29,15 @@ export const MANAGE_SERVICES = '__manage'
 export const MANAGE_STYLES = '__manage-styles'
 export type MenuKind = 'service' | 'language' | 'prompt' | 'style'
 
+/**
+ * Whether the popup's 500 ms loop may ask the background for the provider line. Not while a grant is taking effect
+ * (ADR-0002): the stale worker is replaced only once it has idled out, and every message to it resets the idle
+ * timer — a popup left open on a translating page would keep it alive, and the grant pending, for as long as it
+ * stayed open (Codex, local review of #179). The page-status half of the loop goes to the content script and is
+ * unaffected
+ */
+export const pollsBackground = (helper: HelperStatus | null): boolean => helper?.state !== 'restarting'
+
 export interface PopupInput {
   page: PageStatus | null
   provider: ProviderStatus | null
@@ -61,10 +70,11 @@ export interface PopupView {
   images: boolean
   menu: { kind: MenuKind; label: string; items: MenuItem[]; search: boolean } | null
   /**
-   * Under the image row when the helper is missing. `extensionId` present means the guided install
-   * can run here (macOS); without it the line is the macOS-only notice and there is nothing to press
+   * Under the image row while the helper is not ready: the line, and the step the reader can take — `allow` asks
+   * for the permission (S-P-86c), `install` opens the guided install, whose command needs `extensionId` (S-P-88);
+   * null is a line with nothing to press (macOS only, or a grant still taking effect — S-P-87 / 86d)
    */
-  helper: { text: string; extensionId?: string } | null
+  helper: { text: string; step: 'allow' | 'install' | null; extensionId?: string } | null
   note: Note | null
   failed: string | null
   primary: { label: string; action: 'translate' | 'restore' | 'retranslate'; disabled: boolean; shortcut?: string }
@@ -188,11 +198,11 @@ export function derivePopupView(input: PopupInput): PopupView {
   if (!primary.disabled && shortcut) primary.shortcut = shortcut
   const secondary = behind || paused ? { label: S.primary.restore, action: 'restore' as const } : null
 
-  const helperHint: PopupView['helper'] = config.image.enabled && helper !== null && !helper.available && platform !== null
-    ? platform === 'mac'
-      ? { text: S.helper.install, extensionId }
-      : { text: S.helper.macOnly }
-    : null
+  const helperHint: PopupView['helper'] = !config.image.enabled || helper === null || helper.state === 'ready' || platform === null ? null
+    : platform !== 'mac' ? { text: S.helper.macOnly, step: null }
+    : helper.state === 'permission-missing' ? { text: S.helper.permission, step: 'allow' }
+    : helper.state === 'restarting' ? { text: S.helper.enabling, step: null }
+    : { text: S.helper.install, step: 'install', extensionId }
 
   return {
     empty: false,

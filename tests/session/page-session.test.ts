@@ -85,7 +85,7 @@ function harness(options: HarnessOptions = {}) {
       if (!options.ocrLines) return { ok: false, error: { kind: 'unknown', message: 'no OCR in this test' } }
       return { ok: true, result: { width: 100, height: 100, lines: options.ocrLines }, cached: false }
     },
-    helperStatus: async () => ({ available: options.helper ?? false }),
+    helperStatus: async () => (options.helper ? { state: 'ready', version: '0.1.0' } : { state: 'not-installed' }),
     ...(options.fetchImage ? { fetchImage: options.fetchImage } : {}),
     config: {
       get: async () => {

@@ -52,6 +52,10 @@ const S = {
     imagesPaused: (reason: string) => `图片翻译已暂停：${reason}`, // S-P-35
   },
   helper: {
+    permission: '图片翻译需要允许扩展与识别助手通信', // S-P-86b, macOS: nativeMessaging is optional (ADR-0002)
+    allow: '允许', // S-P-86c / S-O-86: Chrome's own prompt follows this click
+    denied: '未允许。允许后才能识别图中的文字', // S-O-86a
+    enabling: '已允许，稍后自动生效', // S-P-86d / S-O-86b: a fresh background worker is on its way (ADR-0002)
     install: '图片翻译需要安装识别助手', // S-P-86, macOS
     macOnly: '图片翻译目前仅支持 macOS', // S-P-87
     start: '安装', // S-P-88：展开引导；引导本身的文案在 setup

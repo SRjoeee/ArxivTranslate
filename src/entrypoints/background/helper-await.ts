@@ -27,8 +27,8 @@ const DEFAULT_WINDOW_MS = 180_000
 export interface HelperWaitDeps {
   /** 重新探测一次（`recheck` 会清掉「未安装」的记录，见 HelperClient.status） */
   probe: () => Promise<HelperStatus>
-  /** 探到了：把消息发给每个标签页，让停着的位图放出去 */
-  announce: () => void | Promise<void>
+  /** 探到了：把消息发给每个标签页，让停着的位图放出去；页面拿到的是状态本身 */
+  announce: (status: HelperStatus) => void | Promise<void>
   now: () => number
   schedule: (run: () => void, ms: number) => number
   cancel: (id: number) => void
@@ -102,9 +102,17 @@ export function createHelperWaiter(deps: HelperWaitDeps): HelperWaiter {
     probing = true
     try {
       const status = await deps.probe()
-      if (status.available) {
+      if (status.state === 'ready') {
         await clear()
-        await deps.announce()
+        await deps.announce(status)
+      } else if (status.state === 'permission-missing') {
+        // Nothing can be found without the permission (ADR-0002): this wait is over. The pages ask for the permission
+        // before they show the install command, so this only catches a grant withdrawn meanwhile
+        await clear()
+      } else if (status.state === 'restarting') {
+        // This worker cannot connect (it predates the grant). The fresh one the alarm wakes resumes the wait from
+        // the deadline in storage, so stop the rounds here — probing would keep this worker alive — but keep the deadline
+        disarm()
       }
     } catch (error) {
       // 探测本身失败（端口刚断、worker 正在关）不该结束等待：下一轮再来

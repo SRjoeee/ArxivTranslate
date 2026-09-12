@@ -11,6 +11,7 @@ import { Row } from '@/ui/Field'
 import { Switch } from '@/ui/Switch'
 import { MODE_ORDER, O, S, languageLabel, languageName } from '@/ui/strings'
 import type { OptionsData } from '../data'
+import { HelperPermission } from '@/ui/HelperPermission'
 import { HelperSetup } from '@/ui/HelperSetup'
 import { ServiceDrawer } from './ServiceDrawer'
 
@@ -114,11 +115,14 @@ export function Services({ data, extensionId }: { data: OptionsData; extensionId
         </Row>
         <div className="border-t border-line py-3 text-[12px] leading-relaxed text-fg-2">
           {helper === null || platform === null ? O.services.detecting
-            : helper.available ? `${S.setup.done} ${helper.version ?? ''}`
+            : helper.state === 'ready' ? `${S.setup.done} ${helper.version}`
             // The installer exits at once on anything but macOS, so offering it elsewhere would be
             // an actionable-looking path that cannot work (Codex on #157)
             : platform !== 'mac' ? S.helper.macOnly
-            : <HelperSetup extensionId={extensionId} onStatus={setHelper} />}
+            // The permission comes before the install command (ADR-0002); a grant into a running worker takes a moment
+            : helper.state === 'permission-missing' ? <div className="flex flex-col gap-2"><span>{S.helper.permission}</span><HelperPermission onStatus={setHelper} /></div>
+            : helper.state === 'restarting' ? S.helper.enabling
+            : <HelperSetup extensionId={extensionId} />}
         </div>
         <fieldset className="border-0 border-t border-line p-0 py-3">
           <legend className="p-0 text-[12px] font-semibold text-fg-2">{O.services.imageModes}</legend>

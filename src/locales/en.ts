@@ -51,6 +51,10 @@ const S: Locale['S'] = {
     imagesPaused: reason => `Image translation paused: ${reason}`,
   },
   helper: {
+    permission: 'Image translation needs permission to talk to the recognition helper',
+    allow: 'Allow',
+    denied: 'Not allowed. Allow it to recognise text in figures.',
+    enabling: 'Allowed. Takes effect shortly.',
     install: 'Image translation needs the recognition helper',
     macOnly: 'Image translation is macOS only for now',
     start: 'Install',

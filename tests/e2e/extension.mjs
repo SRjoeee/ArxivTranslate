@@ -7,6 +7,7 @@
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { copyWithGrants } from './ext-copy.mjs'
 import { addService, chooseBuiltIn, chooseLanguage, chooseStyle, chooseUiLanguage, clearKeyAndReconnect, openOptions, openSection, pick, setImageMode, setPreload, setSwitch } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
@@ -1263,9 +1264,12 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   check('换回中文之后设置页也跟着回来', /翻译服务/.test(back), back.replace(/\n+/g, ' ').slice(0, 40))
 }
 
-// ── 识别助手的安装引导（DESIGN §15.4，issue #102）：两步走完，装完不必回到扩展 ──────────
+// ── 识别助手的安装引导（DESIGN §15.4，issue #102）与它前面的授权一步（ADR-0002）───────────────
 // 只在 macOS 上跑：别的平台安装脚本会立刻退出，那张卡只有一行「仅支持 macOS」。
-// Playwright 每次用全新 profile，而 host manifest 存在 profile 里，所以这里**必然**是「未安装」
+// `nativeMessaging` 是可选权限：Playwright 的全新 profile 里没有授予，所以主 context 里这张卡是**授权**那一步
+// （S-P-86b/c、S-O-86），而 Chrome 的授权提示是原生对话框、点不到。引导本身（两步、等待）在第二个 context 里跑：
+// 那份构建副本把权限写回 manifest 预先授予（ext-copy.mjs）；装好的 host manifest 又不在那个 profile 里，
+// 所以那边**必然**是「未安装」
 if (process.platform === 'darwin') {
   const paper = await openPaper(PAPER, GOOGLE)
   const popup = await context.newPage()
@@ -1279,61 +1283,100 @@ if (process.platform === 'darwin') {
     await imagesSwitch.click()
     await popup.waitForTimeout(400)
   }
-
-  const install = popup.getByRole('button', { name: '安装', exact: true })
+  const allow = popup.getByRole('button', { name: '允许', exact: true })
   const shown = (await popup.locator('main').innerText()).replace(/\n+/g, ' | ')
-  check('引导：未装助手时 popup 上只有一行提示与「安装」', await install.isVisible() && shown.includes('图片翻译需要安装识别助手'), shown.slice(0, 120))
+  check('授权：权限未授予时 popup 上是一行说明与「允许」，还没有安装引导（S-P-86b/c）',
+    await allow.isVisible() && shown.includes('图片翻译需要允许扩展与识别助手通信') && !shown.includes('图片翻译需要安装识别助手'), shown.slice(0, 120))
+  await popup.screenshot({ path: `${SHOTS}/helper-permission.png` })
+  await popup.close()
+
+  const optionsPage = await openOptions(context, extId)
+  check('授权：设置页图片翻译一节给的是「允许」按钮（S-O-86）',
+    await optionsPage.getByRole('button', { name: '允许', exact: true }).isVisible(), '')
+  await optionsPage.close()
+  await paper.page.close()
+
+  // ── 第二个 context：权限预先授予的副本 → 未安装 → 两步引导 ──
+  const grantedExt = copyWithGrants(EXT, `${HERE}.ext-granted`, { permissions: ['nativeMessaging'] })
+  const GRANTED_PROFILE = `${HERE}.profile-granted`
+  rmSync(GRANTED_PROFILE, { recursive: true, force: true })
+  const granted = await chromium.launchPersistentContext(GRANTED_PROFILE, {
+    channel: 'chromium',
+    headless: !process.env.AXT_HEADED,
+    args: [`--disable-extensions-except=${grantedExt}`, `--load-extension=${grantedExt}`],
+    viewport: { width: 1440, height: 900 },
+  })
+  granted.setDefaultNavigationTimeout(90_000)
+  let [grantedWorker] = granted.serviceWorkers()
+  if (!grantedWorker) grantedWorker = await granted.waitForEvent('serviceworker')
+  const grantedId = grantedWorker.url().split('/')[2]
+  // popup 要站在一篇论文旁边（它查的是活动标签页）；这一页只打开，不翻译
+  const paperTab = await granted.newPage()
+  await paperTab.goto(`https://arxiv.org/html/${PAPER}`, { waitUntil: 'domcontentloaded' })
+
+  const guide = await granted.newPage()
+  await guide.goto(`chrome-extension://${grantedId}/popup.html`)
+  await paperTab.bringToFront()
+  await guide.waitForTimeout(800)
+  const guideSwitch = guide.getByRole('switch', { name: '图片翻译', exact: true })
+  if ((await guideSwitch.getAttribute('aria-checked')) !== 'true') {
+    await guideSwitch.click()
+    await guide.waitForTimeout(400)
+  }
+  const install = guide.getByRole('button', { name: '安装', exact: true })
+  const card = (await guide.locator('main').innerText()).replace(/\n+/g, ' | ')
+  check('引导：权限已授予、未装助手时 popup 上只有一行提示与「安装」', await install.isVisible() && card.includes('图片翻译需要安装识别助手'), card.slice(0, 120))
 
   await install.click()
-  await popup.waitForTimeout(300)
-  const opened = (await popup.locator('main').innerText()).replace(/\n+/g, ' ')
+  await guide.waitForTimeout(300)
+  const opened = (await guide.locator('main').innerText()).replace(/\n+/g, ' ')
   // 两步，没有第三步：原来的「我已经装好了」按钮已经去掉
   check('引导：就地展开成两步，没有「我已经装好了」',
     /打开「终端」/.test(opened) && /在终端中执行以下命令/.test(opened) && !/我已经装好了/.test(opened),
     opened.slice(0, 70))
 
-  const command = popup.locator('button[title]').filter({ hasText: 'curl -fsSL' })
-  check('引导：命令块带着本扩展的 id', (await command.innerText()).includes(extId), extId)
+  const command = guide.locator('button[title]').filter({ hasText: 'curl -fsSL' })
+  check('引导：命令块带着本扩展的 id', (await command.innerText()).includes(grantedId), grantedId)
 
   await command.click()
-  await popup.waitForTimeout(500)
+  await guide.waitForTimeout(500)
   check('引导：复制之后说的是「无需返回此处」，不是让读者回来点确认',
-    (await popup.locator('main').innerText()).includes('执行完成后自动生效，无需返回此处'), '')
+    (await guide.locator('main').innerText()).includes('执行完成后自动生效，无需返回此处'), '')
 
   // 关键的一条：等待在 background 里，popup 关了再开也接得上（§15.4）
-  await popup.goto('about:blank')
-  await popup.goto(`chrome-extension://${extId}/popup.html`)
-  await paper.page.bringToFront()
-  await popup.waitForTimeout(800)
-  await popup.getByRole('button', { name: '安装', exact: true }).click()
-  await popup.waitForTimeout(400)
+  await guide.goto('about:blank')
+  await guide.goto(`chrome-extension://${grantedId}/popup.html`)
+  await paperTab.bringToFront()
+  await guide.waitForTimeout(800)
+  await guide.getByRole('button', { name: '安装', exact: true }).click()
+  await guide.waitForTimeout(400)
   check('引导：重开 popup 之后同一次等待还在（状态在 background，不在组件里）',
-    (await popup.locator('main').innerText()).includes('执行完成后自动生效'), '')
+    (await guide.locator('main').innerText()).includes('执行完成后自动生效'), '')
 
-  await popup.screenshot({ path: `${SHOTS}/helper-onboarding.png` })
+  await guide.screenshot({ path: `${SHOTS}/helper-onboarding.png` })
 
   // service worker 闲置 30 秒会被回收，而**唤醒它的往往正是 popup 那条查询**：
   // 查询必须等 `resume()` 读完 storage 才能回答，否则拿到的是还没恢复的 null（Codex 在 #166 指出）。
   // worker 没被回收时这一条走的是内存那条路，同样该通过——两条路都不许把等待弄丢
-  await popup.waitForTimeout(35_000)
-  await popup.goto('about:blank')
-  await popup.goto(`chrome-extension://${extId}/popup.html`)
-  await paper.page.bringToFront()
-  await popup.waitForTimeout(1_000)
-  await popup.getByRole('button', { name: '安装', exact: true }).click()
-  await popup.waitForTimeout(400)
+  await guide.waitForTimeout(35_000)
+  await guide.goto('about:blank')
+  await guide.goto(`chrome-extension://${grantedId}/popup.html`)
+  await paperTab.bringToFront()
+  await guide.waitForTimeout(1_000)
+  await guide.getByRole('button', { name: '安装', exact: true }).click()
+  await guide.waitForTimeout(400)
   check('引导：service worker 被回收之后，等待仍然接得上',
-    (await popup.locator('main').innerText()).includes('执行完成后自动生效'), '')
-  await popup.close()
+    (await guide.locator('main').innerText()).includes('执行完成后自动生效'), '')
+  await guide.close()
 
   // 剪贴板被挡住时走的是「请手动选中命令后复制」那条路——读者照做、装成了，
   // 检测也必须已经在跑，否则页面上停着的图就一直停着（确认按钮已经没有了）
-  const denied = await context.newPage()
+  const denied = await granted.newPage()
   await denied.addInitScript(() => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('denied')) }, configurable: true })
   })
-  await denied.goto(`chrome-extension://${extId}/popup.html`)
-  await paper.page.bringToFront()
+  await denied.goto(`chrome-extension://${grantedId}/popup.html`)
+  await paperTab.bringToFront()
   await denied.waitForTimeout(900)
   await denied.getByRole('button', { name: '安装', exact: true }).click()
   await denied.waitForTimeout(300)
@@ -1344,7 +1387,7 @@ if (process.platform === 'darwin') {
     fallback.includes('无法复制') && fallback.includes('执行完成后自动生效'), fallback.slice(-60))
   await denied.close()
 
-  await paper.page.close()
+  await granted.close()
 }
 
 await context.close()

@@ -16,7 +16,7 @@ import { HELPER_GUIDE_URL, S, helperInstallCommand } from '@/ui/strings'
 /** 已复制停留多久：够读，又不至于看着像卡住 */
 const COPIED_MS = 1500
 
-export function HelperSetup({ extensionId, onStatus }: { extensionId: string; onStatus?: (status: HelperStatus) => void }) {
+export function HelperSetup({ extensionId }: { extensionId: string }) {
   const [copied, setCopied] = useState(false)
   const [copyFailed, setCopyFailed] = useState(false)
   /** 等到什么时候；null 表示没在等。来源是 background，不是本组件的 state */
@@ -45,17 +45,17 @@ export function HelperSetup({ extensionId, onStatus }: { extensionId: string; on
     return () => clearTimeout(timer)
   }, [until])
 
-  // background 探到了会广播一条：设置页开着就当场换成「已就绪」，
-  // popup 还开着的话同理（没有页面在听时这条消息根本没人收，那也正常）
+  // The background broadcasts the state it finds (`axt:helper-state`); the page's data layer takes it and this
+  // component is replaced by 「已就绪」. What is left to do here is to stop the wait line at once — the reader may see
+  // the frame before the parent re-renders
   useEffect(() => {
-    const onReady = (message: unknown) => {
-      if ((message as { type?: string } | null)?.type !== 'axt:helper-ready') return
-      setUntil(null)
-      void sendMessage({ type: 'axt:helper-status' }).then(onStatus).catch(() => undefined)
+    const onState = (message: unknown) => {
+      const m = message as { type?: string; status?: HelperStatus } | null
+      if (m?.type === 'axt:helper-state' && m.status?.state === 'ready') setUntil(null)
     }
-    browser.runtime.onMessage.addListener(onReady)
-    return () => browser.runtime.onMessage.removeListener(onReady)
-  }, [onStatus])
+    browser.runtime.onMessage.addListener(onState)
+    return () => browser.runtime.onMessage.removeListener(onState)
+  }, [])
 
   /**
    * 只在写入成功之后才说「已复制」。剪贴板被挡住时若照说不误，读者手上其实什么都没有，

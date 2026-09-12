@@ -107,6 +107,9 @@ states, verbs for buttons, no spoken phrases (去填 / 去修 are out), every no
 | S-P-83 | 译文样式菜单 · 最后一行 | 管理译文样式… | [定，2026-09-11，读者提出] 与服务菜单的「管理翻译服务…」同一个角色：菜单的最后一行不是一种样式，而是去管理它们的入口，所以不带预览、不参与选中。样式住在设置页的**阅读**一节，因此这一行直接开到那一节（`options.html#reading`）——`openOptionsPage` 递不进 hash，落在「翻译服务」那一节比多开一个标签页更糟；不带分节的入口（右上角齿轮、提示里的「设置」）仍用 `openOptionsPage`，它会把已经开着的那个标签页拉到前面 |
 | S-P-85 | 图片翻译行 | 图片翻译 | Switch in the card (`image.enabled`, v11); saved at once, live on the page; the per-mode list stays on the options page |
 | S-P-86 | 图片翻译行下 · 助手未安装（macOS） | 图片翻译需要安装识别助手 | Only while the switch is on and the helper is not detected |
+| S-P-86b | 图片翻译行下 · 待授权（macOS） | 图片翻译需要允许扩展与识别助手通信 | [2026-09-13, ADR-0002] `nativeMessaging` 成了可选权限；这一行在 S-P-86 之前出现 |
+| S-P-86c | 授权动作 | 允许 | [2026-09-13, ADR-0002] 从这一下点击发起 Chrome 的授权提示（`src/ui/HelperPermission.tsx`，与设置页共用）；拒绝后按钮仍在 |
+| S-P-86d | 图片翻译行下 · 授权生效中 | 已允许，稍后自动生效 | [2026-09-13, ADR-0002] 授权落在已在运行的 background 里时的过渡态；没有可按的东西，新 worker 起来后卡片自行跟进 |
 | S-P-87 | 图片翻译行下 · 非 macOS | 图片翻译目前仅支持 macOS | |
 | S-P-88 | 助手提示动作 | 安装 | [定，2026-09-12] 就地展开 S-O-27 的引导，不跳设置页、不开新窗口。取代了原来的「复制安装命令 · 教程」两个按钮——引导自己带命令块与教程链接 |
 | S-P-90 | 动作失败 | {原始信息} | Red line under the primary button (`role=alert`), cleared before the next action |
@@ -145,6 +148,9 @@ changes, and the two drawers commit with one button.
 | S-O-27b | 步骤二 | 在终端中执行以下命令 / 点击复制 → 已复制 | 命令整块是一个按钮，点击任意位置均可复制。**折行显示而非横向滚动**：这是一条 `curl \| bash`，看不到结尾便无从判断是否应当执行 |
 | S-O-27c | 等待中 | 执行完成后自动生效，无需返回此处 | [定，2026-09-12] **取代了原来的「我已经装好了」按钮**：装完由 background 自己检测（DESIGN §15.4），读者不必回到扩展。复制即开始等 |
 | S-O-27d | 3 分钟未检测到 | 尚未检测到识别助手。请确认命令已执行完毕且未出现报错。 | 在 S-O-27c 原处换成这一句，不切换界面；命令块始终可点，随时可重新复制 |
+| S-O-86 | 识别助手 · 待授权（macOS） | 图片翻译需要允许扩展与识别助手通信 / 允许 | [2026-09-13, ADR-0002] 授权按钮，在 S-O-27 之前；`src/ui/HelperPermission.tsx` 与 popup 共用 |
+| S-O-86a | 授权被拒 | 未允许。允许后才能识别图中的文字 | 原处一行说明，按钮仍在 |
+| S-O-86b | 授权生效中 | 已允许，稍后自动生效 | 过渡态；background 的新 worker 起来后广播状态，这一节自行跟进 |
 | S-O-26 | 图片模式 | 在这些模式下显示图片译文 / 只影响显示：切到没勾的模式时叠加层隐藏，切回来再显示，不重新识别 | 上下 · 左右 · 仅译文 |
 | S-O-40 | 译文样式 | 译文样式 / 选中的样式立即生效 | A grid of tiles; the chosen one carries a pencil |
 | S-O-41 | 列表动作 | 添加配置 / 重置 | 重置 restores the built-ins and keeps the reader's own |
@@ -216,7 +222,9 @@ the rows open at any time.
 | P11 | 图片翻译已暂停 | `images.fatal` | per text state | S-P-35 + 设置 | text only | per text state | — |
 | P12 | 窄窗口 | `mode !== preference` | 值 | as the state | — | as the state | — |
 | P13 | 页面落后于设置 | on ∧ `running` ≠ settings ∧ !runnable | 值 (the saved one) | S-P-32 + 设置 | — | 重新翻译 **禁用** | 显示原文 |
-| P14 | 识别助手未安装 | `image.enabled` ∧ !helper.available | 值 | S-P-86/87 under the image row | — | as the state | — |
+| P14 | 识别助手未安装 | `image.enabled` ∧ helper = not-installed | 值 | S-P-86/87 under the image row | — | as the state | — |
+| P14a | 识别助手待授权 | `image.enabled` ∧ helper = permission-missing [2026-09-13, ADR-0002] | 值 | S-P-86b/c under the image row | — | as the state | — |
+| P14b | 识别助手授权生效中 | `image.enabled` ∧ helper = restarting [2026-09-13, ADR-0002] | 值 | S-P-86d under the image row | — | as the state | — |
 | P15 | 提示词菜单 | llm ∧ menu = prompt | 值 | as the state | — | as the state | — |
 
 Rules:
@@ -335,7 +343,7 @@ two that differ. A simplified 16 is the fallback if it ever reads badly in the w
 - §10 预翻译参数在 UI 上以刻度呈现，内部映射 margin / threshold
 - §7.6 新增页内「已改用」提示（单实例、Shadow DOM）
 - 错误原因映射表（§3.4）放进 `providers/types.ts` 旁
-- §15.4 `nativeMessaging` 改可选权限时，设置页加 S-O-86 授权按钮（已决定，分发时做）
+- §15.4 `nativeMessaging` 改可选权限时，设置页加 S-O-86 授权按钮（已决定，分发时做）→ [2026-09-13] 重建期做了（ADR-0002）：popup 卡与设置页各一个「允许」
 - #47 排版设置进入 config schema（新字段，升版本），与 §7.5 译文样式分开存
 
 ## 8. 功能覆盖清单
@@ -357,7 +365,7 @@ two that differ. A simplified 16 is the fallback if it ever reads badly in the w
 | 深度思考开关 | §8.2 | 已实现 | 设置 · 更多选项 | S-O-30 |
 | 加载环 / 失败块重试 | §7.6 | 已实现 | 页内 | S-I-01…02 |
 | **图片翻译**：识别助手检测、模式多选、进度、暂停、重试 | §15，PR #87–89 | 已实现 | 设置 · 翻译服务下方一节；popup 失败行与卡内说明；页内叠加层 | S-O-80…87，S-P-35 / 60，S-I-04，P12–P13 |
-| 识别助手授权按钮 | §15.4 | 已定，分发时 | 设置 · 图片翻译 | S-O-86 |
+| 识别助手授权按钮 | §15.4，ADR-0002 | 已实现 [2026-09-13] | popup 卡；设置 · 图片翻译 | S-O-86…86b，S-P-86b…d |
 | **阅读排版**（字号 / 行高 / 宽度 / 间距 / 颜色 / 预设 / 恢复默认） | #47 | 已定未做 | 设置 · 阅读 · 排版卡 | S-O-47 |
 | 分栏拖动 | #83 | 实验 | 页内手柄；设置里一个「恢复居中」 | S-I-05，S-O-48 |
 | 免费 AI 翻译（托管） | #97 | 候选 | 服务列表第四项 | S-P-48，S-O-15 |

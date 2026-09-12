@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HelperError, type NativePort, createHelperClient } from '@/entrypoints/background/helper'
+import { type HelperClientDeps, type NativePort, createHelperClient } from '@/entrypoints/background/helper'
+import { OcrBackendError } from '@/entrypoints/background/ocr-backend'
 
 // helper 客户端（DESIGN §15.2）：假端口把 postMessage 记下来、由测试决定何时回应或断开，
 // 每条断言都对着一种改坏的写法：不关联 id、不超时、断开不作废、撤销不生效、重连不重 ping、保活不停
@@ -23,7 +24,7 @@ class FakePort implements NativePort {
   lastId(): string { return this.sent.at(-1)?.id as string }
 }
 
-function setup(opts: { lastError?: () => string | undefined; timeoutMs?: number; firstOcrTimeoutMs?: number; keepAlive?: () => void; keepAliveMs?: number } = {}) {
+function setup(opts: Partial<Omit<HelperClientDeps, 'connect'>> = {}) {
   const ports: FakePort[] = []
   const client = createHelperClient({
     connect: () => { const p = new FakePort(); ports.push(p); return p },
@@ -46,8 +47,8 @@ describe('createHelperClient', () => {
     expect(ports).toHaveLength(1)
     expect(port().sent).toEqual([{ v: 1, cmd: 'ping', id: port().lastId() }])
     port().reply({ v: 1, id: port().lastId(), ok: true, version: '0.1.0' })
-    expect(await first).toEqual({ available: true, version: '0.1.0' })
-    expect(await client.status()).toEqual({ available: true, version: '0.1.0' })
+    expect(await first).toEqual({ state: 'ready', version: '0.1.0' })
+    expect(await client.status()).toEqual({ state: 'ready', version: '0.1.0' })
     expect(port().sent).toHaveLength(1) // 没有第二个 ping
   })
 
@@ -116,7 +117,7 @@ describe('createHelperClient', () => {
     expect(ports).toHaveLength(2)
     expect(port().sent[0]).toMatchObject({ cmd: 'ping' })
     port().reply({ v: 1, id: port().lastId(), ok: true, version: '0.2.0' })
-    expect(await again).toEqual({ available: true, version: '0.2.0' })
+    expect(await again).toEqual({ state: 'ready', version: '0.2.0' })
   })
 
   it('重连后的第一条不是 OCR 而是握手：换了版本的 helper 的结果带着新版本回来（Codex 在 #87 指出）', async () => {
@@ -124,7 +125,7 @@ describe('createHelperClient', () => {
     const status = client.status()
     await flush()
     port().reply({ v: 1, id: port().lastId(), ok: true, version: '0.1.0' })
-    expect((await status).version).toBe('0.1.0')
+    expect(await status).toEqual({ state: 'ready', version: '0.1.0' })
     port().drop()
     // 端口断了；直接发 OCR——新端口上的第一条必须是 ping
     const a = client.ocr({ image: 'A' })
@@ -135,7 +136,7 @@ describe('createHelperClient', () => {
     expect(port().sent.map(m => m.cmd)).toEqual(['ping', 'ocr'])
     port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
     expect((await a).version).toBe('0.2.0')
-    expect(await client.status()).toEqual({ available: true, version: '0.2.0' })
+    expect(await client.status()).toEqual({ state: 'ready', version: '0.2.0' })
   })
 
   it('超时后断开端口：helper 是同步循环，超时的请求还在它手里；下一条请求起新连接、重新握手（Codex 在 #87 指出）', async () => {
@@ -229,8 +230,7 @@ describe('createHelperClient', () => {
     await flush()
     port().reply({ v: 2, id: port().lastId(), ok: true, version: '9.9.9' })
     const result = await status
-    expect(result.available).toBe(false)
-    expect(result.reason).toContain('协议版本 2')
+    expect(result).toMatchObject({ state: 'not-installed', reason: expect.stringContaining('protocol 2') })
     // 内部握手也一样：排队的 OCR 拒掉、端口断开
     const { client: c2, port: p2 } = setup()
     const a = c2.ocr({ image: 'A' })
@@ -246,8 +246,7 @@ describe('createHelperClient', () => {
     await flush()
     port().reply({ v: 1, id: port().lastId(), ok: true })
     const result = await status
-    expect(result.available).toBe(false)
-    expect(result.reason).toContain('版本号')
+    expect(result).toMatchObject({ state: 'not-installed', reason: expect.stringContaining('no version') })
     const { client: c2, port: p2 } = setup()
     const a = c2.ocr({ image: 'A' })
     await flush()
@@ -295,9 +294,8 @@ describe('createHelperClient', () => {
     await flush()
     port().drop()
     const result = await status
-    expect(result.available).toBe(false)
-    expect(result.reason).toContain('not found')
-    await expect(client.ocr({ image: 'A' })).rejects.toBeInstanceOf(HelperError)
+    expect(result).toMatchObject({ state: 'not-installed', reason: expect.stringContaining('not found') })
+    await expect(client.ocr({ image: 'A' })).rejects.toBeInstanceOf(OcrBackendError)
     expect(ports).toHaveLength(1) // 没有第二次连接
   })
 
@@ -306,16 +304,16 @@ describe('createHelperClient', () => {
     const first = client.status()
     await flush()
     port().drop()
-    expect((await first).available).toBe(false)
+    expect((await first).state).toBe('not-installed')
     // 不带 recheck 的照旧从记忆里答，连都不连
-    expect((await client.status()).available).toBe(false)
+    expect((await client.status()).state).toBe('not-installed')
     expect(ports).toHaveLength(1)
     // 带上就忘掉那次「没装」，重新连——这一次 host 在了
     const again = client.status({ recheck: true })
     await flush()
     await handshake(port())
     const ok = await again
-    expect(ok.available).toBe(true)
+    expect(ok.state).toBe('ready')
     expect(ports).toHaveLength(2)
   })
 
@@ -340,7 +338,7 @@ describe('createHelperClient', () => {
     expect((await c).result.width).toBe(3)
   })
 
-  it('helper 的错误信封变成 HelperError：坏请求归 bad-request，其余归 invalid-response', async () => {
+  it('helper 的错误信封变成 OcrBackendError：坏请求归 bad-request，其余归 invalid-response', async () => {
     const { client, port } = setup()
     const a = client.ocr({ image: '!!!' })
     await flush()
@@ -369,5 +367,49 @@ describe('createHelperClient', () => {
     await a
     vi.advanceTimersByTime(1000)
     expect(keepAlive).toHaveBeenCalledTimes(3) // 结束后不再调
+  })
+  it('the permission comes first (ADR-0002): without it status says permission-missing and nothing is connected; granted, it connects', async () => {
+    let granted = false
+    const { client, ports } = setup({ permitted: async () => granted })
+    expect(await client.status()).toEqual({ state: 'permission-missing' })
+    expect(ports).toHaveLength(0)
+    granted = true
+    const probe = client.status()
+    await flush()
+    expect(ports).toHaveLength(1)
+    await handshake(ports[0] as FakePort)
+    expect(await probe).toEqual({ state: 'ready', version: '0.1.0' })
+  })
+
+  it('a live handshake is not re-asked of the permission; a remembered missing host is answered after it', async () => {
+    let asked = 0
+    const { client, port } = setup({ permitted: async () => { asked++; return true } })
+    const first = client.status()
+    await flush()
+    await handshake(port())
+    expect(await first).toEqual({ state: 'ready', version: '0.1.0' })
+    expect(await client.status()).toEqual({ state: 'ready', version: '0.1.0' })
+    expect(asked).toBe(1)
+    // The host memory sits behind the permission: a worker that lost the permission says so, not "not installed"
+    let granted = true
+    const missing = setup({ permitted: async () => granted, lastError: () => 'Specified native messaging host not found.' })
+    const probe = missing.client.status()
+    await flush()
+    missing.port().drop()
+    expect(await probe).toMatchObject({ state: 'not-installed' })
+    granted = false
+    expect(await missing.client.status()).toEqual({ state: 'permission-missing' })
+  })
+
+  it('granted into a running worker, whose context has no connectNative: status says restarting and connects nothing', async () => {
+    const { client, ports } = setup({ permitted: async () => true, bound: () => false })
+    expect(await client.status()).toEqual({ state: 'restarting' })
+    expect(ports).toHaveLength(0)
+    // The fresh worker has the binding and simply proceeds
+    const fresh = setup({ permitted: async () => true, bound: () => true })
+    const probe = fresh.client.status()
+    await flush()
+    await handshake(fresh.port())
+    expect(await probe).toEqual({ state: 'ready', version: '0.1.0' })
   })
 })

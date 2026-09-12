@@ -86,9 +86,17 @@ export interface AxtMessages {
    * - neither — rebuild only. Later sessions see the new chain; the ones translating keep theirs.
    */
   'axt:engine-ready': { request: { id: string; scope?: string; rebindAll?: boolean }; response: { reset: boolean } }
-  /** options / content → background：本机 OCR helper 是否可用（DESIGN §15.4 的 ping 检测） */
-  /** `recheck` re-probes a host that was reported missing; see HelperClient.status */
+  /**
+   * options / popup / content → background: where the recognition helper stands (DESIGN §15.4's ping, the four
+   * states of ADR-0002). `recheck` re-probes a host that was reported missing; see OcrBackend.status
+   */
   'axt:helper-status': { request: { recheck?: boolean }; response: HelperStatus }
+  /**
+   * background → popup / options: the helper's state changed on the background's own initiative — the install wait
+   * found it, or the fresh worker after a runtime grant reported (ADR-0002). Pages set what they show from it.
+   * Nobody listening is the normal case, so the send may reject
+   */
+  'axt:helper-state': { request: { status: HelperStatus }; response: undefined }
   /**
    * Sent to every tab when a re-probe finds the helper that was missing. A paper parks its bitmaps
    * when the probe at session start came back empty-handed, and nothing else would ever tell it
