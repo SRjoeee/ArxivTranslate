@@ -64,6 +64,7 @@ export default defineBackground(() => {
   const router = createSessionRouter({
     current: transportOf,
     cancelled,
+    retireOthers: inForce => chain.retireOthers(inForce),
     onDrop: scope => ocr.cancel(scope),
     /**
      * 那个标签页还是不是刚才那个页面：问它自己。

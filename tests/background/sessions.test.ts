@@ -508,7 +508,9 @@ describe('createSessionRouter', () => {
     const held = new Promise<void>(resolve => { release = resolve })
     let current = first
     let building = false
-    const router = routerOver(async () => { const chain = current; if (chain === first && building) await held; return chain })
+    const router = routerOver(async () => { const chain = current; if (chain === first && building) await held; return chain }, {
+      retireOthers: inForce => { for (const chain of [first, second]) if (chain !== inForce) chain.retire?.() },
+    })
     await router.forCall('A', 1)
     building = true
     const pendingB = router.forCall('B', 2)
@@ -530,7 +532,7 @@ describe('createSessionRouter', () => {
     // chain and get nothing but aborted (the local review of ADR-0005, fifth pass). The destination is current()
     const inForce = fakeTransport('新链')
     inForce.retire = () => { inForce.cancelled.push('新链 retired') }
-    const router = routerOver(async () => inForce)
+    const router = routerOver(async () => inForce, { retireOthers: current => { for (const chain of [inForce]) if (chain !== current) chain.retire?.() } })
     await router.forCall('s1', 1)
     expect(await router.dropAndRebindAll()).toBe(0)
     await router.rebind('s1')

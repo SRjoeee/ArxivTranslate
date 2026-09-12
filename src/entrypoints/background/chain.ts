@@ -22,6 +22,12 @@ export interface ChainHolderDeps {
  */
 export interface ChainHolder {
   current(): Promise<TranslationTransport>
+  /**
+   * Retire every build but the one in force, and forget them. A service was deleted: the sessions have just been
+   * moved onto the chain in force by the router, and every other chain — including one only a connection test
+   * used, which no session leads to — must refuse whatever wakes or retries inside it (ADR-0005)
+   */
+  retireOthers(inForce: TranslationTransport): void
   /** Rebuild and make the result the chain in force: the reader's explicit actions (`axt:engine-ready`) */
   activate(config?: Config): Promise<Built>
   /**
@@ -36,8 +42,15 @@ export interface ChainHolder {
 
 export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
   let active: Promise<Built> | null = null
+  /** Every chain built and not yet retired: the ones sessions may still be on, and the ones nothing leads to */
+  const built = new Set<TranslationTransport>()
+  const build = (config?: Config): Promise<Built> =>
+    deps.load(config).then(result => {
+      built.add(result.transport)
+      return result
+    })
   const activate = (config?: Config): Promise<Built> => {
-    active = deps.load(config)
+    active = build(config)
     return active
   }
   return {
@@ -45,16 +58,28 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
     async current() {
       for (;;) {
         const promise = active ?? activate()
-        const built = await promise
-        if (promise === active) return built.transport
+        try {
+          const result = await promise
+          if (promise === active) return result.transport
+        } catch (e) {
+          // A build that failed after being superseded is nobody's answer; only the one in force may fail the caller
+          if (promise === active) throw e
+        }
       }
     },
     onConfig(next) {
       if (!active) return
       active = active.then(
-        built => (chainConfigChanged(built.config, next) ? deps.load(next) : { config: next, transport: built.transport }),
-        () => deps.load(next),
+        result => (chainConfigChanged(result.config, next) ? build(next) : { config: next, transport: result.transport }),
+        () => build(next),
       )
+    },
+    retireOthers(inForce) {
+      for (const transport of built) {
+        if (transport === inForce) continue
+        transport.retire?.()
+        built.delete(transport)
+      }
     },
   }
 }

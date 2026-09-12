@@ -47,6 +47,40 @@ describe('createChainHolder', () => {
     expect(nameOf(await holder.current())).toBe('C')
   })
 
+  it('a superseded build that fails is ignored: current() follows the build in force', async () => {
+    // B was awaited, C took over and finished, then B failed: the failure is nobody's answer any more — a mover
+    // that took it would abort the deletion's drain although a replacement is there (the local review of
+    // ADR-0005, seventh pass)
+    const gates = new Map<string, { ok: () => void; fail: () => void }>()
+    const holder = createChainHolder({
+      load: async config => {
+        const built = config as Config
+        await new Promise<void>((resolve, reject) => { gates.set(built.targetLanguage, { ok: resolve, fail: () => reject(new Error(`${built.targetLanguage} failed`)) }) })
+        return { config: built, transport: transport(built.targetLanguage) }
+      },
+    })
+    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'B' }).catch(() => undefined)
+    const asked = holder.current()
+    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'C' })
+    gates.get('C')!.ok()
+    gates.get('B')!.fail()
+    expect(nameOf(await asked)).toBe('C')
+  })
+
+  it('retireOthers() retires every build but the one in force, once', async () => {
+    const retired: string[] = []
+    const make = (name: string) => ({ name, retire: () => { retired.push(name) } }) as unknown as TranslationTransport
+    let n = 0
+    const holder = createChainHolder({ load: async config => ({ config: config ?? DEFAULT_CONFIG, transport: make(`build-${++n}`) }) })
+    await holder.current()
+    await holder.activate()
+    const inForce = await holder.activate()
+    holder.retireOthers(inForce.transport)
+    expect(retired).toEqual(['build-1', 'build-2'])
+    holder.retireOthers(inForce.transport)
+    expect(retired).toEqual(['build-1', 'build-2']) // forgotten once retired
+  })
+
   it('a failed build is retried by the next configuration change', async () => {
     let fail = true
     const holder = createChainHolder({ load: async config => { if (fail) throw new Error('boom'); return { config: config ?? DEFAULT_CONFIG, transport: transport('ok') } } })

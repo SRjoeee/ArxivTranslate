@@ -4,6 +4,7 @@ import { TranslationCache, createCacheDb } from '@/cache/store'
 import { DEFAULT_CONFIG, type Config } from '@/config/schema'
 import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
+import { createChainHolder } from '@/entrypoints/background/chain'
 import { createSessionRouter } from '@/entrypoints/background/sessions'
 import { CHAIN_CONFIG_FIELDS, VOLATILE_CONFIG_FIELDS, chainConfigChanged, createLocalTransport } from '@/providers/transport'
 import type { CachePort } from '@/providers/translate-service'
@@ -238,6 +239,33 @@ describe('createLocalTransport：翻译', () => {
     await vi.advanceTimersByTimeAsync(300)
     expect(calls).toBe(1) // the first attempt failed, the retry is scheduled
     t.retire!()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(calls).toBe(1)
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+  })
+
+  it('deleting a service retires the chain a pending connection test is on, through activate() and dropAndRebindAll(): the retry never reaches the endpoint (ADR-0005, seventh review pass)', async () => {
+    // The connection test has no scope and no session, so nothing leads the router to its chain; the holder knows
+    // every chain it built and retires all but the one in force when the router asks
+    vi.useFakeTimers()
+    let calls = 0
+    const registry = new CancelledScopeRegistry()
+    const holder = createChainHolder({
+      load: async () => ({
+        config: DEFAULT_CONFIG,
+        transport: await withChain([mockProvider(async r => {
+          if (calls++ === 0) throw attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
+          return { segments: r.segments, provider: 'mock' }
+        })], { cancelled: registry }),
+      }),
+    })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: registry, retireOthers: inForce => holder.retireOthers(inForce) })
+    const first = await holder.current()
+    const pending = first.translate({ request: req }) // the connection test: no scope, no session
+    await vi.advanceTimersByTimeAsync(300)
+    expect(calls).toBe(1) // failed once, the retry is scheduled
+    await holder.activate() // the service was deleted, the chain rebuilt
+    await router.dropAndRebindAll()
     await vi.advanceTimersByTimeAsync(10_000)
     expect(calls).toBe(1)
     expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })

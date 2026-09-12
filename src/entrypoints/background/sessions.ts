@@ -83,6 +83,12 @@ export interface SessionRouterDeps {
    * load hangs, that event never comes)
    */
   stillLoading?: (tabId: number) => Promise<boolean>
+  /**
+   * Retire every chain other than the one in force (ADR-0005). `dropAndRebindAll` calls it right after the
+   * sessions are moved and before anything is awaited: a chain only a connection test used has no session that
+   * leads to it, and a retired chain refuses every call that wakes or retries inside it, scoped or not
+   */
+  retireOthers?: (inForce: TranslationTransport) => void
 }
 
 /**
@@ -269,10 +275,11 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
         if (session.transport && session.transport !== transport) old.push([scope, session.transport])
         sessions.set(scope, { ...session, transport })
       }
-      // Retire the replaced chains before any drain is awaited: a call suspended inside one of them (its cache
-      // read, outside every queue) is refused when it wakes instead of reaching the deleted service, while the
-      // scope itself lives on, on the replacement (the local review of ADR-0005, fourth pass)
-      for (const [, chain] of old) chain.retire?.()
+      // Retire every other chain before any drain is awaited — the ones the sessions just left and the ones nothing
+      // leads to: a call suspended inside one of them (its cache read, outside every queue) or retrying there is
+      // refused instead of reaching the deleted service, while the scope itself lives on, on the replacement
+      // (the local review of ADR-0005, fourth and seventh passes)
+      deps.retireOthers?.(transport)
       // Drain, do not mark: the scope stays alive on the new chain, it is only being emptied of
       // the work that belonged to the old one
       let cancelled = 0
