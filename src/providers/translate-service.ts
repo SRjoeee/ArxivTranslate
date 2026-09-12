@@ -387,8 +387,9 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       executeIndividual: (item, meta) => {
         const dead = fatalFor(meta)
         if (dead !== undefined) return Promise.reject(dead)
-        // The batch's live subscribers, not the item's own scope: a deduplicated peer's interest in this item is
-        // known to the batch, and a scope that died since the flush must not be subscribed again
+        // The item's own subscribers as the batch queue hands them over — its scope and the peers deduplicated onto
+        // it — minus the ones that died since the flush. Neither the item's scope alone (a peer would be lost) nor
+        // the batch's union (an unrelated live tab would keep a closed tab's items running) says who still wants it
         const scopes = liveScopes(meta)
         if (scopes === null) return Promise.reject(nobodyLeft(meta))
         return requestQueue.enqueue(

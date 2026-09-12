@@ -510,6 +510,37 @@ describe('createLocalTransport：翻译', () => {
     expect(calls).toBe(2)
   })
 
+  it('the individual fallback keeps each item\'s own subscribers: closing one tab aborts its items while the other tab\'s go on (ADR-0005, twentieth review pass)', async () => {
+    // One batch from two tabs (A1, A2 from tab A; B1 from tab B) fails and splits into items. Subscribing every
+    // item to the batch's union let tab B keep A1 running and A2 queued after tab A closed
+    const registry = new CancelledScopeRegistry()
+    const signals = new Map<string, AbortSignal | undefined>()
+    let releaseA1: () => void = () => {}
+    const holdA1 = new Promise<void>(resolve => { releaseA1 = resolve })
+    let a1Entered: () => void = () => {}
+    const atA1 = new Promise<void>(resolve => { a1Entered = resolve })
+    let calls = 0
+    const t = await withChain([mockProvider(async r => {
+      calls++
+      if (r.segments.length > 1) throw new ProviderError('invalid-response', 'bad shape', { isolatable: true }) // the batch fails, the items go one by one
+      signals.set(r.segments[0]!.id, r.signal)
+      if (r.segments[0]!.id === 'a1') { a1Entered(); await holdA1 }
+      return { segments: r.segments, provider: 'mock' }
+    }, { maxConcurrent: 1 })], { cancelled: registry, batch: { maxRetries: 0, batchDelay: 20 } })
+    const a = t.translate({ request: { segments: [{ id: 'a1', text: 'one' }, { id: 'a2', text: 'two' }], source: 'en', target: 'zh-CN' }, scope: 'tab-a' })
+    const b = t.translate({ request: { segments: [{ id: 'b1', text: 'three' }], source: 'en', target: 'zh-CN' }, scope: 'tab-b' })
+    await atA1 // the batch failed; A1 is at the endpoint, A2 and B1 wait behind the single slot
+    registry.markScope('tab-a') // tab A closes
+    await t.cancel('tab-a')
+    expect(signals.get('a1')?.aborted).toBe(true)
+    releaseA1()
+    expect(await a).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect((await b).ok).toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(signals.has('a2')).toBe(false) // never sent
+    expect(calls).toBe(3) // the batch, A1, B1
+  })
+
   it('router and chain together: a tab closed while the first chain builds leaves no request out and nothing bound (ADR-0005, second review pass)', async () => {
     // The scope's first request arrived on a fresh worker (the chain still building) and the reader closed the
     // tab before it finished: the request must come back aborted, the provider untouched, the session unbound
