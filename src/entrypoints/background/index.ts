@@ -234,12 +234,13 @@ export default defineBackground(() => {
         // 标签页说过「接下来的段落会用离线翻译」，就只迁那一个；删掉的服务必须处处停用，才迁全部；
         // 其余只重建链，正在翻的页面保留它开始时的那条。被动的配置变更一律不迁（见 sessions.ts）
         activate()
-          .then(async a => {
+          .then(async () => {
             // Cancelling first is what makes a deleted service stop: re-pointing alone leaves its
-            // queued and in-flight work running on the transport being replaced (Codex on #157)
-            if (message.rebindAll) await router.dropAndRebindAll(a.transport)
-            else if (message.scope) router.rebind(message.scope, a.transport)
-            return a.transport.status()
+            // queued and in-flight work running on the transport being replaced (Codex on #157).
+            // The router moves onto the chain in force, whichever rebuild finished last (ADR-0005)
+            if (message.rebindAll) await router.dropAndRebindAll()
+            else if (message.scope) await router.rebind(message.scope)
+            return (await transportOf()).status()
           })
           .then(status => sendResponse({ reset: status.chain.includes(message.id) }))
           .catch(() => sendResponse({ reset: false }))

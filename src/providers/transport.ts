@@ -97,18 +97,19 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
   const model = chosen?.model
   /**
    * Set by retire(): this chain has been replaced. A scope moved to the replacement stays live in the registry,
-   * so a call of it suspended in one of these services would go on to the deleted provider when it wakes;
-   * the services read this gate together with the registry and stop it there (#157)
+   * so a call of it suspended in one of these services would go on to the deleted provider when it wakes; and a
+   * connection test has no scope at all. The services read this gate next to the registry and stop both (#157)
    */
   let retired = false
-  const refuse: Pick<CancelledScopeRegistry, 'has'> = { has: scope => retired || deps.cancelled.has(scope) }
+  const isRetired = () => retired
   const steps = chain.map(engine => ({
     provider: engine,
     service: createTranslateService({
       getProvider: async () => engine,
       // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
       getModel: async () => (engine.id === chosen?.id ? chosen.model : undefined),
-      cancelled: refuse,
+      cancelled: deps.cancelled,
+      retired: isRetired,
       ...(deps.cache ? { cache: deps.cache } : {}),
       ...(deps.queue ? { queue: deps.queue } : {}),
       ...(deps.batch ? { batch: deps.batch } : {}),
@@ -128,7 +129,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     const own = serviceOf(config, id)
     if (!own) return undefined
     const engine = createOpenAICompatProvider(own, { prompts: config.prompts })
-    return { provider: engine, service: createTranslateService({ getProvider: async () => engine, getModel: async () => own.model, cancelled: refuse }) }
+    return { provider: engine, service: createTranslateService({ getProvider: async () => engine, getModel: async () => own.model, cancelled: deps.cancelled, retired: isRetired }) }
   }
 
   /**

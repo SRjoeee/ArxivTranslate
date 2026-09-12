@@ -172,6 +172,27 @@ describe('createLocalTransport：翻译', () => {
     expect(registry.has('live')).toBe(false)
   })
 
+  it('retire() also refuses work without a scope: a pending connection test must not use a deleted service\'s key (ADR-0005, fifth review pass)', async () => {
+    // The settings drawer's connection test names its service and carries no scope; the registry cannot cover
+    // it, the retirement gate must
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('no network in tests'))
+    const calls: string[] = []
+    const spare = { ...SVC, id: 'svc-99999999' }
+    const t = await createLocalTransport(
+      { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC, spare] },
+      { cancelled: new CancelledScopeRegistry(), buildChain: async () => ({ chain: [mockProvider(async r => { calls.push('call'); return { segments: r.segments, provider: 'mock' } })], renderPath: 'tags' as const }) },
+    )
+    // Off the chain: the test is past its first await when the chain is retired
+    const pending = t.translate({ request: req, providerId: spare.id })
+    t.retire!()
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    // On the chain, no scope: refused as well
+    expect(await t.translate({ request: req })).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(calls).toEqual([])
+    fetchSpy.mockRestore()
+  })
+
   it('router and chain together: a tab closed while the first chain builds leaves no request out and nothing bound (ADR-0005, second review pass)', async () => {
     // The scope's first request arrived on a fresh worker (the chain still building) and the reader closed the
     // tab before it finished: the request must come back aborted, the provider untouched, the session unbound

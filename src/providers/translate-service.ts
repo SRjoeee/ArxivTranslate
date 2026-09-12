@@ -16,7 +16,7 @@ import { expectationsFromText, validate } from '@/core/protector/validate'
 import { createGlossaryMatcher, type GlossaryEntry } from './glossary'
 import { getRandomUUID } from '@/shared/uuid'
 import { BatchCountMismatchError, BatchQueue, type BatchExecutionMeta, type BatchOptions } from './request/batch-queue'
-import { type CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
+import { type CancelledScopeRegistry, isTranslationCancelledError, TranslationCancelledError } from './request/cancellation'
 import { REQUEST_TIMEOUT_ERROR_NAME, RequestQueue, type QueueOptions } from './request/request-queue'
 import { attachRequestErrorMeta } from './request/retry-policy'
 import { ProviderError, isPermanentErrorKind, type ProviderErrorKind, type TranslatedSegment, type TranslateRequest, type TranslationProvider, type TranslateSegment } from './types'
@@ -91,6 +91,13 @@ export interface TranslateServiceDeps {
    * queue and never writes a result (#1881)
    */
   cancelled: Pick<CancelledScopeRegistry, 'has'>
+  /**
+   * Whether the chain this service belongs to has been retired — a service on it deleted, the sessions moved on
+   * (ADR-0005). Unlike the registry this is not about a scope: a connection test carries none, and it must not
+   * reach the endpoint with a deleted key either (#157), so every call is refused after its awaits and every
+   * batch at dispatch
+   */
+  retired?: () => boolean
 }
 
 export interface TranslateService {
@@ -210,6 +217,8 @@ export async function readWithBudget(store: CachePort, keys: string[], budgetMs:
 
 export function createTranslateService(deps: TranslateServiceDeps): TranslateService {
   const queues = new Map<string, ProviderQueues>()
+  /** A call that must not go on: its scope is dead, or this whole chain is */
+  const refused = (scope: string | undefined): boolean => deps.retired?.() === true || (scope !== undefined && deps.cancelled.has(scope))
   const baseTimeoutMs = deps.queue?.timeoutMs ?? DEFAULT_QUEUE_OPTIONS.timeoutMs
   const timeoutFor = (chars: number) => Math.min(baseTimeoutMs + chars * BATCH_TIMEOUT_PER_CHAR_MS, MAX_BATCH_TIMEOUT_MS)
 
@@ -340,10 +349,11 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       getCharacters: item => item.text.length,
       getDedupKey: item => item.dedupKey,
       getScope: item => item.scope,
-      isScopeCancelled: scope => deps.cancelled.has(scope),
+      isScopeCancelled: scope => refused(scope),
       executeBatch: (items, meta) => {
         // 这一批所属的会话已经致命：当场拒，不进 RequestQueue、不打端点。BatchQueue 只对
         // BatchCountMismatchError 重试或走逐条兜底，所以这里拒了就是终局，不会绕出第二条路
+        if (deps.retired?.()) return Promise.reject(new TranslationCancelledError(meta.scopes?.join(',')))
         const dead = fatalFor(meta)
         if (dead !== undefined) return Promise.reject(dead)
         const ids = uniqueIds(items)
@@ -353,6 +363,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
       },
       executeIndividual: (item, meta) => {
+        if (deps.retired?.()) return Promise.reject(new TranslationCancelledError(meta.scopes?.join(',')))
         const dead = fatalFor(meta)
         if (dead !== undefined) return Promise.reject(dead)
         return requestQueue.enqueue(
@@ -421,7 +432,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         }
       }
       // 读缓存时让出过主线程，这期间 scope 可能已被撤销（Read Frog translation-queues.ts 也在 await 之后查一次）
-      if (scope && deps.cancelled.has(scope)) return { ok: false, error: { kind: 'aborted', message: `已取消（scope: ${scope}）`, isolatable: false } }
+      if (refused(scope)) return { ok: false, error: { kind: 'aborted', message: scope === undefined ? '已取消（链已退役）' : `已取消（scope: ${scope}）`, isolatable: false } }
       const cached = translated.size
 
       // 2. 未命中的逐段入队；同一次调用的段落批次键相同，会攒在一起
@@ -493,7 +504,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         // 写之前再查一次取消（Codex 在 #33 指出）：一次调用会被拆到多个批次，先完成的那些
         // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，
         // 与「恢复原文之后不再写缓存」的承诺不符
-        if (store && writes.length > 0 && !(scope && deps.cancelled.has(scope))) await store.putMany(writes)
+        if (store && writes.length > 0 && !refused(scope)) await store.putMany(writes)
         if (failures.length > 0) {
           const error = pickError(failures)
           // key 没配 / 不认：这轮里再打多少次都是同一个 401。`failQueue` 只排空**那一刻**排在

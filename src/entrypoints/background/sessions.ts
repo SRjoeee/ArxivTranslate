@@ -33,19 +33,18 @@ export interface SessionRouter {
    */
   mayHaveLeft(tabId: number): void
   /**
-   * 把所有进行中的会话迁到新链上。**只给用户的显式动作用**（下载完语言包后的 `axt:engine-ready`）：
-   * 被动的配置变更故意不迁，见本文件开头
+   * Move one session onto the chain in force; the rest keep the one they started on. **Only for the
+   * reader's explicit actions** (`axt:engine-ready` after a language pack downloaded): a passive
+   * configuration change deliberately moves nothing, see the top of this file
    */
-  rebindAll(transport: TranslationTransport): void
-  /** Move one session onto a new chain; the rest keep the one they started on */
-  rebind(scope: string, transport: TranslationTransport): void
+  rebind(scope: string): Promise<void>
   /**
-   * Every session onto a new chain, **and the work on the old ones drained**. Re-pointing alone
+   * Every session onto the chain in force, **and the work on the old ones drained**. Re-pointing alone
    * leaves whatever was queued or in flight running on the transport being replaced, so a deleted
    * service would go on spending its key and writing its results into the live page (Codex on #157).
    * Returns how many requests were cancelled
    */
-  dropAndRebindAll(transport: TranslationTransport): Promise<number>
+  dropAndRebindAll(): Promise<number>
   /** The transport a session is bound to, without binding one; for answering questions about it */
   transportFor(scope: string): TranslationTransport | undefined
   /** 当前还绑着的 scope，按绑定顺序 */
@@ -250,14 +249,17 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       // 那时它还没有会话，到点再取就会把这中间刚开起来的那个会话撤掉
       arm(tabId, scopesOfTab(tabId), 0)
     },
-    rebindAll(transport) {
-      for (const [scope, session] of sessions) sessions.set(scope, { ...session, transport })
-    },
-    rebind(scope, transport) {
+    async rebind(scope) {
+      const transport = await deps.current()
       const session = sessions.get(scope)
       if (session) sessions.set(scope, { ...session, transport })
     },
-    async dropAndRebindAll(transport) {
+    async dropAndRebindAll() {
+      // The destination is the chain in force **now**, not one the caller built: two engine-ready rebuilds can
+      // finish newer-first, and the configuration watcher rebuilds as well. Moving onto a stale build would put
+      // every session on it and retire the chain current() still answers — fresh pages would then bind to a
+      // retired chain and every translation would come back aborted (the local review of ADR-0005, fifth pass)
+      const transport = await deps.current()
       // Move every session first, synchronously, and only then drain the old chains: a forCall whose build lands
       // while a drain below is awaited finds its session already moved and keeps that (see forCall) — moving
       // one session per drain let it bind the chain being replaced and send its request there, while the loop
