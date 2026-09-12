@@ -200,7 +200,10 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
 
   const actions: PopupActions = {
     translate: () => void guard(async () => {
-      const r = await sendToActiveTab({ type: 'axt:translate-page' })
+      // The epoch at the click, as for the other two: a translate delivered late must not translate a page the reader
+      // translated and restored meanwhile (the local review of S2, fourteenth pass)
+      const { epoch } = await sendToActiveTab({ type: 'axt:page-status' })
+      const r = await sendToActiveTab({ type: 'axt:translate-page', ...(epoch !== undefined ? { epoch } : {}) })
       if (!r.started) throw new Error(r.reason ?? '')
     }),
     // The epoch a click acts on is read at the click, not from the last poll: an automatic hand-over restart between
