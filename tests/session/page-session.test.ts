@@ -185,6 +185,23 @@ describe('page session', () => {
     expect((await h.session.status()).session).toBeNull()
   })
 
+  it('overlapping starts are one start: a second click while the first is asking its status mints no second session (S2 review, tenth pass)', async () => {
+    const h = harness({ holdStatusAt: 1 })
+    live = h.session
+    const first = h.session.start()
+    const second = h.session.start()
+    await settle()
+    expect(h.statusCalls).toHaveLength(1)
+    h.releaseStatus()
+    expect(await first).toEqual({ started: true })
+    expect(await second).toEqual({ started: true })
+    const status = await h.session.status()
+    expect(status.session).toBe(h.statusCalls[0])
+    expect(h.cancelled).toEqual([])
+    // Once the start has settled, a start is a start again: refused while on, as before
+    expect(await h.session.start()).toEqual({ started: false, reason: S.page.alreadyOn })
+  })
+
   it('a second start is refused while the session is on; a restart replaces it and cancels the old scope', async () => {
     const h = harness()
     live = h.session

@@ -173,7 +173,20 @@ export function createPageSession(deps: SessionDeps): PageSession {
     if (session) void backend.cancel(session)
   }
 
-  async function start(requested?: Mode, restart = false, from?: string): Promise<StartResult> {
+  /**
+   * Overlapping starts are one start. A second click or key press while the first is still asking its status must
+   * not mint a second session: both would be bound provisionally, the first's first request would drop the second
+   * as the tab's stale scope, and the second would then take the page over with a dead scope — every request of
+   * it aborted (the local review of INVENTORY S2, tenth pass). The later caller gets the earlier start's outcome
+   */
+  let starting: Promise<StartResult> | null = null
+  function start(requested?: Mode, restart = false, from?: string): Promise<StartResult> {
+    if (starting) return starting
+    starting = begin(requested, restart, from).finally(() => { starting = null })
+    return starting
+  }
+
+  async function begin(requested?: Mode, restart = false, from?: string): Promise<StartResult> {
     if (progress.state === 'on' && !restart) return { started: false, reason: S.page.alreadyOn }
     if (from !== undefined && active !== from) return { started: false, reason: S.page.sessionOver }
     if (!paper) return { started: false, reason: S.page.notPaper }
