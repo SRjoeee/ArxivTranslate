@@ -64,11 +64,15 @@ export function useOptionsData(): OptionsData {
     wanted.current = target
     setPack(null)
   }, [])
-  /** A download in flight for this target: lookups meanwhile publish nothing — the API reports `downloadable` until the download ends, which would put the Download button back (Codex on #185) */
-  const downloading = useRef<string | null>(null)
+  /**
+   * The targets whose download is in flight — every one of them, since a reader can start B while A downloads and
+   * come back to A: lookups for such a target publish nothing, the API reporting `downloadable` until the download
+   * ends, which would put the Download button back (Codex on #185)
+   */
+  const downloading = useRef(new Set<string>())
   const checkPack = useCallback(async (target: string) => {
     const state = await packState(target)
-    if (wanted.current === target && downloading.current !== target) setPack(state)
+    if (wanted.current === target && !downloading.current.has(target)) setPack(state)
   }, [])
 
   const loadCache = useCallback(async () => {
@@ -168,7 +172,7 @@ export function useOptionsData(): OptionsData {
   /** From the click itself (shared/pack.ts says why); the row shows an indeterminate state meanwhile */
   const fetchPack = useCallback(async () => {
     const target = (await getConfig()).targetLanguage
-    downloading.current = target
+    downloading.current.add(target)
     setPack('downloading')
     try {
       await downloadPack(target)
@@ -177,8 +181,7 @@ export function useOptionsData(): OptionsData {
       // translating into another language must keep the chain it started on (Codex on #157)
       await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).catch(() => undefined)
     } finally {
-      // Only this download's own marker: a later download of another target may own it by now (Codex on #185)
-      if (downloading.current === target) downloading.current = null
+      downloading.current.delete(target)
       await checkPack(wanted.current ?? target)
     }
   }, [checkPack])

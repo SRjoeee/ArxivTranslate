@@ -139,11 +139,11 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
    * the target moved on re-checks the target of the moment rather than reclaiming its own (the local review of S1)
    */
   const wantedPack = useRef<string | null>(null)
-  /** A download in flight for this target: lookups meanwhile publish nothing (the API says `downloadable` until it ends) */
-  const downloading = useRef<string | null>(null)
+  /** The targets whose download is in flight, every one of them (a reader can come back to A while it downloads): lookups for such a target publish nothing — the API says `downloadable` until it ends */
+  const downloading = useRef(new Set<string>())
   const checkPack = useCallback(async (target: string): Promise<PackState> => {
     const state = await packState(target)
-    if (wantedPack.current === target && downloading.current !== target) setPack(state)
+    if (wantedPack.current === target && !downloading.current.has(target)) setPack(state)
     return state
   }, [])
 
@@ -355,13 +355,12 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     downloadPack: () => void guard(async () => {
       if (!config) return
       const target = config.targetLanguage
-      downloading.current = target
+      downloading.current.add(target)
       setPack('downloading')
       try {
         await downloadPack(target)
       } finally {
-        // Only this download's own marker: a later download of another target may own it by now (Codex on #185)
-        if (downloading.current === target) downloading.current = null
+        downloading.current.delete(target)
         // The target of the moment, not the one downloaded: it may have moved on meanwhile
         await checkPack(wantedPack.current ?? target)
       }
