@@ -17,7 +17,7 @@ function page(over: Partial<PageStatus['progress']> = {}, extra: Partial<PageSta
     mode: 'stack',
     preference: 'stack',
     progress: { state, total: 120, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0, ...over },
-    epoch: 1,
+    epoch: 'doc#1',
     ...(state === 'on' ? { running: { provider: 'microsoft', target: 'cmn', engine: 'microsoft', revision: 'r1' } } : {}),
     ...extra,
   }

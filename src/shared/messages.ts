@@ -29,9 +29,10 @@ export interface PageStatus {
    * The page's action epoch: bumped by every start that commits and every restore. A command carries the epoch it
    * was decided on, and the page refuses one from an earlier epoch — a decision that took a while (the toggle waits
    * for the chain's probes) must not undo what the reader did in between, a translate decided on an idle page that
-   * was translated and restored meanwhile included (the local review of INVENTORY S2, sixth and twelfth passes)
+   * was translated and restored meanwhile included (the local review of INVENTORY S2, sixth and twelfth passes).
+   * Opaque: the document's own id and the count, so another document's epoch never matches (thirteenth pass)
    */
-  epoch?: number
+  epoch?: string
   /**
    * What the current session runs on: the service chosen when it started, its target language,
    * the service actually serving right now (a hand-over down the chain changes it), and `revision` —
@@ -51,9 +52,9 @@ export interface AxtMessages {
    * page has moved — the reader restored, restarted or translated meanwhile — so a decision that took a while (the
    * toggle waits for the chain's probes) cannot undo what the reader did in between (sixth and twelfth passes)
    */
-  'axt:translate-page': { request: { mode?: Mode; restart?: boolean; epoch?: number }; response: { started: boolean; reason?: string } }
+  'axt:translate-page': { request: { mode?: Mode; restart?: boolean; epoch?: string }; response: { started: boolean; reason?: string } }
   /** popup → content：中止并恢复原文. `epoch` as above: a restore decided on an earlier epoch is `refused` */
-  'axt:restore-page': { request: { epoch?: number }; response: { removedNodes: number; refused?: true } }
+  'axt:restore-page': { request: { epoch?: string }; response: { removedNodes: number; refused?: true } }
   /** popup → content：切换模式（只改 <html> 上的属性，不重新翻译；§4 第 9 步） */
   'axt:set-mode': { request: { mode: Mode }; response: { mode: Mode; preference: Mode } }
   /** popup → content：进度 */

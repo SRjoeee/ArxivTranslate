@@ -126,7 +126,7 @@ describe('page session', () => {
     expect(answered).toBe(false)
     h.releaseConfig()
     const status = await pending
-    expect(status).toEqual({ paper: '2410.00260', mode: 'stack', preference: 'stack', progress: { state: 'idle', total: 3, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 }, session: null, epoch: 0 })
+    expect(status).toEqual({ paper: '2410.00260', mode: 'stack', preference: 'stack', progress: { state: 'idle', total: 3, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 }, session: null, epoch: expect.any(String) })
   })
 
   it('start: marks the page, mints a session, reports what it runs on', async () => {
@@ -178,7 +178,7 @@ describe('page session', () => {
     const idle = (await h.session.status()).epoch!
     await h.session.start()
     const on = (await h.session.status()).epoch!
-    expect(on).toBe(idle + 1)
+    expect(on).not.toBe(idle)
     // A restore decided on the epoch before the (automatic) restart is refused and says so
     await h.session.start(undefined, true)
     expect(h.session.restore(on)).toEqual({ removedNodes: 0, refused: true })
@@ -187,7 +187,7 @@ describe('page session', () => {
     expect(h.session.restore(restarted).refused).toBeUndefined()
     expect((await h.session.status()).session).toBeNull()
     // The restore moved the epoch too: a translate decided on the page as it was just before the restore is refused
-    expect((await h.session.status()).epoch).toBe(restarted + 1)
+    expect((await h.session.status()).epoch).not.toBe(restarted)
     expect(await h.session.start(undefined, false, undefined, restarted)).toEqual({ started: false, reason: S.page.sessionOver })
     // Idle → on → idle: a translate decided on the first idle epoch must not translate the page the reader restored
     expect(await h.session.start(undefined, false, undefined, idle)).toEqual({ started: false, reason: S.page.sessionOver })
@@ -195,6 +195,44 @@ describe('page session', () => {
     expect((await h.session.status()).progress.state).toBe('idle')
     // Decided on the current epoch, it starts
     expect(await h.session.start(undefined, false, undefined, (await h.session.status()).epoch)).toEqual({ started: true })
+  })
+
+  it('an epoch belongs to its document: the same tab reloaded starts a new document whose epochs never match the old one\'s (thirteenth pass)', async () => {
+    // Both documents at the same count: the old one translated once (count 1), the new one translated once (count 1)
+    const before = harness()
+    await before.session.start()
+    const stale = (await before.session.status()).epoch!
+    before.session.restore()
+    const after = harness()
+    live = after.session
+    await after.session.start()
+    // A restore decided on the old document, arriving after the reload, must not undo the new document's translation
+    expect(after.session.restore(stale)).toEqual({ removedNodes: 0, refused: true })
+    expect((await after.session.status()).session).not.toBeNull()
+    const kept = (await after.session.status()).session
+    // Refused either way — the page is on (alreadyOn) and the epoch is another document's; the session stays
+    expect(await after.session.start(undefined, false, undefined, stale)).toMatchObject({ started: false })
+    after.session.restore()
+    expect(await after.session.start(undefined, false, undefined, stale)).toEqual({ started: false, reason: S.page.sessionOver })
+    expect((await after.session.status()).session).toBeNull()
+    expect(kept).not.toBeNull()
+  })
+
+  it('a start made obsolete while it waits does not swallow the different start asked for after it (thirteenth pass)', async () => {
+    const h = harness({ holdStatusAt: 2 })
+    live = h.session
+    await h.session.start()
+    const first = (await h.session.status()).epoch!
+    // A restart decided on the page as it is; its status is held. Meanwhile the reader restores, then asks to translate
+    const restart = h.session.start(undefined, true, undefined, first)
+    await settle()
+    expect(h.session.restore().refused).toBeUndefined()
+    const idle = (await h.session.status()).epoch!
+    const translate = h.session.start(undefined, false, undefined, idle)
+    h.releaseStatus()
+    expect(await restart).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(await translate).toEqual({ started: true })
+    expect((await h.session.status()).progress.state).toBe('on')
   })
 
   it('overlapping starts are one start: a second click while the first is asking its status mints no second session (S2 review, tenth pass)', async () => {

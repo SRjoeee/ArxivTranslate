@@ -79,7 +79,7 @@ export function savedFromStatus(status: Pick<ProviderStatus, 'revision' | 'avail
  * an earlier epoch — the reader acted in between (sixth and twelfth passes of the local review). Every action
  * carries it, a translate decided on an idle page included: the page may have been translated and restored since
  */
-export function messageFor(action: PageAction, epoch?: number): { type: 'axt:translate-page'; restart?: true; epoch?: number } | { type: 'axt:restore-page'; epoch?: number } {
+export function messageFor(action: PageAction, epoch?: string): { type: 'axt:translate-page'; restart?: true; epoch?: string } | { type: 'axt:restore-page'; epoch?: string } {
   const decidedOn = epoch !== undefined ? { epoch } : {}
   if (action === 'restore') return { type: 'axt:restore-page', ...decidedOn }
   return action === 'retranslate' ? { type: 'axt:translate-page', restart: true, ...decidedOn } : { type: 'axt:translate-page', ...decidedOn }

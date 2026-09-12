@@ -9,15 +9,15 @@ const progress = (state: Progress['state']): { progress: Progress } =>
 
 // 右键菜单的开关（issue #146）。原生右键菜单在 Playwright 里驱动不了，所以「点了之后做什么」
 // 只能在这一层钉住
-function fakeMenu(status?: { progress: Progress; running?: { provider: string; target: string; engine: string; revision: string }; epoch?: number }, saved: { revision: string | null; canRun: boolean; fallback: boolean } | null = { revision: 'r1', canRun: true, fallback: false }) {
-  const sent: { tabId: number; type: string; restart?: boolean; epoch?: number }[] = []
+function fakeMenu(status?: { progress: Progress; running?: { provider: string; target: string; engine: string; revision: string }; epoch?: string }, saved: { revision: string | null; canRun: boolean; fallback: boolean } | null = { revision: 'r1', canRun: true, fallback: false }) {
+  const sent: { tabId: number; type: string; restart?: boolean; epoch?: string }[] = []
   const created: unknown[] = []
   let click: ((info: { menuItemId: string | number }, tab?: { id?: number }) => void) | undefined
   const deps = {
     create: (o: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) => { created.push(o) },
     removeAll: () => Promise.resolve(),
     onClicked: (h: (info: { menuItemId: string | number }, tab?: { id?: number }) => void) => { click = h },
-    send: vi.fn(async (tabId: number, message: { type: string; restart?: boolean; epoch?: number }) => {
+    send: vi.fn(async (tabId: number, message: { type: string; restart?: boolean; epoch?: string }) => {
       sent.push({ tabId, type: message.type, ...(message.restart ? { restart: true } : {}), ...(message.epoch !== undefined ? { epoch: message.epoch } : {}) })
       if (message.type === 'axt:page-status') {
         if (status === undefined) throw new Error('Receiving end does not exist')
@@ -89,18 +89,18 @@ describe('右键菜单的翻译开关（#146）', () => {
 
   it('the command carries the page epoch it was decided on, a translate on an idle page included, so a page that moved while the settings were read refuses it (sixth and twelfth passes)', async () => {
     const running = { provider: 'microsoft', target: 'cmn', engine: 'microsoft', revision: 'r1' }
-    const behind = fakeMenu({ ...progress('on'), running, epoch: 4 }, { revision: 'r2', canRun: true, fallback: false })
+    const behind = fakeMenu({ ...progress('on'), running, epoch: 'd#4' }, { revision: 'r2', canRun: true, fallback: false })
     behind.click(7)
     await vi.waitFor(() => expect(behind.sent).toHaveLength(2))
-    expect(behind.sent[1]).toEqual({ tabId: 7, type: 'axt:translate-page', restart: true, epoch: 4 })
-    const current = fakeMenu({ ...progress('on'), running, epoch: 4 }, { revision: 'r1', canRun: true, fallback: false })
+    expect(behind.sent[1]).toEqual({ tabId: 7, type: 'axt:translate-page', restart: true, epoch: 'd#4' })
+    const current = fakeMenu({ ...progress('on'), running, epoch: 'd#4' }, { revision: 'r1', canRun: true, fallback: false })
     current.click(7)
     await vi.waitFor(() => expect(current.sent).toHaveLength(2))
-    expect(current.sent[1]).toEqual({ tabId: 7, type: 'axt:restore-page', epoch: 4 })
-    const idle = fakeMenu({ ...progress('idle'), epoch: 2 })
+    expect(current.sent[1]).toEqual({ tabId: 7, type: 'axt:restore-page', epoch: 'd#4' })
+    const idle = fakeMenu({ ...progress('idle'), epoch: 'd#2' })
     idle.click(7)
     await vi.waitFor(() => expect(idle.sent).toHaveLength(2))
-    expect(idle.sent[1]).toEqual({ tabId: 7, type: 'axt:translate-page', epoch: 2 })
+    expect(idle.sent[1]).toEqual({ tabId: 7, type: 'axt:translate-page', epoch: 'd#2' })
   })
 
   it('the saved settings cannot be read: the page is not behind, a running page restores', async () => {

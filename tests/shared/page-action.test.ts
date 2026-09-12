@@ -30,10 +30,10 @@ describe('pageAction', () => {
     expect(messageFor('translate')).toEqual({ type: 'axt:translate-page' })
     expect(messageFor('retranslate')).toEqual({ type: 'axt:translate-page', restart: true })
     expect(messageFor('restore')).toEqual({ type: 'axt:restore-page' })
-    expect(messageFor('retranslate', 3)).toEqual({ type: 'axt:translate-page', restart: true, epoch: 3 })
-    expect(messageFor('restore', 3)).toEqual({ type: 'axt:restore-page', epoch: 3 })
+    expect(messageFor('retranslate', 'd#3')).toEqual({ type: 'axt:translate-page', restart: true, epoch: 'd#3' })
+    expect(messageFor('restore', 'd#3')).toEqual({ type: 'axt:restore-page', epoch: 'd#3' })
     // A translate decided on an idle page carries it too: the page may have been translated and restored since
-    expect(messageFor('translate', 0)).toEqual({ type: 'axt:translate-page', epoch: 0 })
+    expect(messageFor('translate', 'd#0')).toEqual({ type: 'axt:translate-page', epoch: 'd#0' })
   })
 })
 
