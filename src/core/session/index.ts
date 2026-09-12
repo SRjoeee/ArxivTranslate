@@ -10,7 +10,7 @@ import { type Look, lookOf } from '@/config/appearance'
 import { DEFAULT_CONFIG, type Config } from '@/config/schema'
 import type { Block } from '@/core/extractor'
 import type { PaperContext } from '@/core/extractor/context'
-import { collectImageTargets, startImageTranslation, type ImageRun } from '@/core/image'
+import { collectImageTargets, startImageTranslation, type ImageBytes, type ImageRun, type ImageTarget } from '@/core/image'
 import { startTranslation, type Progress, type TranslationRun } from '@/core/pipeline'
 import { escapeText, unescapeText } from '@/core/protector/text'
 import {
@@ -40,6 +40,8 @@ export interface SessionDeps {
   ocr: (call: OcrCall) => Promise<OcrMessageResponse>
   /** Is the recognition helper reachable (`axt:helper-status`) */
   helperStatus: () => Promise<HelperStatus>
+  /** Bytes of one bitmap; the image pipeline's own `fetch` through the HTTP cache when absent (tests inject) */
+  fetchImage?: (url: string) => Promise<ImageBytes>
   config: { get(): Promise<Config>; set(config: Config): Promise<void> }
   /** Switch the words this script puts on the page to the interface's language (UI.md §6) */
   applyLocale: (uiLanguage: string) => void
@@ -67,6 +69,8 @@ export interface PageSession {
   setMode(mode: Mode): Promise<{ mode: Mode; effective: Mode }>
   /** Hand blocks to the running text pipeline (retry, tests); nothing outside a session */
   translate(blocks: Block[]): Promise<void>
+  /** Hand images to the running image pipeline — all of this session's targets by default (retry, tests) */
+  translateImages(targets?: ImageTarget[]): Promise<void>
   /** Retry every failed block and image; returns how many were handed back */
   retryFailed(): number
   /** The helper became available after this session started: release the parked bitmaps */
@@ -130,6 +134,8 @@ export function createPageSession(deps: SessionDeps): PageSession {
   let title: TitleTranslator | null = null
   /** 图片翻译（§15）：helper 可用且设置里至少勾了一种模式时才有 */
   let images: ImageRun | null = null
+  /** The image targets of the running session; `translateImages()` hands them all over by default */
+  let imageTargets: ImageTarget[] = []
   let imageProgress: ImageProgress | null = null
   /** What the session runs on (PageStatus.running); null outside a session */
   let running: NonNullable<PageStatus['running']> | null = null
@@ -157,6 +163,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     run = null
     images?.stop()
     images = null
+    imageTargets = []
     imageProgress = null
     const session = active
     active = null
@@ -287,6 +294,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     if (!paper) return
     const targets = collectImageTargets(doc)
     if (targets.length === 0) return
+    imageTargets = targets
     setImageModes(doc, config.image.modes)
 
     /**
@@ -309,6 +317,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       context,
       ocr: call => deps.ocr(call),
       translate: request => backend.translate(request),
+      ...(deps.fetchImage ? { fetchBytes: deps.fetchImage } : {}),
       // 模式闸对两种图一样；位图额外要等 helper（§15.5）
       isEnabled: t => config.image.enabled && config.image.modes.includes(modes?.effective() ?? config.mode) && (t.kind !== 'raster' || helperReady),
       isCurrent: alive,
@@ -454,6 +463,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       current = { ...current, config }
       images?.stop()
       images = null
+      imageTargets = []
       imageProgress = null
       setImageModes(doc, [])
       const session = current.session
@@ -474,6 +484,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     restore: restorePage,
     setMode,
     translate: picked => run?.translate(picked) ?? Promise.resolve(),
+    translateImages: picked => images?.translate(picked ?? imageTargets) ?? Promise.resolve(),
     retryFailed() {
       const failed = run?.failed() ?? []
       void run?.translate(failed)

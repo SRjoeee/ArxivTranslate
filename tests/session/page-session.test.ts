@@ -11,6 +11,8 @@ import { IMG_MODES_ATTR } from '@/core/renderer/image'
 import { createPageSession, type PageSession, type SessionDeps } from '@/core/session'
 import type { ProviderStatus, TranslationTransport } from '@/providers/transport'
 import type { TranslateCall } from '@/providers/translate-service'
+import type { ImageBytes } from '@/core/image'
+import type { OcrCall, OcrLine } from '@/shared/ocr'
 import { S } from '@/ui/strings'
 
 const PAGE =
@@ -40,6 +42,12 @@ interface HarnessOptions {
   helper?: boolean
   /** Hold the very first configuration read until `releaseConfig()` */
   holdFirstConfig?: boolean
+  /** Hold the n-th backend status read until `releaseStatus()` */
+  holdStatusAt?: number
+  /** Bytes the image pipeline gets for any bitmap URL */
+  fetchImage?: (url: string) => Promise<ImageBytes>
+  /** What the fake OCR recognises in every bitmap */
+  ocrLines?: OcrLine[]
 }
 
 function harness(options: HarnessOptions = {}) {
@@ -50,6 +58,8 @@ function harness(options: HarnessOptions = {}) {
   const calls: TranslateCall[] = []
   const cancelled: string[] = []
   const statusCalls: (string | undefined)[] = []
+  const ocrCalls: OcrCall[] = []
+  let releaseStatus: () => void = () => undefined
   const backend: TranslationTransport = {
     async translate(call) {
       calls.push(call)
@@ -58,6 +68,7 @@ function harness(options: HarnessOptions = {}) {
     async cancel(scope) { cancelled.push(scope); return 0 },
     async status(scope) {
       statusCalls.push(scope)
+      if (options.holdStatusAt === statusCalls.length) await new Promise<void>(resolve => { releaseStatus = resolve })
       return options.status ? options.status(scope, statusCalls.length) : providerStatus()
     },
   }
@@ -69,8 +80,13 @@ function harness(options: HarnessOptions = {}) {
     paper: options.paper === undefined ? '2410.00260' : options.paper,
     context: { paperTitle: 'A Paper' },
     backend,
-    ocr: async () => ({ ok: false, error: { kind: 'unknown', message: 'no OCR in this test' } }),
+    ocr: async call => {
+      ocrCalls.push(call)
+      if (!options.ocrLines) return { ok: false, error: { kind: 'unknown', message: 'no OCR in this test' } }
+      return { ok: true, result: { width: 100, height: 100, lines: options.ocrLines }, cached: false }
+    },
     helperStatus: async () => ({ available: options.helper ?? false }),
+    ...(options.fetchImage ? { fetchImage: options.fetchImage } : {}),
     config: {
       get: async () => {
         reads += 1
@@ -84,9 +100,10 @@ function harness(options: HarnessOptions = {}) {
   }
   const session = createPageSession(deps)
   return {
-    session, blocks, calls, cancelled, statusCalls, deps,
+    session, blocks, calls, cancelled, statusCalls, ocrCalls, deps,
     config: () => config,
     releaseConfig: () => releaseConfig(),
+    releaseStatus: () => releaseStatus(),
     trace: () => (deps.trace as ReturnType<typeof vi.fn>).mock.calls.map(c => String(c[0])),
   }
 }
@@ -181,12 +198,63 @@ describe('page session', () => {
     await h.session.start()
     await settle()
     await h.session.translate(h.blocks.slice(1))
+    const id = (await h.session.status()).session!
     expect(h.calls.length).toBeGreaterThanOrEqual(1)
-    expect(h.calls.every(c => c.scope === undefined || typeof c.scope === 'string')).toBe(true)
+    expect(h.calls.every(c => c.scope === id)).toBe(true)
     const status = await h.session.status()
     expect(status.progress).toMatchObject({ state: 'on', requested: 2, done: 2, failed: 0 })
     expect(document.querySelectorAll('.axt-t')).toHaveLength(2)
     expect(h.session.retryFailed()).toBe(0)
+  })
+
+  it('restoring the page while an automatic restart awaits the backend refuses that restart and sends nothing more', async () => {
+    // the restart's own status read (the second one) is held so the restore can land in the middle of it (Codex on #157)
+    const h = harness({ holdStatusAt: 2 })
+    live = h.session
+    await h.session.start()
+    await settle()
+    const id = (await h.session.status()).session!
+    const restart = h.session.start(undefined, true, id)
+    await settle()
+    h.session.restore()
+    const before = h.calls.length
+    h.releaseStatus()
+    expect(await restart).toEqual({ started: false, reason: S.page.sessionOver })
+    expect((await h.session.status()).session).toBeNull()
+    expect(document.documentElement.hasAttribute(ON_ATTR)).toBe(false)
+    expect(h.calls.length).toBe(before)
+    expect(h.cancelled).toEqual([id])
+  })
+
+  it('every request — text, title, OCR and image labels — carries the active session id, and a restart moves them to the new one', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).buffer
+    const h = harness({
+      page: PAGE + FIGURE,
+      helper: true,
+      config: { image: { enabled: true, modes: ['side', 'stack', 'only'] } },
+      fetchImage: async () => ({ bytes: png, mime: 'image/png' }),
+      ocrLines: [{ text: 'Energy density', quad: [[0.1, 0.1], [0.5, 0.1], [0.5, 0.2], [0.1, 0.2]], conf: 0.99 }],
+    })
+    live = h.session
+    await h.session.start()
+    await settle()
+    const id = (await h.session.status()).session!
+    await h.session.translate(h.blocks.slice(1))
+    await h.session.translateImages()
+    await settle(6)
+    expect(h.calls.some(c => c.request.segments[0]?.id === 'document.title')).toBe(true)
+    expect(h.calls.some(c => c.request.segments[0]?.id.endsWith('#L0'))).toBe(true)
+    expect(h.calls.length).toBeGreaterThanOrEqual(3)
+    expect(h.calls.map(c => c.scope)).toEqual(h.calls.map(() => id))
+    expect(h.ocrCalls.map(c => c.scope)).toEqual([id])
+    // after a restart the new id goes out, never the old one
+    await h.session.start(undefined, true)
+    const next = (await h.session.status()).session!
+    const since = h.calls.length
+    await h.session.translate(h.blocks.slice(1))
+    await settle()
+    expect(h.calls.length).toBeGreaterThan(since)
+    expect(h.calls.slice(since).map(c => c.scope)).toEqual(h.calls.slice(since).map(() => next))
   })
 
   it('a permanent hand-over restarts the page once on the serving engine; a temporary one does not', async () => {
