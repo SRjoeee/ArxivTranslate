@@ -15,7 +15,6 @@ import type { ProviderStatus } from '@/providers/transport'
 import { isBuiltInService, isLlmChosen } from '@/config/services'
 import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
-import { awaitChain } from '@/shared/chain'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
 import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, pollsBackground, runnable } from './view-model'
 
@@ -180,11 +179,12 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   }
 
   /** After a settings change: restart the page on the new settings if it is on and they can run */
-  const restartIfOn = async (next: Config, packState: PackState | null, settled: (s: ProviderStatus) => boolean) => {
+  const restartIfOn = async (next: Config, packState: PackState | null) => {
     const status = await sendToActiveTab({ type: 'axt:page-status' }).catch(() => null)
     if (status?.progress.state !== 'on') return
     if (!runnable(next, packState)) return // the view shows the page as behind the settings
-    setProvider(await awaitChain(settled))
+    // The chain the restart will run on: one built from what was just saved (background/provider-status.ts)
+    setProvider(await sendMessage({ type: 'axt:provider-status', fresh: true }).catch(() => null))
     await sendToActiveTab({ type: 'axt:translate-page', restart: true })
   }
 
@@ -213,20 +213,20 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
       ))
       if (next.provider !== id) return
       const packState = id === 'chrome-builtin' ? await checkPack(next.targetLanguage) : pack
-      await restartIfOn(next, packState, s => s.providerId === id)
+      await restartIfOn(next, packState)
     }),
     chooseLanguage: code => void guard(async () => {
       setMenu(null)
       const next = await patchConfig(latest => ({ ...latest, targetLanguage: code }))
       const packState = await checkPack(code)
-      await restartIfOn(next, packState, s => s.targetLanguage === code)
+      await restartIfOn(next, packState)
     }),
     choosePrompt: id => void guard(async () => {
       setMenu(null)
       const next = await patchConfig(latest => ({ ...latest, prompts: { ...latest.prompts, promptId: id } }))
       // Any of the reader's services is an LLM, and each is chosen through its own id — comparing
       // against 'openai-compat' was never true after v12, so the page kept the old prompt (Codex on #157)
-      if (isLlmChosen(next)) await restartIfOn(next, pack, s => s.promptId === id)
+      if (isLlmChosen(next)) await restartIfOn(next, pack)
     }),
     // The page's config watcher redraws the translations in the new style; no session restarts
     chooseStyle: id => void guard(async () => {

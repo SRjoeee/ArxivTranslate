@@ -1,0 +1,61 @@
+import { describe, expect, it } from 'vitest'
+import { type Config, DEFAULT_CONFIG } from '@/config/schema'
+import { createChainHolder } from '@/entrypoints/background/chain'
+import { providerStatus } from '@/entrypoints/background/provider-status'
+import type { TranslationTransport } from '@/providers/transport'
+
+// The provider-status action (INVENTORY P4): a session's chain, the chain in force, or — after a save — a chain
+// built from what is stored now, without the popup polling for it
+
+const chainOf = (provider: string): TranslationTransport => ({
+  translate: async () => ({ ok: true, result: { segments: [], provider }, cached: 0 }),
+  cancel: async () => 0,
+  status: async () => ({ providerId: provider, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', revision: provider, chain: [provider], demotions: [], engine: { id: provider, displayName: provider } }),
+})
+
+function harness() {
+  let stored: Config = DEFAULT_CONFIG
+  const builds: string[] = []
+  const holder = createChainHolder({
+    owned: () => false,
+    load: async config => {
+      const from = config ?? stored
+      builds.push(from.provider)
+      return { config: from, transport: chainOf(from.provider) }
+    },
+  })
+  const sessions = new Map<string, TranslationTransport>()
+  const deps = { chain: holder, router: { transportFor: (scope: string) => sessions.get(scope) }, loadConfig: async () => stored }
+  return { deps, holder, builds, sessions, save: (next: Config) => { stored = next } }
+}
+
+describe('providerStatus', () => {
+  it('fresh: a setting saved after the last build answers from a chain built from it, before any storage event arrives', async () => {
+    const h = harness()
+    expect((await providerStatus(h.deps, {})).providerId).toBe(DEFAULT_CONFIG.provider)
+    h.save({ ...DEFAULT_CONFIG, provider: 'google-web' })
+    // No storage event has reached the holder; a plain ask still sees the old chain
+    expect((await providerStatus(h.deps, {})).providerId).toBe(DEFAULT_CONFIG.provider)
+    expect((await providerStatus(h.deps, { fresh: true })).providerId).toBe('google-web')
+    expect(h.builds).toEqual([DEFAULT_CONFIG.provider, 'google-web'])
+  })
+
+  it('fresh with nothing changed builds nothing: the offer matches what the chain was built from', async () => {
+    const h = harness()
+    await providerStatus(h.deps, { fresh: true })
+    await providerStatus(h.deps, { fresh: true })
+    // The storage event arriving after the fresh ask is the same comparison, and starts nothing either
+    h.holder.onConfig(DEFAULT_CONFIG)
+    await providerStatus(h.deps, {})
+    expect(h.builds).toEqual([DEFAULT_CONFIG.provider])
+  })
+
+  it('a session asks about its own chain; fresh is about the chain in force, which a restart binds the page to', async () => {
+    const h = harness()
+    await providerStatus(h.deps, {})
+    h.sessions.set('s1', chainOf('pinned'))
+    expect((await providerStatus(h.deps, { scope: 's1' })).providerId).toBe('pinned')
+    h.save({ ...DEFAULT_CONFIG, provider: 'google-web' })
+    expect((await providerStatus(h.deps, { scope: 's1', fresh: true })).providerId).toBe('google-web')
+  })
+})

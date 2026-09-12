@@ -10,6 +10,7 @@ import { engineReady } from './engine-ready'
 import { createHelperClient } from './helper'
 import { createHelperWaiter } from './helper-await'
 import { createHelperRestart } from './helper-restart'
+import { providerStatus } from './provider-status'
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { installContextMenu, refreshContextMenu, installToggleCommand } from './context-menu'
@@ -246,9 +247,8 @@ export default defineBackground(() => {
           .then(cancelled => sendResponse({ cancelled }))
         return true
       case 'axt:provider-status':
-        // A page asking about its own session gets its own chain; everyone else gets the current one
-        Promise.resolve((message.scope && router.transportFor(message.scope)) || transportOf())
-          .then(t => t.status())
+        // A session's own chain, the chain in force, or — after a save — one built from what is stored now
+        providerStatus({ chain, router, loadConfig: getConfig }, message)
           .then(sendResponse)
           .catch((e: unknown) => console.error('[axt] provider-status 失败', e))
         return true
