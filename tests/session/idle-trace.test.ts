@@ -13,15 +13,17 @@ function harness() {
 }
 
 describe('createIdleTrace', () => {
-  it('traces once when a busy run goes idle, with the time since the run started', () => {
+  it('traces once when a busy run goes idle, with the whole time since the run started, rounded', () => {
     const h = harness()
+    // The clock runs from creation, not from the first report: a run that took a while to get going counts that too
+    h.tick(10)
     h.report({ inFlight: 2, done: 0 })
     h.tick(30)
     h.report({ inFlight: 1, done: 1 })
     expect(h.lines).toEqual([])
-    h.tick(20)
+    h.tick(20.4)
     h.report({ inFlight: 0, done: 2 })
-    expect(h.lines).toEqual(['idle: 2 done, 50 ms'])
+    expect(h.lines).toEqual(['idle: 2 done, 60 ms'])
   })
 
   it('a run that was never busy, or stays idle, traces nothing; a second round of work traces a second line', () => {
