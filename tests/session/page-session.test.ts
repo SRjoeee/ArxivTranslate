@@ -204,6 +204,10 @@ describe('page session', () => {
     const status = await h.session.status()
     expect(status.progress).toMatchObject({ state: 'on', requested: 2, done: 2, failed: 0 })
     expect(document.querySelectorAll('.axt-t')).toHaveLength(2)
+    // The line the e2e suites parse (extension.mjs's IDLE regex): one per busy → idle transition, in this format
+    const idle = h.trace().filter(line => line.startsWith('session idle:'))
+    expect(idle.length).toBeGreaterThanOrEqual(1)
+    for (const line of idle) expect(line).toMatch(/^session idle: \d+\/\d+ requested of \d+, \d+ failed, \d+ cached, \d+ ms$/)
     expect(h.session.retryFailed()).toBe(0)
   })
 

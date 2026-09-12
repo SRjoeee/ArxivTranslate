@@ -19,5 +19,5 @@ What differs is real and stays where it is: the text run renders (pending → te
 ## Consequences
 
 - One place answers "which targets are still to do, which failed, why, and whether the run may go on" for both pipelines; a third pipeline (tables as their own run, or SVG figures separated from bitmaps) would start from it.
-- `core/session` keeps reading two progress fields (a contract), and its two idle traces keep their busy → idle detection; folding those into one helper is a follow-up, not this change.
+- `core/session` keeps reading two progress fields (a contract), and its two idle traces keep their busy → idle detection; folding those into one helper is a follow-up, not this change. **Done 2026-09-13** (PR #180): `core/session/idle-trace.ts` holds the detection once; each run keeps its own notion of busy and its own line, and the lines the e2e suites parse are unchanged.
 - The known `e2e:image` flake (`images idle: N/N of 6`, targets never requested) lives in the image run's scheduling and parking; the ledger makes that path shorter to read but this ADR does not claim to fix it.
