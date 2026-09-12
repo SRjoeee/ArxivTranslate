@@ -9,7 +9,7 @@ Checkpoint log for the rebuild toward V1.0 (mandate: `docs/rebuild/CHARTER.md`; 
 ## 2026-09-12 — first structural change: the renderer's module graph (ADR-0003)
 
 - Branch `rebuild/renderer-graph` (stacked on `rebuild/governance`, PR #172). `renderer/index.ts` is now a façade of the 29 names production code uses; the implementation moved to `attrs.ts` (names, leaf), `shell.ts`, `translation.ts`, `page.ts`; ten `index ↔ X` cycles are gone, `tests/renderer/module-graph.test.ts` keeps them gone; the translation boundary has one definition (`TRANSLATION_EXCLUDED_CLASSES`) and `tests/renderer/translation-boundary.test.ts` holds the six CSS copies to it; six stray literals became their constants.
-- No behaviour change by construction. Gate: typecheck, lint, 1 552 unit tests (1 546 + 6), build 1.25 MB — all green. Browser suites: pending below.
+- No behaviour change by construction. Gate: typecheck, lint, 1 552 unit tests (1 546 + 6), build 1.25 MB — all green. Browser suites on this build: `e2e` 67/67 (183 s), `layout` 23/23 (78 s) — longest task 203 ms / total 343 ms, prep 214.5 ms per session, 359 mirrors / 418 pairs / 0 misaligned, the same as the baseline within noise.
 
 ## 2026-09-12 — baseline and governance
 
