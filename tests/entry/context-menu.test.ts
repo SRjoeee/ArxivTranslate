@@ -103,11 +103,16 @@ describe('右键菜单的翻译开关（#146）', () => {
     expect(idle.sent[1]).toEqual({ tabId: 7, type: 'axt:translate-page', epoch: 'd#2' })
   })
 
-  it('the saved settings cannot be read: the page is not behind, a running page restores', async () => {
+  it('the saved settings cannot be read: a running page restores, an idle one is left alone — unknown settings are not settings that run (Codex on #184)', async () => {
     const menu = fakeMenu({ ...progress('on'), running: { provider: 'microsoft', target: 'cmn', engine: 'microsoft', revision: 'r1' } }, null)
     menu.click(7)
     await vi.waitFor(() => expect(menu.sent).toHaveLength(2))
     expect(menu.sent[1]).toEqual({ tabId: 7, type: 'axt:restore-page' })
+    const idle = fakeMenu(progress('idle'), null)
+    idle.click(8)
+    await vi.waitFor(() => expect(idle.sent).toHaveLength(1))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(idle.sent).toEqual([{ tabId: 8, type: 'axt:page-status' }])
   })
 
   it('点一下：先问状态，再发与 popup 同一条消息', async () => {

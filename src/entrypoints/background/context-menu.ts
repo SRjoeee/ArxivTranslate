@@ -59,7 +59,10 @@ export async function toggleTranslation(deps: ToggleDeps, tabId: number): Promis
       deps.send<Pick<PageStatus, 'progress' | 'running' | 'epoch'>>(tabId, { type: 'axt:page-status' }),
       deps.saved().catch(() => null),
     ])
-    const decision = pageDecision(status, saved ?? { revision: null, canRun: true, fallback: false })
+    // Settings that could not be read (a build that failed, the status deadline) are not settings that run: a page
+    // that is on still restores, nothing else starts — the popup with no configuration disables its button too
+    // (Codex on #184)
+    const decision = pageDecision(status, saved ?? { revision: null, canRun: false, fallback: false })
     if (decision?.enabled) await deps.send(tabId, messageFor(decision.action, status.epoch))
   } catch {
     // See above
