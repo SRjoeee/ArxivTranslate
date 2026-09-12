@@ -7,6 +7,7 @@ import { useRef, useState } from 'react'
 import type { Mode } from '@/core/renderer'
 import { BrandMark } from '@/ui/BrandMark'
 import { Button } from '@/ui/Button'
+import { HelperPermission } from '@/ui/HelperPermission'
 import { HelperSetup } from '@/ui/HelperSetup'
 import { Menu } from '@/ui/Menu'
 import { Segmented } from '@/ui/Segmented'
@@ -72,16 +73,18 @@ export function PopupView({ view, error, actions }: { view: View; error: string 
               <Button variant="solid" onClick={actions.retryFailed}>{S.failed.retry}</Button>
             </Bubble>
           )}
-          {/* 未装识别助手时的那张卡：收起来只有一行字与「安装」，展开就是引导本身（UI.md S-P-86…88）。
-              引导与设置页共用同一个组件——两处说的是同一件事 */}
+          {/* The card while the helper is not ready: one line and the step it calls for — 「允许」 for the permission
+              (ADR-0002), 「安装」 to unfold the guided install in place (UI.md S-P-86…88). Both steps are the components
+              the settings page uses: two surfaces, one wording */}
           {view.helper && (
             <div className={`${CARD} flex flex-col gap-2 px-3.5 py-3 text-[12px] leading-relaxed`}>
-              {setupOpen && view.helper.extensionId
+              {setupOpen && view.helper.step === 'install' && view.helper.extensionId
                 ? <HelperSetup extensionId={view.helper.extensionId} />
                 : (
                   <>
                     <span className="text-fg-2">{view.helper.text}</span>
-                    {view.helper.extensionId && (
+                    {view.helper.step === 'allow' && <HelperPermission onStatus={actions.helperStatus} />}
+                    {view.helper.step === 'install' && (
                       <Button variant="solid" className="self-start" onClick={() => setSetupOpen(true)}>{S.helper.start}</Button>
                     )}
                   </>

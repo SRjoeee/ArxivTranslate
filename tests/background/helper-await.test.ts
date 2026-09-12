@@ -22,7 +22,7 @@ function harness(options: { probe?: () => Promise<HelperStatus>; stored?: number
   const deps: HelperWaitDeps = {
     probe: async () => {
       probes.push(now)
-      return options.probe ? options.probe() : { available: false }
+      return options.probe ? options.probe() : { state: 'not-installed' }
     },
     announce: () => { announced.push(now) },
     now: () => now,
@@ -57,12 +57,12 @@ function harness(options: { probe?: () => Promise<HelperStatus>; stored?: number
   return { deps, tick, announced, probes, armed: () => timers.size, savedAt: () => saved, at: () => now, releaseLoad: () => releaseLoad?.() }
 }
 
-const ready: HelperStatus = { available: true, version: '0.1.0' }
+const ready: HelperStatus = { state: 'ready', version: '0.1.0' }
 
 describe('createHelperWaiter', () => {
   it('探到就广播一次，然后停下——不再继续探', async () => {
     let installed = false
-    const h = harness({ probe: async () => (installed ? ready : { available: false }) })
+    const h = harness({ probe: async () => (installed ? ready : { state: 'not-installed' }) })
     const waiter = createHelperWaiter(h.deps)
     await waiter.start()
     await flush()
@@ -231,7 +231,7 @@ describe('createHelperWaiter', () => {
   it('一轮探测还没回来时不开第二轮', async () => {
     let release: (() => void) | null = null
     const h = harness({
-      probe: () => new Promise<HelperStatus>(resolve => { release = () => resolve({ available: false }) }),
+      probe: () => new Promise<HelperStatus>(resolve => { release = () => resolve({ state: 'not-installed' }) }),
     })
     const waiter = createHelperWaiter(h.deps)
     await waiter.start()
@@ -255,5 +255,33 @@ describe('createHelperWaiter', () => {
     expect(h.probes).toHaveLength(1)
     expect(waiter.until()).not.toBeNull()
     expect(h.armed()).toBe(0)
+  })
+  it('a probe without the permission ends the wait: nothing can be found until the pages get it granted (ADR-0002)', async () => {
+    const h = harness({ probe: async () => ({ state: 'permission-missing' }) })
+    const waiter = createHelperWaiter(h.deps)
+    await waiter.start()
+    await h.tick(2_000)
+    expect(h.probes).toHaveLength(1)
+    expect(waiter.until()).toBeNull()
+    expect(h.savedAt()).toBeUndefined()
+    expect(h.armed()).toBe(0)
+    await h.tick(10_000)
+    expect(h.probes).toHaveLength(1)
+    expect(h.announced).toEqual([])
+  })
+
+  it('a stale worker (restarting) stops its rounds but keeps the deadline: the fresh worker resumes it from storage', async () => {
+    const h = harness({ probe: async () => ({ state: 'restarting' }) })
+    const waiter = createHelperWaiter(h.deps)
+    await waiter.start()
+    const deadline = waiter.until()
+    await h.tick(2_000)
+    expect(h.probes).toHaveLength(1)
+    expect(h.armed()).toBe(0)
+    expect(waiter.until()).toBe(deadline)
+    expect(h.savedAt()).toBe(deadline)
+    await h.tick(10_000)
+    expect(h.probes).toHaveLength(1)
+    expect(h.announced).toEqual([])
   })
 })

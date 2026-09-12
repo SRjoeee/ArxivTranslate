@@ -36,9 +36,14 @@ export default defineConfig({
     // (src/locales, UI.md §7)
     default_locale: 'en',
     description: '__MSG_description__',
-    // nativeMessaging：Mac 上的图片翻译经本机 helper 做 OCR（DESIGN §15）；没装 helper 时这条权限闲着，不弹窗
-    // contextMenus：右键菜单里的翻译开关（issue #146）。它不给页面内容的访问权，只是注册一个菜单项
-    permissions: ['storage', 'nativeMessaging', 'contextMenus'],
+    // contextMenus: the translate toggle in the context menu (issue #146) — it registers a menu item, not access to
+    // page content. alarms: wakes a fresh service worker after the reader grants `nativeMessaging` at runtime — a
+    // running worker never gains the API (ADR-0002, verified 2026-09-13); no install warning
+    permissions: ['storage', 'contextMenus', 'alarms'],
+    // nativeMessaging: image translation on a Mac reads figures through the local helper (DESIGN §15). Optional since
+    // ADR-0002: requested from the reader's own click in the popup or on the settings page, so the store listing does
+    // not name a native component to readers who never install it. The image e2e pre-grants it in a patched copy
+    optional_permissions: ['nativeMessaging'],
     // The keyboard entry (UI.md S-P-50): the same toggle as the context menu. The popup shows the
     // binding Chrome reports, so a reader who rebinds or removes it sees the truth
     commands: { 'axt-toggle': { suggested_key: { default: 'Alt+T' }, description: '__MSG_toggle__' } },

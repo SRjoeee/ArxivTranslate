@@ -11,9 +11,10 @@
 // 用法：pnpm build && pnpm e2e:local-endpoint     （首次先 npx playwright install chromium）
 // 环境变量：AXT_PAPER 换论文；AXT_HEADED=1 看着跑。
 import { createServer } from 'node:http'
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { copyWithGrants } from './ext-copy.mjs'
 import { addService, openOptions } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
@@ -94,11 +95,8 @@ console.log(`假端点在 ${BASE_URL}（无 CORS 头，预检 405）`)
 // 正式构建里 http://*/* 是 optional_host_permissions，要用户在设置页点保存时逐个授权；
 // 那是个原生弹窗，Playwright 点不到（实测会一直挂住）。授权流程不是本条 e2e 的被测对象，
 // 所以在**副本**的 manifest 里预置权限，仓库里的 wxt.config.ts 不动
-for (const dir of [EXT, PROFILE]) rmSync(dir, { recursive: true, force: true })
-cpSync(SRC, EXT, { recursive: true })
-const manifest = JSON.parse(readFileSync(`${EXT}/manifest.json`, 'utf8'))
-manifest.host_permissions = [...(manifest.host_permissions ?? []), 'http://127.0.0.1/*']
-writeFileSync(`${EXT}/manifest.json`, JSON.stringify(manifest, null, 2))
+rmSync(PROFILE, { recursive: true, force: true })
+copyWithGrants(SRC, EXT, { hostPermissions: ['http://127.0.0.1/*'] })
 mkdirSync(SHOTS, { recursive: true })
 
 const context = await chromium.launchPersistentContext(PROFILE, {

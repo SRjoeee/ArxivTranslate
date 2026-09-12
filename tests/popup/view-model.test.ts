@@ -126,10 +126,17 @@ describe('derivePopupView (UI.md §4)', () => {
   it('P14 helper missing on macOS: install text plus the id the guided install needs', () => {
     const v = view('P14')
     // 带着 extensionId 才有得装：命令要按这个 id 拼（引导本身在 HelperSetup 里，§15.4）
-    expect(v.helper).toEqual({ text: '图片翻译需要安装识别助手', extensionId: 'abcdefghijklmnopabcdefghijklmnop' })
+    expect(v.helper).toEqual({ text: '图片翻译需要安装识别助手', step: 'install', extensionId: 'abcdefghijklmnopabcdefghijklmnop' })
     // 非 macOS 只有一行说明，没有可按的东西——安装脚本在别处会立刻退出
-    expect(derivePopupView({ ...input('P14'), platform: 'other' }).helper).toEqual({ text: '图片翻译目前仅支持 macOS' })
+    expect(derivePopupView({ ...input('P14'), platform: 'other' }).helper).toEqual({ text: '图片翻译目前仅支持 macOS', step: null })
     expect(derivePopupView({ ...input('P14'), config: { ...input('P14').config!, image: { enabled: false, modes: [] } } }).helper).toBeNull()
+  })
+  it('P14a / P14b the permission comes before the install (ADR-0002): the allow step, then a line while the grant takes effect', () => {
+    expect(view('P14a').helper).toEqual({ text: '图片翻译需要允许扩展与识别助手通信', step: 'allow' })
+    expect(view('P14b').helper).toEqual({ text: '已允许，稍后自动生效', step: null })
+    // Other platforms are told so before anything is asked of them
+    expect(derivePopupView({ ...input('P14a'), platform: 'other' }).helper).toEqual({ text: '图片翻译目前仅支持 macOS', step: null })
+    expect(derivePopupView({ ...input('P14a'), config: { ...input('P14a').config!, image: { enabled: false, modes: [] } } }).helper).toBeNull()
   })
   it('P16 the style menu is what the settings page holds, in its order, with the chosen one marked', () => {
     const v = view('P16')

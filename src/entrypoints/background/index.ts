@@ -4,11 +4,12 @@ import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import { createLocalTransport } from '@/providers/transport'
 import { toErrorInfo } from '@/providers/translate-service'
 import { isAxtMessage } from '@/shared/messages'
-import { HELPER_HOST } from '@/shared/ocr'
+import { HELPER_HOST, type HelperStatus } from '@/shared/ocr'
 import { createChainHolder } from './chain'
 import { engineReady } from './engine-ready'
 import { createHelperClient } from './helper'
 import { createHelperWaiter } from './helper-await'
+import { createHelperRestart } from './helper-restart'
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { installContextMenu, refreshContextMenu, installToggleCommand } from './context-menu'
@@ -62,8 +63,12 @@ export default defineBackground(() => {
     connect: () => browser.runtime.connectNative(HELPER_HOST),
     lastError: () => browser.runtime.lastError?.message,
     keepAlive: () => void browser.runtime.getPlatformInfo(),
+    // Optional permission (ADR-0002): asked before each connection. The binding is missing in a worker started
+    // before the grant; `restarting` is what it reports until the alarm below has brought a fresh one
+    permitted: () => browser.permissions.contains({ permissions: ['nativeMessaging'] }),
+    bound: () => typeof browser.runtime.connectNative === 'function',
   })
-  const ocr = createOcrService({ helper, cache, cancelled })
+  const ocr = createOcrService({ backend: helper, cache, cancelled })
   const router = createSessionRouter({
     current: transportOf,
     cancelled,
@@ -116,6 +121,16 @@ export default defineBackground(() => {
     const tabs = await browser.tabs.query({}).catch(() => [])
     for (const tab of tabs) if (tab.id !== undefined) void browser.tabs.sendMessage(tab.id, message).catch(() => undefined)
   }
+  /**
+   * The helper's state changed on the background's own initiative — the install wait found it, or the fresh worker
+   * after a runtime grant reported (ADR-0002). Papers only need to hear "ready" (they park bitmaps until then); the
+   * extension pages take the state as is. Extension pages are not content scripts and get nothing from
+   * `tabs.sendMessage`, hence the second send; nobody listening is the normal case and it rejects
+   */
+  const broadcastHelper = (status: HelperStatus) => {
+    if (status.state === 'ready') void tellTabs({ type: 'axt:helper-ready' })
+    void browser.runtime.sendMessage({ type: 'axt:helper-state', status }).catch(() => undefined)
+  }
 
   /**
    * 安装引导的等待（§15.4）：读者复制走安装命令之后，由这里定时探，探到了就广播——
@@ -125,12 +140,7 @@ export default defineBackground(() => {
   const AWAIT_KEY = 'axt-helper-await-until'
   const helperWaiter = createHelperWaiter({
     probe: () => ocr.status({ recheck: true }),
-    announce: () => {
-      void tellTabs({ type: 'axt:helper-ready' })
-      // 扩展页面（设置页、还开着的 popup）不是内容脚本，收不到 tabs.sendMessage。
-      // 没有页面在听时这一条会 reject，正是常态
-      void browser.runtime.sendMessage({ type: 'axt:helper-ready' }).catch(() => undefined)
-    },
+    announce: broadcastHelper,
     now: () => Date.now(),
     schedule: (run, ms) => setTimeout(run, ms) as unknown as number,
     cancel: id => clearTimeout(id),
@@ -149,6 +159,21 @@ export default defineBackground(() => {
   // **唤醒 worker 的往往正是 popup 那条查询**，所以查询必须等这一步读完 storage 才能回答，
   // 否则它拿到的是还没恢复的 null（Codex 在 #166 指出）
   const helperRestored = helperWaiter.resume()
+
+  /**
+   * A grant while this worker runs leaves it without `runtime.connectNative` (helper-restart.ts says why). The alarm
+   * fires after the idle limit — into a fresh worker once this one has died — and the listener is registered at top
+   * level, as MV3 requires for an event to wake a worker
+   */
+  const RESTART_ALARM = 'axt-helper-restart'
+  const helperRestart = createHelperRestart({
+    probe: () => ocr.status({ recheck: true }),
+    arm: () => void browser.alarms.create(RESTART_ALARM, { delayInMinutes: 0.75 }),
+    announce: broadcastHelper,
+  })
+  browser.alarms.onAlarm.addListener(alarm => {
+    if (alarm.name === RESTART_ALARM) void helperRestart.fired()
+  })
 
   const menuDeps = {
     create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>
@@ -234,7 +259,9 @@ export default defineBackground(() => {
         ocr.status(message.recheck ? { recheck: true } : undefined).then(status => {
           // A re-probe that finds it has to reach the papers already open, which parked their
           // bitmaps when the probe at their session start found nothing (Codex on #161)
-          if (message.recheck && status.available) void tellTabs({ type: 'axt:helper-ready' })
+          if (message.recheck && status.state === 'ready') void tellTabs({ type: 'axt:helper-ready' })
+          // Granted a moment ago into this running worker: arrange the fresh one (ADR-0002)
+          helperRestart.noticed(status)
           sendResponse(status)
         })
         return true

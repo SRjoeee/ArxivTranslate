@@ -355,7 +355,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       return true
     }
     deps.helperStatus()
-      .then(helper => settleRaster(helper.available))
+      .then(helper => settleRaster(helper.state === 'ready'))
       .catch(e => { trace(`helper-status 失败：${e instanceof Error ? e.message : String(e)}`); settleRaster(false) })
   }
 

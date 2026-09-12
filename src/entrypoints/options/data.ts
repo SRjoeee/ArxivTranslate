@@ -22,7 +22,7 @@ export interface OptionsData {
   checkPack(target: string): Promise<void>
   fetchPack(): Promise<void>
   helper: HelperStatus | null
-  /** What a fresh probe found, from the guided install's own button (sections/HelperSetup.tsx) */
+  /** What the permission step found after a grant (ui/HelperPermission.tsx) */
   setHelper(status: HelperStatus): void
   /** Which platform this is; the installer only runs on macOS */
   platform: 'mac' | 'other' | null
@@ -78,14 +78,22 @@ export function useOptionsData(): OptionsData {
     // `recheck` on every open of a page: the reader may have installed the helper since the worker
     // last looked, and it remembers a missing host for its whole life. Chrome fails a connect to an
     // absent host without spawning anything, so asking again costs nothing
-    sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ available: false, reason: S.page.backendSilent }))
+    sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ state: 'not-installed', reason: S.page.backendSilent }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
+    // The background broadcasts the helper's state when it changes on its own — the install wait found it, or the
+    // fresh worker after a runtime grant reported (ADR-0002); the section follows without a reload
+    const onHelperState = (message: unknown) => {
+      const m = message as { type?: string; status?: HelperStatus } | null
+      if (m?.type === 'axt:helper-state' && m.status) setHelper(m.status)
+    }
+    browser.runtime.onMessage.addListener(onHelperState)
     void loadCache()
     // 翻译发生在别的标签页：切回设置页时重新读一次，否则显示的永远是打开那一刻的数字
     const onVisible = () => { if (!document.hidden) void loadCache() }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
     return () => {
+      browser.runtime.onMessage.removeListener(onHelperState)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }

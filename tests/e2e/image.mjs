@@ -9,10 +9,13 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import { copyWithGrants } from './ext-copy.mjs'
 import { chooseBuiltIn, openOptions, setImageMode, setSwitch } from './options-page.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
-const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
+const SRC = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chrome-mv3', import.meta.url))
+/** The build with `nativeMessaging` pre-granted: optional since ADR-0002, and Chrome's prompt cannot be clicked here */
+const EXT = copyWithGrants(SRC, `${HERE}.ext-image`, { permissions: ['nativeMessaging'] })
 const PROFILE = `${HERE}.profile-image`
 const SHOTS = `${HERE}.shots`
 const PAPER = process.env.AXT_PAPER ?? '2507.00150v1'

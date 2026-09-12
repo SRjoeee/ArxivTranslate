@@ -41,7 +41,7 @@ function provider(over: Partial<ProviderStatus> = {}): ProviderStatus {
 const llmProvider = (over: Partial<ProviderStatus> = {}) => provider({ providerId: SVC.id, model: SVC.model, renderPath: 'tags', engine: { id: SVC.id, displayName: SVC.name }, chain: [SVC.id, 'microsoft', 'google-web'], ...over })
 
 const base: PopupInput = {
-  page: page(), provider: provider(), config, pack: 'available', helper: { available: true, version: '1.0' }, platform: 'mac', menu: null, shortcut: '⌥T', extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+  page: page(), provider: provider(), config, pack: 'available', helper: { state: 'ready', version: '1.0' }, platform: 'mac', menu: null, shortcut: '⌥T', extensionId: 'abcdefghijklmnopabcdefghijklmnop',
 }
 
 export const POPUP_FIXTURES: { id: string; name: string; when: string; input: PopupInput }[] = [
@@ -59,7 +59,9 @@ export const POPUP_FIXTURES: { id: string; name: string; when: string; input: Po
   { id: 'P11', name: '图片翻译已暂停', when: 'images.fatal', input: { ...base, config: llm, provider: llmProvider(), page: page({ state: 'on', requested: 20, done: 12 }, { running: { provider: SVC.id, target: 'cmn', engine: SVC.id, revision: 1 }, images: { total: 6, requested: 2, done: 0, failed: 0, fatal: 'auth: User not found.' } }) } },
   { id: 'P12', name: '窄窗口按上下显示', when: 'mode !== preference', input: { ...base, page: page({ state: 'on', requested: 10, done: 10 }, { preference: 'side', mode: 'stack' }) } },
   { id: 'P13', name: '改选了跑不起来的服务', when: 'on ∧ running ≠ settings ∧ !runnable', input: { ...base, config: llmNoKey, provider: llmProvider({ available: false, fallback: { id: 'microsoft', displayName: 'Microsoft' } }), page: page({ state: 'on', requested: 31, done: 24 }) } },
-  { id: 'P14', name: '识别助手未安装', when: 'images.enabled ∧ !helper.available', input: { ...base, helper: { available: false, reason: 'host not registered' } } },
+  { id: 'P14', name: '识别助手未安装', when: 'images.enabled ∧ helper = not-installed', input: { ...base, helper: { state: 'not-installed', reason: 'host not registered' } } },
+  { id: 'P14a', name: '识别助手待授权', when: 'images.enabled ∧ helper = permission-missing', input: { ...base, helper: { state: 'permission-missing' } } },
+  { id: 'P14b', name: '识别助手授权生效中', when: 'images.enabled ∧ helper = restarting', input: { ...base, helper: { state: 'restarting' } } },
   { id: 'P15', name: '提示词菜单', when: 'llm ∧ menu = prompt', input: { ...base, config: llm, provider: llmProvider(), menu: 'prompt' } },
   { id: 'P16', name: '译文样式菜单', when: 'menu = style', input: { ...base, menu: 'style' } },
 ]

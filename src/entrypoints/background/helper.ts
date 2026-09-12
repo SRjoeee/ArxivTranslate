@@ -1,15 +1,23 @@
-// 本机 OCR helper 的客户端（DESIGN §15.2 / §15.4）：Chrome Native Messaging 端口上的请求 / 响应关联。
+// The client of the local OCR helper (DESIGN §15.2 / §15.4): request / response correlation over a Chrome Native
+// Messaging port. It is the helper implementation of `OcrBackend` (ocr-backend.ts, ADR-0002).
 //
-// 几条与 MV3 有关的事实决定了形状：
-// - 端口开着**不能**阻止 service worker 因闲置被回收；只有消息与 API 调用会重置闲置计时。所以有请求在飞时
-//   定时调一个无害的 API 保活，闲下来就停。worker 被回收时端口关闭、helper 收到 EOF 退出、pending 全部
-//   随 onDisconnect 作废——下一次请求重新连接、重新 ping（版本进缓存键，重连后不能沿用旧值）。
-// - host 没注册时 connectNative 不抛，端口立刻断开并在 lastError 里说 "not found"；这种情况本 worker 生命周期内
-//   记为不可用，不再反复重连。
-// - helper 是顺序的 stdio 循环，在飞上限设为 1：撤掉一个会话时排队的请求还没写进端口，撤才真能撤掉活；
-//   在飞的那一个到达后按已撤处理。
+// Facts about MV3 that shape it:
+// - An open port does **not** keep the service worker alive; only messages and API calls reset the idle timer. So
+//   while a request is in flight a harmless API is called on a timer, and the timer stops when the queue is empty.
+//   When the worker is recycled the port closes, the helper sees EOF and exits, and every pending request is voided
+//   by `onDisconnect` — the next request reconnects and pings again (the version is part of the cache key, so a
+//   reconnected port must not reuse the old one).
+// - With no host registered, `connectNative` does not throw: the port disconnects at once with "not found" in
+//   `lastError`. That is remembered for the worker's life; nothing reconnects until a `recheck`.
+// - `nativeMessaging` is optional (ADR-0002): `permitted` is asked before any connection, and `bound` says whether
+//   this worker's context has `connectNative` at all — a worker started before the grant never gets it (Chrome adds
+//   an API to a context when the context is created, verified 2026-09-13) and reports `restarting` until a fresh one
+//   takes over (helper-restart.ts).
+// - The helper is a sequential stdio loop, so at most one request is in flight: a cancelled request that has not
+//   been written to the port is truly withdrawn; the in-flight one is discarded on arrival.
 import type { ProviderErrorKind } from '@/providers/types'
 import { HELPER_PROTOCOL, type HelperStatus, type OcrResult } from '@/shared/ocr'
+import { type OcrBackend, OcrBackendError } from './ocr-backend'
 
 /** chrome.runtime.connectNative 返回的端口，只留用到的四个成员，测试用假端口 */
 export interface NativePort {
@@ -30,33 +38,16 @@ export interface HelperClientDeps {
   /** 有请求在飞时的保活间隔与动作 */
   keepAliveMs?: number
   keepAlive?: () => void
-}
-
-export interface HelperClient {
-  /**
-   * `recheck` forgets that the host was missing and probes again. Without it a worker that has once
-   * been told "no such native messaging host" answers from that memory for the rest of its life,
-   * which is right while nothing changes and wrong the moment the reader installs the helper and
-   * asks the settings page to look again (the guided install, UI.md S-O-30)
-   */
-  status(options?: { recheck?: boolean }): Promise<HelperStatus>
-  /** 识别；version 是**回应所在连接**握手到的版本，缓存键按它算（重连后 helper 可能换了版本，Codex 在 #87 指出） */
-  ocr(request: { image: string; langs?: string[] }, scope?: string): Promise<{ result: OcrResult; version: string }>
-  /** 撤掉该 scope 排队与在飞的请求，返回撤掉的条数 */
-  cancel(scope: string): number
-}
-
-export class HelperError extends Error {
-  constructor(readonly kind: ProviderErrorKind, message: string) {
-    super(message)
-    this.name = 'HelperError'
-  }
+  /** Whether the optional `nativeMessaging` permission is granted right now (ADR-0002); absent means granted */
+  permitted?: () => Promise<boolean>
+  /** Whether this worker's context has `runtime.connectNative` — false in a worker that predates the grant */
+  bound?: () => boolean
 }
 
 interface Pending {
   scope?: string
   resolve: (reply: Record<string, unknown>) => void
-  reject: (error: HelperError) => void
+  reject: (error: OcrBackendError) => void
   timer?: ReturnType<typeof setTimeout>
 }
 
@@ -75,7 +66,7 @@ function isMissingHost(reason: string | undefined): boolean {
   return /not found|forbidden|not registered|无法找到|找不到/i.test(reason ?? '')
 }
 
-export function createHelperClient(deps: HelperClientDeps): HelperClient {
+export function createHelperClient(deps: HelperClientDeps): OcrBackend {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const firstOcrTimeoutMs = deps.firstOcrTimeoutMs ?? DEFAULT_FIRST_OCR_TIMEOUT_MS
   /** 本 worker 里成功识别过一次：Vision 的一次性准备已经付过，之后按正常超时 */
@@ -108,16 +99,16 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
     return entry
   }
 
-  const errorOf = (reply: Record<string, unknown>): HelperError | null => {
+  const errorOf = (reply: Record<string, unknown>): OcrBackendError | null => {
     const error = reply.error as { code?: unknown; message?: unknown } | undefined
     if (!error) return null
     const kind: ProviderErrorKind = error.code === 'bad-request' || error.code === 'bad-base64' || error.code === 'undecodable-image' ? 'bad-request' : 'invalid-response'
-    return new HelperError(kind, `helper：${typeof error.message === 'string' ? error.message : String(error.code)}`)
+    return new OcrBackendError(kind, `helper：${typeof error.message === 'string' ? error.message : String(error.code)}`)
   }
 
   const failAll = (kind: ProviderErrorKind, message: string) => {
-    for (const id of Array.from(pending.keys())) settle(id)?.reject(new HelperError(kind, message))
-    for (const item of queue.splice(0)) item.reject(new HelperError(kind, message))
+    for (const id of Array.from(pending.keys())) settle(id)?.reject(new OcrBackendError(kind, message))
+    for (const item of queue.splice(0)) item.reject(new OcrBackendError(kind, message))
     updateKeepAlive()
   }
 
@@ -156,7 +147,7 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
         // 断开端口——否则 pump 会一直插 ping、一直收到错误，无限循环（Codex 在 #87 指出）
         // 版本进 OCR 缓存键：没报版本的 helper 不能算可用，否则不同构建的结果共用一个键空间（Codex 在 #87 指出）
         const version = typeof reply?.version === 'string' && reply.version.trim() ? reply.version.trim() : null
-        if (reply && !reply.error && reply.v === HELPER_PROTOCOL && version) known = { available: true, version }
+        if (reply && !reply.error && reply.v === HELPER_PROTOCOL && version) known = { state: 'ready', version }
         else {
           dropPort()
           const why = reply?.error ? errorOf(reply)?.message : reply?.v !== HELPER_PROTOCOL ? `协议版本 ${String(reply?.v)}，扩展要 ${HELPER_PROTOCOL}` : '回应没有版本号'
@@ -179,7 +170,7 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
   const pump = () => {
     while (pending.size < MAX_IN_FLIGHT && queue.length > 0) {
       if (missing) {
-        ;(queue.shift() as Queued).reject(new HelperError('network', missing))
+        ;(queue.shift() as Queued).reject(new OcrBackendError('network', missing))
         continue
       }
       // 新连接先握手：队头不是 ping 而这条连接还没 ping 过（断开重连之后），插一个内部 ping 到队头，
@@ -192,7 +183,7 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       pending.set(item.id, item)
       const budget = item.id.startsWith('ocr-') && !warmed ? firstOcrTimeoutMs : timeoutMs
       item.timer = setTimeout(() => {
-        settle(item.id)?.reject(new HelperError('timeout', `helper ${budget} ms 没有回应`))
+        settle(item.id)?.reject(new OcrBackendError('timeout', `helper ${budget} ms 没有回应`))
         // 超时的请求 helper 还在处理：断开端口，下一条起新进程。握手本身超时说明 helper 起不来，排队的一起拒掉
         dropPort()
         if (item.id.startsWith('ping-')) failAll('timeout', `helper ${timeoutMs} ms 没有回应握手`)
@@ -204,7 +195,7 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
         // connectNative / postMessage 抛错（权限没给、端口刚断）：端口丢掉、排队的全拒——只拒当前这一条的话，
         // 内部握手 ping 失败后 while 会立刻再插一个 ping 再抛，同步死循环卡住 worker（Codex 在 #87 指出）
         const message = e instanceof Error ? e.message : String(e)
-        settle(item.id)?.reject(new HelperError('network', message))
+        settle(item.id)?.reject(new OcrBackendError('network', message))
         dropPort()
         failAll('network', `helper 连接失败：${message}`)
         break
@@ -214,7 +205,7 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
   }
 
   const send = (cmd: string, payload: Record<string, unknown>, scope?: string): Promise<Record<string, unknown>> => {
-    if (missing) return Promise.reject(new HelperError('network', missing))
+    if (missing) return Promise.reject(new OcrBackendError('network', missing))
     const id = `${cmd}-${++sequence}`
     return new Promise((resolve, reject) => {
       queue.push({ id, message: { v: HELPER_PROTOCOL, cmd, id, ...payload }, scope, resolve, reject })
@@ -225,17 +216,22 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
   return {
     async status(options) {
       if (options?.recheck) missing = null
-      if (missing) return { available: false, reason: missing }
+      // A live handshake proves everything below
       if (known) return known
+      // The permission comes before the host: without it nothing can be connected. Without the binding neither —
+      // this worker started before the grant, and only a fresh one will have it (helper-restart.ts)
+      if (deps.permitted && !(await deps.permitted())) return { state: 'permission-missing' }
+      if (deps.bound && !deps.bound()) return { state: 'restarting' }
+      if (missing) return { state: 'not-installed', reason: missing }
       try {
         const reply = await send('ping', {})
         const failure = errorOf(reply)
-        if (failure) return { available: false, reason: failure.message }
-        if (reply.v !== HELPER_PROTOCOL) return { available: false, reason: `helper 协议版本 ${String(reply.v)}，扩展要 ${HELPER_PROTOCOL}，请重新安装 helper` }
-        // known 由 onMessage 按 ping 回应记下；没记下就是回应缺版本号
-        return known ?? { available: false, reason: 'helper 没有报版本号，请重新安装 helper' }
+        if (failure) return { state: 'not-installed', reason: failure.message }
+        if (reply.v !== HELPER_PROTOCOL) return { state: 'not-installed', reason: `helper protocol ${String(reply.v)}, the extension needs ${HELPER_PROTOCOL}: reinstall the helper` }
+        // `known` is set by onMessage from the ping reply; unset means the reply carried no version
+        return known ?? { state: 'not-installed', reason: 'the helper reported no version: reinstall it' }
       } catch (e) {
-        return { available: false, reason: e instanceof Error ? e.message : String(e) }
+        return { state: 'not-installed', reason: e instanceof Error ? e.message : String(e) }
       }
     },
 
@@ -245,10 +241,10 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
       if (failure) throw failure
       const lines = reply.lines
       if (reply.v !== HELPER_PROTOCOL || !Array.isArray(lines) || typeof reply.width !== 'number' || typeof reply.height !== 'number') {
-        throw new HelperError('invalid-response', 'helper 的回应缺 lines / width / height')
+        throw new OcrBackendError('invalid-response', 'helper 的回应缺 lines / width / height')
       }
-      const version = known?.version
-      if (!version) throw new HelperError('invalid-response', 'helper 的回应到了但这条连接没握过手')
+      const version = known?.state === 'ready' ? known.version : undefined
+      if (!version) throw new OcrBackendError('invalid-response', 'helper 的回应到了但这条连接没握过手')
       return {
         result: {
           width: reply.width, height: reply.height, lines: lines as OcrResult['lines'],
@@ -265,13 +261,13 @@ export function createHelperClient(deps: HelperClientDeps): HelperClient {
         const item = queue[i] as Queued
         if (item.scope !== scope) continue
         queue.splice(i, 1)
-        item.reject(new HelperError('aborted', '会话已撤销'))
+        item.reject(new OcrBackendError('aborted', '会话已撤销'))
         cancelled++
       }
       let inFlight = false
       for (const [id, entry] of pending) {
         if (entry.scope !== scope) continue
-        settle(id)?.reject(new HelperError('aborted', '会话已撤销'))
+        settle(id)?.reject(new OcrBackendError('aborted', '会话已撤销'))
         cancelled++
         inFlight = true
       }
