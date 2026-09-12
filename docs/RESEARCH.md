@@ -2,6 +2,8 @@
 
 日期：2026-09-03 · 对应 DESIGN.md v0.1 · 状态：Phase 0 任务 1–7 全部完成
 
+[Note 2026-09-12: this file grew past Phase 0 — §5.1 and §6.4–6.11 are measurements made up to 2026-09-09. It is a frozen record of the MVP (ADR-0001 §3): cite it as evidence, do not treat it as the spec. The status of every row of the §7 revision list is given under that heading.]
+
 本文记录 Phase 0 的实测结论。凡与 DESIGN.md 不一致之处，只在此记录并在 §7 提修订建议，不直接改设计。
 脚本：`pnpm fixtures:stats`（`scripts/fixtures-stats.ts`，规则覆盖率审计）、`scripts/phase0/fetch-candidates.sh`（候选抓取）、`scripts/phase0/candidate-stats.sh`（粗粒度特征计数）、`scripts/phase0/td-numeric-calib.ts`（§5.3 数值格正则校准）、`scripts/phase0/translator-probe.js`（Translator API 探测）。
 Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起生效。
@@ -100,6 +102,8 @@ Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起
 
 翻译根内 `svg` 共 164 个，全部是 `svg.ltx_picture`（TikZ），其中 2608.29808 占 114、2312.17141 占 43（大多带 `ltx_markedasmath`，是画出来的公式）；**没有一个含 `<text>`**，文字只以 `foreignObject > .ltx_foreignobject_content` 形式出现且全部 fixture 仅 1 个文本节点。位图 `img.ltx_graphics` 共 13 个（5 篇）。结论：SVG 图在实践中没有可翻译的 DOM 文字，v1 整体跳过 `svg`；§15 的 OCR 路线只对 `img` 有意义。
 
+[Correction 2026-09-12: superseded. Inline TikZ pictures do carry translatable text in `foreignObject` (199 word-bearing labels in the corpus); DESIGN §15.6 routes them through the image pipeline. The "skip `svg`" rule remains only for the text pipeline.]
+
 ### 2.10 其他
 
 - `.ltx_p` 不一定是 `<p>`：`span.ltx_p` 57 个（2 篇，出现在表格与 inline-block 内）。§7.1 "标签名与原块相同"已覆盖；§7.2 的 grid 技巧只能用于 `.ltx_para > p.ltx_p`，其余降级为 stack。
@@ -108,7 +112,7 @@ Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起
 
 ### 2.11 RULES_VERSION 0.2.0 复跑（Phase 1 `feat/rules`）
 
-审计脚本改为直接调用规则模块的 `classify()`（优先级 skip > table > unit > protect，`.ltx_note` 作 protect-but-descend），报表已重生成到 `docs/phase0/rules-audit.md`：
+审计脚本改为直接调用规则模块的 `classify()`（优先级 skip > table > unit > protect，`.ltx_note` 作 protect-but-descend），报表已重生成到 `docs/phase0/rules-audit.md`： [2026-09-12: the committed report was removed; regenerate it with `pnpm fixtures:stats`.]
 
 - **漏网 0 / 112,268**：致谢、关键词、副标题进 unit；出版元数据、日期、SVG 进 skip；`.ltx_note_mark` 进 protect。
 - 无死规则；unit 规则两两互斥（`multi` 为空），"恰好一条"成立。
@@ -479,6 +483,8 @@ is a different population from the inline `svg.ltx_picture` (TikZ) elements meas
 not generalise to each other — §2.9's conclusion that inline SVG carries no translatable DOM text still
 stands for inline SVG.
 
+[Correction 2026-09-12: this no longer holds — DESIGN §15.6 wires the inline pictures' `foreignObject` labels into the image pipeline.]
+
 **Sample.** Recent papers from eight arXiv categories: 178 with an HTML version. **99 of them (55.6%) carry
 at least one SVG figure**, and counting figures rather than papers, **880 of 1792 (49.1%) are SVG** against
 912 bitmaps. Of those 880 the crawl fetched the first four `<object>`s of each paper — 48 of the 99 papers
@@ -739,6 +745,8 @@ table stale would let later work follow the obsolete requirement, since DESIGN i
 ## 7. DESIGN.md 修订清单
 
 按章节排列。每条只提建议，是否采纳由设计文档决定。
+
+Status as of 2026-09-12 (docs/rebuild/inventory/docs.md §5): **done** 1–5, 7–11, 13, 17–19, 22–27; **superseded by a better design** 6, 12, 14; **reversed by later evidence** 16 (translateHtml was adopted, row 23) and 21 (the instant engine was never built, although DESIGN §8.3 still lists it as decided); **obsolete** 15, 20.
 
 | # | 条目 | 建议 | 依据 |
 |---|---|---|---|

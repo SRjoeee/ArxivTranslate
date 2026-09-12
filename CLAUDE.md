@@ -80,16 +80,8 @@ pnpm helper:build        # Swift helper; pnpm helper:smoke talks to the binary o
 
 ### Issue tracker
 
-Issues and specs live in this repository's GitHub Issues, read and written through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues, the roadmap (#155) and the rebuild's open items live in this repository's GitHub Issues, read and written through the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Codex review
 
 Merge only after Codex's terminal signal (👍 / review comments / usage-limit notice; 👀 means still reviewing); verify every comment. See `docs/agents/codex-review.md`.
-
-### Triage labels
-
-The five default triage labels (`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`), label strings identical to the role names. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context layout: `CONTEXT.md` at the repository root plus `docs/adr/`. See `docs/agents/domain.md`.

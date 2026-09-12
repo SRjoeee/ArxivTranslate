@@ -1,16 +1,19 @@
-// 移植自 reference/read-frog/src/utils/host/translate/api/microsoft.ts@9b44f82（GPL-3.0），2026-09-08 移植、有修改。
-// 端点、查询参数（含 `from=auto` 转空串）、裸字符串数组的请求体、`translations[0].text` 的响应解析
-// 与逐条缺失检查照搬；对照过 reference/FluentRead/src/providers/translation/microsoft.ts，两者形状一致。
+// Ported from reference/read-frog/src/utils/host/translate/api/microsoft.ts@9b44f82 (GPL-3.0), 2026-09-08, modified.
+// The endpoint, the query parameters (including `from=auto` → empty string), the bare-string-array request body, the
+// `translations[0].text` response parsing and the per-item missing check are taken as is; compared against
+// reference/FluentRead/src/providers/translation/microsoft.ts, which has the same shape.
 //
-// 四处改造：
-// 1. **去掉上游的 escapeText / escapeHtmlText**。两个上游都在适配器里转义，因为它们的管线不转义；
-//    我们的 protector 已经转过了（markers 格式，#107），再转一次会把 `<` 发成 `&amp;lt;`。
-//    与当初移植 google-web.ts 做的是同一个改造。附带差异：上游还转义 `"` `'`，我们不转——
-//    标记对齐器盯的是 `<` 与 `&`，引号只在属性里有意义，而这条线是纯文本、不含标签。
-// 2. 上游的 `textFormat === 'html'` 硬失败 → 我们用 `wireFormats: ['markers']` 在协商层挡住（§8.5）；
-//    那句防御性抛错仍保留，协商万一漏了也不能把标签发进来。
-// 3. 错误包成我们的 ProviderError 分类（上游抛裸 Error + meta），走共用的 kindOfStatus。
-// 4. 批量、并发、速率按**我们自己实测的**微软响应特征定（见下），上游只有全局配置、没有 provider 专属值。
+// Four changes:
+// 1. **Upstream's escapeText / escapeHtmlText are dropped.** Both upstreams escape in the adapter because their
+//    pipelines do not; our protector has already escaped (markers format, #107), and escaping again would send `<` as
+//    `&amp;lt;`. The same change was made when google-web.ts was ported. A side difference: upstream also escapes
+//    `"` and `'`, we do not — the marker aligner watches `<` and `&`, quotes only matter inside attributes, and this
+//    line is plain text with no tags.
+// 2. Upstream's hard failure on `textFormat === 'html'` → blocked at negotiation with `wireFormats: ['markers']`
+//    (§8.5); the defensive throw stays, in case negotiation ever lets a tag through.
+// 3. Errors are wrapped in our ProviderError kinds (upstream throws a bare Error with meta), via the shared kindOfStatus.
+// 4. Batch size, concurrency and rate follow **our own measurements** of the Microsoft endpoint (below); upstream only
+//    has global settings, no per-provider values.
 //
 // 上游注释里那条关键知识：**端点每次请求都会跑 HTML 标记对齐器**，裸的 `<` 会融成伪标签
 //（`a < b and c > d` → `<B和C> d`）。Read Frog 的 translation-output-normalization.ts 说得更直白：

@@ -1,5 +1,5 @@
-// 移植自 reference/read-frog/src/utils/host/translate/translation-session.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：
-// 去掉 providerRef 的两个函数（那是它的 hosted 状态，我们的 provider 在 start() 里一次取好）。
+// Ported from reference/read-frog/src/utils/host/translate/translation-session.ts@9b44f82 (GPL-3.0), 2026-09-05,
+// modified: the two providerRef functions are dropped (that is its hosted state; our provider is fetched once in start()).
 //
 // 当前页面翻译会话的身份。模块级变量是对的：一个 frame 只有一个会话。
 // 每个请求都带这个 id 作 scope，用户取消时 translate-service 按它撤掉排队与在飞的请求（它的 #1881）；

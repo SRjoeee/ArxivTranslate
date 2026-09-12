@@ -1,6 +1,7 @@
-// 移植自 reference/read-frog/src/utils/request/batch-queue.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：
-// 只改配置 schema 与 UUID 的 import、计时器类型。按批次键攒批（字数 / 条数 / 攒批时长）、派发闸、
-// 整批结果数对不上时重试再逐条兜底、按 scope 取消；由 translate-service 组装（DESIGN §8.2、§10）。
+// Ported from reference/read-frog/src/utils/request/batch-queue.ts@9b44f82 (GPL-3.0), 2026-09-05, modified: only the
+// config-schema and UUID imports and the timer type. Batches by batch key (characters / items / hold time), a dispatch
+// gate, batch-level retry then per-item fallback when the result count is off, cancellation by scope; assembled by
+// translate-service (DESIGN §8.2, §10).
 import { getRandomUUID } from "@/shared/uuid"
 import { batchQueueConfigSchema } from "./config"
 import { TranslationCancelledError } from "./cancellation"

@@ -1,8 +1,9 @@
-// 移植自 reference/read-frog/src/utils/host/translate/ui/spinner.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改，
-// 2026-09-11 再改：转的圆环换成骨架屏（DESIGN §7.6）。**保留的是它的性能做法**——同时动画的数量有上限、
-// 句柄存 WeakMap、删节点前先取消（它的 #1881 / #1831）；换掉的只是画什么：几条按论文字号排的条，
-// 用 arXiv 红染过，整体呼吸（shadcn/ui 的 pulse）。样式在 styles/modes.css 里，这里只写每块自己的宽度。
-// 去掉的 getTranslatedTextAndRemoveSpinner 是它的请求胶水，我们的在 pipeline/run.ts。
+// Ported from reference/read-frog/src/utils/host/translate/ui/spinner.ts@9b44f82 (GPL-3.0), 2026-09-05, modified;
+// changed again 2026-09-11: the spinning ring became a skeleton (DESIGN §7.6). **What is kept is its performance
+// discipline** — a cap on simultaneous animations, handles in a WeakMap, cancel before removing a node (its #1881 /
+// #1831); only what is drawn changed: a few bars sized by the paper's type, tinted arXiv red, breathing as a whole
+// (shadcn/ui's pulse). The styles live in styles/modes.css; this file only writes each block's own widths.
+// Its request glue getTranslatedTextAndRemoveSpinner is gone; ours is in pipeline/run.ts.
 import { INLINE_ATTR } from './attrs'
 
 export const SKELETON_CLASS = 'axt-skel'

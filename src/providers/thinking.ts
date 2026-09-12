@@ -1,5 +1,7 @@
-// 思考（推理）模式开关。做法照搬 KISS 的 THINKING_API_REGISTRY：按端点选适配器，默认关闭——
-// 翻译不需要推理过程，开着会让每批请求慢一个数量级。字段经 AI SDK 的 providerOptions 直接进请求体。
+// Ported from reference/kiss-translator/src/apis/trans.js@c95bd46 (GPL-3.0), 2026-09-03, modified: the
+// THINKING_API_REGISTRY shape and its per-endpoint adapters, reduced to the endpoints we support. Default off —
+// translation needs no reasoning trace, and leaving it on makes every batch an order of magnitude slower. The fields
+// go into the request body through the AI SDK's providerOptions.
 export type ThinkingMode = 'enabled' | 'disabled'
 
 type Adapter = (mode: ThinkingMode) => Record<string, unknown>

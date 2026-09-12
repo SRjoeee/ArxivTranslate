@@ -1,5 +1,6 @@
-// 移植自 reference/read-frog/src/utils/crypto-polyfill.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：仅改名与文件头。
-// 有 crypto.randomUUID 就用它；只暴露 getRandomValues 的环境（部分扩展上下文、非安全上下文）退回手写 UUIDv4。
+// Ported from reference/read-frog/src/utils/crypto-polyfill.ts@9b44f82 (GPL-3.0), 2026-09-05, modified: renamed, header only.
+// crypto.randomUUID when present; environments that only expose getRandomValues (some extension contexts, insecure
+// contexts) fall back to a hand-rolled UUIDv4.
 
 function getCryptoWithRandomValues(): Crypto {
   if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {

@@ -6,6 +6,11 @@ Checkpoint log for the rebuild toward V1.0 (mandate: `docs/rebuild/CHARTER.md`; 
 
 - Verify before the manifest change ships (ADR-0002 §4): Chrome keeps a permission moved from `permissions` to `optional_permissions` in the granted set across an update.
 
+## 2026-09-12 — legal registry and stale documents
+
+- Branch `rebuild/docs-hygiene` (stacked on `rebuild/governance`). GPL §5: the 14 ported files carry the English header template; four files whose headers claimed a source without an attribution line got one and a registry row (`scheduler/title.ts`, `scheduler/lazy.ts`, `providers/thinking.ts`, `providers/request/config.ts`); `THIRD_PARTY.md` rewritten in English with the "idea only" files named. Retired: the two executed `docs/superpowers/plans/`, the regenerable `docs/phase0/rules-audit.md` (it committed a local path), the never-adapted `docs/agents/domain.md` and `triage-labels.md`; `issue-tracker.md` rewritten for this repository (only `needs-triage` and `wontfix` exist as labels). RESEARCH.md: frozen-record note, two dated SVG corrections, statuses for the 27-row §7 list.
+- Not touched on purpose: `DESIGN.md` and `UI.md` beyond dated corrections (ADR-0001 §3); the v12 spec under `docs/superpowers/specs/` (its decisions exist nowhere else).
+
 ## 2026-09-12 — first structural change: the renderer's module graph (ADR-0003)
 
 - Branch `rebuild/renderer-graph` (stacked on `rebuild/governance`, PR #172). `renderer/index.ts` is now a façade of the 29 names production code uses; the implementation moved to `attrs.ts` (names, leaf), `shell.ts`, `translation.ts`, `page.ts`; ten `index ↔ X` cycles are gone, `tests/renderer/module-graph.test.ts` keeps them gone; the translation boundary has one definition (`TRANSLATION_EXCLUDED_CLASSES`) and `tests/renderer/translation-boundary.test.ts` holds the six CSS copies to it; six stray literals became their constants.

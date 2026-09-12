@@ -1,5 +1,6 @@
-// 队列参数的校验：只保留 Read Frog `types/config/translate.ts` 里 request-queue / batch-queue 用到的四个字段与下限，
-// 不搬它整个配置模块。setQueueOptions / setBatchConfig 热更新时用。
+// Ported from reference/read-frog/src/types/config/translate.ts@9b44f82 (GPL-3.0), 2026-09-05, modified: only the
+// four fields and lower bounds request-queue / batch-queue read, not the whole config module. Also used by the
+// setQueueOptions / setBatchConfig hot-update entry points.
 import { z } from 'zod'
 
 export const MIN_TRANSLATE_RATE = 0.01

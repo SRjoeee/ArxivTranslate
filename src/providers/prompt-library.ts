@@ -1,8 +1,10 @@
-// 移植自 reference/read-frog/src/utils/constants/prompt.ts 与 src/utils/prompts/translate.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：
-// 模板变量换成论文语义（paperTitle / abstract / sectionTitle / glossary），网页摘要改为直接用论文 abstract，
-// 去掉字幕与文本分隔符式的批处理。批处理协议不在这里——见 prompt.ts 的协议块，它追加在任何提示词之后。
+// Ported from reference/read-frog/src/utils/constants/prompt.ts and src/utils/prompts/translate.ts@9b44f82 (GPL-3.0),
+// 2026-09-05, modified: the template variables are the paper's (paperTitle / abstract / sectionTitle / glossary), the
+// web-page summary is replaced by the paper's abstract, and the subtitle and delimiter-style batching are dropped. The
+// batch protocol is not here — see the protocol block in prompt.ts, appended after any prompt.
 //
-// 结构照搬：模板变量 {{token}} + 内置提示词表 + 用户自定义（patterns）+ 按 promptId 选择、找不到回退 default。
+// Kept as is: the {{token}} template variables, the built-in prompt table, the reader's own patterns, and selection by
+// promptId with a fallback to default.
 
 export const PROMPT_TOKENS = ['targetLanguage', 'input', 'paperTitle', 'abstract', 'sectionTitle', 'glossary'] as const
 export type PromptToken = (typeof PROMPT_TOKENS)[number]
