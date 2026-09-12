@@ -297,8 +297,27 @@ await setPreload(options, { range: '一屏' })
   }
 }
 
+// ── 设置页改了目标语言，开着的 popup 不重开就跟着变（INVENTORY S1）──────────────────────
+// popup 与设置页各持一份配置，原来只回显自己的写入。论文标签页留在前台（popup 查的是活动标签页），
+// 设置页在后台由 Playwright 驱动
+{
+  const paperTab = await context.newPage()
+  await paperTab.goto(`https://arxiv.org/html/${PAPER}`, { waitUntil: 'domcontentloaded' })
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await paperTab.bringToFront()
+  await popup.waitForTimeout(800)
+  const languageRow = popup.getByRole('button', { name: '目标语言', exact: false })
+  const before = (await languageRow.textContent()) ?? ''
+  await chooseLanguage(options, '日语', '日语')
+  await popup.waitForTimeout(1_200)
+  const after = (await languageRow.textContent()) ?? ''
+  check('设置页改了目标语言，开着的 popup 不重开就跟着变（S1）', /简体中文/.test(before) && /日语/.test(after), `${before.trim()} → ${after.trim()}`)
+  await popup.close()
+  await paperTab.close()
+}
+
 // ── 设置页：目标语言（配置 v4 的 ISO 639-3 码）与自定义提示词即时生效、重载仍在 ──────
-await chooseLanguage(options, '日语', '日语')
 await openSection(options, 'prompts')
 await options.getByRole('button', { name: '新建', exact: true }).click()
 await options.getByLabel('名称').fill('e2e 提示词')
