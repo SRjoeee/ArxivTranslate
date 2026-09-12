@@ -177,7 +177,8 @@ export function useOptionsData(): OptionsData {
       // translating into another language must keep the chain it started on (Codex on #157)
       await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).catch(() => undefined)
     } finally {
-      downloading.current = null
+      // Only this download's own marker: a later download of another target may own it by now (Codex on #185)
+      if (downloading.current === target) downloading.current = null
       await checkPack(wanted.current ?? target)
     }
   }, [checkPack])

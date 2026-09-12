@@ -360,7 +360,8 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
       try {
         await downloadPack(target)
       } finally {
-        downloading.current = null
+        // Only this download's own marker: a later download of another target may own it by now (Codex on #185)
+        if (downloading.current === target) downloading.current = null
         // The target of the moment, not the one downloaded: it may have moved on meanwhile
         await checkPack(wantedPack.current ?? target)
       }

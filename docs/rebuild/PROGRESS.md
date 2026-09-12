@@ -17,6 +17,7 @@ Checkpoint log for the rebuild toward V1.0 (mandate: `docs/rebuild/CHARTER.md`; 
 - Codex on the PR, third round (two P2, adopted): the reload test compares the stored choice's locale with the one in use rather than a recorded value; a session change clears the previous session's chain status.
 - Codex on the PR, fifth round (P2, adopted): committing another target now forgets the previous target's pack state at once, on both surfaces.
 - Codex on the PR, sixth round (P2, adopted): while a download is in flight for a target, lookups for it publish nothing, so an unrelated write meanwhile cannot put the Download button back.
+- Codex on the PR, seventh round (P2, adopted): a download that ends clears only its own marker; a later download of another target may own it by then.
 - Tests 1 668 (unchanged — the two data layers are hooks without a unit harness, INVENTORY §4.5); `pnpm e2e` 73/73 with a new case: the target language changed on the settings tab shows in the open popup without reopening it. Still held in more than one place after this: the content script's subscription (session), the background's chain (its own offers), the abstract page's raw read (deliberate, bundle size) — each now follows the store; nothing shows a stale copy.
 
 ## 2026-09-13 — one decision for the popup's main button, the context menu and the keyboard command (INVENTORY S2)
