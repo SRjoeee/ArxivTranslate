@@ -195,21 +195,30 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
         await transport.cancel(scope)
         return transport
       }
-      // 一个标签页同时只有一个会话：出现新 scope 说明上一轮没走 endRun（导航、刷新），把它撤掉。
-      // bind 过的（bound 有值、没 transport）已经在 bind 里撤过了
-      if (!bound && tabId !== undefined) {
-        const stale = scopesOfTab(tabId)
+      if (!bound) {
+        // 一个标签页同时只有一个会话：出现新 scope 说明上一轮没走 endRun（导航、刷新），把它撤掉。
+        // bind 过的（bound 有值、没 transport）已经在 bind 里撤过了
+        const stale = tabId !== undefined ? scopesOfTab(tabId) : []
+        // Register before the first await, as bind() does for OCR: a tab closed while the chain is being built
+        // must find this scope among its sessions, or dropTab marks nothing and the continuation below binds a
+        // dead scope and lets its request out — one paid batch per request suspended here, and the binding
+        // stays behind (the local review of ADR-0005 reproduced it; inherited from the MVP)
+        sessions.set(scope, tabId !== undefined ? { tabId } : {})
         if (stale.length > 0) await drop(stale)
       }
-      const transport = await deps.current()
+      const built = await deps.current()
       // Dropped while the chain was being built (tab closed, page restored): the drop saw no transport and had
       // nothing to drain, and binding now would revive the session and let its requests through (Codex on #87).
       // Do not bind; drain this chain of the scope and hand it over — the registry refuses its calls anyway
       if (deps.cancelled.has(scope)) {
-        await transport.cancel(scope)
-        return transport
+        await built.cancel(scope)
+        return built
       }
-      sessions.set(scope, { ...bound, transport, ...(tabId !== undefined ? { tabId } : {}) })
+      // A rebind during the build (engine-ready: `rebind`, `dropAndRebindAll`) already chose this session's chain;
+      // the one the build returns is the chain of the moment it started, and must not overrule that choice
+      const entry = sessions.get(scope)
+      const transport = entry?.transport ?? built
+      sessions.set(scope, { ...entry, transport, ...(tabId !== undefined ? { tabId } : {}) })
       return transport
     },
     bind(scope, tabId) {

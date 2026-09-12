@@ -4,6 +4,7 @@ import { TranslationCache, createCacheDb } from '@/cache/store'
 import { DEFAULT_CONFIG, type Config } from '@/config/schema'
 import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
+import { createSessionRouter } from '@/entrypoints/background/sessions'
 import { CHAIN_CONFIG_FIELDS, VOLATILE_CONFIG_FIELDS, chainConfigChanged, createLocalTransport } from '@/providers/transport'
 import type { CachePort } from '@/providers/translate-service'
 import { ProviderError, type TranslateRequest, type TranslationProvider } from '@/providers/types'
@@ -145,6 +146,26 @@ describe('createLocalTransport：翻译', () => {
     // A scope nobody marked goes through
     expect((await t.translate({ request: req, scope: 'live' })).ok).toBe(true)
     expect(calls).toEqual([SVC.id])
+  })
+
+  it('router and chain together: a tab closed while the first chain builds leaves no request out and nothing bound (ADR-0005, second review pass)', async () => {
+    // The scope's first request arrived on a fresh worker (the chain still building) and the reader closed the
+    // tab before it finished: the request must come back aborted, the provider untouched, the session unbound
+    const calls: string[] = []
+    const registry = new CancelledScopeRegistry()
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    const router = createSessionRouter({
+      current: async () => { await held; return withChain([mockProvider(async r => { calls.push('call'); return { segments: r.segments, provider: 'mock' } })], { cancelled: registry }) },
+      cancelled: registry,
+    })
+    const pending = router.forCall('s1', 7).then(t => t.translate({ request: req, scope: 's1' }))
+    await Promise.resolve()
+    await router.dropTab(7)
+    release()
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(calls).toEqual([])
+    expect(router.bound()).toEqual([])
   })
 })
 

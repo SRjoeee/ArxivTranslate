@@ -453,6 +453,45 @@ describe('createSessionRouter', () => {
     expect(transport.cancelled).toEqual(['链:s1'])
   })
 
+  it('a text scope is registered before the chain build: a tab closed during the build drops it — nothing bound, the scope marked', async () => {
+    // Text requests do not bind first the way OCR does. While the first forCall awaited the chain, the scope was
+    // in no session, so dropTab marked nothing and the continuation bound the dead scope and let its request out
+    // (the local review of ADR-0005 reproduced it with the real service; inherited from the MVP)
+    const transport = fakeTransport('链')
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    const registry = new CancelledScopeRegistry()
+    const drained: string[] = []
+    const router = routerOver(async () => { await held; return transport }, { cancelled: registry, onDrop: scope => { drained.push(scope); return 1 } })
+    const pending = router.forCall('s1', 7) // no bind before it
+    await Promise.resolve()
+    expect(router.bound()).toEqual(['s1']) // registered at once
+    expect(await router.dropTab(7)).toBe(1) // onDrop only: no chain to drain yet
+    expect(drained).toEqual(['s1'])
+    expect(registry.has('s1')).toBe(true)
+    release()
+    await pending
+    expect(router.bound()).toEqual([])
+    expect(transport.cancelled).toEqual(['链:s1']) // drained on the chain the build returned
+  })
+
+  it('a rebind during the chain build wins over the chain the build returns', async () => {
+    // engine-ready moves a session (`rebind`) or all of them (`dropAndRebindAll`) while a first forCall may still
+    // be awaiting the chain of the moment it started; that older chain must not overrule the move when it lands
+    const first = fakeTransport('旧链')
+    const second = fakeTransport('新链')
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    const router = routerOver(async () => { await held; return first })
+    const pending = router.forCall('s1', 7)
+    await Promise.resolve()
+    router.rebind('s1', second)
+    release()
+    expect(nameOf(await pending)).toBe('新链')
+    expect(nameOf(router.transportFor('s1')!)).toBe('新链')
+    expect(first.cancelled).toEqual([])
+  })
+
   it('a certain drop marks every scope before any chain is asked to drain', async () => {
     // The mark is what a call suspended on its cache read sees when it wakes; draining may await a chain build, so
     // every scope of the drop is marked up front, not one by one between drains (ADR-0005)
