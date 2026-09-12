@@ -4,7 +4,7 @@
 **但不能假定 push 一定会触发**（2026-09-08 实测：刚从限额恢复那阵，两个 PR 推完新提交后二十分钟既没有 👀
 也没有新 review，显式评论 `@codex review` 才动）。所以等待时**要按下面的规矩核对 review 的 commit 是不是当前
 HEAD**，只看"有没有 review"会把上一轮的旧结论当成本轮的；确认没跟上就显式再叫一次，
-**Opening a PR does not always start a review** (2026-09-12: #172 and #173 sat 30 minutes without 👀). End every PR body with a line `@codex review`, above the attribution line — the mention is what reliably starts the round. **也可以在 PR 上评论 `@codex review` 手动触发**——撞过限额、当时没审成的 PR 靠这个补审，
+**Rebuild-period merge gate** (owner, 2026-09-12; ADR-0001 §7): a PR into `rebuild/v1` merges once the local adversarial review passed with its findings addressed, CI is green and Codex left a terminal signal here — no further confirmation. `main` stays owner-only. **Opening a PR does not always start a review** (2026-09-12: #172 and #173 sat 30 minutes without 👀). End every PR body with a line `@codex review`, above the attribution line — the mention is what reliably starts the round. **也可以在 PR 上评论 `@codex review` 手动触发**——撞过限额、当时没审成的 PR 靠这个补审，
 **已经合并的 PR 同样吃这一招**（2026-09-06 实测 #58 等一批合并时没被审过的 PR，都能这样补回来）：
 先在 PR 上打一个 👀 反应（`eyes`）表示**审查中**，结束时留下三种终态信号之一。**看到终态信号之前不要合并**：
 
