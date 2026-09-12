@@ -143,6 +143,55 @@ describe('createChainHolder', () => {
     expect(nameOf(await asked)).toBe('amh')
   })
 
+  it('a build from storage learns what it built from: a setting repaired after a fallback build rebuilds', async () => {
+    // The watcher ignores an invalid stored value; an engine-ready rebuild then builds from storage and lands on the
+    // fallback. Repairing the setting must rebuild — comparing with what was asked for before the storage build
+    // would miss it (the local review of ADR-0005, twelfth pass)
+    let builds = 0
+    const holder = createChainHolder({ owned: () => false, load: async config => { builds++; const built = config ?? DEFAULT_CONFIG; return { config: built, transport: transport(built.targetLanguage) } } })
+    await holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'afr' })
+    await holder.activate() // from storage: the fallback target
+    expect(nameOf(await holder.current())).toBe(DEFAULT_CONFIG.targetLanguage)
+    holder.onConfig({ ...DEFAULT_CONFIG, targetLanguage: 'afr' }) // repaired
+    expect(nameOf(await holder.current())).toBe('afr')
+    expect(builds).toBe(3)
+  })
+
+  it('a build from storage landing after a configuration change does not overwrite what the change asked for', async () => {
+    const gates = new Map<number, () => void>()
+    let builds = 0
+    const holder = createChainHolder({
+      owned: () => false,
+      load: async config => {
+        const n = ++builds
+        await new Promise<void>(resolve => { gates.set(n, resolve) })
+        const built = config ?? DEFAULT_CONFIG
+        return { config: built, transport: transport(`${n}:${built.targetLanguage}`) }
+      },
+    })
+    void holder.activate() // build 1, from storage, held
+    holder.onConfig({ ...DEFAULT_CONFIG, targetLanguage: 'afr' }) // build 2
+    gates.get(2)!()
+    gates.get(1)!() // the storage build lands late
+    expect(nameOf(await holder.current())).toBe('2:afr')
+    holder.onConfig({ ...DEFAULT_CONFIG, targetLanguage: 'afr' }) // nothing changed against what was asked for
+    expect(nameOf(await holder.current())).toBe('2:afr')
+    expect(builds).toBe(2)
+  })
+
+  it('a build that fails after a successful one is retried by the next change, whatever it changes', async () => {
+    let fail = false
+    let builds = 0
+    const holder = createChainHolder({ owned: () => false, load: async config => { builds++; if (fail) throw new Error('boom'); const built = config ?? DEFAULT_CONFIG; return { config: built, transport: transport(built.targetLanguage) } } })
+    await holder.current()
+    fail = true
+    await expect(holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'afr' })).rejects.toThrow('boom')
+    fail = false
+    holder.onConfig({ ...DEFAULT_CONFIG, targetLanguage: 'afr', mode: 'only' }) // volatile against what was asked for
+    expect(nameOf(await holder.current())).toBe('afr')
+    expect(builds).toBe(3)
+  })
+
   it('a failed build is retried by the next configuration change', async () => {
     let fail = true
     const holder = createChainHolder({ owned: () => false, load: async config => { if (fail) throw new Error('boom'); return { config: config ?? DEFAULT_CONFIG, transport: transport('ok') } } })

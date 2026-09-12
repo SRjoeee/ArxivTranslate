@@ -75,17 +75,22 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
    * (the local review of ADR-0005, eighth pass)
    */
   const built = new Set<TranslationTransport>()
-  /** What the chain was last asked to be built from — the configuration a change is compared with */
+  /**
+   * What the chain was last asked to be built from — the configuration a change is compared with. `null` while a
+   * build from the stored configuration is in flight: that one learns what it built from when it lands, unless a
+   * change arrived meanwhile or a later build was asked for (a stale landing must not overwrite either)
+   */
   let requested: Config | null = null
+  let generation = 0
   /** The build in force failed: the next configuration change rebuilds, whatever it changed */
   let failed = false
   const build = (config?: Config): Promise<Built> => {
-    if (config) requested = config
+    const mine = ++generation
+    requested = config ?? null
     failed = false
     const promise: Promise<Built> = deps.load(config).then(result => {
       built.add(result.transport)
-      // Built from the stored configuration: learn it when the build lands, unless a change arrived meanwhile
-      requested ??= result.config
+      if (requested === null && generation === mine) requested = result.config
       return result
     })
     promise.catch(() => {
