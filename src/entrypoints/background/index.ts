@@ -170,6 +170,8 @@ export default defineBackground(() => {
     probe: () => ocr.status({ recheck: true }),
     arm: () => void browser.alarms.create(RESTART_ALARM, { delayInMinutes: 0.75 }),
     announce: broadcastHelper,
+    // The one subscription fed by tabs that are not ours (see onTabUpdated below)
+    quiesce: () => browser.tabs.onUpdated.removeListener(onTabUpdated),
   })
   browser.alarms.onAlarm.addListener(alarm => {
     if (alarm.name === RESTART_ALARM) void helperRestart.fired()
@@ -210,13 +212,19 @@ export default defineBackground(() => {
    * 一个还活着的页面判死，它后半篇的译文会全部 aborted（用户 2026-09-09 报的）。所以交给 router
    * 按住一会儿：这个标签页再来一次请求就说明页面还在，撤销取消
    */
-  browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  // Named, because it comes off while a grant takes effect (ADR-0002): a tab whose title ticks — a clock, a chat
+  // app's unread count — is an event every few seconds from a tab that is not ours, and each one resets the worker's
+  // idle timer, which would keep the stale worker alive for good (Codex, local review pass 2). The fresh worker
+  // registers it again at start-up; until then a tab that closes still drops its sessions (onRemoved), a tab that
+  // navigates away only once the fresh worker's own probes run
+  const onTabUpdated: Parameters<typeof browser.tabs.onUpdated.addListener>[0] = (tabId, changeInfo) => {
     // **loading 与 complete 都要按一次**。跨文档导航提交得慢时，旧文档在 loading 之后还活着，
     // 到点探针问到的是它、答的是同一个会话，撤销就被放掉了——而它随后就没了，再没人问第二次
     //（Codex 在 #143 指出）。complete 时新文档已经就位：同文档换 hash 的话探针照样答「还在」，
     // 真跳走的话答的就是新会话或者根本答不上
     if (changeInfo.status === 'loading' || changeInfo.status === 'complete') router.mayHaveLeft(tabId)
-  })
+  }
+  browser.tabs.onUpdated.addListener(onTabUpdated)
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!isAxtMessage(message)) return

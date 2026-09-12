@@ -17,6 +17,13 @@ export interface HelperRestartDeps {
   arm: () => void
   /** What the fresh worker found, for the pages (and the tabs, when ready) */
   announce: (status: HelperStatus) => void
+  /**
+   * Take down the subscriptions fed by activity that is not ours while this worker waits to be replaced: a tab
+   * update from any tab is an event, and every event resets the idle timer — a tab whose title ticks would keep the
+   * stale worker alive for good. The fresh worker registers them anew at start-up. Called on every stale answer,
+   * so it has to be idempotent
+   */
+  quiesce?: () => void
 }
 
 export interface HelperRestart {
@@ -27,13 +34,17 @@ export interface HelperRestart {
 }
 
 export function createHelperRestart(deps: HelperRestartDeps): HelperRestart {
+  const stale = () => {
+    deps.quiesce?.()
+    deps.arm()
+  }
   return {
     noticed(status) {
-      if (status.state === 'restarting') deps.arm()
+      if (status.state === 'restarting') stale()
     },
     async fired() {
       const status = await deps.probe()
-      if (status.state === 'restarting') deps.arm()
+      if (status.state === 'restarting') stale()
       else deps.announce(status)
     },
   }
