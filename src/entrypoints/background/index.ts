@@ -187,6 +187,8 @@ export default defineBackground(() => {
    * from the chain in force, which is built from them. The popup decides the same from the settings it holds
    */
   const saved = async () => {
+    // Runnability comes from a chain built from what is stored now, in order with every other offer (provider-status.ts)
+    await offers.offer()
     const [config, status] = await Promise.all([getConfig(), transportOf().then(t => t.status())])
     return { revision: await chainRevision(config), canRun: status.available, fallback: status.fallback !== undefined }
   }
