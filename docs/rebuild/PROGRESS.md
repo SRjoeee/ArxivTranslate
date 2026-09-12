@@ -6,6 +6,12 @@ Checkpoint log for the rebuild toward V1.0 (mandate: `docs/rebuild/CHARTER.md`; 
 
 - Verify before the manifest change ships (ADR-0002 §4): Chrome keeps a permission moved from `permissions` to `optional_permissions` in the granted set across an update.
 
+## 2026-09-12 — one page session, one permanent-error policy (ADR-0004)
+
+- Branch `rebuild/session`. `src/core/session/index.ts` now owns what `entrypoints/content/index.ts` held (467 → 78 lines, an adapter): modes, prep, highlight, title, the text and image runs, progress, the restart-once guard, the appearance and locale gates, the helper resume. Session identity is the object's own (`active` + one `alive()` per run); `scheduler/session.ts` keeps only `newSessionId()`. `PERMANENT_ERROR_KINDS` / `isPermanentErrorKind` in `providers/types.ts` replace the five hand-written `no-key` / `auth` sets.
+- `tests/session/page-session.test.ts` (11 cases) fixes the lifecycle: status waits for the first config read; start marks and mints; refusals and their reasons; restart cancels the old scope; restore strips everything and refuses a stale automatic restart; the permanent hand-over restarts once and a temporary one does not; the watcher gate beats a late read; setMode persists; locale re-applies; bitmaps park until the helper answers and `resumeRaster` releases them once.
+- Gate: typecheck, lint, 1 562 unit tests, build 1.25 MB — green. Browser suites: pending below.
+
 ## 2026-09-12 — legal registry and stale documents
 
 - Branch `rebuild/docs-hygiene` (stacked on `rebuild/governance`). GPL §5: the 14 ported files carry the English header template; four files whose headers claimed a source without an attribution line got one and a registry row (`scheduler/title.ts`, `scheduler/lazy.ts`, `providers/thinking.ts`, `providers/request/config.ts`); `THIRD_PARTY.md` rewritten in English with the "idea only" files named. Retired: the two executed `docs/superpowers/plans/`, the regenerable `docs/phase0/rules-audit.md` (it committed a local path), the never-adapted `docs/agents/domain.md` and `triage-labels.md`; `issue-tracker.md` rewritten for this repository (only `needs-triage` and `wontfix` exist as labels). RESEARCH.md: frozen-record note, two dated SVG corrections, statuses for the 27-row §7 list.

@@ -4,7 +4,7 @@
 import { toBcp47 } from '@/config/languages'
 import { ID_ATTR, type Block, type TextBlock } from '@/core/extractor'
 import type { SentenceAlignment } from '@/providers/alignment'
-import type { TranslateContext } from '@/providers/types'
+import { isPermanentErrorKind, type TranslateContext } from '@/providers/types'
 import { joinRuns, rehydrate, splitRuns, validate, type WireSpan } from '@/core/protector'
 import {
   clearAllPending, enable, markPartial, registerSentences, renderFailed, renderPending, renderTable, renderText, setState, type Look, type Mode,
@@ -73,8 +73,6 @@ export interface TranslationRun {
   /** 翻失败的块（文档序）；popup 的"重试失败"把它们再交给 translate */
   failed(): Block[]
 }
-
-const FATAL_KINDS = new Set(['no-key', 'auth'])
 
 type Outcome = 'waiting' | 'requested' | 'done' | 'failed'
 /**
@@ -179,7 +177,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
   }
 
   const noteFatal = (res: Extract<TranslateMessageResponse, { ok: false }>) => {
-    if (FATAL_KINDS.has(res.error.kind) && fatal === undefined) {
+    if (isPermanentErrorKind(res.error.kind) && fatal === undefined) {
       fatal = `${res.error.kind}: ${res.error.message}`
       // 配置错了继续也只会重复失败：断开观察器，不再排新批次
       scheduler?.disconnect()

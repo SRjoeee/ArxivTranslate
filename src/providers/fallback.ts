@@ -5,7 +5,7 @@
 // 解决的问题：key 过期、额度用尽、网络抖动时 run.ts 会把整页翻译停死（no-key / auth 触发
 // scheduler.disconnect()），读者对着半篇译文干等。硬规则 4：失败必须可恢复并触发 fallback 链。
 import type { CancelOptions, TranslateCall, TranslateMessageResponse, TranslateService } from './translate-service'
-import type { ProviderErrorKind, TranslatedSegment, TranslationProvider } from './types'
+import { isPermanentErrorKind, type ProviderErrorKind, type TranslatedSegment, type TranslationProvider } from './types'
 
 export interface FallbackStep {
   provider: TranslationProvider
@@ -51,9 +51,6 @@ export const FALLBACK_KINDS: ReadonlySet<ProviderErrorKind> = new Set<ProviderEr
   'no-key', 'auth', 'network', 'timeout', 'rate-limit', 'bad-request', 'invalid-response', 'unknown',
 ])
 
-/** 配置问题不会自己好：本会话内永久降级，不再浪费一次请求去试 */
-const PERMANENT_KINDS: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>(['no-key', 'auth'])
-
 /**
  * 瞬时故障的冷却时长。持续故障时不设冷却的话，每次调用都要把该引擎的重试与超时（最长 120s）白等一遍；
  * 设太长又会在短暂抖动后长时间用着更差的引擎。60s 是折中，可注入以便测试
@@ -96,7 +93,8 @@ export function createFallbackService(
     const info: DemotedInfo = { id: step.provider.id, displayName: step.provider.displayName, kind: error.kind, message: error.message }
     demotions.set(step.provider.id, {
       info,
-      ...(PERMANENT_KINDS.has(error.kind) ? {} : { until: now() + cooldownMs }),
+      // 配置问题不会自己好：本会话内永久降级，不再浪费一次请求去试（PERMANENT_ERROR_KINDS）
+      ...(isPermanentErrorKind(error.kind) ? {} : { until: now() + cooldownMs }),
     })
     lastDemoted = info
     console.warn(`[axt] ${step.provider.displayName} 降级（${error.kind}）：${error.message}`)
