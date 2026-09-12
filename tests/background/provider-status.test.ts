@@ -124,6 +124,20 @@ describe('statusInForce', () => {
     expect((await status).providerId).toBe('healthy')
   })
 
+  it('a replacement landing after the transport was taken but before its status is awaited is not missed (fifth pass)', async () => {
+    // current() hands over the old chain and the replacement lands in the same turn, before the caller subscribes
+    let inForce = never('stalled')
+    let fire: () => void = () => undefined
+    let signal = new Promise<void>(resolve => { fire = resolve })
+    const replace = (next: TranslationTransport) => { inForce = next; const done = fire; signal = new Promise<void>(resolve => { fire = resolve }); done() }
+    let handed = 0
+    const chain = {
+      current: async () => { const taken = inForce; if (++handed === 1) replace(chainOf('healthy')); return taken },
+      replaced: () => signal,
+    }
+    expect((await statusInForce(chain)).providerId).toBe('healthy')
+  })
+
   it('a probe that never settles with nothing replacing the chain rejects at the deadline, with no obsolete answer', async () => {
     vi.useFakeTimers()
     try {

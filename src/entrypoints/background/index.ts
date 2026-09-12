@@ -3,7 +3,7 @@ import { getConfig, watchConfig } from '@/config/storage'
 import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import { createLocalTransport } from '@/providers/transport'
 import { toErrorInfo } from '@/providers/translate-service'
-import { isAxtMessage } from '@/shared/messages'
+import { isAxtMessage, replyWith } from '@/shared/messages'
 import { HELPER_HOST, type HelperStatus } from '@/shared/ocr'
 import { createChainHolder } from './chain'
 import { engineReady } from './engine-ready'
@@ -264,9 +264,9 @@ export default defineBackground(() => {
         return true
       case 'axt:provider-status':
         // A session's own chain, the chain in force, or — after a save — one built from what is stored now
-        providerStatus({ chain, router, offers }, message)
-          .then(sendResponse)
-          .catch((e: unknown) => console.error('[axt] provider-status 失败', e))
+        // A failure (a build that failed, the status deadline) is replied, not only logged: the page that asked
+        // must see its request settle
+        replyWith(providerStatus({ chain, router, offers }, message), sendResponse)
         return true
       case 'axt:engine-ready':
         // Rebuild and move whom the sender says (./engine-ready.ts): a downloaded language pack moves one tab, a

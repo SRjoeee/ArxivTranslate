@@ -45,8 +45,11 @@ export async function statusInForce(chain: Pick<ChainHolder, 'current' | 'replac
   })
   try {
     for (;;) {
+      // The signal first, then the transport: a replacement landing between the two would otherwise be missed —
+      // the old chain's probe would be raced against the replacement after the one already underway (fifth pass)
+      const replaced = chain.replaced().then(() => null)
       const transport = await Promise.race([chain.current(), deadline])
-      const status = await Promise.race([transport.status(), chain.replaced().then(() => null), deadline])
+      const status = await Promise.race([transport.status(), replaced, deadline])
       if (status === null) continue
       if ((await Promise.race([chain.current(), deadline])) === transport) return status
     }

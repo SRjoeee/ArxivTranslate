@@ -134,9 +134,35 @@ export function isAxtMessage(value: unknown): value is AxtMessage {
     && (value as { type: string }).type.startsWith('axt:')
 }
 
+/**
+ * What a handler replies when the work behind a message failed. A handler that returns `true` and never replies
+ * leaves the sender waiting for as long as the worker lives — a rejection logged in the background is invisible to
+ * the page that asked (the local review of INVENTORY S2, fifth pass). `sendMessage` turns this reply back into a
+ * rejection, so a caller's `.catch` sees the failure it would have seen from a local call
+ */
+export interface FailureReply {
+  axtError: string
+}
+
+export const failure = (error: unknown): FailureReply => ({ axtError: error instanceof Error ? error.message : String(error) })
+
+export const isFailure = (value: unknown): value is FailureReply =>
+  typeof value === 'object' && value !== null && typeof (value as { axtError?: unknown }).axtError === 'string'
+
+/** Reply to a message with the outcome of a promise: the value, or a typed failure the sender rejects on */
+export function replyWith<T>(promise: Promise<T>, sendResponse: (reply: T | FailureReply) => void): void {
+  promise.then(sendResponse, error => sendResponse(failure(error)))
+}
+
+/** The sender's side of `replyWith`: a failure reply becomes a rejection */
+export function decodeReply<T>(reply: T | FailureReply): T {
+  if (isFailure(reply)) throw new Error(reply.axtError)
+  return reply
+}
+
 /** 发给 background；MV3 下 sendMessage 不传回调即返回 Promise */
 export function sendMessage<T extends AxtMessageType>(message: AxtMessage<T>): Promise<AxtResponse<T>> {
-  return browser.runtime.sendMessage(message) as Promise<AxtResponse<T>>
+  return (browser.runtime.sendMessage(message) as Promise<AxtResponse<T> | FailureReply>).then(decodeReply)
 }
 
 /** 发给当前活动标签页的 content script；标签页上没有接收方时 Promise 会 reject。不读 url，无需 tabs 权限 */
