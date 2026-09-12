@@ -273,11 +273,18 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
         transport = await deps.current()
       } catch (e) {
         // No chain to move onto — the rebuild after the deletion failed. The deleted service must stop all the
-        // same: retire and drain every chain, and let the sessions go unmarked, so their next request binds
-        // whatever chain is in force by then (the local review of ADR-0005, ninth pass)
+        // same: retire every chain, take the chains off the sessions synchronously, then drain. The scope → tab
+        // entries stay, unmarked: a tab closing later must still find them to drop (image recognition queues by
+        // scope too), and their next request binds whatever chain is in force by then (the local review of
+        // ADR-0005, ninth and tenth passes)
         deps.retireOthers?.(null)
-        for (const [scope, session] of sessions) if (session.transport) await session.transport.cancel(scope)
-        sessions.clear()
+        const old: [string, TranslationTransport][] = []
+        for (const [scope, session] of sessions) {
+          if (!session.transport) continue
+          old.push([scope, session.transport])
+          sessions.set(scope, session.tabId !== undefined ? { tabId: session.tabId } : {})
+        }
+        for (const [scope, chain] of old) await chain.cancel(scope)
         throw e
       }
       // Move every session first, synchronously, and only then drain the old chains: a forCall whose build lands

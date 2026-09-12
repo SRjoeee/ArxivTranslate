@@ -44,11 +44,14 @@ describe('engineReady', () => {
     expect(retired).toEqual(['build-1'])
   })
 
-  it('a deletion whose rebuild fails outright still retires every chain and lets the sessions go', async () => {
-    // Nothing to move onto, but the deleted service must stop: every chain is retired and drained, and the
-    // sessions are let go unmarked — their next request binds whatever chain is in force by then
-    // (the local review of ADR-0005, ninth pass)
+  it('a deletion whose rebuild fails outright still retires every chain; the sessions keep their tabs, lose their chains', async () => {
+    // Nothing to move onto, but the deleted service must stop: every chain is retired and drained. The scope → tab
+    // entries stay, unmarked — a tab closing later must still find them (image recognition queues by scope too),
+    // and their next request binds whatever chain is in force by then (the local review of ADR-0005, ninth and
+    // tenth passes)
     const retired: string[] = []
+    const drained: string[] = []
+    const registry = new CancelledScopeRegistry()
     let n = 0
     const holder = createChainHolder({
       owned: transport => router.sessionsOn(transport) > 0,
@@ -58,11 +61,43 @@ describe('engineReady', () => {
         return { config: DEFAULT_CONFIG, transport: chainOf(name, ['svc-new'], retired) }
       },
     })
-    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: inForce => holder.retireOthers(inForce) })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: registry, retireOthers: inForce => holder.retireOthers(inForce), onDrop: scope => { drained.push(scope); return 1 } })
     await router.forCall('s1', 1)
+    router.bind('ocr-2', 2) // an image-only session on another tab
     expect(await engineReady(holder, router, { id: 'svc-new', rebindAll: true })).toEqual({ reset: false })
     expect(retired).toEqual(['build-1'])
-    expect(router.bound()).toEqual([])
+    expect(router.bound()).toEqual(['s1', 'ocr-2'])
+    expect(router.transportFor('s1')).toBeUndefined()
+    // Closing the tabs afterwards still drops them: marked, and their recognitions drained
+    await router.dropTab(2)
+    await router.dropTab(1)
+    expect(drained).toEqual(['ocr-2', 's1'])
+    expect(registry.has('ocr-2')).toBe(true)
+    expect(registry.has('s1')).toBe(true)
+  })
+
+  it('a deletion whose own rebuild never settles is carried out once another rebuild takes over', async () => {
+    // The handler does not wait for its own build: the movers follow current(), which stops waiting for a build the
+    // moment it is superseded (the local review of ADR-0005, tenth pass)
+    const retired: string[] = []
+    const gates = new Map<string, () => void>()
+    let n = 0
+    const holder = createChainHolder({
+      owned: transport => router.sessionsOn(transport) > 0,
+      load: async () => {
+        const name = `build-${++n}`
+        if (name !== 'build-1') await new Promise<void>(resolve => { gates.set(name, resolve) })
+        return { config: DEFAULT_CONFIG, transport: chainOf(name, ['svc-new'], retired) }
+      },
+    })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: inForce => holder.retireOthers(inForce) })
+    const old = await router.forCall('s1', 1)
+    const action = engineReady(holder, router, { id: 'svc-new', rebindAll: true }) // build-2: never released
+    void holder.activate() // build-3: another action's rebuild
+    gates.get('build-3')!()
+    expect(await action).toEqual({ reset: true })
+    expect(router.transportFor('s1')).not.toBe(old)
+    expect(retired).toEqual(['build-1'])
   })
 
   it('a language pack whose engine is not on the chain in force answers reset: false', async () => {
