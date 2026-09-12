@@ -11,7 +11,8 @@ import { escapeText, unescapeText } from '@/core/protector/text'
 import { type ImageLabel, type ImageTarget, clearImage, renderImage } from '@/core/renderer/image'
 import { DOCUMENT_ROOT, FIGURE_SELECTORS } from '@/core/rules/latexml'
 import { INJECTED_SELECTOR } from '@/core/marks'
-import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
+import { createRunLedger } from '@/core/run/ledger'
+import type { PreloadOptions } from '@/core/scheduler/lazy'
 import { foreignLinesOf, linesOf, looksLikeCode, pictureTexts } from '@/core/svg'
 import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
 import { isPermanentErrorKind, type TranslateContext } from '@/providers/types'
@@ -78,8 +79,6 @@ export interface ImageRun {
   failed(): ImageTarget[]
   progress(): ImageProgress
 }
-
-type Outcome = 'waiting' | 'requested' | 'done' | 'failed'
 
 /** 这张内联图里有没有值得翻的标签：纯公式的 TikZ 图（语料里的多数）不必进调度 */
 function hasPictureText(picture: Element): boolean {
@@ -184,13 +183,20 @@ export function captionOf(el: Element): string | undefined {
 
 export function startImageTranslation(options: ImageRunOptions): ImageRun {
   const fetchBytes = options.fetchBytes ?? defaultFetchBytes
-  const outcome = new Map<ImageTarget, Outcome>(options.targets.map(t => [t, 'waiting']))
-  const reasons = new Map<ImageTarget, string>()
   /** 进入过视口但模式闸关着的目标 */
   const parked = new Set<ImageTarget>()
-  let stopped = false
-  let fatal: string | undefined
-  const alive = () => !stopped && fatal === undefined && options.isCurrent()
+  // The bookkeeping shared with the text run (ADR-0006): outcomes, the permanent-error record, stop, the scheduler
+  const ledger = createRunLedger(options.targets, {
+    preload: options.preload,
+    onEnter: entered => { void translate(entered) },
+    isCurrent: options.isCurrent,
+    onStop: () => {
+      parked.clear()
+      // 排队没开始的直接结清，等它们的 translate() 才会返回
+      for (const entry of queue.splice(0)) entry.done()
+    },
+  })
+  const alive = () => !ledger.halted()
   /**
    * run 级的队列与 worker 池：并发上限对整个 run 生效，不是对每次 translate() 调用各算一份——
    * 观察器每次回调、每次重试都会调 translate()，各开一池的话上限形同虚设（Codex 在 #89 指出）
@@ -199,24 +205,11 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
   const queue: { target: ImageTarget; done: () => void }[] = []
   let active = 0
 
-  const progress = (): ImageProgress => {
-    let requested = 0
-    let done = 0
-    let failed = 0
-    for (const state of outcome.values()) {
-      if (state !== 'waiting') requested++
-      if (state === 'done') done++
-      if (state === 'failed') failed++
-    }
-    return { total: outcome.size, requested, done, failed, ...(fatal !== undefined ? { fatal } : {}) }
-  }
+  const progress = (): ImageProgress => ledger.progress()
   const report = () => {
-    if (!stopped) options.onProgress?.(progress())
+    if (!ledger.stopped()) options.onProgress?.(progress())
   }
-  const fail = (target: ImageTarget, reason: string) => {
-    outcome.set(target, 'failed')
-    reasons.set(target, reason)
-  }
+  const fail = (target: ImageTarget, reason: string) => ledger.settle(target, 'failed', reason)
 
   /** 把回来的段落配回它们的框；成功与部分成功两条路共用一份 */
   const labelsFrom = (segments: readonly { id: string; text: string }[], boxes: readonly Box[], target: ImageTarget): ImageLabel[] => {
@@ -305,7 +298,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       const finishEmpty = () => {
         // 真的摘掉了旧叠加层就要通知整理层：side 的拆图副本里还留着它，签名不重算副本就不重建（Codex 在 #89 指出）
         const removed = clearImage(target)
-        outcome.set(target, 'done')
+        ledger.settle(target, 'done')
         if (removed) options.onRendered?.([target])
       }
       // 动图：helper 只识别了第 0 帧，浏览器在放后面的帧，框对不上——不叠
@@ -339,12 +332,10 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
         }
         // key 失效 / 没配 key：与文字管线一样，第一次遇到就停调度，之后的图不再取、不再识别
         // 配置级错误（PERMANENT_ERROR_KINDS，与文字管线同一套）：第一次遇到就停调度，别让之后进入视口的每张图都去取图、识别、再撞一次
-        if (isPermanentErrorKind(res.error.kind) && fatal === undefined) {
-          fatal = `${res.error.kind}: ${res.error.message}`
-          scheduler?.disconnect()
+        if (isPermanentErrorKind(res.error.kind) && ledger.fatal(res.error.kind, res.error.message)) {
           parked.clear()
           // 已认领但没完成的（并发中的、排队的）一并记失败，进度与 failed() 才对得上；排队的直接结清
-          for (const [other, state] of outcome) if (state === 'requested' && other !== target) fail(other, `停在配置错误：${res.error.message}`)
+          for (const other of ledger.inState('requested')) if (other !== target) fail(other, `停在配置错误：${res.error.message}`)
           for (const entry of queue.splice(0)) entry.done()
           fail(target, `翻译失败：${res.error.message}`)
           // 立刻把带 fatal 的进度发出去：别等还在等 OCR 的另一个 worker（最长一个 helper 超时）结束才让 popup 知道（Codex 在 #89 指出）
@@ -356,7 +347,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       const labels = labelsFrom(res.result.segments, boxes, target)
       if (labels.length === 0) return finishEmpty()
       renderImage(target, labels)
-      outcome.set(target, 'done')
+      ledger.settle(target, 'done')
       options.onRendered?.([target])
     } catch (e) {
       if (!alive()) return
@@ -365,17 +356,12 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
   }
 
   const translate = async (picked: ImageTarget[]): Promise<void> => {
-    if (!alive()) return
-    const fresh = picked.filter(t => outcome.has(t) && outcome.get(t) !== 'requested')
-    if (fresh.length === 0) return
-    const ready = fresh.filter(t => options.isEnabled(t))
-    for (const t of fresh) if (!ready.includes(t)) parked.add(t)
+    // The gate is asked per target (§15.5): bitmaps wait for the helper, SVG figures do not; the refused ones park
+    const { taken: ready, held } = ledger.intake(picked, options.isEnabled)
+    for (const t of held) parked.add(t)
     if (ready.length === 0) return
-    scheduler?.claim(ready)
-    for (const t of ready) {
-      parked.delete(t)
-      outcome.set(t, 'requested')
-    }
+    for (const t of ready) parked.delete(t)
+    ledger.request(ready)
     report()
     // 进 run 级队列，worker 池按上限取（fetch → hash → base64 → OCR 一条龙，别一次全开）
     const settled = ready.map(target => new Promise<void>(done => queue.push({ target, done })))
@@ -397,8 +383,7 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
   }
 
   // 首屏在这里同步播种，回调会在 translate 就绪之前触发，所以 translate 得先定义
-  let scheduler: LazyScheduler<ImageTarget> | null = null
-  scheduler = createLazyScheduler(options.targets, { ...options.preload, onEnter: entered => { void translate(entered) } })
+  ledger.observe()
 
   return {
     translate,
@@ -410,16 +395,9 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
       parked.clear()
       void translate(picked)
     },
-    stop() {
-      if (stopped) return
-      stopped = true
-      scheduler?.disconnect()
-      parked.clear()
-      // 排队没开始的直接结清，等它们的 translate() 才会返回
-      for (const entry of queue.splice(0)) entry.done()
-    },
-    failed: () => options.targets.filter(t => outcome.get(t) === 'failed'),
-    fatal: () => fatal,
+    stop: () => ledger.stop(),
+    failed: () => ledger.failed(),
+    fatal: () => ledger.fatalReason(),
     progress,
   }
 }

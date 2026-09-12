@@ -9,7 +9,8 @@ import { joinRuns, rehydrate, splitRuns, validate, type WireSpan } from '@/core/
 import {
   clearAllPending, enable, markPartial, registerSentences, renderFailed, renderPending, renderTable, renderText, setState, type Look, type Mode,
 } from '@/core/renderer'
-import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
+import { createRunLedger } from '@/core/run/ledger'
+import type { PreloadOptions } from '@/core/scheduler/lazy'
 import { createWorkPacer, pauseIfBudgetSpent } from '@/core/scheduler/pacer'
 import type { RenderPath } from '@/cache/key'
 import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
@@ -74,7 +75,6 @@ export interface TranslationRun {
   failed(): Block[]
 }
 
-type Outcome = 'waiting' | 'requested' | 'done' | 'failed'
 /**
  * 一段的结果：译文，或失败原因（给失败态小部件看，§7.6）。
  *
@@ -94,33 +94,25 @@ const errorOf = (res: Extract<TranslateMessageResponse, { ok: false }>): Segment
 
 export function startTranslation(options: RunOptions): TranslationRun {
   const { doc, blocks, transport } = options
-  const outcome = new Map<Block, Outcome>(blocks.map(block => [block, 'waiting']))
+  // The bookkeeping shared with the image run (ADR-0006): outcomes, the permanent-error record, stop, the scheduler
+  const ledger = createRunLedger(blocks, {
+    preload: options.preload,
+    onEnter: entered => { void translate(entered) },
+    onStop: () => clearAllPending(doc),
+  })
   let cached = 0
-  let fatal: string | undefined
-  let stopped = false
-  let scheduler: LazyScheduler | null = null
 
   const progress = (): Progress => {
-    let requested = 0
-    let done = 0
-    let failed = 0
-    let inFlight = 0
-    for (const state of outcome.values()) {
-      if (state === 'waiting') continue
-      requested++
-      if (state === 'done') done++
-      else if (state === 'failed') failed++
-      else inFlight++
-    }
-    return { state: stopped || fatal !== undefined ? 'stopped' : 'on', total: blocks.length, requested, done, failed, cached, inFlight, ...(fatal !== undefined ? { fatal } : {}) }
+    const counts = ledger.progress()
+    return { state: ledger.halted() ? 'stopped' : 'on', ...counts, cached, inFlight: counts.requested - counts.done - counts.failed }
   }
   const report = () => {
-    if (!stopped) options.onProgress?.(progress())
+    if (!ledger.stopped()) options.onProgress?.(progress())
   }
   // 不另设 stopped 守卫：第一次调用在 translate() 的 halted() 检查与本批之间没有让出主线程，
   // 第二次在 `if (stopped) return` 之后——那条 return 就是守卫，这里再判一次是测不到的死代码
   const rendered = (blocks: Block[]) => options.onRendered?.(blocks)
-  const halted = () => stopped || fatal !== undefined
+  const halted = () => ledger.halted()
   let lastProvider: string | undefined
   const served = (id: string) => {
     if (id === lastProvider) return
@@ -154,7 +146,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
       await pauseIfBudgetSpent(pacer)
     }
     if (halted()) return
-    scheduler = createLazyScheduler(blocks, { ...options.preload, onEnter: entered => { void translate(entered) } })
+    ledger.observe()
   })()
 
   const send = (items: { id: string; text: string; cuts?: number[] }[], renderPath: RenderPath, sectionTitle?: string, opts: { bypassCache?: boolean } = {}) => {
@@ -176,12 +168,9 @@ export function startTranslation(options: RunOptions): TranslationRun {
     return cuts === undefined ? {} : { cuts }
   }
 
+  // 配置错了继续也只会重复失败：记下来，观察器断开，不再排新批次；在飞的批次照常收尾
   const noteFatal = (res: Extract<TranslateMessageResponse, { ok: false }>) => {
-    if (isPermanentErrorKind(res.error.kind) && fatal === undefined) {
-      fatal = `${res.error.kind}: ${res.error.message}`
-      // 配置错了继续也只会重复失败：断开观察器，不再排新批次
-      scheduler?.disconnect()
-    }
+    if (isPermanentErrorKind(res.error.kind)) ledger.fatal(res.error.kind, res.error.message)
   }
 
   /** runs 兜底（§6.5）：按 void 切段逐段翻译再拼回 */
@@ -231,7 +220,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
       return
     }
     const res = await send(segments.map(s => ({ id: s.id, text: s.text, ...cutsFor(s) })), options.capabilities.renderPath, sectionTitle)
-    if (stopped) return
+    if (ledger.stopped()) return
     if (!res.ok) {
       noteFatal(res)
       // 一次调用可能被拆到多个批次，一批失败不代表另一批没成：成功的那些随失败一起送回来，
@@ -249,7 +238,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
       // 只是把它乘以段数——实测 4 段的 `bad-request` 会变成 7 次调用（`4,2,1,1,2,1,1`），
       // 限额类失败更是反效果。判据由 service 侧随错误一起送过来（providers/types.ts 的
       // `ISOLATABLE_BY_KIND`，provider 可以覆盖），content 这一层不再自己猜
-      if (fatal === undefined && left.length > 1 && res.error.isolatable) {
+      if (ledger.fatalReason() === undefined && left.length > 1 && res.error.isolatable) {
         const mid = Math.ceil(left.length / 2)
         await translateSegments(left.slice(0, mid), sectionTitle, out)
         await translateSegments(left.slice(mid), sectionTitle, out)
@@ -272,15 +261,13 @@ export function startTranslation(options: RunOptions): TranslationRun {
   async function processBatch(batch: Batch): Promise<void> {
     const targets = batch.kind === 'table' && batch.block ? [batch.block] : batch.segments.map(s => s.block)
     // 请求发出前先插 pending 节点（§7.6）
-    for (const block of targets) {
-      outcome.set(block, 'requested')
-      renderPending(block)
-    }
+    ledger.request(targets)
+    for (const block of targets) renderPending(block)
     rendered(targets)
     report()
     const out: BatchResult = new Map()
     await translateSegments(batch.segments, batch.sectionTitle, out)
-    if (stopped) return // stop() 已经把 pending 清掉、不再上报
+    if (ledger.stopped()) return // stop() 已经把 pending 清掉、不再上报
     if (batch.kind === 'table' && batch.block) {
       const cells = new Map<Element, DocumentFragment>()
       // 一格的原文侧偏移与对齐，等 renderTable 建出克隆格之后才登记得了（§7.7）
@@ -304,7 +291,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
       if (cells.size === batch.segments.length) {
         renderTable(batch.block, cells, renderedCells)
         registerCells()
-        outcome.set(batch.block, 'done')
+        ledger.settle(batch.block, 'done')
       } else {
         if (cells.size > 0) {
           renderTable(batch.block, cells, renderedCells)
@@ -313,7 +300,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
         } else {
           renderFailed(batch.block, reason, () => { void translate([batch.block!]) })
         }
-        outcome.set(batch.block, 'failed')
+        ledger.settle(batch.block, 'failed', reason)
       }
     } else {
       for (const segment of batch.segments) {
@@ -322,12 +309,13 @@ export function startTranslation(options: RunOptions): TranslationRun {
           const spans = result.fragment.offsets
           const node = renderText(segment.block as TextBlock, result.fragment)
           registerSentences(segment.block.el, node, segment.protected.offsets, spans, result.alignment)
-          outcome.set(segment.block, 'done')
+          ledger.settle(segment.block, 'done')
         } else {
           // 删掉 pending 与上一轮的译文（换了引擎 / 目标语言后再翻失败，页面不能还挂着旧译文，Codex 在 #9 指出），
           // 插失败态小部件：原因 + 重试（§7.6）
-          renderFailed(segment.block, result?.error ?? 'unknown: 没有这一段的结果', () => { void translate([segment.block]) })
-          outcome.set(segment.block, 'failed')
+          const reason = result?.error ?? 'unknown: 没有这一段的结果'
+          renderFailed(segment.block, reason, () => { void translate([segment.block]) })
+          ledger.settle(segment.block, 'failed', reason)
         }
       }
     }
@@ -336,23 +324,12 @@ export function startTranslation(options: RunOptions): TranslationRun {
   }
 
   async function translate(picked: Block[]): Promise<void> {
-    if (halted()) return
-    const fresh = picked.filter(block => outcome.has(block) && outcome.get(block) !== 'requested')
-    if (fresh.length === 0) return
-    scheduler?.claim(fresh)
-    const batches = planBatches(fresh, { maxBatchChars: options.capabilities.maxBatchChars, maxBatchItems: options.capabilities.maxBatchItems, renderPath: options.capabilities.renderPath }, block => sectionOf.get(block))
+    const { taken } = ledger.intake(picked)
+    if (taken.length === 0) return
+    const batches = planBatches(taken, { maxBatchChars: options.capabilities.maxBatchChars, maxBatchItems: options.capabilities.maxBatchItems, renderPath: options.capabilities.renderPath }, block => sectionOf.get(block))
     // 批次直接交给服务：在飞数量由移植的 request-queue 按速率兜住（§8.2），这里不再有 worker 池
     await Promise.all(batches.map(processBatch))
   }
 
-  function stop(): void {
-    if (stopped) return
-    stopped = true
-    scheduler?.disconnect()
-    clearAllPending(doc)
-  }
-
-  const failed = () => blocks.filter(block => outcome.get(block) === 'failed')
-
-  return { ready, translate, stop, progress, failed }
+  return { ready, translate, stop: () => ledger.stop(), progress, failed: () => ledger.failed() }
 }
