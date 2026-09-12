@@ -3,7 +3,7 @@
 // now — the popup and the page it is translating write the same object (Codex on #39).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { browser } from 'wxt/browser'
-import { type FallbackReason, configFallbackReason, getConfig, setConfig } from '@/config/storage'
+import { type FallbackReason, configFallbackReason, getConfig, setConfig, watchConfig } from '@/config/storage'
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { sendMessage } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
@@ -75,6 +75,18 @@ export function useOptionsData(): OptionsData {
       setFallbackReason(configFallbackReason())
       void checkPack(c.targetLanguage)
     })
+    // A change saved elsewhere — the popup, another settings tab — shows here without a reload (INVENTORY S1). The
+    // store is re-read on the same serialized chain the page's own writes use, not taken from the event: events
+    // carry no order, and one for an earlier write can arrive after a later write was already shown (#182)
+    const unwatch = watchConfig(() => {
+      const reload = async () => {
+        const stored = await getConfig()
+        setLocal(stored)
+        void checkPack(stored.targetLanguage)
+        return stored
+      }
+      writes.current = writes.current.then(reload, reload)
+    })
     // `recheck` on every open of a page: the reader may have installed the helper since the worker
     // last looked, and it remembers a missing host for its whole life. Chrome fails a connect to an
     // absent host without spawning anything, so asking again costs nothing
@@ -93,6 +105,7 @@ export function useOptionsData(): OptionsData {
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
     return () => {
+      unwatch()
       browser.runtime.onMessage.removeListener(onHelperState)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)

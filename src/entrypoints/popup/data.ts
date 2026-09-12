@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { browser } from 'wxt/browser'
 import { type Config, DEFAULT_CONFIG, MODE_VALUES } from '@/config/schema'
-import { getConfig, setConfig } from '@/config/storage'
+import { getConfig, setConfig, watchConfig } from '@/config/storage'
 import type { Mode } from '@/core/renderer'
 import { COMMAND_ID } from '@/entrypoints/background/context-menu'
 import type { ProviderStatus } from '@/providers/transport'
@@ -113,6 +113,19 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
       .catch(() => setShortcut(null))
     sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ state: 'not-installed' }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
+    // A change saved elsewhere — the settings page, another tab's popup — shows here without reopening (INVENTORY S1).
+    // Re-read on the serialized write chain rather than taken from the event, which carries no order (#182)
+    const unwatch = watchConfig(() => {
+      const reload = async () => {
+        const stored = await getConfig()
+        await settle(stored)
+        void checkPack(stored.targetLanguage)
+        loadProvider()
+        return stored
+      }
+      writes.current = writes.current.then(reload, reload)
+    })
+    return unwatch
   }, [refresh, checkPack, loadProvider, settle])
 
   // The background broadcasts the helper's state when it changes on its own — the guided install's wait found it,
