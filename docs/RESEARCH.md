@@ -746,7 +746,7 @@ table stale would let later work follow the obsolete requirement, since DESIGN i
 
 按章节排列。每条只提建议，是否采纳由设计文档决定。
 
-Status as of 2026-09-12 (docs/rebuild/inventory/docs.md §5): **done** 1–5, 7–11, 13, 17–19, 22–27; **superseded by a better design** 6, 12, 14; **reversed by later evidence** 16 (translateHtml was adopted, row 23) and 21 (the instant engine was never built, although DESIGN §8.3 still lists it as decided); **obsolete** 15, 20.
+Status as of 2026-09-12 (docs/rebuild/inventory/docs.md §5): **done** 1–5, 7–11, 13, 17–19, 22–27; **superseded by a better design** 6, 12, 14; **reversed by later evidence** 16 (translateHtml was adopted, row 23); **unimplemented, disposition unresolved** 21 (the instant engine was never built, yet DESIGN §8.3 lists it as decided — the rebuild has to either build it or strike the decision); **obsolete** 15, 20.
 
 | # | 条目 | 建议 | 依据 |
 |---|---|---|---|
