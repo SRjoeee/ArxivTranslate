@@ -4,7 +4,7 @@
 import type { Block, TableBlock, TextBlock } from '@/core/extractor'
 import { isRtlTag } from '@/config/languages'
 import { AXT_ATTR_PREFIX, INJECTED_SELECTOR, T_CLASS, isInjected, stripInjected } from '@/core/marks'
-import { isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
+import { eqnProseCell, isInlineTitleCandidate, tableCells, visibleText } from '@/core/rules/latexml'
 import highlightCss from '@/styles/highlight.css?inline'
 import imageCss from '@/styles/image.css?inline'
 import modesCss from '@/styles/modes.css?inline'
@@ -183,10 +183,59 @@ export function shouldInline(block: TextBlock): boolean {
 }
 
 /** 文本块：与原块同标签名的新元素，内容是 protector 回填的 fragment（克隆已剥 id） */
+/**
+ * 一个块的译文外壳：多数块就是「与原块同名的标签」，**说明行例外**——`<tr>` 里的内容必须装在
+ * 单元格里，直接挂在行下表格布局根本不排它。返回 `node`（要插进页面的那个）与 `slot`（内容该
+ * 放进去的那个），两者在非说明行时是同一个。
+ *
+ * 译文、骨架屏、失败小部件**三条路都走这里**：只给译文开特例的话，等待中的圆环会直接挂在
+ * `<tr>` 下、失败小部件会变成 `<tbody>` 的 `<span>` 子节点，两者都不合表格的内容模型
+ *（Codex 在 #168 指出）
+ */
+export function translationShell(block: Block, tagName?: string): { node: Element; slot: Element } {
+  const doc = block.el.ownerDocument
+  const node = doc.createElement(tagName ?? block.el.tagName)
+  const cell = eqnProseCell(block.el)
+  if (!cell) return { node, slot: node }
+  const shell = cell.cloneNode(false) as Element
+  // 壳里不留原格的 id 与块标记（§6.4 的理由相同：重复 id 会毁掉锚点）
+  shell.removeAttribute('id')
+  node.append(shell)
+  return { node, slot: shell }
+}
+
+/**
+ * 回填出来的片段本身是不是一个单元格。
+ *
+ * 占位符路径下说明行整格就是一个成对占位符，`rehydrate` 交回来的顶层元素**已经是 `<td>`**；
+ * 再套一层壳就成了 `<tr><td><td>…</td></td></tr>`（Codex 在 #168 指出，我的第一版测试用裸文本
+ * fragment 所以没抓到）。runs 降级路径把标记拍平，那时交回来的是纯文本，仍然需要壳
+ */
+function isCellFragment(content: DocumentFragment): boolean {
+  let cell: Element | null = null
+  for (const node of Array.from(content.childNodes)) {
+    if (node.nodeType === 1) {
+      if (cell) return false
+      const el = node as Element
+      if (!el.matches('td, th')) return false
+      cell = el
+    } else if (/\S/.test(node.textContent ?? '')) {
+      return false
+    }
+  }
+  return cell !== null
+}
+
 export function renderText(block: TextBlock, content: DocumentFragment): Element {
   clearTranslation(block)
-  const node = block.el.ownerDocument.createElement(block.el.tagName)
-  node.append(content)
+  const { node, slot } = translationShell(block)
+  // 回填出来的已经是一个 `<td>` 时直接用它，别再套壳（见 isCellFragment）
+  if (slot !== node && isCellFragment(content)) {
+    slot.remove()
+    node.append(content)
+  } else {
+    slot.append(content)
+  }
   // 表格单元格里的 .ltx_p 本身也是块，它的译文作为兄弟插在原表内，整表克隆会把它一起复制进来（2026-09-04 实测）
   stripInjected(node, false)
   node.className = translationClass(block.el)

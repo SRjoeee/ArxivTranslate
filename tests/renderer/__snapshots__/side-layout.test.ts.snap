@@ -107,7 +107,9 @@ exports[`side 模式的容器覆盖 > 2609.04056.html：配对能否连到翻译
 
 exports[`side 模式的容器覆盖 > synthetic-structures.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
 {
-  "blockedBy": {},
-  "connected": "32/32",
+  "blockedBy": {
+    "tbody": 2,
+  },
+  "connected": "32/34",
 }
 `;

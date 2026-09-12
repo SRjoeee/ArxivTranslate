@@ -131,6 +131,10 @@ Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起
 
 原先报告的漏翻（作者区的致谢性注释）与规则完整性无关，是 §5.2 里"作者区整块跳过"这条策略造成的，已在同一次修订里改为默认翻译。
 
+**2026-09-12 追加：`\intertext`（issue #152）。** 这个合成 fixture 后来也用来装**真实论文里有、但抓的 13 篇里没有**的形状。第一个这样的条目是方程组里的 `\intertext` 说明行，整段从 `arxiv.org/html/2609.09360v1` 逐字节抄来（只截到第二个说明行为止，约 9 KB）。
+
+**为什么不把整篇收进 `tests/fixtures/arxiv/`**：实测加第 13 篇真实论文（688 KB）时，`protector/fixtures` 与 `renderer/fixtures` 两个 worker 双双 **heap OOM**——语料测试在一个 worker 里顺序跑完全部 fixture，每篇都要留住整篇 DOM 加一份 `outerHTML` 快照做「跑完之后 DOM 逐字节未变」的比对，12 篇已经贴着堆上限；单独跑那一篇没有任何问题。放进合成 fixture 只多 9 KB，而所有语料扫描（protector 往返、选择器边界、提取、side 布局）照样吃得到这个形状。语料继续长下去时，堆上限迟早要单独处理，那是另一件事。
+
 ---
 
 ## 3. 容器与导航

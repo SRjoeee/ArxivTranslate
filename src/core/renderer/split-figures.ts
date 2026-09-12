@@ -9,7 +9,7 @@
 // 实在不能重排的（宽公式、宽 SVG，实测 8 张图里有 3 张溢出 78 / 102 / 209px）退化为栏内横滑，
 // 字号一律不动。试过把栏宽喂给 ar5iv 的 `--main-width`（它按 .33/.5 的比例算面板宽），
 // 实测更糟：面板缩成 160px 还溢出 555px，所以那个变量保持不动。
-import { DOCUMENT_ROOT, FIGURE_MEDIA, isTableRoot, tableCells } from '@/core/rules/latexml'
+import { DOCUMENT_ROOT, FIGURE_MEDIA, SPLIT_ROOTS, isTableRoot, tableCells } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
 import { IMG_CLASS } from '@/core/marks'
 import { hashText } from '@/shared/hash'
@@ -87,11 +87,14 @@ function pairNodes(from: Element, to: Element): Map<Node, Node> {
   return out
 }
 
-/** 元素所在的最外层 figure（嵌套分图交给最外层一起复制）；不在图里返回 null */
+/**
+ * 元素所在的最外层拆分根（嵌套的分图、图里的方程组都交给最外层一起复制）；不在里面返回 null。
+ * 根不只是 `figure`：含说明行的方程组同样整块拆两份（`SPLIT_ROOTS`，issue #152）
+ */
 export function outermostFigure(el: Element): Element | null {
-  let fig = el.closest('figure')
+  let fig = el.closest(SPLIT_ROOTS)
   while (fig?.parentElement) {
-    const outer = fig.parentElement.closest('figure')
+    const outer = fig.parentElement.closest(SPLIT_ROOTS)
     if (!outer) break
     fig = outer
   }
@@ -100,7 +103,7 @@ export function outermostFigure(el: Element): Element | null {
 
 function needsSplit(fig: Element): boolean {
   if (fig.classList.contains(T_CLASS)) return false // 克隆件自己
-  if (fig.parentElement?.closest('figure')) return false // 嵌套的分图交给最外层一起复制
+  if (fig.parentElement?.closest(SPLIT_ROOTS)) return false // 嵌套的分图、图里的方程组交给最外层一起复制
   if (!fig.querySelector(REAL_OR_IMAGE)) return false // 内部没有译文（pending 不算）：整块没配对，交给镜像
   return hasLooseMedia(fig) // 没有游离媒体的浮动体（如表格）不必整块复制，它的表本来就有译文克隆
 }
@@ -143,7 +146,7 @@ export function splitFigures(root: Document | Element): number {
   const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))
   if (!scope) return 0
   let made = 0
-  for (const fig of Array.from(scope.querySelectorAll('figure'))) {
+  for (const fig of Array.from(scope.querySelectorAll(SPLIT_ROOTS))) {
     if (!needsSplit(fig)) continue
     const key = translationKey(fig)
     const sibling = fig.nextElementSibling
