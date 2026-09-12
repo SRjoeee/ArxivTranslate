@@ -798,6 +798,50 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.close()
 }
 
+// ── service worker 重启后 popup 不把页面误报成「落后于设置」（INVENTORY S8，开放问题 2）──────
+// 链的 revision 原是 worker 里的构建计数器：worker 被回收再起来，计数从 1 重来，而页面记着旧 worker
+// 的数字，popup 就把它当成「设置改了」——主按钮变成「重新翻译」。现在 revision 是设置的摘要，同一套
+// 设置在哪个 worker 上建出来都一样。Playwright 挂着调试器、worker 不会自然闲置回收，所以从浏览器级
+// CDP 关掉它的 target（实测下一条消息就起新 worker），代替「闲置 30 秒」
+{
+  const { page } = await openPaper(PAPER2, GOOGLE)
+  const t0 = Date.now()
+  let partial = 0
+  while (Date.now() - t0 < 30_000 && partial === 0) {
+    partial = (await countDom(page)).translations
+    if (partial === 0) await sleep(100)
+  }
+  const popup = await context.newPage()
+  await popup.goto(`chrome-extension://${extId}/popup.html`)
+  await page.bringToFront()
+  await popup.getByRole('button', { name: '显示原文' }).waitFor({ timeout: 10_000 })
+  const before = await popup.locator('main').innerText()
+  check('worker 重启前：页面在翻，主按钮是「显示原文」', !/重新翻译/.test(before), before.replace(/\n+/g, ' | ').slice(0, 100))
+  await popup.close()
+
+  const [oldWorker] = context.serviceWorkers()
+  const born = await oldWorker.evaluate(() => { globalThis.__axtBorn ??= Date.now(); return globalThis.__axtBorn })
+  const cdp = await context.browser().newBrowserCDPSession()
+  const targets = (await cdp.send('Target.getTargets')).targetInfos.filter(t => t.type === 'service_worker' && t.url.includes(extId))
+  for (const t of targets) await cdp.send('Target.closeTarget', { targetId: t.targetId })
+  await cdp.detach()
+  await sleep(1_500)
+
+  const again = await context.newPage()
+  await again.goto(`chrome-extension://${extId}/popup.html`)
+  await page.bringToFront()
+  await again.getByRole('button', { name: /显示原文|重新翻译/ }).first().waitFor({ timeout: 10_000 })
+  await sleep(1_500)
+  const [freshWorker] = context.serviceWorkers()
+  const bornAgain = freshWorker ? await freshWorker.evaluate(() => { globalThis.__axtBorn ??= Date.now(); return globalThis.__axtBorn }).catch(() => born) : born
+  check('前置：CDP 关掉 target 之后起的是新 worker', bornAgain !== born, `${born} → ${bornAgain}`)
+  const after = await again.locator('main').innerText()
+  check('worker 重启后：同一套设置，popup 仍说「显示原文」，不把页面误报成落后于设置（S8）',
+    bornAgain !== born && /显示原文/.test(after) && !/重新翻译/.test(after), after.replace(/\n+/g, ' | ').slice(0, 120))
+  await again.close()
+  await page.close()
+}
+
 // ── 关掉标签页：background 的队列跟着撤（Codex 在 #59 指出）──────────────
 // 请求搬回 background 之后，销毁 content script 不再销毁这些工作。不撤的话，关掉的标签页还会
 // 继续发付费请求，直到批次耗尽预算（单批最长 180 秒）。

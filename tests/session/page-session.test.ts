@@ -27,7 +27,7 @@ const settle = async (rounds = 4) => { for (let i = 0; i < rounds; i++) await ti
 function providerStatus(over: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
     providerId: 'microsoft', available: true, maxBatchChars: 100_000, maxBatchItems: 100, renderPath: 'tags',
-    targetLanguage: 'cmn', promptId: 'default', revision: 1, engine: { id: 'microsoft', displayName: 'Microsoft' },
+    targetLanguage: 'cmn', promptId: 'default', revision: 'r1', engine: { id: 'microsoft', displayName: 'Microsoft' },
     chain: ['microsoft'], demotions: [], ...over,
   }
 }
@@ -144,7 +144,7 @@ describe('page session', () => {
     expect(status.preference).toBe(DEFAULT_CONFIG.mode)
     expect(status.mode).toBe(effective)
     expect(status.progress.state).toBe('on')
-    expect(status.running).toEqual({ provider: DEFAULT_CONFIG.provider, target: DEFAULT_CONFIG.targetLanguage, engine: 'microsoft', revision: 1 })
+    expect(status.running).toEqual({ provider: DEFAULT_CONFIG.provider, target: DEFAULT_CONFIG.targetLanguage, engine: 'microsoft', revision: 'r1' })
     expect(status.images).toBeUndefined()
   })
 

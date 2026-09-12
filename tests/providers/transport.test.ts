@@ -6,7 +6,7 @@ import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
 import { createChainHolder } from '@/entrypoints/background/chain'
 import { createSessionRouter } from '@/entrypoints/background/sessions'
-import { CHAIN_CONFIG_FIELDS, VOLATILE_CONFIG_FIELDS, chainConfigChanged, createLocalTransport } from '@/providers/transport'
+import { CHAIN_CONFIG_FIELDS, VOLATILE_CONFIG_FIELDS, chainConfigChanged, chainRevision, createLocalTransport } from '@/providers/transport'
 import type { CachePort } from '@/providers/translate-service'
 import { ProviderError, type TranslateRequest, type TranslationProvider } from '@/providers/types'
 
@@ -587,7 +587,7 @@ describe('createLocalTransport：状态', () => {
       promptId: 'default',
       chain: [SVC.id, 'google-web'],
       demotions: [],
-      revision: expect.any(Number),
+      revision: expect.stringMatching(/^[0-9a-f]{16}$/),
       engine: { id: SVC.id, displayName: SVC.id },
     })
   })
@@ -703,5 +703,34 @@ describe('chainConfigChanged：什么样的配置改动才重建链', () => {
 
   it('同值的新对象不算改动：storage 每次 watch 都给一份新解析结果', () => {
     expect(chainConfigChanged(DEFAULT_CONFIG, structuredClone(DEFAULT_CONFIG))).toBe(false)
+  })
+})
+
+describe('chainRevision (INVENTORY S8: the identity of the settings a chain is built from)', () => {
+  const base: Config = { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC] }
+
+  it('is the same for the same chain settings — across builds, and whatever order the fields come back in', async () => {
+    const a = await chainRevision(base)
+    expect(a).toMatch(/^[0-9a-f]{16}$/)
+    // A worker restart rebuilds the chain from the same settings: that is not a change the page is behind
+    expect(await chainRevision({ ...base })).toBe(a)
+    const reordered = { ...base, services: [{ thinking: SVC.thinking, model: SVC.model, apiKey: SVC.apiKey, baseURL: SVC.baseURL, name: SVC.name, kind: SVC.kind, id: SVC.id }] } as Config
+    expect(await chainRevision(reordered)).toBe(a)
+  })
+
+  it('changes with every chain field — the key, the model, the prompt, the target, the fallback, the service — and with none of the volatile ones', async () => {
+    const a = await chainRevision(base)
+    const changes: Partial<Config>[] = [
+      { services: [{ ...SVC, apiKey: 'sk-y' }] },
+      { services: [{ ...SVC, model: 'x/z' }] },
+      { prompts: { ...base.prompts, promptId: 'other' } },
+      { targetLanguage: 'jpn' as Config['targetLanguage'] },
+      { fallback: { ...base.fallback, enabled: !base.fallback.enabled } },
+      { provider: 'microsoft' },
+    ]
+    for (const change of changes) expect(await chainRevision({ ...base, ...change }), Object.keys(change).join()).not.toBe(a)
+    for (const field of VOLATILE_CONFIG_FIELDS) {
+      expect(await chainRevision({ ...base, [field]: { changed: true } } as unknown as Config), field).toBe(a)
+    }
   })
 })
