@@ -124,6 +124,25 @@ describe('createChainHolder', () => {
     expect(retired).toEqual(['build-1', 'build-2'])
   })
 
+  it('a configuration change starts its rebuild without waiting for a build that never settles', async () => {
+    // The configuration watcher's rebuild used to chain onto the build in force; a deletion's hung build then kept
+    // every later rebuild from starting, and the clean-up with it (the local review of ADR-0005, eleventh pass)
+    const gates = new Map<string, () => void>()
+    const holder = createChainHolder({
+      owned: () => false,
+      load: async config => {
+        const built = config as Config
+        await new Promise<void>(resolve => { gates.set(built.targetLanguage, resolve) })
+        return { config: built, transport: transport(built.targetLanguage) }
+      },
+    })
+    void holder.activate({ ...DEFAULT_CONFIG, targetLanguage: 'afr' }) // never released
+    const asked = holder.current()
+    holder.onConfig({ ...DEFAULT_CONFIG, targetLanguage: 'amh' })
+    gates.get('amh')!()
+    expect(nameOf(await asked)).toBe('amh')
+  })
+
   it('a failed build is retried by the next configuration change', async () => {
     let fail = true
     const holder = createChainHolder({ owned: () => false, load: async config => { if (fail) throw new Error('boom'); return { config: config ?? DEFAULT_CONFIG, transport: transport('ok') } } })

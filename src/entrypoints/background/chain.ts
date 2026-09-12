@@ -40,8 +40,10 @@ export interface ChainHolder {
    * A configuration change. Only the fields that shape the chain rebuild it: the content script writes the
    * configuration on every display-mode switch, usually while a page is translating, and an indiscriminate
    * rebuild would clear the token bucket and the hand-over records with it (`chainConfigChanged` has the table).
-   * A failed build is retried by the next change. Nothing happens before the first build — that one reads the
-   * stored configuration itself
+   * The change is compared with what the chain was last asked to be built from, not with a finished build, so a
+   * build that never settles cannot keep the next one from starting (the local review of ADR-0005, eleventh
+   * pass). A failed build is retried by the next change. Nothing happens before the first build — that one reads
+   * the stored configuration itself
    */
   onConfig(next: Config): void
 }
@@ -73,11 +75,24 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
    * (the local review of ADR-0005, eighth pass)
    */
   const built = new Set<TranslationTransport>()
-  const build = (config?: Config): Promise<Built> =>
-    deps.load(config).then(result => {
+  /** What the chain was last asked to be built from — the configuration a change is compared with */
+  let requested: Config | null = null
+  /** The build in force failed: the next configuration change rebuilds, whatever it changed */
+  let failed = false
+  const build = (config?: Config): Promise<Built> => {
+    if (config) requested = config
+    failed = false
+    const promise: Promise<Built> = deps.load(config).then(result => {
       built.add(result.transport)
+      // Built from the stored configuration: learn it when the build lands, unless a change arrived meanwhile
+      requested ??= result.config
       return result
     })
+    promise.catch(() => {
+      if (promise === active) failed = true
+    })
+    return promise
+  }
   const activate = (config?: Config): Promise<Built> => take(build(config))
   const sweep = (inForce: TranslationTransport): void => {
     for (const transport of built) {
@@ -108,10 +123,9 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
     },
     onConfig(next) {
       if (!active) return
-      take(active.then(
-        result => (chainConfigChanged(result.config, next) ? build(next) : { config: next, transport: result.transport }),
-        () => build(next),
-      ))
+      const previous = requested
+      requested = next
+      if (previous === null || failed || chainConfigChanged(previous, next)) take(build(next))
     },
     retireOthers(inForce) {
       for (const transport of built) {

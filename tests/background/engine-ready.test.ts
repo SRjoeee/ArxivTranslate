@@ -76,9 +76,10 @@ describe('engineReady', () => {
     expect(registry.has('s1')).toBe(true)
   })
 
-  it('a deletion whose own rebuild never settles is carried out once another rebuild takes over', async () => {
+  it('a deletion whose own rebuild never settles is carried out once the configuration watcher rebuilds', async () => {
     // The handler does not wait for its own build: the movers follow current(), which stops waiting for a build the
-    // moment it is superseded (the local review of ADR-0005, tenth pass)
+    // moment it is superseded — and the watcher's rebuild starts without waiting for the hung one (the local review
+    // of ADR-0005, tenth and eleventh passes)
     const retired: string[] = []
     const gates = new Map<string, () => void>()
     let n = 0
@@ -93,7 +94,7 @@ describe('engineReady', () => {
     const router = createSessionRouter({ current: () => holder.current(), cancelled: new CancelledScopeRegistry(), retireOthers: inForce => holder.retireOthers(inForce) })
     const old = await router.forCall('s1', 1)
     const action = engineReady(holder, router, { id: 'svc-new', rebindAll: true }) // build-2: never released
-    void holder.activate() // build-3: another action's rebuild
+    holder.onConfig({ ...DEFAULT_CONFIG, targetLanguage: 'arb' }) // build-3: the watcher's rebuild
     gates.get('build-3')!()
     expect(await action).toEqual({ reset: true })
     expect(router.transportFor('s1')).not.toBe(old)
