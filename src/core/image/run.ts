@@ -14,7 +14,7 @@ import { INJECTED_SELECTOR } from '@/core/marks'
 import { createLazyScheduler, type LazyScheduler, type PreloadOptions } from '@/core/scheduler/lazy'
 import { foreignLinesOf, linesOf, looksLikeCode, pictureTexts } from '@/core/svg'
 import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
-import type { TranslateContext } from '@/providers/types'
+import { isPermanentErrorKind, type TranslateContext } from '@/providers/types'
 import { sha256Hex } from '@/shared/digest'
 import type { ImageProgress, OcrCall, OcrLine, OcrMessageResponse } from '@/shared/ocr'
 import { isTranslatable, linesToBoxes, type Box } from './boxes'
@@ -27,8 +27,6 @@ export const MAX_IMAGE_BYTES = 6 * 1024 * 1024
 const IMAGE_TYPES = /^image\/(png|jpe?g|gif|webp|bmp|tiff)$/i
 /** 图注做上下文时的长度上限：进 prompt 也进缓存键 */
 const CAPTION_MAX_CHARS = 300
-/** 配置级错误（与文字管线的 FATAL_KINDS 同一套）：第一次遇到就停调度，别让之后进入视口的每张图都去取图、识别、再撞一次 */
-const FATAL_KINDS = new Set(['no-key', 'auth'])
 /** 同时在处理的图：取字节、base64、消息载荷都占内存，helper 又是顺序的，多开只是把 6 MB 一张的图囤在那里 */
 const MAX_CONCURRENT = 2
 /** `<object>` 还在加载时等它多久（§15.5）。等不到就跳过这一张，不拖住队列 */
@@ -340,7 +338,8 @@ export function startImageTranslation(options: ImageRunOptions): ImageRun {
           options.onRendered?.([target])
         }
         // key 失效 / 没配 key：与文字管线一样，第一次遇到就停调度，之后的图不再取、不再识别
-        if (FATAL_KINDS.has(res.error.kind) && fatal === undefined) {
+        // 配置级错误（PERMANENT_ERROR_KINDS，与文字管线同一套）：第一次遇到就停调度，别让之后进入视口的每张图都去取图、识别、再撞一次
+        if (isPermanentErrorKind(res.error.kind) && fatal === undefined) {
           fatal = `${res.error.kind}: ${res.error.message}`
           scheduler?.disconnect()
           parked.clear()

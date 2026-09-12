@@ -19,7 +19,7 @@ import { BatchCountMismatchError, BatchQueue, type BatchExecutionMeta, type Batc
 import { CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
 import { REQUEST_TIMEOUT_ERROR_NAME, RequestQueue, type QueueOptions } from './request/request-queue'
 import { attachRequestErrorMeta } from './request/retry-policy'
-import { ProviderError, type ProviderErrorKind, type TranslatedSegment, type TranslateRequest, type TranslationProvider, type TranslateSegment } from './types'
+import { ProviderError, isPermanentErrorKind, type ProviderErrorKind, type TranslatedSegment, type TranslateRequest, type TranslationProvider, type TranslateSegment } from './types'
 
 /**
  * What one segment's translation carries through the queue. `alignment` is present only when the
@@ -159,13 +159,6 @@ interface QueueItem {
   /** 这一段匹配到的术语（§8.2）；没配术语表时为 undefined，与从前完全一致 */
   terms?: readonly GlossaryEntry[]
 }
-
-/**
- * 会让这条链路本轮整个作废的错。与 `fallback.ts` 的 `PERMANENT_KINDS` 同一份判断：
- * 换个 key 才可能好转，而换 key 会走 `chainConfigChanged` 重建 transport，标记随之清掉。
- * 降级链不受影响——链上每个引擎有各自的 service 与队列表（`transport.ts` 的 steps）
- */
-const FATAL_FOR_QUEUE: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>(['no-key', 'auth'])
 
 /**
  * 这个引擎在**哪些会话**里已经出过不可恢复的错。粒度是会话而不是 service 生命周期：
@@ -473,7 +466,9 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
          * 记在调用方这一层的 scope 归属不受影响：这个 catch 就在调用方的闭包里
          */
         const noteFatal = (e: unknown) => {
-          if (scope && e instanceof ProviderError && FATAL_FOR_QUEUE.has(e.kind)) pair.fatal.scopes.set(scope, e)
+          // 会让这条链路本轮整个作废的错（PERMANENT_ERROR_KINDS）：换 key 才可能好转，而换 key 会重建 transport、标记随之清掉；
+          // 降级链不受影响——链上每个引擎有各自的 service 与队列表（`transport.ts` 的 steps）
+          if (scope && e instanceof ProviderError && isPermanentErrorKind(e.kind)) pair.fatal.scopes.set(scope, e)
         }
         const settled = await Promise.allSettled(items.map(item => pair.batchQueue.enqueue(item).catch(e => {
           noteFatal(e)
@@ -557,7 +552,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
 /** 一次调用里多段失败时报哪个：配置错误优先（run.ts 据此停下），其次真正的失败，最后才是取消 */
 function pickError(errors: unknown[]): unknown {
   const kinds = errors.map(e => toErrorInfo(e).kind)
-  const fatal = kinds.findIndex(kind => kind === 'no-key' || kind === 'auth')
+  const fatal = kinds.findIndex(isPermanentErrorKind)
   if (fatal >= 0) return errors[fatal]
   const real = kinds.findIndex(kind => kind !== 'aborted')
   return real >= 0 ? errors[real] : errors[0]

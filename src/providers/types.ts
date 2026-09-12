@@ -98,6 +98,17 @@ export interface TranslationProvider {
 export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'bad-request' | 'invalid-response' | 'timeout' | 'aborted' | 'unknown'
 
 /**
+ * The kinds that continuing can only repeat: a missing or rejected key. The one definition (ADR-0004) behind the
+ * fallback chain's permanent demotion, the translate service's per-scope stop, both pipelines' halt and the page's
+ * restart-on-hand-over decision. A new key rebuilds the chain (`chainConfigChanged`), which is what clears them.
+ */
+export const PERMANENT_ERROR_KINDS: ReadonlySet<ProviderErrorKind> = new Set<ProviderErrorKind>(['no-key', 'auth'])
+
+export function isPermanentErrorKind(kind: string): kind is 'no-key' | 'auth' {
+  return PERMANENT_ERROR_KINDS.has(kind as ProviderErrorKind)
+}
+
+/**
  * 每种 kind 对应的重试元数据，构造时就挂上：移植的 retry-policy 只认它自己的 kind，
  * 认不出 no-key / aborted 就会当未知错误重试（实测 no-key 被调 4 次、白等 7s）。
  * 在构造函数里挂而不是在 provider 的 catch 里挂，是因为 no-key、id 对不上这些错误在 try 之外直接 throw。
