@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks, type TableBlock, type TextBlock } from '@/core/extractor'
-import { MODE_ATTR, ON_ATTR, enable, renderImage, renderTable, renderText, restore, setImageModes, setMode } from '@/core/renderer'
+import { MODE_ATTR, ON_ATTR } from '@/core/renderer/attrs'
+import { renderImage, setImageModes } from '@/core/renderer/image'
+import { enable, restore, setMode } from '@/core/renderer/page'
+import { renderTable, renderText } from '@/core/renderer/translation'
 import { enableDebug } from '@/entrypoints/content/debug'
 import { frag } from './helpers'
 

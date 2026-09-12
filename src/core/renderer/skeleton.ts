@@ -3,6 +3,7 @@
 // 句柄存 WeakMap、删节点前先取消（它的 #1881 / #1831）；换掉的只是画什么：几条按论文字号排的条，
 // 用 arXiv 红染过，整体呼吸（shadcn/ui 的 pulse）。样式在 styles/modes.css 里，这里只写每块自己的宽度。
 // 去掉的 getTranslatedTextAndRemoveSpinner 是它的请求胶水，我们的在 pipeline/run.ts。
+import { INLINE_ATTR } from './attrs'
 
 export const SKELETON_CLASS = 'axt-skel'
 export const SKELETON_LINE_CLASS = 'axt-skel-line'
@@ -61,7 +62,7 @@ export function createSkeleton(ownerDoc: Document, options: { chars?: number; in
   // 纯装饰：等待状态由 popup 的进度显示承担，逐块的骨架屏不该被逐个念出来
   skeleton.setAttribute('aria-hidden', 'true')
   const widths = options.inline ? [INLINE_WIDTH] : WIDTHS[skeletonLines(options.chars ?? 0) - 1]!
-  if (options.inline) skeleton.setAttribute('data-axt-inline', '')
+  if (options.inline) skeleton.setAttribute(INLINE_ATTR, '')
   for (const width of widths) {
     const line = ownerDoc.createElement('span')
     line.className = SKELETON_LINE_CLASS

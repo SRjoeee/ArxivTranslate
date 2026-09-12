@@ -6,19 +6,13 @@
 // instead of twenty and every value arrives as a variable.
 import type { Look } from '@/config/appearance'
 import { HL_OPACITY_MAX, HL_OPACITY_MIN } from '@/config/appearance'
+import { ON_ATTR, REAL_TRANSLATION } from './attrs'
 import { OPACITY_MAX, OPACITY_MIN, sanitizeColor, sanitizeCustomCss } from './style-values'
 
 export { COLOR_MAX, OPACITY_MAX, OPACITY_MIN, sanitizeColor, sanitizeCustomCss } from './style-values'
 
-/** The active profile's underline, absent when it has none */
-export const UNDERLINE_ATTR = 'data-axt-underline'
-/** Present when the active profile blurs the translation until it is hovered */
-export const BLUR_ATTR = 'data-axt-blur'
-
-/** 自定义 CSS 的选择器由我们给出，用户只填花括号里的声明 */
-// 与 presets.css 同一条界线：加载圆环、失败控件、side 模式的镜像与拆分克隆都带 .axt-t，但都不是译文
-/** 「真正的译文」这条界线：与 presets.css 每一行、split-figures.ts 的 REAL_TRANSLATION 必须一致 */
-export const TRANSLATION_SELECTOR = 'html[data-axt-on] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
+/** 「真正的译文」这条界线来自 attrs.ts 的 REAL_TRANSLATION；presets.css 里的每一份由 tests/renderer/translation-boundary.test.ts 守着 */
+export const TRANSLATION_SELECTOR = `html[${ON_ATTR}] ${REAL_TRANSLATION}`
 
 /**
  * 「不是任何**真**译文的后代」的真译文。透明度必须用它，不能用 TRANSLATION_SELECTOR：
@@ -26,8 +20,7 @@ export const TRANSLATION_SELECTOR = 'html[data-axt-on] .axt-t:not(.axt-pending, 
  * 两层都匹配的话 opacity 会相乘——下限 0.3 会渲染成 0.09，几乎看不见（Codex 在 #106 指出）。
  * 内层用 :where() 压掉特异度贡献。拆图副本本身被排除，所以副本**里**的真译文仍然拿到一次透明度
  */
-const NESTED = '.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
-export const TOP_TRANSLATION_SELECTOR = `${TRANSLATION_SELECTOR}:not(:where(${NESTED}) *)`
+export const TOP_TRANSLATION_SELECTOR = `${TRANSLATION_SELECTOR}:not(:where(${REAL_TRANSLATION}) *)`
 
 /**
  * The reader's own declarations apply to the active profile whatever else it sets: v12 made them a

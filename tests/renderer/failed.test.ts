@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { extract, type TableBlock, type TextBlock } from '@/core/extractor'
-import { ERROR_CLASS, FOR_ATTR, REASON_ATTR, relabelFailed, PARTIAL_ATTR, SPLIT_CLASS, STATE_ATTR, T_CLASS, clearTranslation, markPartial, renderFailed, renderPending, renderTable, restore, splitFigures } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { ERROR_CLASS, FOR_ATTR, PARTIAL_ATTR, SPLIT_CLASS, STATE_ATTR } from '@/core/renderer/attrs'
+import { REASON_ATTR, relabelFailed, renderFailed } from '@/core/renderer/failed'
+import { restore } from '@/core/renderer/page'
+import { renderPending } from '@/core/renderer/pending'
+import { splitFigures } from '@/core/renderer/split-figures'
+import { clearTranslation, markPartial, renderTable } from '@/core/renderer/translation'
 import { docOf, frag } from './helpers'
 import { S, reasonText, setLocale } from '@/ui/strings'
 

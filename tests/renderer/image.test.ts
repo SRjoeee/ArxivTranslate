@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { IMG_CLASS, T_CLASS } from '@/core/marks'
-import {
-  FOR_ATTR, IMG_MODES_ATTR, LANG_ATTR, MIRROR_CLASS, type ImageLabel, clearImage, clearImageEverywhere, emWidth, enable, labelStyle, overlayOf, renderImage, restore, setImageModes,
-} from '@/core/renderer'
+import { FOR_ATTR, LANG_ATTR, MIRROR_CLASS } from '@/core/renderer/attrs'
+import { IMG_MODES_ATTR, clearImage, clearImageEverywhere, emWidth, labelStyle, overlayOf, renderImage, setImageModes, type ImageLabel } from '@/core/renderer/image'
+import { enable, restore } from '@/core/renderer/page'
 import { splitFigures } from '@/core/renderer/split-figures'
 import { docOf } from './helpers'
 

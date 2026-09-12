@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { extract, markBlocks, type TextBlock } from '@/core/extractor'
-import { FOR_ATTR, MIRROR_CLASS, T_CLASS, createMirrors, renderImage, renderText, restore } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { FOR_ATTR, MIRROR_CLASS } from '@/core/renderer/attrs'
+import { renderImage } from '@/core/renderer/image'
+import { createMirrors } from '@/core/renderer/mirror'
+import { restore } from '@/core/renderer/page'
+import { renderText } from '@/core/renderer/translation'
 import { IMG_CLASS } from '@/core/marks'
 import { docOf, frag } from './helpers'
 

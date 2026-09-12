@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { MODE_ATTR, createModeController } from '@/core/renderer'
-
+import { MODE_ATTR } from '@/core/renderer/attrs'
+import { createModeController } from '@/core/renderer/responsive'
 /** 可控的 matchMedia 替身 */
 function fakeMedia(matches: boolean) {
   const listeners = new Set<() => void>()

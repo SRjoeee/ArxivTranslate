@@ -28,6 +28,8 @@ export function isInjected(el: Element): boolean {
 
 /** 所有注入属性的前缀（CLAUDE.md 硬规则 5） */
 export const AXT_ATTR_PREFIX = 'data-axt-'
+/** 所有注入 class 的前缀（同一条规则）；提取论文上下文时据此排除我们自己的节点 */
+export const AXT_CLASS_PREFIX = 'axt-'
 
 /**
  * 会执行脚本的 URL。克隆件里**不留这种**：链接的行为归原件，克隆只是拿来读的副本。

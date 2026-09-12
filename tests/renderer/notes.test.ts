@@ -1,7 +1,8 @@
 // 脚注两栏归位（DESIGN §7.2）。译文段落由占位符协议回填，脚注是受保护节点，
 // 于是译文里会重建一份**原文**脚注；这里把该脚注的译文复制进去，页面右缘只挂一份边注。
 import { describe, expect, it } from 'vitest'
-import { T_CLASS, delocalizeNotes, localizeNotes } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { delocalizeNotes, localizeNotes } from '@/core/renderer/notes'
 import { docOf } from './helpers'
 
 /**

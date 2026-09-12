@@ -1,6 +1,7 @@
 // 模式的自动降级（DESIGN §7.2）：side 需要足够宽的视口，窄了自动退回 stack，变宽再回来。
 // 用户手选的模式记为偏好，自动降级不覆盖偏好。
-import { setMode, type Mode } from './index'
+import type { Mode } from './attrs'
+import { setMode } from './page'
 
 /** 与 arXiv 主题折叠导航栏的断点对齐；ar5iv 另有 46/52/96/109rem 断点（RESEARCH.md §3.2） */
 export const NARROW_QUERY = '(max-width: 1279px)'

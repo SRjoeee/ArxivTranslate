@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { extract } from '@/core/extractor'
 import { startTranslation } from '@/core/pipeline'
-import { restore } from '@/core/renderer'
+import { restore } from '@/core/renderer/page'
 import { createOpenAICompatProvider } from '@/providers/openai-compat'
 import { cacheKeyFor } from '@/cache/key'
 import type { CachePort } from '@/providers/translate-service'

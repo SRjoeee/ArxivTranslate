@@ -6,6 +6,11 @@ Checkpoint log for the rebuild toward V1.0 (mandate: `docs/rebuild/CHARTER.md`; 
 
 - Verify before the manifest change ships (ADR-0002 §4): Chrome keeps a permission moved from `permissions` to `optional_permissions` in the granted set across an update.
 
+## 2026-09-12 — first structural change: the renderer's module graph (ADR-0003)
+
+- Branch `rebuild/renderer-graph` (stacked on `rebuild/governance`, PR #172). `renderer/index.ts` is now a façade of the 29 names production code uses; the implementation moved to `attrs.ts` (names, leaf), `shell.ts`, `translation.ts`, `page.ts`; ten `index ↔ X` cycles are gone, `tests/renderer/module-graph.test.ts` keeps them gone; the translation boundary has one definition (`TRANSLATION_EXCLUDED_CLASSES`) and `tests/renderer/translation-boundary.test.ts` holds the six CSS copies to it; six stray literals became their constants.
+- No behaviour change by construction. Gate: typecheck, lint, 1 552 unit tests (1 546 + 6), build 1.25 MB — all green. Browser suites: pending below.
+
 ## 2026-09-12 — baseline and governance
 
 - `main` frozen at 8cfd771 (PR #168 merged), tagged `v0.3.0-mvp`; Phase 1 closed on roadmap #155 with an agent note and the owner's charter posted verbatim.

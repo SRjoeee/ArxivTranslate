@@ -11,26 +11,15 @@
 // 实测更糟：面板缩成 160px 还溢出 555px，所以那个变量保持不动。
 import { DOCUMENT_ROOT, FIGURE_MEDIA, SPLIT_ROOTS, isTableRoot, tableCells } from '@/core/rules/latexml'
 import { ID_ATTR } from '@/core/extractor'
-import { IMG_CLASS } from '@/core/marks'
+import { AXT_ATTR_PREFIX, IMG_CLASS, T_CLASS } from '@/core/marks'
 import { hashText } from '@/shared/hash'
-import { MIRROR_CLASS } from './mirror'
+import { ERROR_CLASS, FOR_ATTR, MIRROR_CLASS, PENDING_CLASS, REAL_TRANSLATION, SPLIT_ATTR, SPLIT_CLASS, SPLIT_FOR_ATTR, SPLIT_OF_ATTR } from './attrs'
 import { mirrorSentences, sentenceSignatureOf } from './sentences'
-import { PENDING_CLASS } from './pending'
-import { FOR_ATTR, T_CLASS } from './index'
 
-/** 真正的译文：等待态的 pending 节点与失败态的小部件（§7.6）都不算 */
 
-/** 原件上的标记（原节点只允许追加 data-axt-*，§7.1） */
-export const SPLIT_ATTR = 'data-axt-split'
-/** 克隆件的 class；它同时带 T_CLASS，所以配对规则会把它放进右栏 */
-export const SPLIT_CLASS = 'axt-split'
-
-/**
- * 真译文：与 §7.5 预设选择器同一条界线——圆环、失败小部件、**镜像、拆分克隆**都带 .axt-t 只是为了配对，不是译文。
- * 漏掉 .axt-mirror 时（issue #46 实测 2312.17141）：说明还 pending 的图被镜像了媒体，下一趟全量把镜像当成"有译文"，
- * 删掉镜像、克隆一份没有任何译文的图——右栏是一份原文副本。基线每趟全量，7 张拆图里 2 张是这种假拆
- */
-const REAL_TRANSLATION = `.${T_CLASS}:not(.${PENDING_CLASS}, .axt-error, .${MIRROR_CLASS}, .${SPLIT_CLASS})`
+// 真译文的界线是 attrs.ts 的 REAL_TRANSLATION——圆环、失败小部件、**镜像、拆分克隆**都带 .axt-t 只是为了配对，不是译文。
+// 漏掉 .axt-mirror 时（issue #46 实测 2312.17141）：说明还 pending 的图被镜像了媒体，下一趟全量把镜像当成"有译文"，
+// 删掉镜像、克隆一份没有任何译文的图——右栏是一份原文副本。基线每趟全量，7 张拆图里 2 张是这种假拆
 /** 图片叠加层（§15.2）也算真译文：只有它的插图同样要拆，且它到达时签名要变、副本要重建 */
 const REAL_OR_IMAGE = `${REAL_TRANSLATION}, .${IMG_CLASS}`
 /** 克隆时译文内容的签名，用来判断译文有没有增加或改变、要不要重建 */
@@ -108,18 +97,6 @@ function needsSplit(fig: Element): boolean {
   return hasLooseMedia(fig) // 没有游离媒体的浮动体（如表格）不必整块复制，它的表本来就有译文克隆
 }
 
-/** 克隆件里记着自己对应原件的哪个 id：页内锚点靠它找到克隆中对应的那一处（issue #44） */
-export const SPLIT_OF_ATTR = 'data-axt-split-of'
-/**
- * 副本里的图片叠加层记着它翻的是哪张图。
- *
- * 与 `SPLIT_OF_ATTR` 同一个手法：`data-axt-for` 会被 `stripIds` 一起抹掉，于是
- * `clearImageEverywhere` 按 `data-axt-for` 找不到副本里那一份，「不再翻这张图」之后
- * only 模式下读者看到的仍是上一轮的译文（Codex 在 #134 指出）。换个名字留下来——
- * 不是 `data-axt-for`，配对规则不会把副本里的叠加层当成另一份译文
- */
-export const SPLIT_FOR_ATTR = 'data-axt-split-for'
-
 /**
  * 克隆件不能带原件的 id 与块标记（会造成重复 id）。但**对应关系不能一起丢**：
  * only 模式下原件整个被藏，指向图内某一行的锚点（实测 2312.17141 有 21 个，
@@ -132,7 +109,7 @@ function stripIds(root: Element): void {
     const id = el.getAttribute('id')
     const forId = el.classList.contains(IMG_CLASS) ? el.getAttribute(FOR_ATTR) : null
     el.removeAttribute('id')
-    for (const name of el.getAttributeNames()) if (name.startsWith('data-axt-')) el.removeAttribute(name)
+    for (const name of el.getAttributeNames()) if (name.startsWith(AXT_ATTR_PREFIX)) el.removeAttribute(name)
     if (id) el.setAttribute(SPLIT_OF_ATTR, id)
     if (forId) el.setAttribute(SPLIT_FOR_ATTR, forId)
   }
@@ -166,7 +143,7 @@ export function splitFigures(root: Document | Element): number {
     // 屏幕上真正显示的那一份上（issue #139）
     const twins = pairNodes(fig, clone)
     // 还在等译文 / 翻失败的对：副本里去掉圆环与小部件、留原文，译文到了 key 变化会重建
-    for (const pending of Array.from(clone.querySelectorAll(`.${PENDING_CLASS}, .axt-error`))) pending.remove()
+    for (const pending of Array.from(clone.querySelectorAll(`.${PENDING_CLASS}, .${ERROR_CLASS}`))) pending.remove()
     // 克隆件只留译文：每对里把原文成员摘掉（译文自己不会被摘）
     for (const original of Array.from(clone.querySelectorAll('*'))) {
       if (original.classList.contains(T_CLASS)) continue

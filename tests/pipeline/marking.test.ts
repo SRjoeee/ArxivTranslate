@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ID_ATTR, extract } from '@/core/extractor'
 import { startTranslation, type Transport } from '@/core/pipeline/run'
-import { MIRROR_CLASS, createMirrors } from '@/core/renderer'
+import { MIRROR_CLASS } from '@/core/renderer/attrs'
+import { createMirrors } from '@/core/renderer/mirror'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 
 const idle: Transport = async () => new Promise(() => {})

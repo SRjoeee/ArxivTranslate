@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { FIT_ATTR, FIT_SCROLL, T_CLASS, fitTables, resetFitCache, watchFontLoads } from '@/core/renderer'
+import { T_CLASS } from '@/core/marks'
+import { FIT_ATTR, FIT_SCROLL, fitTables, resetFitCache, watchFontLoads } from '@/core/renderer/table-fit'
 import { docOf } from './helpers'
 
 /** 一对表格：原表 + 译文克隆（renderTable 的结果形状） */

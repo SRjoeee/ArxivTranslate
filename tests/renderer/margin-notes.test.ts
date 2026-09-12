@@ -1,7 +1,7 @@
 // 边注在沟槽里依次下排（DESIGN §7.2）。样式表把边注框的高度归零（否则它会撑高网格行），
 // 代价是浮动之间不再互相避让；位置因此由 JS 量出来、用 transform 推开。
 import { describe, expect, it } from 'vitest'
-import { applyMarginNotes, clearMarginNotes, planMarginNotes, stackShifts } from '@/core/renderer'
+import { applyMarginNotes, clearMarginNotes, planMarginNotes, stackShifts } from '@/core/renderer/margin-notes'
 import { docOf } from './helpers'
 
 const box = (top: number, height: number, ours = true) => ({ top, height, ours })

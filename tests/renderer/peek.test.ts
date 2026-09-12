@@ -3,7 +3,6 @@
 import { describe, expect, it } from 'vitest'
 import { INJECTED_SELECTOR, isInjected } from '@/core/marks'
 import { AT_ATTR, PEEK_DWELL_MS, createPeek, movesText, type PeekAnchor } from '@/core/renderer/peek'
-
 const doc = () => new DOMParser().parseFromString('<html><body></body></html>', 'text/html')
 
 /** Timers under test control: `setTimeout` queues, `fire` runs what is due. */

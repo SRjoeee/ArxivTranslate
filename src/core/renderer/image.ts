@@ -3,9 +3,7 @@
 // 叠加层不带 .axt-t（理由见 marks.ts 的 IMG_CLASS），只在成功时插；等待 / 失败没有 DOM 节点。
 // 与 §7.1 一致：<img> 本身一个属性都不加；恢复原文时 restore 按 INJECTED_SELECTOR 整层删掉。
 import { IMG_CLASS } from '@/core/marks'
-import { DIR_ATTR, FOR_ATTR, LANG_ATTR } from './index'
-import { MIRROR_CLASS } from './mirror'
-import { SPLIT_FOR_ATTR } from './split-figures'
+import { DIR_ATTR, FOR_ATTR, LANG_ATTR, MIRROR_CLASS, SPLIT_FOR_ATTR } from './attrs'
 
 /** <html> 上的模式闸：用户勾选的模式集合，空格分隔，CSS 用 ~= 匹配当前模式（§15 的设置项） */
 export const IMG_MODES_ATTR = 'data-axt-img-modes'

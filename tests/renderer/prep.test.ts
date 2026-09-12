@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { extract, markBlocks, type TextBlock } from '@/core/extractor'
-import { MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS, createPrep, renderImage, renderText, resetFitCache, rootsOf, splitFigures } from '@/core/renderer'
+import { MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS } from '@/core/renderer/attrs'
+import { renderImage } from '@/core/renderer/image'
+import { createPrep, rootsOf } from '@/core/renderer/prep'
+import { splitFigures } from '@/core/renderer/split-figures'
+import { resetFitCache } from '@/core/renderer/table-fit'
+import { renderText } from '@/core/renderer/translation'
 import { docOf, frag } from './helpers'
 
 // 增量整理（issue #46）：每趟只碰刚动过 DOM 的块所在的容器，镜像整个会话只跑一次，

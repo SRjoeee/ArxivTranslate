@@ -8,7 +8,7 @@
 //
 // 网格里每个格子的顶端 = 行顶 + 自身 margin-top，两边上边距不等就必然错位；
 // CSS 没有"取兄弟的计算值"的写法，所以把原文的上边距抄到译文上——只写我们自己的节点。
-import { T_CLASS } from './index'
+import { T_CLASS } from '@/core/marks'
 import { SIDE_DENY_SUBTREE } from './side-layout'
 
 function translations(root: Document | Element): HTMLElement[] {

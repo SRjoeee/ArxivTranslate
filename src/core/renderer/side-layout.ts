@@ -1,4 +1,7 @@
+import { ID_ATTR } from '@/core/extractor'
+import { T_CLASS } from '@/core/marks'
 import { SIDE_LAYOUT } from '@/core/rules/latexml'
+import { SPLIT_ATTR, SPLIT_CLASS } from './attrs'
 // side 模式的结构判定（DESIGN §7.2）。这里是唯一事实来源，modes.css 里的同名清单由测试守着。
 // `ltx_*` 字面量全部来自 rules 模块的 SIDE_LAYOUT（CLAUDE.md 硬规则 2），这里只做组合。
 //
@@ -20,7 +23,7 @@ import { SIDE_LAYOUT } from '@/core/rules/latexml'
 export const MULTI_PANEL_FLEX = SIDE_LAYOUT.multiPanelFlex
 
 export const SIDE_DENY = [
-  '.axt-t',                                            // 译文自身不是容器
+  `.${T_CLASS}`,                                       // 译文自身不是容器
   'table', 'thead', 'tbody', 'tr', 'td', 'th',         // 表格内部结构，改成网格会毁掉表格
   SIDE_LAYOUT.atomicContext,                           // 行内与预格式化上下文
   SIDE_LAYOUT.pairMember,                              // 配对成员本身，内部的译文是脚注那种嵌套
@@ -38,7 +41,7 @@ export const SIDE_DENY = [
 export const SIDE_DENY_SUBTREE = [
   SIDE_LAYOUT.note, // 脚注（上面那段）
   // 整块拆开的插图：两份都不参与配对网格，内部一律交给 ar5iv 自己排（DESIGN §7.2）
-  '[data-axt-split]', '.axt-split',
+  `[${SPLIT_ATTR}]`, `.${SPLIT_CLASS}`,
   MULTI_PANEL_FLEX, // 多面板插图（上面那段）
 ].join(', ')
 
@@ -47,7 +50,7 @@ export const SIDE_DENY_SUBTREE = [
  * 块标记在会话一开始就打上（§10），整页一次性变两栏、之后不再横向跳动；只认译文的话，
  * 懒加载下预翻译距离之外的块一直通栏、进入边距才缩到左栏（用户反馈，2026-09-05 修订）
  */
-export const SIDE_CONTAINER = `:has(.axt-t, [data-axt-id]):not(:is(${SIDE_DENY}))`
+export const SIDE_CONTAINER = `:has(.${T_CLASS}, [${ID_ATTR}]):not(:is(${SIDE_DENY}))`
 
 /** 是不是配对容器（含子树排除）。运行时一律走这里，别直接 matches(SIDE_CONTAINER) */
 export function isSideContainer(el: Element): boolean {

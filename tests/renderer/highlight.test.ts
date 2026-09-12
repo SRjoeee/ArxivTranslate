@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { rehydrate, serialize } from '@/core/protector'
-import { clearSentenceHighlights, registerSentences, restore, setMode, startSentenceHighlight } from '@/core/renderer'
+import { clearSentenceHighlights, startSentenceHighlight } from '@/core/renderer/highlight'
+import { restore, setMode } from '@/core/renderer/page'
+import { registerSentences } from '@/core/renderer/sentences'
 import { PEEK_DWELL_MS } from '@/core/renderer/peek'
 import { splitSentences } from '@/core/sentences'
 

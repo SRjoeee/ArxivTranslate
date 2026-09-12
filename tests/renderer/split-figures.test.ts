@@ -1,8 +1,11 @@
 // 插图整块拆两份（DESIGN §7.2）。图与公式没有译文，按块配对右栏就空着；
 // 整张图跨两栏又等于放弃对照，所以整块复制一份、副本里只留译文。
 import { describe, expect, it } from 'vitest'
-import { FOR_ATTR, MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS, T_CLASS, dropStaleSplits, renderImage, restore, splitFigures } from '@/core/renderer'
-import { SPLIT_FOR_ATTR } from '@/core/renderer/split-figures'
+import { T_CLASS } from '@/core/marks'
+import { FOR_ATTR, MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS, SPLIT_FOR_ATTR } from '@/core/renderer/attrs'
+import { renderImage } from '@/core/renderer/image'
+import { restore } from '@/core/renderer/page'
+import { dropStaleSplits, splitFigures } from '@/core/renderer/split-figures'
 import { IMG_CLASS } from '@/core/marks'
 import { ID_ATTR } from '@/core/extractor'
 import { docOf } from './helpers'

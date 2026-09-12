@@ -4,12 +4,13 @@
 // 与 §7.1 一致：它只是原块的下一个兄弟，restore 删掉宿主节点就干净了。
 import type { Block } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
-import { FOR_ATTR, clearTranslation, setState, translationShell } from './index'
 import { S, parseFatal, reasonText } from '@/ui/strings'
+import { ERROR_CLASS, FOR_ATTR } from './attrs'
+import { translationShell } from './shell'
+import { clearTranslation, setState } from './translation'
 
 /** 原始诊断留在属性里：`restore()` 按注入标记整体清掉，它不进界面 */
 export const REASON_ATTR = 'data-axt-reason'
-export const ERROR_CLASS = 'axt-error'
 
 const STYLE = `
 :host { display: inline-flex; align-items: center; gap: 4px; font: 12px system-ui, sans-serif; vertical-align: middle; }

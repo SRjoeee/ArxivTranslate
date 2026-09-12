@@ -3,7 +3,8 @@
 // On the window's own document: a `DOMParser` document breaks Range offsets in happy-dom.
 import { describe, expect, it } from 'vitest'
 import { rangesOf, rehydrate, serialize } from '@/core/protector'
-import { localizeNotes, registerSentences, sentenceMapAt } from '@/core/renderer'
+import { localizeNotes } from '@/core/renderer/notes'
+import { registerSentences, sentenceMapAt } from '@/core/renderer/sentences'
 import { splitSentences } from '@/core/sentences'
 
 /**

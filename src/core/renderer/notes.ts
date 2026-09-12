@@ -22,12 +22,9 @@
 //（正文全是 URL、全是公式，没有可翻的字），副本与原件逐字相同。后一种以前不打标记，
 // 原件就一直露着，同一条边注在沟槽里画两遍（2509.10652v3 引言的 6 条 URL 脚注，用户 2026-09-11 反馈）。
 import { ID_ATTR } from '@/core/extractor'
-import { T_CLASS, isInjected } from '@/core/marks'
+import { AXT_ATTR_PREFIX, T_CLASS, isInjected } from '@/core/marks'
 import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
-import { IDENTITY_ATTR } from './index'
-import { MIRROR_CLASS } from './mirror'
-import { PENDING_CLASS } from './pending'
-import { SPLIT_CLASS } from './split-figures'
+import { ERROR_CLASS, IDENTITY_ATTR, MIRROR_CLASS, PENDING_CLASS, SPLIT_CLASS } from './attrs'
 import { mirrorPair } from './sentences'
 
 /** 原件上的标记：译文已复制进副本，这份边注由样式隐藏 */
@@ -51,7 +48,7 @@ function localizedCopy(translated: Element): Element {
   // 多 9.6px 缩进，它自带的标号又是绝对定位的，会飞到正文里（实测，用户反馈"位置是乱的"）
   clone.classList.remove(NOTE.contentClass)
   clone.classList.add(NOTE_T_CLASS)
-  for (const name of clone.getAttributeNames()) if (name.startsWith('data-axt-')) clone.removeAttribute(name)
+  for (const name of clone.getAttributeNames()) if (name.startsWith(AXT_ATTR_PREFIX)) clone.removeAttribute(name)
   // The marks are hidden, not removed: in the translation's sentence registration a mark is a
   // placeholder, and mirroring onto the copy needs a twin for every node — with one missing, that
   // sentence's range would run from the hidden original all the way to the copy and enclose the
@@ -140,7 +137,7 @@ function mirrorNote(source: Element, translated: Element, wrapper: Element, fres
 }
 
 /** A translation that has actually arrived: not the skeleton, not the failure widget, which are `.axt-t` siblings too */
-const arrived = (el: Element | null): el is Element => !!el && el.classList.contains(T_CLASS) && !el.classList.contains(PENDING_CLASS) && !el.classList.contains('axt-error')
+const arrived = (el: Element | null): el is Element => !!el && el.classList.contains(T_CLASS) && !el.classList.contains(PENDING_CLASS) && !el.classList.contains(ERROR_CLASS)
 
 const squeeze = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim()
 
@@ -154,6 +151,9 @@ const reproduces = (source: Element, copy: Element): boolean => {
   return text !== '' && text === squeeze(copy.textContent)
 }
 
+/** 这些副本整块由某个模式藏起来：identity 的与拆图的在 stack、镜像在 side 以外（modes.css）。里面那份脚注副本不能当成"唯一留下的一份" */
+const HIDABLE_COPY = `.${T_CLASS}[${IDENTITY_ATTR}], .${MIRROR_CLASS}, .${SPLIT_CLASS}`
+
 /**
  * 把脚注的译文复制进译文块里重建出来的副本，并标记原件。
  * 幂等：副本里已有同样内容就不动；内容变了就换。返回本轮改动的数量。
@@ -161,10 +161,6 @@ const reproduces = (source: Element, copy: Element): boolean => {
 export function localizeNotes(root: Document | Element): number {
   const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))
   if (!scope) return 0
-  // 这些副本整块由某个模式藏起来：identity 的与拆图的在 stack、镜像在 side 以外（modes.css）。
-  // 里面那份脚注副本不能当成"唯一留下的一份"。在函数里拼而不是模块级常量：
-  // 三个常量来自 renderer 内互相 import 的模块，模块初始化时取会踩到环
-  const hidableCopy = `.${T_CLASS}[${IDENTITY_ATTR}], .${MIRROR_CLASS}, .${SPLIT_CLASS}`
   let localized = 0
   for (const translation of Array.from(scope.querySelectorAll(`.${T_CLASS}`))) {
     const original = translation.previousElementSibling
@@ -191,7 +187,7 @@ export function localizeNotes(root: Document | Element): number {
       // original hidden is only safe while the copy is guaranteed to be on screen, and that is
       // just as true for a note whose translation has arrived: the original's outer box carries
       // that translation too, so hiding it takes both away
-      const hidable = !!copy.closest(hidableCopy)
+      const hidable = !!copy.closest(HIDABLE_COPY)
       if (!arrived(sibling)) {
         // A note the extractor never registered — its content is a bare URL, a lone formula, nothing
         // with letters in it — will never get a translation, and waiting for one left the original
