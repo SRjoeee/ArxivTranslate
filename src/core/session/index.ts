@@ -63,10 +63,12 @@ export interface PageSession {
    * decided in: the reads inside are awaited, and the reader may restore the page during them —
    * a stale continuation must not translate the page again (Codex on #157)
    */
-  start(requested?: Mode, restart?: boolean, from?: string): Promise<StartResult>
+  /** `from`: the session a restart was decided on; `epoch`: the page's action epoch a command was decided on — either, stale, refuses the start */
+  start(requested?: Mode, restart?: boolean, from?: string, epoch?: number): Promise<StartResult>
   /** Back to the original page: stop everything, remove every injected node and attribute */
   /** `from`: the session the restore was decided on; once it has ended the restore is not the reader's and does nothing */
-  restore(from?: string): { removedNodes: number; refused?: true }
+  /** `epoch`: the page's action epoch the restore was decided on; an earlier one is refused */
+  restore(epoch?: number): { removedNodes: number; refused?: true }
   /** Switch side / stack / only without a new session; the preference is persisted */
   setMode(mode: Mode): Promise<{ mode: Mode; effective: Mode }>
   /** Hand blocks to the running text pipeline (retry, tests); nothing outside a session */
@@ -152,6 +154,8 @@ export function createPageSession(deps: SessionDeps): PageSession {
   let restarted = false
   /** The current session's id; null outside a session. Every callback of a run closes over its own copy */
   let active: string | null = null
+  /** The page's action epoch (PageStatus.epoch): every start that commits and every restore moves it */
+  let actions = 0
   const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
   let progress: Progress = idle()
 
@@ -180,15 +184,21 @@ export function createPageSession(deps: SessionDeps): PageSession {
    * it aborted (the local review of INVENTORY S2, tenth pass). The later caller gets the earlier start's outcome
    */
   let starting: Promise<StartResult> | null = null
-  function start(requested?: Mode, restart = false, from?: string): Promise<StartResult> {
+  function start(requested?: Mode, restart = false, from?: string, epoch?: number): Promise<StartResult> {
     if (starting) return starting
-    starting = begin(requested, restart, from).finally(() => { starting = null })
+    starting = begin(requested, restart, from, epoch).finally(() => { starting = null })
     return starting
   }
 
-  async function begin(requested?: Mode, restart = false, from?: string): Promise<StartResult> {
+  /**
+   * `from`: the session a restart was decided on (the automatic restart after a permanent hand-over names its own).
+   * `epoch`: the page's action epoch a command from the popup or the toggle was decided on. Either, when given and
+   * stale, refuses the start: the page moved on since the decision
+   */
+  async function begin(requested?: Mode, restart = false, from?: string, epoch?: number): Promise<StartResult> {
     if (progress.state === 'on' && !restart) return { started: false, reason: S.page.alreadyOn }
     if (from !== undefined && active !== from) return { started: false, reason: S.page.sessionOver }
+    if (epoch !== undefined && epoch !== actions) return { started: false, reason: S.page.sessionOver }
     if (!paper) return { started: false, reason: S.page.notPaper }
     if (blocks.length === 0) return { started: false, reason: S.page.nothingToTranslate }
     const tStart = now()
@@ -212,6 +222,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     if (!status.available && !status.fallback) return { started: false, reason: S.page.noService }
     // The reader may have restored the page while the two reads above were in flight
     if (from !== undefined && active !== from) return { started: false, reason: S.page.sessionOver }
+    if (epoch !== undefined && epoch !== actions) return { started: false, reason: S.page.sessionOver }
     trace(`start: ready in ${Math.round(now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
     modes?.stop()
@@ -224,6 +235,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     // 只在这条路径上装：没开翻译时没有译文，也就没有对照可言
     if (config.reading.sentenceHighlight) highlight = startSentenceHighlight(doc) ?? null
     active = session
+    actions++
     const alive = () => active === session
     progress = { ...idle(), state: 'on' }
     restarted = false
@@ -430,8 +442,9 @@ export function createPageSession(deps: SessionDeps): PageSession {
     return { mode, effective }
   }
 
-  function restorePage(from?: string): { removedNodes: number; refused?: true } {
-    if (from !== undefined && active !== from) return { removedNodes: 0, refused: true }
+  function restorePage(epoch?: number): { removedNodes: number; refused?: true } {
+    if (epoch !== undefined && epoch !== actions) return { removedNodes: 0, refused: true }
+    actions++
     endRun()
     modes?.stop()
     modes = null
@@ -517,6 +530,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       preference: modes?.preference() ?? savedMode,
       progress,
       session: active,
+      epoch: actions,
       ...(imageProgress ? { images: imageProgress } : {}),
       ...(running ? { running } : {}),
     })),

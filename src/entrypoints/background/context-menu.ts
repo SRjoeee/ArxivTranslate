@@ -56,11 +56,11 @@ export interface CommandDeps extends ToggleDeps {
 export async function toggleTranslation(deps: ToggleDeps, tabId: number): Promise<void> {
   try {
     const [status, saved] = await Promise.all([
-      deps.send<Pick<PageStatus, 'progress' | 'running' | 'session'>>(tabId, { type: 'axt:page-status' }),
+      deps.send<Pick<PageStatus, 'progress' | 'running' | 'epoch'>>(tabId, { type: 'axt:page-status' }),
       deps.saved().catch(() => null),
     ])
     const decision = pageDecision(status, saved ?? { revision: null, canRun: true, fallback: false })
-    if (decision?.enabled) await deps.send(tabId, messageFor(decision.action, status.session))
+    if (decision?.enabled) await deps.send(tabId, messageFor(decision.action, status.epoch))
   } catch {
     // See above
   }

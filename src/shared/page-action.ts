@@ -75,11 +75,12 @@ export function savedFromStatus(status: Pick<ProviderStatus, 'revision' | 'avail
 
 /**
  * The message each action is, the way the popup's buttons send them: a re-translation restarts the session in place.
- * `from` is the session the decision was made on; the page refuses a restart or a restore of a session that has
- * ended meanwhile (the reader acted in between — sixth pass of the local review)
+ * `epoch` is the page's action epoch the decision was made on (`PageStatus.epoch`); the page refuses a command from
+ * an earlier epoch — the reader acted in between (sixth and twelfth passes of the local review). Every action
+ * carries it, a translate decided on an idle page included: the page may have been translated and restored since
  */
-export function messageFor(action: PageAction, from?: string | null): { type: 'axt:translate-page'; restart?: true; from?: string } | { type: 'axt:restore-page'; from?: string } {
-  const decidedOn = from ? { from } : {}
+export function messageFor(action: PageAction, epoch?: number): { type: 'axt:translate-page'; restart?: true; epoch?: number } | { type: 'axt:restore-page'; epoch?: number } {
+  const decidedOn = epoch !== undefined ? { epoch } : {}
   if (action === 'restore') return { type: 'axt:restore-page', ...decidedOn }
-  return action === 'retranslate' ? { type: 'axt:translate-page', restart: true, ...decidedOn } : { type: 'axt:translate-page' }
+  return action === 'retranslate' ? { type: 'axt:translate-page', restart: true, ...decidedOn } : { type: 'axt:translate-page', ...decidedOn }
 }

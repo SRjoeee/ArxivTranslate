@@ -195,7 +195,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     if (!runnable(next, packState)) return // the view shows the page as behind the settings
     // The chain the restart will run on: one built from what was just saved (background/provider-status.ts)
     setProvider(await sendMessage({ type: 'axt:provider-status', fresh: true }).catch(() => null))
-    await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(status.session ? { from: status.session } : {}) })
+    await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(status.epoch !== undefined ? { epoch: status.epoch } : {}) })
   }
 
   const actions: PopupActions = {
@@ -203,16 +203,16 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
       const r = await sendToActiveTab({ type: 'axt:translate-page' })
       if (!r.started) throw new Error(r.reason ?? '')
     }),
-    // The session a click acts on is read at the click, not from the last poll: an automatic hand-over restart
-    // between polls would make the poll's session stale and the command refused (the local review of S2, seventh pass)
+    // The epoch a click acts on is read at the click, not from the last poll: an automatic hand-over restart between
+    // polls would make the poll's stale and the command refused (the local review of S2, seventh pass)
     retranslate: () => void guard(async () => {
-      const from = (await sendToActiveTab({ type: 'axt:page-status' })).session
-      const r = await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(from ? { from } : {}) })
+      const { epoch } = await sendToActiveTab({ type: 'axt:page-status' })
+      const r = await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(epoch !== undefined ? { epoch } : {}) })
       if (!r.started) throw new Error(r.reason ?? '')
     }),
     restore: () => void guard(async () => {
-      const from = (await sendToActiveTab({ type: 'axt:page-status' })).session
-      const r = await sendToActiveTab({ type: 'axt:restore-page', ...(from ? { from } : {}) })
+      const { epoch } = await sendToActiveTab({ type: 'axt:page-status' })
+      const r = await sendToActiveTab({ type: 'axt:restore-page', ...(epoch !== undefined ? { epoch } : {}) })
       if (r.refused) throw new Error(S.page.sessionOver)
     }),
     chooseMode: mode => void guard(async () => { await sendToActiveTab({ type: 'axt:set-mode', mode }) }),
