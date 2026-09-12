@@ -8,7 +8,9 @@ import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { sendMessage } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
-import { S } from '@/ui/strings'
+import { localeInUse, S } from '@/ui/strings'
+import { pickLocale } from '@/locales'
+import { browserLanguages } from '@/ui/apply-locale'
 
 export interface CacheStats { entries: number; bytes: number }
 
@@ -43,8 +45,6 @@ export function useOptionsData(): OptionsData {
   const [cacheCleared, setCacheCleared] = useState(false)
   /** Every config write queues behind the previous one; see `patch` */
   const writes = useRef<Promise<Config>>(Promise.resolve(DEFAULT_CONFIG))
-  /** The interface language this page rendered with; a different one saved elsewhere means a reload */
-  const shownLanguage = useRef<string | null>(null)
   /** The language the newest pack lookup was for; see `checkPack` */
   const wanted = useRef<string | null>(null)
 
@@ -80,7 +80,6 @@ export function useOptionsData(): OptionsData {
     const init = async () => {
       const c = await getConfig()
       wanted.current = c.targetLanguage
-      shownLanguage.current = c.uiLanguage
       setLocal(c)
       setFallbackReason(configFallbackReason())
       void checkPack(c.targetLanguage)
@@ -93,9 +92,10 @@ export function useOptionsData(): OptionsData {
     const unwatch = watchConfig(() => {
       const reload = async () => {
         const stored = await getConfig()
-        // The interface language is chosen once before the page renders (main.tsx): a change saved elsewhere takes
-        // the same way this page's own change does — a reload (Codex on #185)
-        if (shownLanguage.current !== null && stored.uiLanguage !== shownLanguage.current) {
+        // The interface language is chosen once before the page renders (main.tsx): a stored choice that resolves to
+        // another pack takes the same way this page's own change does — a reload. Compared with the locale in use,
+        // not with a recorded value (Codex on #185)
+        if (pickLocale(stored.uiLanguage, browserLanguages()) !== localeInUse()) {
           location.reload()
           return stored
         }
@@ -146,7 +146,6 @@ export function useOptionsData(): OptionsData {
       const next = fn(await getConfig())
       await setConfig(next)
       wanted.current = next.targetLanguage
-      shownLanguage.current = next.uiLanguage
       setLocal(next)
       // A valid write **is** the repair: leaving the warning up would go on telling the reader that
       // the key and service they just fixed are not in effect (Codex on #157)

@@ -18,7 +18,9 @@ import type { HelperStatus } from '@/shared/ocr'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
 import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, pollsBackground, runnable } from './view-model'
 import { chainRevision } from '@/config/revision'
-import { S } from '@/ui/strings'
+import { localeInUse, S } from '@/ui/strings'
+import { pickLocale } from '@/locales'
+import { browserLanguages } from '@/ui/apply-locale'
 
 const scriptStart = performance.now()
 
@@ -77,11 +79,8 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const [local, setLocal] = useState<{ config: Config; revision: string } | null>(null)
   const config = local?.config ?? null
   const savedRevision = local?.revision ?? null
-  /** The interface language this popup rendered with */
-  const shownLanguage = useRef<string | null>(null)
   const settle = useCallback(async (next: Config) => {
     wantedPack.current = next.targetLanguage
-    shownLanguage.current = next.uiLanguage
     setLocal({ config: next, revision: await chainRevision(next) })
   }, [])
   /** The offline service's language pack (§8.4); `downloadable` needs a click to create() (user gesture) */
@@ -166,8 +165,11 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     const unwatch = watchConfig(() => {
       const reload = async () => {
         const stored = await getConfig()
-        // The interface language was applied once at mount; a change saved elsewhere takes a reload (as the settings page)
-        if (shownLanguage.current !== null && stored.uiLanguage !== shownLanguage.current) {
+        // The interface language was applied once at mount (applyLocale); a stored choice that resolves to another
+        // pack takes a reload, as the settings page's own change does. Compared with the locale actually in use, not
+        // with a value this hook recorded: a change landing between the locale's read and this hook's first read
+        // would otherwise pass unnoticed (Codex on #185)
+        if (pickLocale(stored.uiLanguage, browserLanguages()) !== localeInUse()) {
           location.reload()
           return stored
         }
@@ -207,9 +209,11 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   }, [page, refresh])
 
   // The session the answers are for; when it ends, its answer goes with it
+  // A new session — the page restarted from A to B, or stopped — starts with no chain status of its own: A's hand-overs
+  // are not B's (Codex on #185); the next poll fills it
   useEffect(() => {
     sessionRef.current = page?.session ?? null
-    if (!page?.session) setSessionProvider(null)
+    setSessionProvider(null)
   }, [page?.session])
 
   // Poll progress every 500 ms while translation is on: scrolling keeps triggering, there is no
