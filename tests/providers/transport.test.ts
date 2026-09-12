@@ -456,7 +456,7 @@ describe('createLocalTransport：翻译', () => {
     const cache: CachePort = { getMany: async keys => keys.map(() => null), putMany: async () => undefined }
     const paper = { paper: '2410.00260', renderPath: 'tags' as const }
     let calls = 0
-    const t = await withChain([mockProvider(async r => { calls++; if (r.segments[0]?.id === 'blocker') await blocking; return { segments: r.segments, provider: 'mock' } }, { maxConcurrent: 1 })], { cancelled: registry, cache })
+    const t = await withChain([mockProvider(async r => { calls++; if (r.segments[0]?.id === 'blocker') await blocking; return { segments: r.segments, provider: 'mock' } }, { maxConcurrent: 1, maxBatchItems: 1 })], { cancelled: registry, cache })
     const blocker = t.translate({ request: { segments: [{ id: 'blocker', text: 'hold' }], source: 'en', target: 'zh-CN' }, scope: 'x', cache: paper })
     await new Promise(resolve => setTimeout(resolve, 200)) // the blocker holds the only slot
     const a = t.translate({ request: req, scope: 'tab-a', cache: paper })
@@ -469,6 +469,44 @@ describe('createLocalTransport：翻译', () => {
     expect((await blocker).ok).toBe(true)
     expect(await a).toMatchObject({ ok: false, error: { kind: 'aborted' } })
     expect((await b).ok).toBe(true)
+    expect(calls).toBe(2)
+  })
+
+  it('a batch retry does not resurrect a subscriber that died meanwhile: after both tabs closed, no third attempt (ADR-0005, nineteenth review pass)', async () => {
+    // Two tabs share a paragraph. The first attempt comes back with the wrong count (the batch queue retries), tab A
+    // closes meanwhile; the retry used to re-subscribe A from the frozen batch meta, so when tab B closed during
+    // the second attempt the task survived on the dead A and a third attempt reached the endpoint for nobody
+    const registry = new CancelledScopeRegistry()
+    const cache: CachePort = { getMany: async keys => keys.map(() => null), putMany: async () => undefined }
+    const paper = { paper: '2410.00260', renderPath: 'tags' as const }
+    const gates: { entered: () => void; release: () => void }[] = []
+    const attempt = (n: number) => new Promise<void>(resolve => { gates[n] = { entered: resolve, release: () => undefined } })
+    const first = attempt(1)
+    const second = attempt(2)
+    let releaseFirst: () => void = () => {}
+    let releaseSecond: () => void = () => {}
+    const holdFirst = new Promise<void>(resolve => { releaseFirst = resolve })
+    const holdSecond = new Promise<void>(resolve => { releaseSecond = resolve })
+    let calls = 0
+    const t = await withChain([mockProvider(async r => {
+      calls++
+      if (calls === 1) { gates[1]!.entered(); await holdFirst; throw new ProviderError('invalid-response', 'bad shape', { isolatable: true }) } // → a batch retry
+      if (calls === 2) { gates[2]!.entered(); await holdSecond; throw attachRequestErrorMeta(new ProviderError('network', 'down'), { isRetryable: true }) } // → request retry
+      return { segments: r.segments, provider: 'mock' }
+    })], { cancelled: registry, cache, batch: { maxRetries: 1, enableFallbackToIndividual: false } })
+    const a = t.translate({ request: req, scope: 'tab-a', cache: paper })
+    const b = t.translate({ request: req, scope: 'tab-b', cache: paper })
+    await first
+    registry.markScope('tab-a') // tab A closes during the first attempt
+    await t.cancel('tab-a')
+    releaseFirst()
+    await second // the batch retry re-subscribed: B only, not the dead A
+    registry.markScope('tab-b') // tab B closes during the second attempt
+    await t.cancel('tab-b')
+    releaseSecond()
+    expect(await a).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(await b).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    await new Promise(resolve => setTimeout(resolve, 300))
     expect(calls).toBe(2)
   })
 

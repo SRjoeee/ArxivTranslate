@@ -343,6 +343,19 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       }
       return error
     }
+    /**
+     * What a request-queue task subscribes for this batch: the batch's scope union as flushed, minus the scopes
+     * that died since. A batch retry reuses the meta of its first flush, and re-subscribing a dead scope keeps the
+     * task alive after its last live subscriber is drained — the endpoint is then called for nobody (the local
+     * review of ADR-0005, nineteenth pass). `null`: every subscriber died, there is nothing to send for.
+     * `undefined` stays `undefined` — an unscoped member keeps the batch alive, as in the queues' refcount
+     */
+    const liveScopes = (meta: BatchExecutionMeta): readonly string[] | undefined | null => {
+      if (!meta.scopes || meta.scopes.length === 0) return meta.scopes
+      const live = meta.scopes.filter(scope => !deps.cancelled.has(scope))
+      return live.length > 0 ? live : null
+    }
+    const nobodyLeft = (meta: BatchExecutionMeta) => attachRequestErrorMeta(new TranslationCancelledError(meta.scopes?.join(',')), { isRetryable: false })
     const requestQueue = new RequestQueue(queueOptions)
     const batchQueue = new BatchQueue<QueueItem, TranslationOutcome>({
       maxCharactersPerBatch: provider.maxBatchChars,
@@ -367,16 +380,22 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         const chars = items.reduce((n, item) => n + item.text.length, 0)
         const hash = items.map(item => item.dedupKey ?? item.uid).join('|')
         const scheduleAt = Math.min(...items.map(item => item.scheduleAt))
-        return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
+        const scopes = liveScopes(meta)
+        if (scopes === null) return Promise.reject(nobodyLeft(meta))
+        return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
       },
       executeIndividual: (item, meta) => {
         const dead = fatalFor(meta)
         if (dead !== undefined) return Promise.reject(dead)
+        // The batch's live subscribers, not the item's own scope: a deduplicated peer's interest in this item is
+        // known to the batch, and a scope that died since the flush must not be subscribed again
+        const scopes = liveScopes(meta)
+        if (scopes === null) return Promise.reject(nobodyLeft(meta))
         return requestQueue.enqueue(
           async signal => (await translateItems([item], [item.id], signal))[0]!,
           item.scheduleAt,
           item.dedupKey ?? item.uid,
-          item.scope ? [item.scope] : undefined,
+          scopes,
           // 逐条兜底是同一批文本的最后一程，不能再拿一份完整预算（Codex 在 #56 指出）
           { timeoutMs: timeoutFor(item.text.length), deadlineAt: deadlineOf(meta) },
         )
