@@ -445,23 +445,31 @@ describe('createLocalTransport：翻译', () => {
     expect(calls).toBe(1)
   })
 
-  it('a dead scope\'s waiting batches never reach the endpoint, drained or not', async () => {
-    // Batches already flushed into the request queue dispatch through the attempt-time gate; a scope the registry
-    // holds is refused there even on a chain nobody drained
-    let release: () => void = () => {}
-    const held = new Promise<void>(resolve => { release = resolve })
-    let entered: () => void = () => {}
-    const atEndpoint = new Promise<void>(resolve => { entered = resolve })
+  it('dropping one tab before dispatch keeps a deduplicated peer alive: the same paragraph requested by two tabs is sent once, for the one still there', async () => {
+    // Deduplication needs cache keys (the dedup key is the cache key). The queue items carry the first subscriber's
+    // scope only; the second tab is known to the queues' refcount. Refusing by the items' scopes at attempt time
+    // aborted the live peer (the local review of ADR-0005, eighteenth pass); the drain is by refcount, and the
+    // attempt-time gate looks at the chain only
+    let releaseBlocker: () => void = () => {}
+    const blocking = new Promise<void>(resolve => { releaseBlocker = resolve })
     const registry = new CancelledScopeRegistry()
+    const cache: CachePort = { getMany: async keys => keys.map(() => null), putMany: async () => undefined }
+    const paper = { paper: '2410.00260', renderPath: 'tags' as const }
     let calls = 0
-    const t = await withChain([mockProvider(async r => { calls++; entered(); await held; return { segments: r.segments, provider: 'mock' } }, { maxBatchItems: 1, maxConcurrent: 1 })], { cancelled: registry })
-    const pending = t.translate({ request: { segments: [{ id: 'a', text: 'x' }, { id: 'b', text: 'y' }, { id: 'c', text: 'z' }], source: 'en', target: 'zh-CN' }, scope: 'dead' })
-    await atEndpoint
-    registry.markScope('dead') // marked, never drained
-    release()
-    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
-    await new Promise(resolve => setTimeout(resolve, 50))
-    expect(calls).toBe(1)
+    const t = await withChain([mockProvider(async r => { calls++; if (r.segments[0]?.id === 'blocker') await blocking; return { segments: r.segments, provider: 'mock' } }, { maxConcurrent: 1 })], { cancelled: registry, cache })
+    const blocker = t.translate({ request: { segments: [{ id: 'blocker', text: 'hold' }], source: 'en', target: 'zh-CN' }, scope: 'x', cache: paper })
+    await new Promise(resolve => setTimeout(resolve, 200)) // the blocker holds the only slot
+    const a = t.translate({ request: req, scope: 'tab-a', cache: paper })
+    await new Promise(resolve => setTimeout(resolve, 200)) // a's batch flushed, waiting behind the slot
+    const b = t.translate({ request: req, scope: 'tab-b', cache: paper })
+    await new Promise(resolve => setTimeout(resolve, 200)) // b joined a's waiting task by its key: the queue knows b, the items do not
+    registry.markScope('tab-a') // tab A closed: the router marks, then drains its scope
+    await t.cancel('tab-a')
+    releaseBlocker()
+    expect((await blocker).ok).toBe(true)
+    expect(await a).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect((await b).ok).toBe(true)
+    expect(calls).toBe(2)
   })
 
   it('router and chain together: a tab closed while the first chain builds leaves no request out and nothing bound (ADR-0005, second review pass)', async () => {
