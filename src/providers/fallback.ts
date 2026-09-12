@@ -109,7 +109,9 @@ export function createFallbackService(
     //（Codex 在 #163 指出）。后来的覆盖先前的：那是更新的一次结果
     const gathered = new Map<string, TranslatedSegment>()
     const withGathered = (response: TranslateMessageResponse): TranslateMessageResponse => {
-      if (response.ok || gathered.size === 0) return response
+      // An aborted answer is the call's refusal — its scope died or its chain was retired — and carries nothing
+      // back, not even what an earlier engine on the chain translated (the local review of ADR-0005, sixteenth pass)
+      if (response.ok || gathered.size === 0 || response.error.kind === 'aborted') return response
       return { ...response, partial: [...gathered.values()] }
     }
     for (const [index, step] of chain.entries()) {

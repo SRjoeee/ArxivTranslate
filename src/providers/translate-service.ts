@@ -389,6 +389,8 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
   }
 
   const translate = async ({ request, providerId, cache, scope }: TranslateCall): Promise<TranslateMessageResponse> => {
+    /** Nothing of this call goes back: its scope died, or its chain was retired */
+    const refusal = (): TranslateMessageResponse => ({ ok: false, error: { kind: 'aborted', message: scope === undefined ? '已取消（链已退役）' : `已取消（scope: ${scope}）`, isolatable: false } })
     try {
       const provider = await deps.getProvider(providerId)
       const model = (await deps.getModel?.()) ?? ''
@@ -436,7 +438,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         }
       }
       // 读缓存时让出过主线程，这期间 scope 可能已被撤销（Read Frog translation-queues.ts 也在 await 之后查一次）
-      if (refused(scope)) return { ok: false, error: { kind: 'aborted', message: scope === undefined ? '已取消（链已退役）' : `已取消（scope: ${scope}）`, isolatable: false } }
+      if (refused(scope)) return refusal()
       const cached = translated.size
 
       // 2. 未命中的逐段入队；同一次调用的段落批次键相同，会攒在一起
@@ -510,8 +512,13 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         // the cache after "restore the page"; Codex on #33), no `partial` for the caller to render, no result
         // from a task an unscoped subscriber kept alive through the drain (the local review of ADR-0005,
         // fifteenth pass)
-        if (refused(scope)) return { ok: false, error: { kind: 'aborted', message: scope === undefined ? '已取消（链已退役）' : `已取消（scope: ${scope}）`, isolatable: false } }
-        if (store && writes.length > 0) await store.putMany(writes)
+        if (refused(scope)) return refusal()
+        if (store && writes.length > 0) {
+          await store.putMany(writes)
+          // The write was one more wait: a drop or a retirement during it must not hand the result over either.
+          // What was written stays — sound translations under keys derived from their content
+          if (refused(scope)) return refusal()
+        }
         if (failures.length > 0) {
           const error = pickError(failures)
           // key 没配 / 不认：这轮里再打多少次都是同一个 401。`failQueue` 只排空**那一刻**排在

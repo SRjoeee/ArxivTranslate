@@ -267,6 +267,60 @@ describe('createLocalTransport：翻译', () => {
     expect(writes).toEqual([])
   })
 
+  it('retire() during the cache write: the result does not go back either (ADR-0005, sixteenth review pass)', async () => {
+    // The last check before the write is followed by one more wait, the write itself; a retirement landing there
+    // must be seen too. What was written stays — sound translations under content-derived keys
+    let releaseWrite: () => void = () => {}
+    const writing = new Promise<void>(resolve => { releaseWrite = resolve })
+    let atWrite: () => void = () => {}
+    const writeStarted = new Promise<void>(resolve => { atWrite = resolve })
+    const cache: CachePort = { getMany: async keys => keys.map(() => null), putMany: async () => { atWrite(); await writing } }
+    const t = await withChain([mockProvider(async r => ({ segments: r.segments, provider: 'mock' }))], { cache })
+    const pending = t.translate({ request: req, scope: 'live', cache: { paper: '2410.00260', renderPath: 'tags' } })
+    await writeStarted
+    t.retire!()
+    releaseWrite()
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+  })
+
+  it('a scope dropped during the cache write gets nothing back either', async () => {
+    let releaseWrite: () => void = () => {}
+    const writing = new Promise<void>(resolve => { releaseWrite = resolve })
+    let atWrite: () => void = () => {}
+    const writeStarted = new Promise<void>(resolve => { atWrite = resolve })
+    const cache: CachePort = { getMany: async keys => keys.map(() => null), putMany: async () => { atWrite(); await writing } }
+    const registry = new CancelledScopeRegistry()
+    const t = await withChain([mockProvider(async r => ({ segments: r.segments, provider: 'mock' }))], { cache, cancelled: registry })
+    const pending = t.translate({ request: req, scope: 'live', cache: { paper: '2410.00260', renderPath: 'tags' } })
+    await writeStarted
+    registry.markScope('live') // the router's drop: mark, then drain
+    await t.cancel('live')
+    releaseWrite()
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+  })
+
+  it('an aborted answer carries no partial result from an earlier engine on the chain', async () => {
+    // The first engine translated one segment and failed the other, the chain fell back, and the fallback engine's
+    // chain was retired while it worked: the refusal must not pick the first engine's segment back up
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    let entered: () => void = () => {}
+    const atFallback = new Promise<void>(resolve => { entered = resolve })
+    const first = { ...mockProvider(async r => {
+      if (r.segments[0]?.id === 'a') return { segments: r.segments, provider: 'p1' }
+      throw attachRequestErrorMeta(new ProviderError('network', 'down'), { isRetryable: false })
+    }, { maxBatchItems: 1 }), id: 'p1' }
+    const second = { ...mockProvider(async r => { entered(); await held; return { segments: r.segments, provider: 'p2' } }), id: 'p2' }
+    const t = await withChain([first, second])
+    const pending = t.translate({ request: { segments: [{ id: 'a', text: 'x' }, { id: 'b', text: 'y' }], source: 'en', target: 'zh-CN' }, scope: 'live' })
+    await atFallback
+    t.retire!()
+    release()
+    const result = await pending
+    expect(result).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(result.ok === false && result.partial).toBeUndefined()
+  })
+
   it('retire() and cancel(scope) reach an off-chain call already at its endpoint', async () => {
     // Off-chain services are built per named call; one with a request in flight is drained with the chain
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise(() => undefined))
