@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { createChainHolder } from '@/entrypoints/background/chain'
-import { createConfigOffers, providerStatus } from '@/entrypoints/background/provider-status'
+import { createConfigOffers, providerStatus, statusInForce } from '@/entrypoints/background/provider-status'
 import type { TranslationTransport } from '@/providers/transport'
 
 // The provider-status action (INVENTORY P4): a session's chain, the chain in force, or — after a save — a chain
@@ -87,5 +87,27 @@ describe('providerStatus', () => {
     expect((await providerStatus(h.deps, { scope: 's1' })).providerId).toBe('pinned')
     h.save({ ...DEFAULT_CONFIG, provider: 'google-web' })
     expect((await providerStatus(h.deps, { scope: 's1', fresh: true })).providerId).toBe('google-web')
+  })
+})
+
+describe('statusInForce', () => {
+  it('a chain replaced while its probes answer is not the answer: the status describes the chain in force afterwards (S2 review, third pass)', async () => {
+    let release: () => void = () => undefined
+    const slow: TranslationTransport = { ...chainOf('old'), status: async () => { await new Promise<void>(resolve => { release = resolve }); return { ...(await chainOf('old').status()) } } }
+    const fresh = chainOf('new')
+    let inForce = slow
+    const status = statusInForce({ current: async () => inForce })
+    await new Promise(resolve => setTimeout(resolve, 0))
+    inForce = fresh // a save landed while the old chain's probes were out
+    release()
+    expect((await status).providerId).toBe('new')
+  })
+
+  it('answers at once when nothing replaced the chain', async () => {
+    const chain = chainOf('only')
+    let asked = 0
+    const status = await statusInForce({ current: async () => { asked++; return chain } })
+    expect(status.providerId).toBe('only')
+    expect(asked).toBe(2)
   })
 })

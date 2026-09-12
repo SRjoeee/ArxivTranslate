@@ -26,6 +26,20 @@ export function createConfigOffers(deps: { load: () => Promise<Config>; chain: P
   }
 }
 
+/**
+ * The status of the chain in force — still in force once the status has come back. `status()` waits for the
+ * engines' availability probes, and a configuration change can replace the chain meanwhile; the answer would then
+ * describe a superseded chain, and a decision made on it would be the previous settings' (the local review of
+ * INVENTORY S2, third pass). Re-asked until the chain that answered is the one in force
+ */
+export async function statusInForce(chain: Pick<ChainHolder, 'current'>): Promise<ProviderStatus> {
+  for (;;) {
+    const transport = await chain.current()
+    const status = await transport.status()
+    if ((await chain.current()) === transport) return status
+  }
+}
+
 export interface ProviderStatusDeps {
   chain: Pick<ChainHolder, 'current'>
   router: Pick<SessionRouter, 'transportFor'>
@@ -43,6 +57,6 @@ export interface ProviderStatusDeps {
  */
 export async function providerStatus(deps: ProviderStatusDeps, message: { scope?: string; fresh?: boolean }): Promise<ProviderStatus> {
   if (message.fresh) await deps.offers.offer()
-  const transport = (!message.fresh && message.scope && deps.router.transportFor(message.scope)) || await deps.chain.current()
-  return transport.status()
+  const own = !message.fresh && message.scope ? deps.router.transportFor(message.scope) : undefined
+  return own ? own.status() : statusInForce(deps.chain)
 }

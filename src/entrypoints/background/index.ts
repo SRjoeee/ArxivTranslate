@@ -10,7 +10,7 @@ import { engineReady } from './engine-ready'
 import { createHelperClient } from './helper'
 import { createHelperWaiter } from './helper-await'
 import { createHelperRestart } from './helper-restart'
-import { createConfigOffers, providerStatus } from './provider-status'
+import { createConfigOffers, providerStatus, statusInForce } from './provider-status'
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { installContextMenu, refreshContextMenu, installToggleCommand } from './context-menu'
@@ -187,9 +187,10 @@ export default defineBackground(() => {
    * from the chain in force, which is built from them. The popup decides the same from the settings it holds
    */
   const saved = async () => {
-    // One snapshot: the chain in force, built from what is stored now (offered in order with every other offer)
+    // One snapshot: the chain in force, built from what is stored now (offered in order with every other offer),
+    // and still in force once its probes have answered
     await offers.offer()
-    return savedFromStatus(await (await transportOf()).status())
+    return savedFromStatus(await statusInForce(chain))
   }
   const menuDeps = {
     create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>

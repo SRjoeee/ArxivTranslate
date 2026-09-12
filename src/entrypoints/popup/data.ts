@@ -61,9 +61,15 @@ function openOptions(section?: OptionsSection): void {
 export function usePopupData(): { input: PopupInput; error: string | null; actions: PopupActions } {
   const [page, setPage] = useState<PageStatus | null>(null)
   const [provider, setProvider] = useState<ProviderStatus | null>(null)
-  const [config, setLocalConfig] = useState<Config | null>(null)
-  /** The digest of the saved chain settings, recomputed whenever the config here changes; what a page is behind or not */
-  const [savedRevision, setSavedRevision] = useState<string | null>(null)
+  /**
+   * The configuration this popup shows, with the digest of its chain settings — **one** state, set once the digest
+   * is known: a configuration shown beside the previous one's digest would call a page current that is behind it,
+   * and the button would restore where the toggle refuses (the local review of INVENTORY S2, third pass)
+   */
+  const [local, setLocal] = useState<{ config: Config; revision: string } | null>(null)
+  const config = local?.config ?? null
+  const savedRevision = local?.revision ?? null
+  const settle = useCallback(async (next: Config) => setLocal({ config: next, revision: await chainRevision(next) }), [])
   /** The offline service's language pack (§8.4); `downloadable` needs a click to create() (user gesture) */
   const [pack, setPack] = useState<PackState | null>(null)
   const [helper, setHelper] = useState<HelperStatus | null>(null)
@@ -96,17 +102,17 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   useEffect(() => {
     console.debug(`[axt] popup mounted ${Math.round(performance.now() - scriptStart)} ms after script start`)
     loadProvider()
-    getConfig().then(c => {
-      setLocalConfig(c)
+    getConfig().then(async c => {
+      await settle(c)
       void checkPack(c.targetLanguage)
-    }).catch(() => setLocalConfig(null))
+    }).catch(() => setLocal(null))
     refresh()
     browser.commands.getAll()
       .then(all => setShortcut(all.find(c => c.name === COMMAND_ID)?.shortcut || null))
       .catch(() => setShortcut(null))
     sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ state: 'not-installed' }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
-  }, [refresh, checkPack, loadProvider])
+  }, [refresh, checkPack, loadProvider, settle])
 
   // The background broadcasts the helper's state when it changes on its own — the guided install's wait found it,
   // or the fresh worker after a runtime grant reported (ADR-0002). Without this the card would stay up until the
@@ -119,15 +125,6 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     browser.runtime.onMessage.addListener(onState)
     return () => browser.runtime.onMessage.removeListener(onState)
   }, [])
-
-  // The saved settings' identity, for the "page behind the settings" test (shared/page-action.ts). A stale value
-  // from an earlier config must not answer for a newer one: the effect's own generation wins
-  useEffect(() => {
-    if (config === null) { setSavedRevision(null); return }
-    let alive = true
-    void chainRevision(config).then(revision => { if (alive) setSavedRevision(revision) }).catch(() => { if (alive) setSavedRevision(null) })
-    return () => { alive = false }
-  }, [config])
 
   // While the page is still loading the content script is not injected yet (document_idle), so
   // the first ask has no receiver; ask again every 500 ms a few times instead of declaring "not an
@@ -182,7 +179,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     const run = async () => {
       const next = patch(await getConfig())
       await setConfig(next)
-      setLocalConfig(next)
+      await settle(next)
       loadProvider()
       return next
     }
