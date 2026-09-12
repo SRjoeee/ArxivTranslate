@@ -65,11 +65,13 @@ export interface TranslationTransport {
   /** `scope` asks about that session's own chain rather than the current global one (§8.5) */
   status(scope?: string): Promise<ProviderStatus>
   /**
-   * Local chains only (absent on the content side). After this, a call still inside the chain — suspended on its
-   * cache read, outside every queue — is refused when it wakes and caches nothing. The router retires a chain it
-   * replaces because a service on it is gone: the scope stays live, on the replacement (ADR-0005)
+   * Local chains only (absent on the content side). Every scoped request queued or in flight on the chain is
+   * drained, whichever session left it here — a session moved on by a language pack leaves its earlier requests
+   * behind — and returned as the count; after this, a call still inside the chain (suspended on its cache read,
+   * outside every queue, or a connection test's retry) is refused when it wakes and caches nothing. The chain
+   * holder retires the chains a deletion replaces: the scope stays live, on the replacement (ADR-0005)
    */
-  retire?(): void
+  retire?(): number
   /** Local chains only: whether retire() has been called — the router never binds a session to such a chain */
   isRetired?(): boolean
   /**
@@ -206,6 +208,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     status,
     retire: () => {
       retired = true
+      return service.cancelAll()
     },
     isRetired: () => retired,
     busy: () => inFlight > 0,

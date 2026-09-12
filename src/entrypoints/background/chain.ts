@@ -29,11 +29,12 @@ export interface ChainHolder {
   current(): Promise<TranslationTransport>
   /**
    * Retire every build but the one in force, and forget them. A service was deleted: every chain other than the
-   * build in force — including one only a connection test used, which no session leads to — must refuse whatever
-   * wakes or retries inside it (ADR-0005). While the build in force has not landed (or failed), everything is
-   * retired: its sessions bind the replacement when it lands
+   * build in force — including one only a connection test used, which no session leads to — is drained of its
+   * scoped work and refuses whatever wakes or retries inside it (ADR-0005). While the build in force has not
+   * landed (or failed), everything is retired: its sessions bind the replacement when it lands. Returns how many
+   * requests the retired chains drained
    */
-  retireOthers(): void
+  retireOthers(): number
   /** Rebuild and make the result the chain in force: the reader's explicit actions (`axt:engine-ready`) */
   activate(config?: Config): Promise<Built>
   /**
@@ -138,11 +139,13 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
     },
     retireOthers() {
       const inForce = landed?.transport ?? null
+      let cancelled = 0
       for (const transport of built) {
         if (transport === inForce) continue
-        transport.retire?.()
+        cancelled += transport.retire?.() ?? 0
         built.delete(transport)
       }
+      return cancelled
     },
   }
 }

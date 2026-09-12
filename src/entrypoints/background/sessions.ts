@@ -86,12 +86,13 @@ export interface SessionRouterDeps {
    */
   stillLoading?: (tabId: number) => Promise<boolean>
   /**
-   * Retire every chain other than the build in force, or every chain while that build has not landed (ADR-0005).
-   * `dropAndRebindAll` calls it first, before anything is awaited: a chain only a connection test used has no
-   * session that leads to it, and a retired chain refuses every call that wakes or retries inside it, scoped or
-   * not. The router then takes the retired chains off their sessions and drains them
+   * Retire every chain other than the build in force, or every chain while that build has not landed (ADR-0005),
+   * draining each of its scoped work — whichever session left it there — and returning the count. `dropAndRebindAll`
+   * calls it first, before anything is awaited: a chain only a connection test used has no session that leads to
+   * it, and a retired chain refuses every call that wakes or retries inside it, scoped or not. The router then
+   * takes the retired chains off their sessions
    */
-  retireOthers?: () => void
+  retireOthers?: () => number
 }
 
 /**
@@ -270,25 +271,23 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
     },
     async dropAndRebindAll() {
       // Stopping the deleted service must not wait for its replacement: a rebuild can hang in an engine probe,
-      // fail, or be superseded (the local review of ADR-0005, fourth, fifth, ninth and thirteenth passes).
-      // 1. Before anything is awaited: the holder retires every chain but the build in force — every chain, while
-      //    that build has not landed — and the sessions on a retired chain lose it, keeping their scope → tab
-      //    entries (a tab closing later must still find them: image recognition queues by scope too)
-      deps.retireOthers?.()
-      const old: [string, TranslationTransport][] = []
+      // fail, or be superseded (the local review of ADR-0005, fourth, fifth, ninth, thirteenth and fourteenth
+      // passes). 1. Before anything is awaited: the holder retires every chain but the build in force — every
+      //    chain, while that build has not landed — draining each chain's scoped work, whichever session left it
+      //    there (a session moved on by a language pack leaves its earlier requests behind; the registry does not
+      //    mark it, so nothing else would stop them). The sessions on a retired chain lose it, keeping their
+      //    scope → tab entries (a tab closing later must still find them: image recognition queues by scope too)
+      const cancelled = deps.retireOthers?.() ?? 0
+      const taken: string[] = []
       for (const [scope, session] of sessions) {
         if (!session.transport?.isRetired?.()) continue
-        old.push([scope, session.transport])
+        taken.push(scope)
         sessions.set(scope, session.tabId !== undefined ? { tabId: session.tabId } : {})
       }
-      // 2. Drain the retired chains — do not mark: the scope stays alive, only the work on the chain it left goes.
-      //    A call suspended or retrying inside a retired chain is refused by the chain itself
-      let cancelled = 0
-      for (const [scope, chain] of old) cancelled += await chain.cancel(scope)
-      // 3. The replacement. A session binds it on its next request anyway (forCall); binding the ones taken off
+      // 2. The replacement. A session binds it on its next request anyway (forCall); binding the ones taken off
       //    a chain now keeps status answers and the holder's ownership current. A failed rebuild surfaces here
       const transport = await deps.current()
-      for (const [scope] of old) {
+      for (const scope of taken) {
         const session = sessions.get(scope)
         if (session && !session.transport) sessions.set(scope, { ...session, transport })
       }

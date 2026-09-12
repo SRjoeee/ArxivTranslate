@@ -90,7 +90,7 @@ describe('createChainHolder', () => {
 
   it('retireOthers() retires every build but the one in force, once', async () => {
     const retired: string[] = []
-    const make = (name: string) => ({ name, retire: () => { retired.push(name) } }) as unknown as TranslationTransport
+    const make = (name: string) => ({ name, retire: () => { retired.push(name); return 0 } }) as unknown as TranslationTransport
     let n = 0
     const holder = createChainHolder({ owned: () => false, load: async config => ({ config: config ?? DEFAULT_CONFIG, transport: make(`build-${++n}`) }) })
     await holder.current()
@@ -113,7 +113,7 @@ describe('createChainHolder', () => {
       load: async config => {
         const k = ++n
         if (k > 1) await new Promise<void>(resolve => { gates.set(k, resolve) })
-        return { config: config ?? DEFAULT_CONFIG, transport: { name: `build-${k}`, retire: () => { retired.push(`build-${k}`) } } as unknown as TranslationTransport }
+        return { config: config ?? DEFAULT_CONFIG, transport: { name: `build-${k}`, retire: () => { retired.push(`build-${k}`); return 0 } } as unknown as TranslationTransport }
       },
     })
     await holder.current()
@@ -134,7 +134,7 @@ describe('createChainHolder', () => {
     let n = 0
     const make = (): TranslationTransport => {
       const name = `build-${++n}`
-      const self = { name, retire: () => { retired.push(name) }, busy: () => busyOne === self } as unknown as TranslationTransport
+      const self = { name, retire: () => { retired.push(name); return 0 }, busy: () => busyOne === self } as unknown as TranslationTransport
       return self
     }
     const holder = createChainHolder({ owned: t => owned.has(t), load: async config => ({ config: config ?? DEFAULT_CONFIG, transport: make() }) })

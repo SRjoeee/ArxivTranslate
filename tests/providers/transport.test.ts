@@ -272,6 +272,34 @@ describe('createLocalTransport：翻译', () => {
     expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
   })
 
+  it('a deletion drains a chain its session left earlier: the request still in flight there is cancelled, never returned late (ADR-0005, fourteenth review pass)', async () => {
+    // A language pack moved the session to a new chain while its request was still at the old chain's endpoint;
+    // the registry does not mark a live session, so only draining the chain itself stops that request
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    let entered: () => void = () => {}
+    const atEndpoint = new Promise<void>(resolve => { entered = resolve })
+    const registry = new CancelledScopeRegistry()
+    let calls = 0
+    const holder = createChainHolder({
+      owned: transport => router.sessionsOn(transport) > 0,
+      load: async () => ({
+        config: DEFAULT_CONFIG,
+        transport: await withChain([mockProvider(async r => { if (++calls === 1) { entered(); await held } return { segments: r.segments, provider: 'mock' } })], { cancelled: registry }),
+      }),
+    })
+    const router = createSessionRouter({ current: () => holder.current(), cancelled: registry, retireOthers: () => holder.retireOthers() })
+    const first = await router.forCall('s1', 1)
+    const pending = first.translate({ request: req, scope: 's1' })
+    await atEndpoint
+    await holder.activate() // a language pack: the session moves on, its request stays at the old endpoint
+    await router.rebind('s1')
+    await holder.activate() // a service deleted
+    expect(await router.dropAndRebindAll()).toBeGreaterThan(0)
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    release()
+  })
+
   it('router and chain together: a tab closed while the first chain builds leaves no request out and nothing bound (ADR-0005, second review pass)', async () => {
     // The scope's first request arrived on a fresh worker (the chain still building) and the reader closed the
     // tab before it finished: the request must come back aborted, the provider untouched, the session unbound

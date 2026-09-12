@@ -104,6 +104,8 @@ export interface TranslateService {
   translate(call: TranslateCall): Promise<TranslateMessageResponse>
   /** Drain the scope's queued and in-flight requests; returns how many. Refusing the scope's later calls is the registry's job, not this method's */
   cancel(scope: string): number
+  /** Drain every scoped request, queued or in flight, whichever session left it here; returns how many. Retirement of the chain (ADR-0005) */
+  cancelAll(): number
 }
 
 /** Read Frog 的默认队列参数（DEFAULT_CONFIG.pageTranslation.requestQueueConfig 与 translation-queues.ts 里的常量） */
@@ -554,7 +556,18 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     return cancelled
   }
 
-  return { translate, cancel }
+  // Same order as cancel(): a batch still gathering flushes new tasks between the two drains the other way round.
+  // Unscoped work (a connection test) is not drained — the retirement gate refuses its next attempt
+  const cancelAll = (): number => {
+    let cancelled = 0
+    for (const { requestQueue, batchQueue } of queues.values()) {
+      cancelled += batchQueue.cancelWhere(() => true)
+      cancelled += requestQueue.cancelWhere(() => true)
+    }
+    return cancelled
+  }
+
+  return { translate, cancel, cancelAll }
 }
 
 /** 一次调用里多段失败时报哪个：配置错误优先（run.ts 据此停下），其次真正的失败，最后才是取消 */

@@ -131,6 +131,7 @@ export function createFallbackService(
 
   /** 恢复原文要撤掉每套队列：漏一个就有在飞请求回来往 DOM 写 */
   const cancel = (scope: string): number => steps.reduce((n, step) => n + step.service.cancel(scope), 0)
+  const cancelAll = (): number => steps.reduce((n, step) => n + step.service.cancelAll(), 0)
 
   const status = (): FallbackStatus => ({
     configuredId: steps[0]!.provider.id,
@@ -140,5 +141,5 @@ export function createFallbackService(
     demotions: steps.filter(step => isDemoted(step.provider.id)).map(step => demotions.get(step.provider.id)!.info),
   })
 
-  return { translate, cancel, status }
+  return { translate, cancel, cancelAll, status }
 }
