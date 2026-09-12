@@ -1354,8 +1354,9 @@ if (process.platform === 'darwin') {
   await popup.close()
 
   const optionsPage = await openOptions(context, extId)
-  check('授权：设置页图片翻译一节给的是「允许」按钮（S-O-86）',
-    await optionsPage.getByRole('button', { name: '允许', exact: true }).isVisible(), '')
+  // The helper state arrives asynchronously (the page asks the background on mount): wait for the button, do not sample it
+  const allowOnOptions = await optionsPage.getByRole('button', { name: '允许', exact: true }).waitFor({ timeout: 5_000 }).then(() => true, () => false)
+  check('授权：设置页图片翻译一节给的是「允许」按钮（S-O-86）', allowOnOptions, allowOnOptions ? '' : (await optionsPage.getByText(/识别助手/).first().textContent().catch(() => '')) ?? '')
   await optionsPage.close()
   await paper.page.close()
 
