@@ -99,10 +99,15 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
    * Service availability. Re-queried after a pack download and after every config change, or the
    * translate button stays in the state it had when the popup mounted
    */
-  /** Only the latest ask of each kind may publish: answers come back in any order, and a stale one would undo a newer */
+  /** Only the latest saved-settings ask may publish: answers come back in any order, and a stale one would undo a newer */
   const savedAsk = useRef(0)
-  const sessionAsk = useRef(0)
-  /** The session the page reports right now; a session answer for another one publishes nothing */
+  /**
+   * The session ask in flight, if any. Polls of the same session are coalesced rather than numbered: a generation
+   * bumped by every 500 ms tick would invalidate each answer that takes longer than a tick, and the session's chain
+   * would never show (Codex on #185). An answer for a session the page no longer reports publishes nothing
+   */
+  const sessionAskFor = useRef<string | null>(null)
+  /** The session the page reports right now */
   const sessionRef = useRef<string | null>(null)
   const loadProvider = useCallback((scope?: string | null, fresh = false): Promise<void> => {
     // While a page is translating, ask **its** chain: it stays on the one it started with, so the
@@ -110,10 +115,12 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     // for a refresh driven by a configuration change: the answer describes a chain built from what
     // is stored now, not the previous chain still in force (the local review of S1)
     if (scope) {
-      const ask = ++sessionAsk.current
+      if (sessionAskFor.current === scope) return Promise.resolve()
+      sessionAskFor.current = scope
+      const settled = () => { if (sessionAskFor.current === scope) sessionAskFor.current = null }
       return sendMessage({ type: 'axt:provider-status', scope })
-        .then(status => { if (ask === sessionAsk.current && sessionRef.current === scope) setSessionProvider(status) })
-        .catch(() => { if (ask === sessionAsk.current && sessionRef.current === scope) setSessionProvider(null) })
+        .then(status => { settled(); if (sessionRef.current === scope) setSessionProvider(status) })
+        .catch(() => { settled(); if (sessionRef.current === scope) setSessionProvider(null) })
     }
     const ask = ++savedAsk.current
     return sendMessage({ type: 'axt:provider-status', ...(fresh ? { fresh: true } : {}) })
