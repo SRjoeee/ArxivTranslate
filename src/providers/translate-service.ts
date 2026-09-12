@@ -505,10 +505,13 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
               : { key, translation: value.text, paper: cache.paper })
           }
         })
-        // 写之前再查一次取消（Codex 在 #33 指出）：一次调用会被拆到多个批次，先完成的那些
-        // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，
-        // 与「恢复原文之后不再写缓存」的承诺不符
-        if (store && writes.length > 0 && !refused(scope)) await store.putMany(writes)
+        // The last word, after every batch has settled: the scope died or the chain was retired meanwhile, and
+        // nothing of this call goes back — no cache write (a batch that finished before the drain would land in
+        // the cache after "restore the page"; Codex on #33), no `partial` for the caller to render, no result
+        // from a task an unscoped subscriber kept alive through the drain (the local review of ADR-0005,
+        // fifteenth pass)
+        if (refused(scope)) return { ok: false, error: { kind: 'aborted', message: scope === undefined ? '已取消（链已退役）' : `已取消（scope: ${scope}）`, isolatable: false } }
+        if (store && writes.length > 0) await store.putMany(writes)
         if (failures.length > 0) {
           const error = pickError(failures)
           // key 没配 / 不认：这轮里再打多少次都是同一个 401。`failQueue` 只排空**那一刻**排在

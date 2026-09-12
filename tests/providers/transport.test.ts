@@ -208,9 +208,9 @@ describe('createLocalTransport：翻译', () => {
     expect(calls).toEqual([])
   })
 
-  it('retire() while an unscoped batch is in flight: its answer comes back, nothing is cached', async () => {
-    // Already at the endpoint when the chain is retired: the answer was paid for and is returned, but a retired
-    // chain writes nothing — the check before the cache write, which used to look at the scope alone
+  it('retire() while an unscoped batch is in flight: nothing comes back, nothing is cached', async () => {
+    // Already at the endpoint when the chain is retired: a retired chain answers nothing and writes nothing —
+    // the check after every batch settled, which used to look at the scope alone and only guarded the cache write
     const writes: unknown[] = []
     let release: () => void = () => {}
     const held = new Promise<void>(resolve => { release = resolve })
@@ -222,8 +222,70 @@ describe('createLocalTransport：翻译', () => {
     await atEndpoint // real timers: the request is at the endpoint
     t.retire!()
     release()
-    expect((await pending).ok).toBe(true)
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
     expect(writes).toEqual([])
+  })
+
+  it('after retirement nothing of a call goes back: a scoped call sharing its task with an unscoped one gets aborted, not the shared result (ADR-0005, fifteenth review pass)', async () => {
+    // Deduplication merges the two calls into one queue task; the unscoped subscriber keeps that task alive
+    // through the drain, so it completes — the answer must still not reach the scoped caller
+    const writes: unknown[] = []
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    let entered: () => void = () => {}
+    const atEndpoint = new Promise<void>(resolve => { entered = resolve })
+    const cache: CachePort = { getMany: async keys => keys.map(() => null), putMany: async entries => { writes.push(entries) } }
+    const t = await withChain([mockProvider(async r => { entered(); await held; return { segments: r.segments, provider: 'mock' } })], { cache })
+    const scoped = t.translate({ request: req, scope: 'live', cache: { paper: '2410.00260', renderPath: 'tags' } })
+    const unscoped = t.translate({ request: req, cache: { paper: '2410.00260', renderPath: 'tags' } })
+    await atEndpoint
+    t.retire!()
+    release()
+    expect(await scoped).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(await unscoped).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(writes).toEqual([])
+  })
+
+  it('a call split over two batches and retired between them comes back aborted with no partial result', async () => {
+    // run.ts renders `partial` while the session is live; after retirement the finished batch must not be shown either
+    let calls = 0
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    let entered: () => void = () => {}
+    const second = new Promise<void>(resolve => { entered = resolve })
+    const writes: unknown[] = []
+    const cache: CachePort = { getMany: async keys => keys.map(() => null), putMany: async entries => { writes.push(entries) } }
+    const t = await withChain([mockProvider(async r => { if (++calls === 2) { entered(); await held } return { segments: r.segments, provider: 'mock' } }, { maxBatchItems: 1 })], { cache })
+    const pending = t.translate({ request: { segments: [{ id: 'a', text: 'x' }, { id: 'b', text: 'y' }], source: 'en', target: 'zh-CN' }, scope: 'live', cache: { paper: '2410.00260', renderPath: 'tags' } })
+    await second // the second batch is at the endpoint
+    await new Promise(resolve => setTimeout(resolve, 0)) // and the first has settled in the queue: only the second is drained
+    t.retire!()
+    release()
+    const result = await pending
+    expect(result).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(result.ok === false && result.partial).toBeUndefined()
+    expect(writes).toEqual([])
+  })
+
+  it('retire() and cancel(scope) reach an off-chain call already at its endpoint', async () => {
+    // Off-chain services are built per named call; one with a request in flight is drained with the chain
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise(() => undefined))
+    const spare = { ...SVC, id: 'svc-99999999' }
+    const build = () => createLocalTransport(
+      { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC, spare] },
+      { cancelled: new CancelledScopeRegistry(), buildChain: async () => ({ chain: [mockProvider(async r => ({ segments: r.segments, provider: 'mock' }))], renderPath: 'tags' as const }) },
+    )
+    const retiring = await build()
+    const onRetire = retiring.translate({ request: req, providerId: spare.id, scope: 'live' })
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+    expect(retiring.retire!()).toBeGreaterThan(0)
+    expect(await onRetire).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    const cancelling = await build()
+    const onCancel = cancelling.translate({ request: req, providerId: spare.id, scope: 'live' })
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2))
+    expect(await cancelling.cancel('live')).toBeGreaterThan(0)
+    expect(await onCancel).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    fetchSpy.mockRestore()
   })
 
   it('retire() between two attempts: the request queue retries the stored thunk, so the gate sits in front of every provider call', async () => {

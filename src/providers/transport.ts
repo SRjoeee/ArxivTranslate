@@ -10,7 +10,7 @@ import { buildChain } from '.'
 import { createOpenAICompatProvider } from './openai-compat'
 import { createFallbackService } from './fallback'
 import type { CancelledScopeRegistry } from './request/cancellation'
-import { createTranslateService, type CachePort, type TranslateCall, type TranslateMessageResponse, type TranslateServiceDeps } from './translate-service'
+import { createTranslateService, type CachePort, type TranslateCall, type TranslateMessageResponse, type TranslateService, type TranslateServiceDeps } from './translate-service'
 import type { ProviderErrorKind, TranslationProvider } from './types'
 
 /** 此刻实际在用的引擎与最近一次降级原因（§8.5）；popup 据此解释译文为什么换了引擎 */
@@ -147,12 +147,21 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
    * 链上有免费兜底就把它显示成成功，等于把 issue #42 抱怨的「两条路径不一致」换个方向再犯一次——
    * 用户会以为端点没问题，实际整页都在用 Google 翻
    */
-  const route = (call: TranslateCall): Promise<TranslateMessageResponse> => {
+  /** Off-chain services with a call inside: built per named call, they are drained and retired with the chain */
+  const offChainLive = new Set<TranslateService>()
+  const route = async (call: TranslateCall): Promise<TranslateMessageResponse> => {
     if (call.providerId === undefined) return service.translate(call)
-    const step = steps.find(s => s.provider.id === call.providerId) ?? offChain(call.providerId)
+    const step = steps.find(s => s.provider.id === call.providerId)
+    if (step) return step.service.translate(call)
+    const own = offChain(call.providerId)
     // 这一条与段落无关，拆小了也还是同一个引擎不在链上
-    if (!step) return Promise.resolve({ ok: false, error: { kind: 'unknown', message: `引擎 ${call.providerId} 不在当前链上`, isolatable: false } })
-    return step.service.translate(call)
+    if (!own) return { ok: false, error: { kind: 'unknown', message: `引擎 ${call.providerId} 不在当前链上`, isolatable: false } }
+    offChainLive.add(own.service)
+    try {
+      return await own.service.translate(call)
+    } finally {
+      offChainLive.delete(own.service)
+    }
   }
   /** Calls inside this chain right now; `busy()` reports it to the chain holder */
   let inFlight = 0
@@ -204,11 +213,17 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
 
   return {
     translate,
-    cancel: async scope => service.cancel(scope),
+    cancel: async scope => {
+      let cancelled = service.cancel(scope)
+      for (const own of offChainLive) cancelled += own.cancel(scope)
+      return cancelled
+    },
     status,
     retire: () => {
       retired = true
-      return service.cancelAll()
+      let cancelled = service.cancelAll()
+      for (const own of offChainLive) cancelled += own.cancelAll()
+      return cancelled
     },
     isRetired: () => retired,
     busy: () => inFlight > 0,
