@@ -70,6 +70,12 @@ export interface TranslationTransport {
    * replaces because a service on it is gone: the scope stays live, on the replacement (ADR-0005)
    */
   retire?(): void
+  /**
+   * Local chains only: a call is still inside the chain — suspended on its cache read, at the endpoint, in a
+   * retry backoff. The chain holder keeps a superseded chain while this is true, so a deleted service's chain
+   * can still be retired (ADR-0005)
+   */
+  busy?(): boolean
 }
 
 export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' | 'batch' | 'cacheReadBudgetMs'> {
@@ -137,12 +143,22 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
    * 链上有免费兜底就把它显示成成功，等于把 issue #42 抱怨的「两条路径不一致」换个方向再犯一次——
    * 用户会以为端点没问题，实际整页都在用 Google 翻
    */
-  const translate = (call: TranslateCall): Promise<TranslateMessageResponse> => {
+  const route = (call: TranslateCall): Promise<TranslateMessageResponse> => {
     if (call.providerId === undefined) return service.translate(call)
     const step = steps.find(s => s.provider.id === call.providerId) ?? offChain(call.providerId)
     // 这一条与段落无关，拆小了也还是同一个引擎不在链上
     if (!step) return Promise.resolve({ ok: false, error: { kind: 'unknown', message: `引擎 ${call.providerId} 不在当前链上`, isolatable: false } })
     return step.service.translate(call)
+  }
+  /** Calls inside this chain right now; `busy()` reports it to the chain holder */
+  let inFlight = 0
+  const translate = async (call: TranslateCall): Promise<TranslateMessageResponse> => {
+    inFlight++
+    try {
+      return await route(call)
+    } finally {
+      inFlight--
+    }
   }
 
   const status = async (): Promise<ProviderStatus> => {
@@ -189,6 +205,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     retire: () => {
       retired = true
     },
+    busy: () => inFlight > 0,
   }
 }
 

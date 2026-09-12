@@ -344,6 +344,7 @@ describe('createSessionRouter', () => {
     const router = routerOver(async () => t)
     await router.forCall('session-1', 1)
     expect(nameOf(router.transportFor('session-1')!)).toBe('链')
+    expect(router.sessionsOn(t)).toBe(1)
     expect(router.transportFor('从没有过的')).toBeUndefined()
     expect(router.bound()).toEqual(['session-1'])
   })

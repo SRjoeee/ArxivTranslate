@@ -11,7 +11,7 @@ const nameOf = (t: TranslationTransport) => (t as unknown as { name: string }).n
 describe('createChainHolder', () => {
   it('builds lazily on the first current() and keeps that build', async () => {
     let builds = 0
-    const holder = createChainHolder({ load: async config => { builds++; return { config: config ?? DEFAULT_CONFIG, transport: transport(`build-${builds}`) } } })
+    const holder = createChainHolder({ owned: () => false, load: async config => { builds++; return { config: config ?? DEFAULT_CONFIG, transport: transport(`build-${builds}`) } } })
     expect(nameOf(await holder.current())).toBe('build-1')
     expect(nameOf(await holder.current())).toBe('build-1')
     expect(builds).toBe(1)
@@ -19,7 +19,7 @@ describe('createChainHolder', () => {
 
   it('a configuration change rebuilds only when a field that shapes the chain changed', async () => {
     let builds = 0
-    const holder = createChainHolder({ load: async config => { builds++; return { config: config ?? DEFAULT_CONFIG, transport: transport(`build-${builds}`) } } })
+    const holder = createChainHolder({ owned: () => false, load: async config => { builds++; return { config: config ?? DEFAULT_CONFIG, transport: transport(`build-${builds}`) } } })
     await holder.current()
     holder.onConfig({ ...DEFAULT_CONFIG, mode: 'only' }) // volatile: the display mode
     expect(nameOf(await holder.current())).toBe('build-1')
@@ -32,6 +32,7 @@ describe('createChainHolder', () => {
     // move the sessions back onto it and retire the chain in force (the local review of ADR-0005, sixth pass)
     const gates = new Map<string, () => void>()
     const holder = createChainHolder({
+      owned: () => false,
       load: async config => {
         const built = config as Config
         await new Promise<void>(resolve => { gates.set(built.targetLanguage, resolve) })
@@ -53,6 +54,7 @@ describe('createChainHolder', () => {
     // ADR-0005, seventh pass)
     const gates = new Map<string, { ok: () => void; fail: () => void }>()
     const holder = createChainHolder({
+      owned: () => false,
       load: async config => {
         const built = config as Config
         await new Promise<void>((resolve, reject) => { gates.set(built.targetLanguage, { ok: resolve, fail: () => reject(new Error(`${built.targetLanguage} failed`)) }) })
@@ -71,7 +73,7 @@ describe('createChainHolder', () => {
     const retired: string[] = []
     const make = (name: string) => ({ name, retire: () => { retired.push(name) } }) as unknown as TranslationTransport
     let n = 0
-    const holder = createChainHolder({ load: async config => ({ config: config ?? DEFAULT_CONFIG, transport: make(`build-${++n}`) }) })
+    const holder = createChainHolder({ owned: () => false, load: async config => ({ config: config ?? DEFAULT_CONFIG, transport: make(`build-${++n}`) }) })
     await holder.current()
     await holder.activate()
     const inForce = await holder.activate()
@@ -81,9 +83,31 @@ describe('createChainHolder', () => {
     expect(retired).toEqual(['build-1', 'build-2']) // forgotten once retired
   })
 
+  it('a superseded build nothing uses is let go at the next current(); one with a session on it or a call inside is kept for retirement', async () => {
+    // A worker that lives through many configuration changes must not keep every chain it ever built
+    const owned = new Set<TranslationTransport>()
+    let busyOne: TranslationTransport | null = null
+    const retired: string[] = []
+    let n = 0
+    const make = (): TranslationTransport => {
+      const name = `build-${++n}`
+      const self = { name, retire: () => { retired.push(name) }, busy: () => busyOne === self } as unknown as TranslationTransport
+      return self
+    }
+    const holder = createChainHolder({ owned: t => owned.has(t), load: async config => ({ config: config ?? DEFAULT_CONFIG, transport: make() }) })
+    const first = await holder.current()
+    owned.add(first) // a page still reads on it
+    busyOne = (await holder.activate()).transport // a connection test still inside it
+    await holder.activate() // nothing on this one
+    await holder.activate() // nor on this one
+    const inForce = await holder.current() // the sweep: build-3 and build-4 are let go
+    holder.retireOthers(inForce)
+    expect(retired).toEqual(['build-1', 'build-2'])
+  })
+
   it('a failed build is retried by the next configuration change', async () => {
     let fail = true
-    const holder = createChainHolder({ load: async config => { if (fail) throw new Error('boom'); return { config: config ?? DEFAULT_CONFIG, transport: transport('ok') } } })
+    const holder = createChainHolder({ owned: () => false, load: async config => { if (fail) throw new Error('boom'); return { config: config ?? DEFAULT_CONFIG, transport: transport('ok') } } })
     await expect(holder.current()).rejects.toThrow('boom')
     fail = false
     holder.onConfig(DEFAULT_CONFIG)

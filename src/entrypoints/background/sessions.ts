@@ -47,6 +47,8 @@ export interface SessionRouter {
   dropAndRebindAll(): Promise<number>
   /** The transport a session is bound to, without binding one; for answering questions about it */
   transportFor(scope: string): TranslationTransport | undefined
+  /** How many sessions are on this chain; the chain holder keeps a superseded chain while any is */
+  sessionsOn(transport: TranslationTransport): number
   /** 当前还绑着的 scope，按绑定顺序 */
   bound(): string[]
 }
@@ -287,6 +289,7 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       return cancelled
     },
     transportFor: scope => sessions.get(scope)?.transport,
+    sessionsOn: transport => [...sessions.values()].filter(session => session.transport === transport).length,
     bound: () => [...sessions.keys()],
   }
 }

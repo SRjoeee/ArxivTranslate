@@ -9,6 +9,11 @@ export interface Built {
 export interface ChainHolderDeps {
   /** Build the chain from a configuration, or from the stored one when none is given */
   load: (config?: Config) => Promise<Built>
+  /**
+   * Whether a session is still on this chain — the router knows. Required: a superseded chain nobody is on and
+   * with no call inside is let go, and without this answer a chain with pages on it would be let go too
+   */
+  owned: (transport: TranslationTransport) => boolean
 }
 
 /**
@@ -42,7 +47,13 @@ export interface ChainHolder {
 
 export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
   let active: Promise<Built> | null = null
-  /** Every chain built and not yet retired: the ones sessions may still be on, and the ones nothing leads to */
+  /**
+   * Every chain built and neither retired nor let go: the one in force, the ones sessions are still on, the ones
+   * with a call still inside (a connection test in its retry backoff) that nothing else leads to. Superseded
+   * chains with none of that are let go at the next `current()` — a worker that lives through many configuration
+   * changes must not keep every chain it ever built, with its queues and native translator sessions
+   * (the local review of ADR-0005, eighth pass)
+   */
   const built = new Set<TranslationTransport>()
   const build = (config?: Config): Promise<Built> =>
     deps.load(config).then(result => {
@@ -53,6 +64,12 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
     active = build(config)
     return active
   }
+  const sweep = (inForce: TranslationTransport): void => {
+    for (const transport of built) {
+      if (transport === inForce || transport.busy?.() || deps.owned(transport)) continue
+      built.delete(transport)
+    }
+  }
   return {
     activate,
     async current() {
@@ -60,7 +77,10 @@ export function createChainHolder(deps: ChainHolderDeps): ChainHolder {
         const promise = active ?? activate()
         try {
           const result = await promise
-          if (promise === active) return result.transport
+          if (promise === active) {
+            sweep(result.transport)
+            return result.transport
+          }
         } catch (e) {
           // A build that failed after being superseded is nobody's answer; only the one in force may fail the caller
           if (promise === active) throw e

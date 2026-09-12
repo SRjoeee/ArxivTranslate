@@ -251,6 +251,7 @@ describe('createLocalTransport：翻译', () => {
     let calls = 0
     const registry = new CancelledScopeRegistry()
     const holder = createChainHolder({
+      owned: transport => router.sessionsOn(transport) > 0,
       load: async () => ({
         config: DEFAULT_CONFIG,
         transport: await withChain([mockProvider(async r => {

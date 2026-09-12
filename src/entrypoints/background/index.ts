@@ -6,6 +6,7 @@ import { toErrorInfo } from '@/providers/translate-service'
 import { isAxtMessage } from '@/shared/messages'
 import { HELPER_HOST } from '@/shared/ocr'
 import { createChainHolder } from './chain'
+import { engineReady } from './engine-ready'
 import { createHelperClient } from './helper'
 import { createHelperWaiter } from './helper-await'
 import { createOcrService } from './ocr'
@@ -28,6 +29,8 @@ export default defineBackground(() => {
       const resolved = config ?? await getConfig()
       return { config: resolved, transport: await createLocalTransport(resolved, { cache, cancelled }) }
     },
+    // The router is created below; a superseded chain is only ever swept after a build, long after that
+    owned: transport => router.sessionsOn(transport) > 0,
   })
   const transportOf = () => chain.current()
   /** 这个 worker 当前用的界面语言，用来认出「读者改了它」（右键菜单的标题要跟着重画） */
@@ -215,22 +218,9 @@ export default defineBackground(() => {
           .catch((e: unknown) => console.error('[axt] provider-status 失败', e))
         return true
       case 'axt:engine-ready':
-        // 语言包下载完之前建的链里没有这个引擎（buildChain 会把 isAvailable 为假的剔掉），
-        // 或者它已被永久降级。重建一条新链，让它重新参与（§8.5，Codex 在 #50 指出）。
-        // **迁哪些会话由发起方决定**（Codex 在 #59 / #157 指出）：popup 的语言包下载只对它打开的那个
-        // 标签页说过「接下来的段落会用离线翻译」，就只迁那一个；删掉的服务必须处处停用，才迁全部；
-        // 其余只重建链，正在翻的页面保留它开始时的那条。被动的配置变更一律不迁（见 sessions.ts）
-        chain.activate()
-          .then(async () => {
-            // Cancelling first is what makes a deleted service stop: re-pointing alone leaves its
-            // queued and in-flight work running on the transport being replaced (Codex on #157).
-            // The router moves onto the chain in force, whichever rebuild finished last (ADR-0005)
-            if (message.rebindAll) await router.dropAndRebindAll()
-            else if (message.scope) await router.rebind(message.scope)
-            return (await transportOf()).status()
-          })
-          .then(status => sendResponse({ reset: status.chain.includes(message.id) }))
-          .catch(() => sendResponse({ reset: false }))
+        // Rebuild and move whom the sender says (./engine-ready.ts): a downloaded language pack moves one tab, a
+        // deleted service moves everyone and retires its chain — the movers act on the chain in force
+        void engineReady(chain, router, message).then(sendResponse)
         return true
       // IndexedDB 不可用时也要回话，否则调用方等到的是"message channel closed"（Codex 在 #7 指出）
       case 'axt:cache-clear':
