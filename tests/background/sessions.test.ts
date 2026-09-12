@@ -372,6 +372,36 @@ describe('createSessionRouter', () => {
     expect(dropped).toEqual(['s1', 's2'])
   })
 
+  it('bindTo is provisional: a session bound at status time takes nothing from the tab until its first request, which then drops the tab\'s earlier sessions (S2 review, eighth pass)', async () => {
+    const chain = fakeTransport('链')
+    const router = routerOver(async () => chain)
+    // The tab's session, on its chain, with a request made
+    expect(nameOf(await router.forCall('winner', 7))).toBe('链')
+    // A restart that lost: its status came back late and bound it — nothing happens to the winner
+    router.bindTo('loser', chain, 7)
+    expect(router.bound().sort()).toEqual(['loser', 'winner'])
+    expect(router.transportFor('winner')).toBe(chain)
+    expect(chain.cancelled).toEqual([])
+    // The next session of the tab makes its first request: the winner and the lingering loser are its stale predecessors
+    router.bindTo('next', chain, 7)
+    expect(nameOf(await router.forCall('next', 7))).toBe('链')
+    expect(router.bound()).toEqual(['next'])
+    expect(chain.cancelled.sort()).toEqual(['链:loser', '链:winner'])
+    // Its second request is an ordinary bound call: nothing more is dropped
+    await router.forCall('next', 7)
+    expect(chain.cancelled).toHaveLength(2)
+  })
+
+  it('a provisional binding to a chain since retired is not used: the first request binds the chain in force', async () => {
+    const old = fakeTransport('旧')
+    const fresh = fakeTransport('新')
+    const router = routerOver(async () => fresh)
+    router.bindTo('s1', old, 7)
+    old.retire?.()
+    expect(nameOf(await router.forCall('s1', 7))).toBe('新')
+    expect(router.transportFor('s1')).toBe(fresh)
+  })
+
   it('bind：只记 tab 关联、同步返回、不建链；之后 dropTab 撤得到，forCall 再填链并保留 tab', async () => {
     const transport = fakeTransport('链')
     let built = 0

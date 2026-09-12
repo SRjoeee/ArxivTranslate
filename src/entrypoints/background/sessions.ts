@@ -20,7 +20,8 @@ export interface SessionRouter {
   bind(scope: string, tabId: number | undefined): void
   /**
    * Bind a session to a given chain — the one whose status it was just told, so the settings it records are the
-   * settings that serve it (provider-status.ts). Nothing happens for a scope already on a chain or already dropped
+   * settings that serve it (provider-status.ts). Provisional: the tab's earlier sessions are dropped by this one's
+   * first request (`forCall`), not now. Nothing happens for a scope already on a chain or already dropped
    */
   bindTo(scope: string, transport: TranslationTransport, tabId: number | undefined): void
   /** 撤掉这些 scope 并解绑，返回撤掉的条数 */
@@ -117,7 +118,12 @@ const NAVIGATION_GRACE_MS = 3000
 
 export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
   /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
-  const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number }>()
+  /**
+   * `provisional`: bound to a chain at status time (`bindTo`), before the session has made a request. Such a binding
+   * takes nothing from the tab's other sessions yet — a restart whose status came back late must not cancel the
+   * restart that won (the local review of INVENTORY S2, eighth pass); the first request makes it the tab's session
+   */
+  const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number; provisional?: true }>()
   /** 按住的「可能跳走了」，按标签页；这个标签页再来一次请求就取消 */
   const leaving = new Map<number, ReturnType<typeof setTimeout>>()
 
@@ -225,7 +231,22 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       // 也没人再武装一次，旧会话的队列会一直跑（Codex 在 #143 指出）。到点问页面自己才是判据
       if (scope === undefined) return deps.current()
       const bound = sessions.get(scope)
-      if (bound?.transport) return bound.transport
+      if (bound?.transport && !bound.provisional) return bound.transport
+      if (bound?.transport && !bound.transport.isRetired?.()) {
+        // The first request of a session bound at status time: now it is the tab's session, and the tab's earlier
+        // ones are stale (a refresh, a navigation without endRun) — the same drop a new scope gets below, deferred
+        // to here so that a binding made for a restart that lost cancels nothing (eighth pass)
+        const { provisional: _, ...settled } = bound
+        sessions.set(scope, { ...settled, ...(tabId !== undefined ? { tabId } : {}) })
+        const stale = tabId !== undefined ? scopesOfTab(tabId).filter(other => other !== scope) : []
+        if (stale.length > 0) await drop(stale)
+        return bound.transport
+      }
+      if (bound?.provisional) {
+        // Bound provisionally to a chain since retired: the loop below binds the chain in force, as for a fresh scope
+        const { provisional: _, transport: __, ...rest } = bound
+        sessions.set(scope, rest)
+      }
       if (!bound && deps.cancelled.has(scope)) {
         // A dropped session calling again (the old content script in this worker still sends): hand it the current
         // chain, drained of the scope first — the registry refuses the request anyway
@@ -276,11 +297,7 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       if (deps.cancelled.has(scope) || transport.isRetired?.()) return
       const bound = sessions.get(scope)
       if (bound?.transport) return
-      if (!bound && tabId !== undefined) {
-        const stale = scopesOfTab(tabId)
-        if (stale.length > 0) void drop(stale)
-      }
-      sessions.set(scope, { ...bound, transport, ...(tabId !== undefined ? { tabId } : {}) })
+      sessions.set(scope, { ...bound, transport, provisional: true, ...(tabId !== undefined ? { tabId } : {}) })
     },
     drop,
     dropTab: tabId => {
