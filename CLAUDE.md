@@ -1,220 +1,95 @@
-# CLAUDE.md — arXiv HTML Translator
+# CLAUDE.md — Read arXiv
 
-面向 `https://arxiv.org/html/*` 的 Chrome 翻译扩展：保结构、可逆、适合长期阅读的双语翻译。
+Chrome extension (MV3) that translates `https://arxiv.org/html/*` in place: structure-preserving, reversible, made for long bilingual reading sessions. Display name **Read arXiv**; repository `ReadarXiv`; everything the extension injects is prefixed `axt-` / `data-axt-` / `--axt-`.
 
-**开工前必读 `docs/DESIGN.md`**，它是唯一事实来源。任何与它冲突的实现都是错的；要改设计，先改文档再改代码。
-`docs/RESEARCH.md` 存放 Phase 0 的实测结论（选择器校订、参考文件地图、接口存活状态）。
+## Where the truth lives
 
----
+The project is being rebuilt toward V1.0 under the owner's mandate of 2026-09-12. Read in this order:
 
-## 技术栈（固定，不要另选）
+1. `docs/rebuild/CHARTER.md` — the mandate: goals, freedoms, risk boundaries, how work is organized. It overrides habits recorded anywhere else.
+2. `docs/adr/` — one decision per file. ADR-0001 is the governance: baseline, workspace, which MVP conventions survive, which contracts get migrations.
+3. `docs/rebuild/PROGRESS.md` — the checkpoint log. After a context switch, start there.
+4. `docs/rebuild/INVENTORY.md` and `docs/rebuild/BASELINE.md` — what the MVP code actually does (module map, run paths, the guard ledger: what each odd branch originally fixed and which test guards it) and what its suites and measurements protect. The evidence for every trade-off.
+5. `docs/DESIGN.md` — **frozen** record of the v0.1 implementation (tag `v0.3.0-mvp`), with `docs/RESEARCH.md` (Phase 0 measurements) and `docs/UI.md` (the MVP UI contract). Cite them as evidence, not as the spec; edit them only to correct a misleading factual error, with a dated note.
 
-| 用途 | 选择 |
-|---|---|
-| 扩展框架 | WXT + TypeScript，pnpm |
-| UI | React；注入页面的浮层用 WXT `createShadowRootUi` 做 Shadow DOM 隔离；popup / options 是独立扩展页面，无需隔离 |
-| LLM 调用 | Vercel AI SDK（`ai` + `@ai-sdk/openai-compatible`（OpenRouter / DeepSeek / Ollama）/ `@ai-sdk/anthropic` / `@ai-sdk/google`），结构化输出用 `generateText` + `Output.object` + zod（AI SDK 7，`generateObject` 已被取代）；请求拼装、流式、错误分类交给 SDK，不自己维护接口 |
-| 校验 | zod |
-| 队列 / 重试 | 移植 Read Frog `utils/request/`（`request-queue` 令牌桶 + `batch-queue` 攒批 + `retry-policy`），见 DESIGN.md §8.2 |
-| 缓存 | Dexie（IndexedDB），移植 FluentRead 的缓存实现 |
-| 配置 | WXT storage（带 schema 版本与迁移） |
-| hash | Web Crypto SHA-256 |
-| Chrome 内置翻译类型 | `@types/dom-chromium-ai` |
-| 测试 | Vitest + happy-dom |
-| Lint | Biome（只开 linter；formatter 关着，长行与移植文件不重排；`src/providers/request/**` 等整目录移植的代码用 biome.json 的 override 放宽规则，不为 lint 改移植原文） |
+`main` is frozen at the MVP baseline. Rebuild work happens on `rebuild/v1` (worktree `.worktrees/rebuild`). Without the owner's explicit request: nothing merges into `main`, no version is released, no history is rewritten.
 
-不从零实现：请求队列、重试退避、hash、存储封装、JSON 解析容错。一律用上表的库，或移植参考仓库里已经成熟的实现（如 Read Frog 的 `utils/request/*`、FluentRead 的 `services/translation/cache.ts`，后者带 Dexie，允许）。
+## Hard rules
 
----
+Each is a product promise, a legal requirement, or a contract with something outside this repository. They survive the rebuild unchanged.
 
-## 目录结构
+1. **DOM invariants** (DESIGN §7.1, guarded by tests): a translation node is inserted only as the next sibling of its original block; an original node gains `data-axt-*` attributes and nothing else; global state lives only on `<html>`; after restore the DOM equals the pre-translation DOM node by node.
+2. **Prefixes**: every injected class, data attribute and CSS variable starts with `axt-` / `data-axt-` / `--axt-`.
+3. **Free and built-in translation APIs are unreliable by assumption**: their failure must be recoverable and must trigger the fallback chain; it must never take the extension down.
+4. **Cache key** carries `providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText`; bump the version whenever a prompt or a rule changes meaning.
+5. **Secrets**: API keys live only in WXT storage — never in logs, cache keys, fixtures or git.
+6. **Attribution**: code ported from `reference/` (KISS Translator, Read Frog, FluentRead — GPL-3.0, read-only, git-ignored) keeps the header `// Ported from reference/<repo>/<path>@<commit> (GPL-3.0), <YYYY-MM-DD>, modified` and an entry in `docs/THIRD_PARTY.md`.
+7. **External contracts** (ADR-0001 §6) get migration or compatibility handling, never silent replacement: the saved configuration schema, the Native Messaging protocol with the installed `axt-helper`, the installer surface.
 
-```
-src/
-  entrypoints/
-    content.ts          # 注入 arxiv.org/html/*
-    background.ts       # 队列、providers、缓存
-    popup/              # React
-    options/            # React
-  core/
-    rules/latexml.ts    # 所有 ltx_* 选择器只能出现在这里，导出 RULES_VERSION
-    extractor/          # 块提取
-    protector/          # 占位符：序列化、校验、回填、runs 切段
-    renderer/           # 兄弟节点插入、模式切换、恢复
-    scheduler/          # 按视口触发的一次性观察器、会话 id、标题翻译、主线程切片
-  providers/
-    types.ts            # TranslationProvider 接口（见 DESIGN.md §8）
-    openai-compat.ts  anthropic.ts  gemini.ts  chrome-builtin.ts  google-gtx.ts
-    prompt.ts           # LLM prompt，导出 PROMPT_VERSION
-  cache/
-  config/
-  styles/
-    modes.css           # side / stack / only
-    presets.css         # 译文样式预设
-docs/
-  DESIGN.md  RESEARCH.md
-tests/
-  fixtures/arxiv/<arxiv-id>.html
-reference/              # 参考仓库，gitignore，只读
-```
+Two MVP design rules stay as defaults, open to re-evaluation with evidence: `ltx_*` selectors live only in `src/core/rules/latexml.ts` (style sheets may use them for layout only); the renderer chooses markup vs. runs by the provider's `preservesMarkup`, never by provider identity.
 
----
+## Stack
 
-## 硬规则
+WXT + React + TypeScript with pnpm · Vercel AI SDK for LLM providers (structured output via `generateText` + `Output.object` + zod) · Dexie for the translation cache · WXT storage with schema versions and migrations · Vitest + happy-dom for unit tests, Playwright for e2e · Biome, linter only · Swift for the macOS image-recognition helper. Target is Chrome MV3 (`minimum_chrome_version` in `wxt.config.ts`); no cross-browser branches or polyfills; runtime feature detection stays because a free API can be absent on the same Chrome.
 
-1. **DOM 不变量**（DESIGN.md §7.1）：译文节点只作为原块的下一个兄弟插入；原节点只允许追加 `data-axt-*` 属性，不改子树；全局状态只在 `<html>` 上；恢复后 DOM 必须与翻译前逐节点相等。有测试守护，不许绕。
-2. **选择器只在一处**：任何 `ltx_*` 选择器只能写在 `src/core/rules/latexml.ts`，其他 TS 文件通过规则模块的函数访问。唯一例外是 `src/styles/*.css`：布局要声明式地写在样式表里，不能靠运行时给节点打标记，那会把排版和 JS 生命周期耦在一起。样式表里的 `ltx_*` 只用于布局，规则模块仍是「哪些内容要翻译」的唯一事实来源。
-3. **两条渲染路径**：provider 的 `preservesMarkup` 决定走 markup 还是 runs，不要在渲染层写 provider 特判。
-4. **免费接口视为不稳定**：`chrome-builtin`、`google-gtx` 各自独立文件、独立错误类型；失败必须可恢复并触发 fallback 链，不能让扩展整体挂掉。
-5. **前缀**：所有注入的 class / data 属性 / CSS 变量以 `axt-` / `data-axt-` / `--axt-` 开头。
-6. **缓存键**必须包含 `providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText`。改了 prompt 或规则就要升版本号。
-7. **敏感信息**：API key 只存 WXT storage，永不进日志、缓存键、测试 fixture、git。
+This is the current stack, not a fixed one: a change is allowed with evidence of real benefit and an ADR (charter §5).
 
----
+## Working rules
 
-## 参考代码使用边界
+- **A PR is one complete, explainable, verifiable design change.** Cross-module changes update the interface and every caller together. Keep unrelated changes out; never split a coherent change to make it small. The MVP-era measurement (ADR-0001 §8) shows large PRs cost five to six Codex rounds — the local review before opening is how that cost is paid down.
+- **Gate before every PR** — the same four steps CI runs: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`, plus the e2e scripts relevant to the change. `pnpm test` is vitest and does not type-check (#115 went red in CI after a green local run for exactly this reason).
+- **Self-review before asking for review.** On 2026-09-08 about a quarter of the review rounds went to "fixing A broke B": after adding a constraint, grep for everyone else on that path; read your own diff as someone else's code and ask what used to work and now does not.
+- **Local Codex review, then the PR.** Run `/codex:adversarial-review` (or `/codex:review`; both wrap `node <codex plugin>/scripts/codex-companion.mjs … --base rebuild/v1 --scope branch`) and pass it before opening the PR. Then wait for CI and the Codex GitHub review's terminal signal — 👍, review comments, or a usage-limit notice; 👀 means still reviewing. Verify every comment against a fixture, a probe or the code before adopting it; write down what you declined and why. One review request per fix batch, not per commit. Details: `docs/agents/codex-review.md`.
+- **Do not wait on review to start the next independent PR.** Disjoint files are necessary but not sufficient for independence: a branch that consumes a type, a schema value or a behaviour a pending PR introduces depends on it — branch from the pending branch or wait. Two branches editing the same file is the case to avoid outright.
+- **Parallel agents for measurement and reading, not for implementation.** Probes, inventories and multi-angle reviews are independent and self-verifying; run them concurrently and re-check their conclusions here. Implementation correctness comes from holding the whole context; cross-module interface changes are single-threaded.
+- **Verify before relying.** A claim in a frozen document or an old comment is a hypothesis: check it with a fixture, a probe or `git log -S` before building on it, and record what you found in the ADR that depends on it.
+- **Ported code.** The MVP's "port the whole directory, clean up later" policy is over (ADR-0001 §9). Keep only what is called; when a ported module is touched, its unused parts go.
 
-`reference/` 下是 KISS Translator、Read Frog、FluentRead 的源码（GPL-3.0，与本项目同许可证），**只读**。
+## Language
 
-- **默认优先移植**：它们已经迭代多年，能整段拿来用的就拿来用（provider 请求拼装、队列 / 重试 / 批处理、缓存、配置迁移、占位符校验、视口调度、样式预设、UI 组件），移植后按本项目的命名与目录改造，不引入它们的配置体系。参考文件地图见 `docs/RESEARCH.md` §4。**搬不搬只看有无负面影响**：暂时用不上但没有额外负担的部分随模块一起搬（按目录搬，不按函数挑），功能稳定后统一清理；会让性能或效果变差的才单独讨论取舍，并把理由写进 DESIGN.md。
-- **原创的例外**只有三种：(1) arXiv 适配——`rules/latexml.ts`、`extractor` 的 LaTeXML 路径与 `protector` 占位符引擎（Phase 1 / 2 已完成，DESIGN.md §6）；(2) `renderer`——三个项目都改动、包裹或替换原节点，与 DESIGN.md §7.1 的 DOM 不变量冲突；(3) 移植会与 DESIGN.md 的不变量冲突或让代码变乱时改写，并在 PR 里说明理由。
-- **来源标注（GPL §5）**：每个移植文件的文件头写 `// Ported from reference/<repo>/<path>@<commit> (GPL-3.0), <YYYY-MM-DD>, modified`（GPL §5(a) 要求修改声明带日期；模板本身也用英文，与下面的语言规则一致——已有文件在下次实质改动时一并换），并在 `docs/THIRD_PARTY.md` 登记；改写幅度大的也要登记。
-- 面向未来：extractor 以"站点适配器"接口组织，LaTeXML 是第一个适配器；通用启发式 walker（Read Frog `dom/filter.ts`、`dom/traversal.ts`）移植后作为 v2 的第二个适配器接入其他论文站点，v1 仍只做 arXiv。
+Everything written for developers is English: identifiers, comments, docs, test names and assertion messages, commit messages (`type(scope): summary`), PR descriptions, issues. Convert existing Chinese where a change touches it — the passage and its surroundings, never a whole file for one line (an 800-line translation diff is unreviewable and breaks `git blame`; Codex on #120).
 
----
+Three kinds of Chinese are product, not prose, and stay:
 
-## 工作流
+1. **Product copy** — the extension speaks Chinese to its readers; popup and options strings are the product.
+2. **Localization data** — `LANG_CODE_TO_ZH_NAME` / `LANG_CODE_TO_LOCALE_NAME` feed the language labels shown in settings.
+3. **Multilingual test inputs and expectations** — `weights -> 权重` in the prompt tests and `证明。` in the rules tests are the non-Latin coverage itself; translating them silently deletes it.
 
-- 任何超过 100 行的模块，先用 plan mode 给出方案再写代码；方案要引用 DESIGN.md 的对应章节。
-- **一个模块一个分支 / PR，而且要小**。`rules`、`protector`、`renderer` 的改动必须附带测试。
-  2026-09-08 数了一天九个 PR 的实际代价。**「有建议的轮次」可以精确数**（`pulls/N/reviews` 里带正文的）；
-  **无建议的运行数不可考**——那条路径上该接口是空的，只留一个 👍，而 👍 会被下一轮的 👀 覆盖
-  （`docs/agents/codex-review.md` 自己写着这两点，我第一次数还是漏了）。所以只能给下界：
+Conversation with the owner is in Chinese.
 
-  | PR | #112 | #114 | #110 | #117 | #116 | #113 | #106 | #115 | #107 |
-  |---|---|---|---|---|---|---|---|---|---|
-  | 行数 | 32 | 46 | 61 | 79 | 155 | 219 | 491 | 631 | 845 |
-  | 有建议的轮次 | 0 | 1 | 0 | 0 | 1 | 2 | 5 | 5 | 4 |
-  | 终轮 👍 | 有 | **无** | 有 | 有 | 有 | **无** | 有 | 有 | 有 |
-  | **运行数下界** | 1 | 1 | 1 | 1 | 2 | 2 | 6 | 6 | 5 |
-
-  （#113 / #114 是核实完建议就合了，没跑最后一轮干净审查，所以它们没有那个 +1。）
-
-  **100 行以下下界是 1 次；491 行往上下界是 5–6 次。** 上面说了小的那几个可能有被覆盖掉的干净运行，
-  所以这里也只能说下界——但下界之间已经差了 5 倍，结论不依赖那些数不到的运行。 合并成大 PR 会**更费**审查额度，不是更省——
-  大 PR 每轮的意见也更多、来回更久。CI 那两分钟在这个量级上不是瓶颈。
-  两条例外，该合就合：**只描述某个改动的文档跟着那个改动走**（单独发会白占一轮）；
-  **动同一个函数的改动一起走**（分开会互相制造 rebase 冲突）。
-- **请求审查之前先自查这三条**，今天有约四分之一的审查轮次是花在「修 A 的时候弄坏了 B」上的：
-  1. 跑齐下面那条闸门的**四步**（`typecheck` / `lint` / `test` / `build`）**加上与改动相关的 e2e**，不是只跑单测——
-     `pnpm test` 是 vitest，不查类型；
-  2. **每加一条约束就 grep 一遍还有谁走这条路**——加了「不接受标签格式」之后没查还有谁在发文本，
-     于是设置页的「测试连接」永远失败（#115）；
-  3. 把自己的 diff 当成别人的代码通读一遍，问「这次改动让什么原本能用的东西不能用了」。
-- 一次修复批次只叫一次审查，不要推一个 commit 叫一次。
-- **Do not wait on review to start the next independent PR.** Review is the bottleneck, not
-  authorship: on the lower bounds above, a PR under 100 lines costs at least one Codex run and one
-  over 491 at least five or six, and Codex hit its usage limit four times on 2026-09-08.
-
-  Check what the next PR actually depends on. Disjoint file lists are necessary but **not
-  sufficient**: a branch consuming a type, a schema value or a behaviour that a pending PR
-  introduces is not independent of it however disjoint the files, because it would compile against a
-  `main` that lacks the prerequisite and validate the wrong behaviour. Branch that one off the
-  pending branch, or wait. This is not hypothetical — carrying alignment through the queue consumes
-  a type #125 introduces while touching entirely different files. Where no such dependency exists,
-  branch from `main` and start; rebasing disjoint files is cheap and waiting is not.
-
-  Two branches editing the same file is the case to avoid outright: #118 and #120 both touched
-  CLAUDE.md, and #115 carried a conflict rebase could not see, where an assertion pinned a value
-  #116 had renamed.
-- **Parallelise measurements with subagents; write implementation yourself.** Probes and
-  experiments are independent, self-verifying (the output is numbers), land no code, and need none
-  of the invariants in this file — those are worth running concurrently, with the conclusions
-  re-checked here, since a measurement can be wrong in ways its own output does not show (the
-  sentLen figures reported on #105 were measured on contaminated input). Implementation is the
-  opposite: correctness here keeps coming from holding the whole context — that `\s` eats NBSP,
-  that §5.2 relies on boundary whitespace between inline blocks, that a mutation check can look
-  like it passed while testing the wrong half. Briefing a subagent to that standard costs about as
-  much as writing the module.
-- 结束前必须通过：`pnpm typecheck && pnpm lint && pnpm test && pnpm build`（**与 CI 的四步一致**）。`pnpm test` 是 vitest，**不做类型检查**；漏掉 typecheck 的话本地会全绿而 CI 红——2026-09-08 的 #115 就是这么栽的。
-- **PR 开出或 push 后，等 Codex 审完再合并**：它先打 👀 反应表示审查中，结束时留 👍 反应（无建议）、一条 review + 行内评论（有建议）或限额提示，三种终态信号之一出现前不要合。评论逐条核实（fixture / 实测 / 读代码）再采纳，没采纳的写明理由。See `docs/agents/codex-review.md`。
-- 遇到 DESIGN.md 里标 **[待验证]** 的内容，先用 fixture 或 curl 实测，把结论写进 `docs/RESEARCH.md`，再实现。
-- 发现 DESIGN.md 与实测不符：停下，在 RESEARCH.md 记录差异并提出修改建议，不要默默改设计。
-- **写给开发者看的一切用英文**：标识符、注释、文档、测试名与断言文案、commit message、PR 描述、issue。
-  commit 格式 `type(scope): summary`。
-  存量（2026-09-09 时 179 个文件、5727 行）**改哪段转哪段**：只转这次改动碰到的那部分与它周围的行文，
-  **不要因为动了一行就翻掉整个文件**——`docs/DESIGN.md` 858 行、`docs/phase0/rules-audit.md` 656 行，
-  那样产生的正是本条想避免的、没法审又打断 `git blame` 的巨型 diff（Codex 在 #120 指出）。
-
-  **三类中文不动，它们是功能不是行文**：
-  1. **产品 UI 的文案**——这个扩展对用户讲中文。popup 与 options 里的提示语、错误文案、按钮标签
-     都是产品的一部分，翻成英文是改产品，不是改代码风格。
-  2. **本地化数据**——`config/languages.ts` 的 `LANG_CODE_TO_ZH_NAME` / `LANG_CODE_TO_LOCALE_NAME`
-     是 `label()` 直接喂给设置页的语言名（「简体中文（中文）」），翻掉等于把本地化删了。
-  3. **多语种的测试输入与期望值**——它们是覆盖率本身：`tests/providers/prompt.test.ts` 用
-     `weights -> 权重` 验术语表进 prompt 的形状，`tests/rules/latexml.test.ts` 用 `证明。`
-     验非拉丁文本的识别。翻成英文等于**悄悄删掉这些用例的覆盖面**，非拉丁回归会直接漏过去。
-
-  三类都是 Codex 在 #120 逐条指出的。测试**名**与断言消息仍然转英文——它们是写给开发者看的。
-
-  **与用户对话也仍用中文**——这条规则约束的是仓库内容，不是聊天。
-
----
-
-## Phase 0 任务（按顺序做，产出全部写入 `docs/RESEARCH.md`）
-
-1. **抓 fixture**：从 arXiv 选 8–10 篇 HTML 存入 `tests/fixtures/arxiv/`，覆盖：
-   - 行内公式密集的（数学 / 理论 CS）
-   - 有算法框和代码块的
-   - 有大表格、数值表的
-   - 有脚注、定理环境的
-   - 2023 年（早期 LaTeXML 版本）和 2026 年各至少两篇
-   - 至少一篇含 `.ltx_ERROR`
-2. **规则覆盖率审计**：写一个脚本，对每个 fixture 列出所有带文本的元素及其 `ltx_*` 类名与出现次数，再用 DESIGN.md §5 的翻译单元和跳过规则做匹配，输出三类结果：(a) 规则中不存在于任何 fixture 的类名，(b) 未被任何规则覆盖的带文本元素（漏网），(c) 只在部分年份出现的类名（版本差异）。目标是"每个文本节点恰好落在一条规则下"。顺带统计 SVG 图占比（见 DESIGN.md §15.1）。
-3. **容器与导航**：确认 arXiv 主容器（预期 `.ltx_page_main` / `.ltx_page_content`）、左侧导航 `.ltx_page_navbar`、arXiv 自己注入的页头页脚元素的选择器；记录 arXiv 页面自带 JS 的行为（脚注弹出、导航切换、是否有 MathJax 回退）。
-4. **参考文件地图**：clone 三个仓库到 `reference/`，为 DESIGN.md §4 的每个模块写一行"参考 `<repo>/<path>`"，重点找：Read Frog 的 DOM walker 与仅译文模式标记处理、KISS 的富文本翻译与 Google 适配器、FluentRead 的渐进翻译与缓存。
-5. **接口存活性**：用 curl 验证今天是否可用、返回格式、是否保留 HTML 标签：
-   - Google `translate.googleapis.com/translate_a/single?client=gtx`
-   - 微软 `edge.microsoft.com/translate/translatetext`（仅记录，v1 不接）
-   - Google `translateHtml` 接口（在参考仓库里 grep `translateHtml` 找到用法）
-6. **Translator API**：写一个最小 content script 验证 `'Translator' in self`、`Translator.availability()`、`create()` 是否需要用户手势，以及模型下载体验。
-7. 最后给出：DESIGN.md 需要修订的条目清单（不要直接改 DESIGN.md）。
-
----
-
-## 常用命令
+## Commands
 
 ```
 pnpm install
-pnpm dev            # WXT 开发模式，自动加载到 Chrome
-pnpm build
-pnpm test
-pnpm test:watch
-pnpm typecheck      # tsc --noEmit；vitest 不查类型，这一步不能省
-pnpm lint           # Biome linter；pnpm lint:fix 应用安全修复
-pnpm e2e            # 真实浏览器端到端（Playwright 起带扩展的 Chromium，先 pnpm build；首次 npx playwright install chromium）
-pnpm e2e:layout     # 真实浏览器的 side 模式布局断言（宽度契约、列表标记槽、flex 图配对、边注位置）
-pnpm e2e:a11y       # A/B 无障碍审计：同一篇跑两次 axe，只报由扩展引入的差集（§7.4b）
-pnpm e2e:local-endpoint  # 不返 CORS 头的 http 本机端点能翻整页（issue #42 的收益回归）
-pnpm fixtures:stats # Phase 0 的类名直方图脚本（待创建）
+pnpm dev                 # WXT dev mode, loads into Chrome
+pnpm typecheck           # tsc --noEmit — vitest does not type-check
+pnpm lint                # Biome linter; pnpm lint:fix applies safe fixes
+pnpm test                # vitest; pnpm test:watch
+pnpm build               # wxt build + scripts/check-output.mjs (rejects non-characters Chrome refuses to load)
+pnpm e2e                 # real Chromium with the extension (pnpm build first; once: npx playwright install chromium)
+pnpm e2e:layout          # side-mode layout contract in a real browser
+pnpm e2e:a11y            # A/B axe audit: only differences the extension introduces
+pnpm e2e:local-endpoint  # an http endpoint without CORS headers can translate a whole page (#42)
+pnpm e2e:image           # image translation through the installed helper (SKIP without it)
+pnpm e2e:placeholders    # placeholder survival per sentence shape against a live engine (DESIGN §6.3)
+pnpm fixtures:stats      # rule coverage audit over the fixtures
+pnpm helper:build        # Swift helper; pnpm helper:smoke talks to the binary over Native Messaging frames
 ```
-
----
 
 ## Agent skills
 
 ### Issue tracker
 
-Issues 与 spec 记录在本仓库的 GitHub Issues，通过 `gh` CLI 读写。See `docs/agents/issue-tracker.md`.
+Issues and specs live in this repository's GitHub Issues, read and written through the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Codex review
 
-合并前必须等 Codex 的终态信号（👍 / 行内评论 / 限额提示；👀 表示还在审），评论逐条核实。See `docs/agents/codex-review.md`.
+Merge only after Codex's terminal signal (👍 / review comments / usage-limit notice; 👀 means still reviewing); verify every comment. See `docs/agents/codex-review.md`.
 
 ### Triage labels
 
-使用默认的五个 triage 标签（`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`），标签字符串与角色名一致。See `docs/agents/triage-labels.md`.
+The five default triage labels (`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`), label strings identical to the role names. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-单上下文布局：仓库根 `CONTEXT.md` + `docs/adr/`。See `docs/agents/domain.md`.
+Single-context layout: `CONTEXT.md` at the repository root plus `docs/adr/`. See `docs/agents/domain.md`.
