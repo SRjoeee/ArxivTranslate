@@ -21,12 +21,12 @@ Each is a product promise, a legal requirement, or a contract with something out
 1. **DOM invariants** (DESIGN §7.1, guarded by tests): a translation node is inserted only as the next sibling of its original block; an original node gains `data-axt-*` attributes and nothing else; global state lives only on `<html>`; after restore the DOM equals the pre-translation DOM node by node.
 2. **Prefixes**: every injected class, data attribute and CSS variable starts with `axt-` / `data-axt-` / `--axt-`.
 3. **Free and built-in translation APIs are unreliable by assumption**: their failure must be recoverable and must trigger the fallback chain; it must never take the extension down.
-4. **Cache key** carries `providerId | model | PROMPT_VERSION | RULES_VERSION | target | renderPath | normalizedText`; bump the version whenever a prompt or a rule changes meaning.
+4. **Cache key** carries every input that changes a translation — today `CACHE_KEY_VERSION | providerId | model | PROMPT_VERSION | promptKey | context | RULES_VERSION | target | renderPath | normalizedText | cuts` (`src/cache/key.ts`); bump the matching version whenever a prompt, a rule or the request shape changes meaning.
 5. **Secrets**: API keys live only in WXT storage — never in logs, cache keys, fixtures or git. A third party's public client constant (the Google web translator's key in `providers/google-web.ts`) is not a secret — ADR-0001 §10.
 6. **Attribution**: code ported from `reference/` (KISS Translator, Read Frog, FluentRead — GPL-3.0, read-only, git-ignored) keeps the header `// Ported from reference/<repo>/<path>@<commit> (GPL-3.0), <YYYY-MM-DD>, modified` and an entry in `docs/THIRD_PARTY.md`.
 7. **External contracts** (ADR-0001 §6) get migration or compatibility handling, never silent replacement: the saved configuration schema, the Native Messaging protocol with the installed `axt-helper`, the installer surface.
 
-Two MVP design rules stay as defaults, open to re-evaluation with evidence: `ltx_*` selectors live only in `src/core/rules/latexml.ts` (style sheets may use them for layout only); the renderer chooses markup vs. runs by the provider's `preservesMarkup`, never by provider identity.
+Two MVP design rules stay as defaults, open to re-evaluation with evidence: `ltx_*` selectors live only in `src/core/rules/latexml.ts` (style sheets may use them for layout only); the wire format (tags / markers / runs) is negotiated from the provider's declared `wireFormats`, never chosen by provider identity in the renderer.
 
 ## Stack
 
