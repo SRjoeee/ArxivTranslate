@@ -39,8 +39,8 @@ This is the current stack, not a fixed one: a change is allowed with evidence of
 - **A PR is one complete, explainable, verifiable design change.** Cross-module changes update the interface and every caller together. Keep unrelated changes out; never split a coherent change to make it small. The MVP-era measurement (ADR-0001 §8) shows large PRs cost five to six Codex rounds — the local review before opening is how that cost is paid down.
 - **Gate before every PR** — the same four steps CI runs: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`, plus the e2e scripts relevant to the change. `pnpm test` is vitest and does not type-check (#115 went red in CI after a green local run for exactly this reason).
 - **Self-review before asking for review.** On 2026-09-08 about a quarter of the review rounds went to "fixing A broke B": after adding a constraint, grep for everyone else on that path; read your own diff as someone else's code and ask what used to work and now does not.
-- **Local Codex review, then the PR.** Run `/codex:adversarial-review` (or `/codex:review`; both wrap `node <codex plugin>/scripts/codex-companion.mjs … --base rebuild/v1 --scope branch`) and pass it before opening the PR. Then wait for CI and the Codex GitHub review's terminal signal — 👍, review comments, or a usage-limit notice; 👀 means still reviewing. Verify every comment against a fixture, a probe or the code before adopting it; write down what you declined and why. One review request per fix batch, not per commit. Details: `docs/agents/codex-review.md`.
-- **Do not wait on review to start the next independent PR.** Disjoint files are necessary but not sufficient for independence: a branch that consumes a type, a schema value or a behaviour a pending PR introduces depends on it — branch from the pending branch or wait. Two branches editing the same file is the case to avoid outright.
+- **Local Codex review, then the PR.** Run `/codex:adversarial-review` (or `/codex:review`; both wrap `node <codex plugin>/scripts/codex-companion.mjs … --base rebuild/v1 --scope branch`) and pass it before opening the PR. End the PR body with a line `@codex review` above the attribution line — opening a PR alone does not reliably start the round. Then wait for CI and the Codex GitHub review's terminal signal — 👍, review comments, or a usage-limit notice; 👀 means still reviewing. Verify every comment against a fixture, a probe or the code before adopting it; write down what you declined and why. One review request per fix batch, not per commit. Details: `docs/agents/codex-review.md`.
+- **Do not wait on review to start the next independent PR** — stack it on the branch it depends on and keep working; review is the bottleneck, not authorship. Disjoint files are necessary but not sufficient for independence: a branch that consumes a type, a schema value or a behaviour a pending PR introduces depends on it — branch from the pending branch or wait. Two branches editing the same file is the case to avoid outright.
 - **Parallel agents for measurement and reading, not for implementation.** Probes, inventories and multi-angle reviews are independent and self-verifying; run them concurrently and re-check their conclusions here. Implementation correctness comes from holding the whole context; cross-module interface changes are single-threaded.
 - **Verify before relying.** A claim in a frozen document or an old comment is a hypothesis: check it with a fixture, a probe or `git log -S` before building on it, and record what you found in the ADR that depends on it.
 - **Ported code.** The MVP's "port the whole directory, clean up later" policy is over (ADR-0001 §9). Keep only what is called; when a ported module is touched, its unused parts go.
@@ -80,16 +80,8 @@ pnpm helper:build        # Swift helper; pnpm helper:smoke talks to the binary o
 
 ### Issue tracker
 
-Issues and specs live in this repository's GitHub Issues, read and written through the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues, the roadmap (#155) and the rebuild's open items live in this repository's GitHub Issues, read and written through the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Codex review
 
 Merge only after Codex's terminal signal (👍 / review comments / usage-limit notice; 👀 means still reviewing); verify every comment. See `docs/agents/codex-review.md`.
-
-### Triage labels
-
-The five default triage labels (`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`), label strings identical to the role names. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context layout: `CONTEXT.md` at the repository root plus `docs/adr/`. See `docs/agents/domain.md`.

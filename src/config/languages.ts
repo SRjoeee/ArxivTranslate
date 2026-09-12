@@ -1,7 +1,8 @@
-// 移植自 @read-frog/definitions@0.4.4（reference/read-frog 的依赖包，GPL-3.0）的语言表，2026-09-05 移植、有修改：
-// 只搬 LANG_CODE_ISO6393_OPTIONS 与四张名称 / 映射表，其余（SRS、电子书 schema）不搬；辅助函数是本项目的。
-// 语言码用 ISO 639-3（与 Read Frog 一致），配置 v4 起 targetLanguage 存这个码；
-// LLM prompt 里填英文名，Google 网页翻译按 BCP-47 收，各自经这里的函数转换。
+// Ported from @read-frog/definitions@0.4.4 (the dependency package of reference/read-frog, GPL-3.0): the language
+// tables, 2026-09-05, modified: only LANG_CODE_ISO6393_OPTIONS and the four name / mapping tables are taken (the SRS
+// and e-book schemas are not); the helper functions are this project's.
+// Language codes are ISO 639-3 (as in Read Frog); config v4 stores targetLanguage as that code. LLM prompts get the
+// English name and Google's web translator takes BCP-47; both conversions go through the functions here.
 import { z } from 'zod'
 
 /** 179 个 ISO 639-3 码，顺序照 Read Frog（常用语言在前） */

@@ -1,4 +1,5 @@
-// 一次性视口调度（DESIGN §10）：Read Frog PageTranslationManager 的观察器骨架，改绑我们的 Block[]。
+// Ported from reference/read-frog/src/entrypoints/host.content/translation-control/page-translation.ts@9b44f82 (GPL-3.0),
+// 2026-09-05, modified: the PageTranslationManager observer skeleton, rebound to our Block[] (DESIGN §10).
 //
 // 块第一次进入视口加预翻译距离时才交出去翻，同时 unobserve——一次性；视口外的块永远不会被请求。
 // 同一次 IO 回调里进入的块作一批交给 onEnter（它的 #1881：一次密集进入几百条也只处理一次）。

@@ -1,5 +1,5 @@
-// 移植自 reference/read-frog/src/utils/request/priority-queue.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：仅加文件头。
-// 二叉堆优先队列，request-queue 按 scheduleAt 取任务用。
+// Ported from reference/read-frog/src/utils/request/priority-queue.ts@9b44f82 (GPL-3.0), 2026-09-05, modified: header only.
+// A binary-heap priority queue; request-queue takes tasks by scheduleAt from it.
 interface PriorityQueue<T> {
   push: (item: T, priority: number) => void
   peek: () => T | undefined

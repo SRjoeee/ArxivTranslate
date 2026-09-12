@@ -1,9 +1,13 @@
-// 移植自 reference/FluentRead/src/services/translation/cache.ts@536a819（GPL-3.0），2026-09-03 移植、有修改：
-// 键的计算移到 src/cache/key.ts（Web Crypto）；记录加 paper 字段与索引，支持按论文清理；TTL / 容量常量按论文场景放大；
-// 库名、类型与导出按本项目调整，构造函数可注入独立库与小容量用于测试；保留原有的内存热层、LRU 淘汰与"缓存故障降级为未命中"的策略。
-// 与原实现的最大分歧：原版每次 set 都 orderBy('lastAccessedAt').toArray() 把整库记录读出来算条数与字节数（O(n)/次）。
-// 一篇论文几百次 set，库到几千条后每次写入都要反序列化整库，MV3 的 service worker 是单线程，
-// 其他消息（provider-status）会排在后面等几十秒。这里改为：字节数与条数增量维护，只有真的超限才按最旧批量淘汰。
+// Ported from reference/FluentRead/src/services/translation/cache.ts@536a819 (GPL-3.0), 2026-09-03, modified:
+// key computation moved to src/cache/key.ts (Web Crypto); records gain a `paper` field and index so one paper can be
+// cleared; TTL and capacity constants raised for the paper use case; database name, types and exports follow this
+// project, and the constructor takes an injected database and a small capacity for tests. Kept: the in-memory hot
+// layer, LRU eviction, and "a cache failure degrades to a miss".
+// The largest departure: upstream ran orderBy('lastAccessedAt').toArray() on every set, reading the whole store to
+// count entries and bytes (O(n) per write). A paper is a few hundred sets; once the store holds thousands of entries
+// every write deserialises all of them, and MV3's single-threaded service worker keeps other messages
+// (provider-status) waiting for tens of seconds. Here counts and bytes are maintained incrementally, and only a real
+// overflow evicts the oldest in one batch.
 import Dexie, { type DexieOptions, type Table } from 'dexie'
 import type { SentenceAlignment } from '@/providers/alignment'
 

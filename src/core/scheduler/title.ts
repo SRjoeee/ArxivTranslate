@@ -1,4 +1,5 @@
-// 标签页标题翻译（DESIGN §10）：Read Frog page-translation.ts 里 document.title 那一段的改写。
+// Ported from reference/read-frog/src/entrypoints/host.content/translation-control/page-translation.ts@9b44f82 (GPL-3.0),
+// 2026-09-05, modified: only its document.title part, rewritten around this project's session and transport (DESIGN §10).
 // 开始时翻一次 document.title；<head> 上的观察器盯着标题被页面改成"既非原文也非我们写的值"时重翻；
 // 停止时恢复原文（§7.1：恢复后逐节点相等，<title> 的文本也要回去）。
 // arXiv 页面是静态的，观察器几乎不会触发，但它没有负担，照搬（CLAUDE.md 的搬运判定）。

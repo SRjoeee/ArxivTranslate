@@ -1,7 +1,9 @@
-// 移植自 reference/read-frog/src/utils/request/request-queue.ts@9b44f82（GPL-3.0），2026-09-05 移植、有修改：
-// deepmerge-ts 换成对象展开（QueueOptions 是平的）、配置 schema 换成本目录 config.ts、UUID 换成 src/shared/uuid.ts、
-// 计时器类型改 ReturnType<typeof setTimeout>（@types/node 只是传递依赖）、超时错误加 name 便于服务层归到 timeout。
-// 令牌桶限速 + 超时竞速 + 重试 / 429 暂停与暂停后单探针 / 401 排空整队 / 按 scope 取消；由 translate-service 组装（DESIGN §8.2、§10）。
+// Ported from reference/read-frog/src/utils/request/request-queue.ts@9b44f82 (GPL-3.0), 2026-09-05, modified:
+// deepmerge-ts replaced by object spread (QueueOptions is flat), the config schema by this directory's config.ts, the
+// UUID by src/shared/uuid.ts, the timer type by ReturnType<typeof setTimeout> (@types/node is only transitive), and the
+// timeout error given a name so the service layer can file it under timeout.
+// Token-bucket rate limiting, timeout racing, retry / a 429 pause with a single probe after it / draining the queue on
+// 401 / cancellation by scope; assembled by translate-service (DESIGN §8.2, §10).
 import type { RequestRetryPolicy } from "./retry-policy"
 import { getRandomUUID } from "@/shared/uuid"
 import { requestQueueConfigSchema } from "./config"
