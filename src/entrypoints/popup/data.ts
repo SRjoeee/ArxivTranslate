@@ -17,6 +17,7 @@ import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages
 import type { HelperStatus } from '@/shared/ocr'
 import { type PackState, downloadPack, packState } from '@/shared/pack'
 import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, pollsBackground, runnable } from './view-model'
+import { chainRevision } from '@/config/revision'
 
 const scriptStart = performance.now()
 
@@ -61,6 +62,8 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const [page, setPage] = useState<PageStatus | null>(null)
   const [provider, setProvider] = useState<ProviderStatus | null>(null)
   const [config, setLocalConfig] = useState<Config | null>(null)
+  /** The digest of the saved chain settings, recomputed whenever the config here changes; what a page is behind or not */
+  const [savedRevision, setSavedRevision] = useState<string | null>(null)
   /** The offline service's language pack (§8.4); `downloadable` needs a click to create() (user gesture) */
   const [pack, setPack] = useState<PackState | null>(null)
   const [helper, setHelper] = useState<HelperStatus | null>(null)
@@ -116,6 +119,15 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     browser.runtime.onMessage.addListener(onState)
     return () => browser.runtime.onMessage.removeListener(onState)
   }, [])
+
+  // The saved settings' identity, for the "page behind the settings" test (shared/page-action.ts). A stale value
+  // from an earlier config must not answer for a newer one: the effect's own generation wins
+  useEffect(() => {
+    if (config === null) { setSavedRevision(null); return }
+    let alive = true
+    void chainRevision(config).then(revision => { if (alive) setSavedRevision(revision) }).catch(() => { if (alive) setSavedRevision(null) })
+    return () => { alive = false }
+  }, [config])
 
   // While the page is still loading the content script is not injected yet (document_idle), so
   // the first ask has no receiver; ask again every 500 ms a few times instead of declaring "not an
@@ -268,5 +280,5 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     helperStatus: setHelper,
   }
 
-  return { input: { page, provider, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id }, error, actions }
+  return { input: { page, provider, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id, savedRevision }, error, actions }
 }

@@ -1,10 +1,12 @@
-// 右键菜单里的开关（issue #146）。第二个入口，动作与 popup 完全同一条路：问一次状态，
-// 然后发 `axt:translate-page` 或 `axt:restore-page`。
+// The toggle in the context menu (issue #146) and on the keyboard command: a second and third entry to the same
+// action as the popup's main button — ask the page its state once, decide the way the button does, send what it
+// would send.
 //
 // **标签不跟着状态变**：`contextMenus.update` 是全局的、不是按标签页的，跟着当前页改的话，
 // 一切换标签页就说错了。沉浸式翻译的那一条也是静态的。
 
 import type { PageStatus } from '@/shared/messages'
+import { messageFor, pageAction } from '@/shared/page-action'
 import { S } from '@/ui/strings'
 
 /** 菜单项 id；重建时按它删旧的，worker 每次唤醒都会重新跑一遍 create */
@@ -24,53 +26,41 @@ export const MENU_PATTERNS = ['https://arxiv.org/html/*']
  */
 export const MENU_CONTEXTS = ['page', 'selection', 'link', 'image', 'video', 'audio', 'editable']
 
-export interface MenuDeps {
+/** What the toggle needs: a way to ask the page and tell it, and the saved settings' identity (shared/page-action.ts) */
+export interface ToggleDeps {
+  send<T>(tabId: number, message: { type: string }): Promise<T>
+  /** `chainRevision` of the stored configuration; null when it cannot be read (the page is then never "behind") */
+  savedRevision(): Promise<string | null>
+}
+
+export interface MenuDeps extends ToggleDeps {
   create(options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }): void
   removeAll(): Promise<void> | void
   onClicked(handler: (info: { menuItemId: string | number }, tab?: { id?: number }) => void): void
-  send<T>(tabId: number, message: { type: string }): Promise<T>
 }
 
-export interface CommandDeps {
+export interface CommandDeps extends ToggleDeps {
   onCommand(handler: (command: string, tab?: { id?: number }) => void): void
   /** The active tab of the current window, for the platforms that hand the command over without one */
   activeTab(): Promise<{ id?: number } | undefined>
-  send<T>(tabId: number, message: { type: string }): Promise<T>
 }
 
 /**
- * 这个状态下该发哪条消息。
- *
- * **参数按 `PageStatus` 定型，不是随手一个宽松对象。** 第一版写的是 `state === 'off'`，而
- * `Progress.state` 只有 `idle | on | stopped` 三个值——菜单于是永远发恢复、一次都没能开始翻译过，
- * 而测试里那个假状态也写着 `'off'`，正好把它盖住了（Codex 在 #147 指出）。定了型，这种假样例编译不过。
- *
- * 分界与 popup 的两个按钮一致：`canRestore` 是 `state !== 'idle'`，所以只有 idle 才是「去翻」。
- *
- * 纯函数，好测：右键菜单本身在 Playwright 里驱动不了（那是浏览器的原生菜单），
- * 所以「点了之后做什么」这件事只能在这一层钉住。
+ * The toggle itself, shared by the menu and the keyboard command: ask the page its state, decide as the popup's main
+ * button does (`pageAction`, shared/page-action.ts — the key does what the button shows) and send the message that
+ * button would. A page without a content script yet (just navigated, or the extension updated and the page not
+ * reloaded) answers nothing and nothing happens, which is what the popup does in that situation too. The saved
+ * settings are read for every toggle: the page's revision against their digest is the "behind" test, so ⌥T on a
+ * page left behind by a change in another tab re-translates it, as the button it is badged on offers to
  */
-export function actionFor(status: Pick<PageStatus, 'progress'> | undefined): 'axt:translate-page' | 'axt:restore-page' | undefined {
-  const state = status?.progress?.state
-  if (state === undefined) return undefined
-  // A paused session (a fatal error) retries, matching the popup's 重新翻译 — the shortcut badge sits
-  // on that very button, so restoring here would undo the translations the reader asked to retry
-  // (Codex on #157). Only a running one restores
-  if (state === 'stopped' && status?.progress?.fatal !== undefined) return 'axt:translate-page'
-  return state === 'idle' ? 'axt:translate-page' : 'axt:restore-page'
-}
-
-/**
- * The toggle itself, shared by the menu and the keyboard command: ask the page its state, then send
- * the same message the popup's button would. A page without a content script yet (just navigated,
- * or the extension updated and the page not reloaded) answers nothing and nothing happens, which
- * is what the popup does in that situation too
- */
-export async function toggleTranslation(send: MenuDeps['send'], tabId: number): Promise<void> {
+export async function toggleTranslation(deps: ToggleDeps, tabId: number): Promise<void> {
   try {
-    const status = await send<Pick<PageStatus, 'progress'>>(tabId, { type: 'axt:page-status' })
-    const action = actionFor(status)
-    if (action) await send(tabId, { type: action })
+    const [status, savedRevision] = await Promise.all([
+      deps.send<Pick<PageStatus, 'progress' | 'running'>>(tabId, { type: 'axt:page-status' }),
+      deps.savedRevision().catch(() => null),
+    ])
+    const action = pageAction(status, savedRevision)
+    if (action) await deps.send(tabId, messageFor(action))
   } catch {
     // See above
   }
@@ -86,7 +76,7 @@ export async function toggleTranslation(send: MenuDeps['send'], tabId: number): 
 export function installContextMenu(deps: MenuDeps): void {
   deps.onClicked((info, tab) => {
     if (info.menuItemId !== MENU_ID || tab?.id === undefined) return
-    void toggleTranslation(deps.send, tab.id)
+    void toggleTranslation(deps, tab.id)
   })
   refreshContextMenu(deps)
 }
@@ -107,7 +97,7 @@ export function installToggleCommand(deps: CommandDeps): void {
     if (command !== COMMAND_ID) return
     void (async () => {
       const target = tab?.id !== undefined ? tab : await deps.activeTab().catch(() => undefined)
-      if (target?.id !== undefined) await toggleTranslation(deps.send, target.id)
+      if (target?.id !== undefined) await toggleTranslation(deps, target.id)
     })()
   })
 }

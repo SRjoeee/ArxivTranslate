@@ -17,6 +17,7 @@ import { installContextMenu, refreshContextMenu, installToggleCommand } from './
 import { handlePing } from '@/shared/ping'
 import { applyLocaleFrom, resolveLocale } from '@/ui/apply-locale'
 import { setLocale } from '@/ui/strings'
+import { chainRevision } from '@/config/revision'
 
 // background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
 // 异步响应必须用 sendResponse + return true。
@@ -181,12 +182,15 @@ export default defineBackground(() => {
     if (alarm.name === RESTART_ALARM) void helperRestart.fired()
   })
 
+  /** The saved settings' identity for the toggle's "behind" test (shared/page-action.ts); the popup computes the same */
+  const savedRevision = () => getConfig().then(chainRevision)
   const menuDeps = {
     create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>
       browser.contextMenus.create(options as Parameters<typeof browser.contextMenus.create>[0]),
     removeAll: () => browser.contextMenus.removeAll(),
     onClicked: (handler: Parameters<typeof browser.contextMenus.onClicked.addListener>[0]) => browser.contextMenus.onClicked.addListener(handler),
     send: (tabId: number, message: unknown) => browser.tabs.sendMessage(tabId, message as never),
+    savedRevision,
   }
   installContextMenu(menuDeps)
   // 读者在这次读还没回来的时候改了界面语言：watcher 已经换过语言包，这个旧快照不许再盖回去。
@@ -203,6 +207,7 @@ export default defineBackground(() => {
     onCommand: handler => browser.commands.onCommand.addListener(handler),
     activeTab: async () => (await browser.tabs.query({ active: true, currentWindow: true }))[0],
     send: (tabId, message) => browser.tabs.sendMessage(tabId, message),
+    savedRevision,
   })
 
   browser.tabs.onRemoved.addListener(tabId => dropTab(tabId, '关闭'))
