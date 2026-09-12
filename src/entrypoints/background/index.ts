@@ -1,11 +1,11 @@
-import type { Config } from '@/config/schema'
 import { cachePortOf, translationCache } from '@/cache'
 import { getConfig, watchConfig } from '@/config/storage'
 import { CancelledScopeRegistry } from '@/providers/request/cancellation'
-import { chainConfigChanged, createLocalTransport, type TranslationTransport } from '@/providers/transport'
+import { createLocalTransport } from '@/providers/transport'
 import { toErrorInfo } from '@/providers/translate-service'
 import { isAxtMessage } from '@/shared/messages'
 import { HELPER_HOST } from '@/shared/ocr'
+import { createChainHolder } from './chain'
 import { createHelperClient } from './helper'
 import { createHelperWaiter } from './helper-await'
 import { createOcrService } from './ocr'
@@ -22,27 +22,17 @@ export default defineBackground(() => {
   /** Scopes ended for certain — one registry (ADR-0005): the session router writes it, the chain's services and OCR read it */
   const cancelled = new CancelledScopeRegistry()
 
-  /**
-   * 全浏览器共用一条链、一套队列（§8.2 的跨标签页额度策略）。懒建：worker 每次被唤醒都要重建，
-   * 只是为了清个缓存就先探一遍引擎可用性不值得
-   */
-  let active: Promise<{ config: Config; transport: TranslationTransport }> | null = null
-  const load = async (config?: Config) => {
-    const resolved = config ?? await getConfig()
-    return { config: resolved, transport: await createLocalTransport(resolved, { cache, cancelled }) }
-  }
-  const activate = (config?: Config) => {
-    active = load(config)
-    return active
-  }
-  const transportOf = () => (active ?? activate()).then(a => a.transport)
+  /** The chain in force, one per worker (./chain.ts): built lazily, rebuilt when the configuration that shapes it changes */
+  const chain = createChainHolder({
+    load: async config => {
+      const resolved = config ?? await getConfig()
+      return { config: resolved, transport: await createLocalTransport(resolved, { cache, cancelled }) }
+    },
+  })
+  const transportOf = () => chain.current()
   /** 这个 worker 当前用的界面语言，用来认出「读者改了它」（右键菜单的标题要跟着重画） */
   let uiLanguage: string | null = null
 
-  /**
-   * 只有会换掉引擎链的配置字段才重建。content 每切一次显示模式就写一次配置，而那时页面往往正在翻——
-   * 无差别重建会把令牌桶与降级记录一起清掉（chainConfigChanged 的注释里有归类表）
-   */
   watchConfig(next => {
     // 界面语言变了要重画菜单：worker 不会为此重启，不重画的话标题一直停在旧语言（Codex 在 #161 指出）
     if (next.uiLanguage !== uiLanguage) {
@@ -50,11 +40,7 @@ export default defineBackground(() => {
       applyLocaleFrom(next.uiLanguage)
       refreshContextMenu(menuDeps)
     }
-    if (!active) return
-    active = active.then(
-      a => (chainConfigChanged(a.config, next) ? load(next) : { config: next, transport: a.transport }),
-      () => load(next),
-    )
+    chain.onConfig(next)
   })
 
   /**
@@ -233,7 +219,7 @@ export default defineBackground(() => {
         // **迁哪些会话由发起方决定**（Codex 在 #59 / #157 指出）：popup 的语言包下载只对它打开的那个
         // 标签页说过「接下来的段落会用离线翻译」，就只迁那一个；删掉的服务必须处处停用，才迁全部；
         // 其余只重建链，正在翻的页面保留它开始时的那条。被动的配置变更一律不迁（见 sessions.ts）
-        activate()
+        chain.activate()
           .then(async () => {
             // Cancelling first is what makes a deleted service stop: re-pointing alone leaves its
             // queued and in-flight work running on the transport being replaced (Codex on #157).

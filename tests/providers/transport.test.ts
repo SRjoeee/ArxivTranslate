@@ -214,13 +214,33 @@ describe('createLocalTransport：翻译', () => {
     let release: () => void = () => {}
     const held = new Promise<void>(resolve => { release = resolve })
     const cache: CachePort = { getMany: async keys => keys.map(() => null), putMany: async entries => { writes.push(entries) } }
-    const t = await withChain([mockProvider(async r => { await held; return { segments: r.segments, provider: 'mock' } })], { cache })
+    let entered: () => void = () => {}
+    const atEndpoint = new Promise<void>(resolve => { entered = resolve })
+    const t = await withChain([mockProvider(async r => { entered(); await held; return { segments: r.segments, provider: 'mock' } })], { cache })
     const pending = t.translate({ request: req, cache: { paper: '2410.00260', renderPath: 'tags' } })
-    await new Promise(resolve => setTimeout(resolve, 200)) // real timers: past the batch delay, the request is in flight
+    await atEndpoint // real timers: the request is at the endpoint
     t.retire!()
     release()
     expect((await pending).ok).toBe(true)
     expect(writes).toEqual([])
+  })
+
+  it('retire() between two attempts: the request queue retries the stored thunk, so the gate sits in front of every provider call', async () => {
+    // An unscoped request failed with a retryable error and is waiting out its backoff when the chain is retired;
+    // the retry must not reach the endpoint with the deleted key (the local review of ADR-0005, sixth pass)
+    vi.useFakeTimers()
+    let calls = 0
+    const t = await withChain([mockProvider(async r => {
+      if (calls++ === 0) throw attachRequestErrorMeta(new ProviderError('rate-limit', '429'), { statusCode: 429, responseHeaders: { 'retry-after': '1' }, isRetryable: true })
+      return { segments: r.segments, provider: 'mock' }
+    })])
+    const pending = t.translate({ request: req })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(calls).toBe(1) // the first attempt failed, the retry is scheduled
+    t.retire!()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(calls).toBe(1)
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
   })
 
   it('router and chain together: a tab closed while the first chain builds leaves no request out and nothing bound (ADR-0005, second review pass)', async () => {

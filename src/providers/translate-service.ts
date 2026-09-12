@@ -278,6 +278,10 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
   }
 
   const translateItems = async (items: QueueItem[], ids: string[], signal: AbortSignal | undefined): Promise<TranslationOutcome[]> => {
+    // The last check before the endpoint, and the only one a retry passes through: the request queue retries the
+    // stored thunk without re-entering the batch queue, so a chain retired between two attempts must stop here.
+    // Non-retryable, so the queue does not try a third time (ADR-0005)
+    if (deps.retired?.()) throw attachRequestErrorMeta(new TranslationCancelledError(items[0]?.scope), { isRetryable: false })
     const first = items[0]!
     try {
       const result = await first.provider.translate({
@@ -353,7 +357,6 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       executeBatch: (items, meta) => {
         // 这一批所属的会话已经致命：当场拒，不进 RequestQueue、不打端点。BatchQueue 只对
         // BatchCountMismatchError 重试或走逐条兜底，所以这里拒了就是终局，不会绕出第二条路
-        if (deps.retired?.()) return Promise.reject(new TranslationCancelledError(meta.scopes?.join(',')))
         const dead = fatalFor(meta)
         if (dead !== undefined) return Promise.reject(dead)
         const ids = uniqueIds(items)
@@ -363,7 +366,6 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
       },
       executeIndividual: (item, meta) => {
-        if (deps.retired?.()) return Promise.reject(new TranslationCancelledError(meta.scopes?.join(',')))
         const dead = fatalFor(meta)
         if (dead !== undefined) return Promise.reject(dead)
         return requestQueue.enqueue(
