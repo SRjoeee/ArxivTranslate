@@ -40,10 +40,10 @@ export interface SessionRouter {
   /** Move one session onto a new chain; the rest keep the one they started on */
   rebind(scope: string, transport: TranslationTransport): void
   /**
-   * Every session onto a new chain, **with the work on the old one cancelled first**. Re-pointing
-   * alone leaves whatever was queued or in flight running on the transport being replaced, so a
-   * deleted service would go on spending its key and writing its results into the live page
-   * (Codex on #157). Returns how many requests were cancelled
+   * Every session onto a new chain, **and the work on the old ones drained**. Re-pointing alone
+   * leaves whatever was queued or in flight running on the transport being replaced, so a deleted
+   * service would go on spending its key and writing its results into the live page (Codex on #157).
+   * Returns how many requests were cancelled
    */
   dropAndRebindAll(transport: TranslationTransport): Promise<number>
   /** The transport a session is bound to, without binding one; for answering questions about it */
@@ -247,13 +247,19 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       if (session) sessions.set(scope, { ...session, transport })
     },
     async dropAndRebindAll(transport) {
-      let cancelled = 0
-      for (const [scope, session] of [...sessions]) {
-        // Drain, do not mark: the scope stays alive on the new chain, it is only being emptied of
-        // the work that belonged to the old one
-        if (session.transport && session.transport !== transport) cancelled += await session.transport.cancel(scope)
+      // Move every session first, synchronously, and only then drain the old chains: a forCall whose build lands
+      // while a drain below is awaited finds its session already moved and keeps that (see forCall) — moving
+      // one session per drain let it bind the chain being replaced and send its request there, while the loop
+      // then recorded the replacement over it (the local review of ADR-0005, third pass)
+      const old: [string, TranslationTransport][] = []
+      for (const [scope, session] of sessions) {
+        if (session.transport && session.transport !== transport) old.push([scope, session.transport])
         sessions.set(scope, { ...session, transport })
       }
+      // Drain, do not mark: the scope stays alive on the new chain, it is only being emptied of
+      // the work that belonged to the old one
+      let cancelled = 0
+      for (const [scope, chain] of old) cancelled += await chain.cancel(scope)
       return cancelled
     },
     transportFor: scope => sessions.get(scope)?.transport,

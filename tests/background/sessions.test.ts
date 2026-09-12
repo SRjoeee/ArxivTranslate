@@ -492,6 +492,28 @@ describe('createSessionRouter', () => {
     expect(first.cancelled).toEqual([])
   })
 
+  it('dropAndRebindAll moves every session before it drains: a build landing during a drain binds the replacement, not the chain being replaced', async () => {
+    // A is on the old chain, B is still building on it. Draining A yields; if B were moved only when the loop
+    // reached it, B's forCall would land in that gap, bind the old chain and send its request to the deleted
+    // service, while the loop then recorded the replacement over it (the local review of ADR-0005, third pass)
+    const first = fakeTransport('旧链')
+    const second = fakeTransport('新链')
+    let release: () => void = () => {}
+    const held = new Promise<void>(resolve => { release = resolve })
+    let building = false
+    const router = routerOver(async () => { if (building) await held; return first })
+    await router.forCall('A', 1)
+    building = true
+    const pendingB = router.forCall('B', 2)
+    await Promise.resolve()
+    // Draining A lets B's build finish before the loop would have reached B
+    first.cancel = async scope => { first.cancelled.push(`旧链:${scope}`); release(); await new Promise(resolve => setTimeout(resolve, 0)); return 1 }
+    expect(await router.dropAndRebindAll(second)).toBe(1)
+    expect(nameOf(await pendingB)).toBe('新链')
+    expect(nameOf(router.transportFor('B')!)).toBe('新链')
+    expect(first.cancelled).toEqual(['旧链:A']) // B never had work on the old chain
+  })
+
   it('a certain drop marks every scope before any chain is asked to drain', async () => {
     // The mark is what a call suspended on its cache read sees when it wakes; draining may await a chain build, so
     // every scope of the drop is marked up front, not one by one between drains (ADR-0005)
