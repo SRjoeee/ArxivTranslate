@@ -148,6 +148,30 @@ describe('createLocalTransport：翻译', () => {
     expect(calls).toEqual([SVC.id])
   })
 
+  it('retire(): a call suspended in the chain\'s cache read is refused when it wakes and caches nothing; the scope itself is not marked (ADR-0005, fourth review pass)', async () => {
+    // A service was deleted while a request of a live session sat in its chain's cache read — outside every
+    // queue, so draining reaches nothing. Retiring the chain stops it there; the session goes on, on the replacement
+    const calls: string[] = []
+    const writes: unknown[] = []
+    let signal: () => void = () => {}
+    const reached = new Promise<void>(resolve => { signal = resolve })
+    let release: () => void = () => {}
+    const cache: CachePort = {
+      getMany: keys => new Promise(resolve => { release = () => resolve(keys.map(() => null)); signal() }),
+      putMany: async entries => { writes.push(entries) },
+    }
+    const registry = new CancelledScopeRegistry()
+    const t = await withChain([mockProvider(async r => { calls.push('call'); return { segments: r.segments, provider: 'mock' } })], { cache, cancelled: registry })
+    const pending = t.translate({ request: req, scope: 'live', cache: { paper: '2410.00260', renderPath: 'tags' } })
+    await reached
+    t.retire!()
+    release()
+    expect(await pending).toMatchObject({ ok: false, error: { kind: 'aborted' } })
+    expect(calls).toEqual([])
+    expect(writes).toEqual([])
+    expect(registry.has('live')).toBe(false)
+  })
+
   it('router and chain together: a tab closed while the first chain builds leaves no request out and nothing bound (ADR-0005, second review pass)', async () => {
     // The scope's first request arrived on a fresh worker (the chain still building) and the reader closed the
     // tab before it finished: the request must come back aborted, the provider untouched, the session unbound

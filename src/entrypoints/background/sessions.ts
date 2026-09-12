@@ -101,9 +101,16 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
   /** 按住的「可能跳走了」，按标签页；这个标签页再来一次请求就取消 */
   const leaving = new Map<number, ReturnType<typeof setTimeout>>()
 
+  /**
+   * Per tab, the number of the navigation probe in force. A probe that awaited the page and finds itself
+   * superseded — the tab closed, or a newer session on it armed a probe of its own — stops, instead of
+   * re-arming its stale scopes over the newer timer (the local review of ADR-0005, fourth pass)
+   */
+  const probes = new Map<number, number>()
   /** 这个标签页还活着：把按住的撤销取消掉 */
   const stayed = (tabId: number | undefined): void => {
     if (tabId === undefined) return
+    probes.set(tabId, (probes.get(tabId) ?? 0) + 1)
     const timer = leaving.get(tabId)
     if (timer === undefined) return
     clearTimeout(timer)
@@ -155,6 +162,7 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
   const arm = (tabId: number, scopes: readonly string[], attempt: number): void => {
     stayed(tabId)
     if (scopes.length === 0) return
+    const probe = probes.get(tabId)
     leaving.set(tabId, setTimeout(() => {
       leaving.delete(tabId)
       void (async () => {
@@ -162,8 +170,11 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
         const answers = deps.stillThere
           ? await Promise.all(scopes.map(s => deps.stillThere!(tabId, s)))
           : scopes.map(() => 'unknown' as const)
+        if (probes.get(tabId) !== probe) return // superseded while the page was being asked
         const live = scopes.filter((_, i) => answers[i] === 'same')
-        if (live.length > 0 && attempt < LOADING_RETRIES && await deps.stillLoading?.(tabId)) {
+        const loading = live.length > 0 && attempt < LOADING_RETRIES && await deps.stillLoading?.(tabId)
+        if (probes.get(tabId) !== probe) return
+        if (loading) {
           arm(tabId, scopes, attempt + 1)
           return
         }
@@ -256,6 +267,10 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
         if (session.transport && session.transport !== transport) old.push([scope, session.transport])
         sessions.set(scope, { ...session, transport })
       }
+      // Retire the replaced chains before any drain is awaited: a call suspended inside one of them (its cache
+      // read, outside every queue) is refused when it wakes instead of reaching the deleted service, while the
+      // scope itself lives on, on the replacement (the local review of ADR-0005, fourth pass)
+      for (const [, chain] of old) chain.retire?.()
       // Drain, do not mark: the scope stays alive on the new chain, it is only being emptied of
       // the work that belonged to the old one
       let cancelled = 0

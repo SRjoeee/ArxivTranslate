@@ -446,6 +446,9 @@ describe('createSessionRouter', () => {
       await router.dropTab(100 + i)
     }
     await vi.advanceTimersByTimeAsync(11 * 60_000)
+    // A registry that pruned on write would prune now: this write is what a TTL mutant needs to show itself
+    router.bind('late', 999)
+    await router.dropTab(999)
     release()
     await pending
     expect(registry.has('s1')).toBe(true)
@@ -508,10 +511,38 @@ describe('createSessionRouter', () => {
     await Promise.resolve()
     // Draining A lets B's build finish before the loop would have reached B
     first.cancel = async scope => { first.cancelled.push(`旧链:${scope}`); release(); await new Promise(resolve => setTimeout(resolve, 0)); return 1 }
+    // The replaced chain is retired before any drain: a call suspended inside it is refused when it wakes
+    first.retire = () => { first.cancelled.push('旧链 retired') }
     expect(await router.dropAndRebindAll(second)).toBe(1)
     expect(nameOf(await pendingB)).toBe('新链')
     expect(nameOf(router.transportFor('B')!)).toBe('新链')
-    expect(first.cancelled).toEqual(['旧链:A']) // B never had work on the old chain
+    expect(first.cancelled).toEqual(['旧链 retired', '旧链:A']) // B never had work on the old chain
+  })
+
+  it('a navigation probe superseded by a newer session on the tab stops: it must not re-arm its stale scopes over the newer timer', async () => {
+    // A's probe is awaiting the page when B replaces A on the tab and arms a probe of its own. A's answer comes
+    // back "still here" while the tab loads: re-arming A would clear B's timer, and B's navigation away would
+    // then escape cancellation (the local review of ADR-0005, fourth pass; inherited from the MVP)
+    vi.useFakeTimers()
+    const transport = fakeTransport('链')
+    const asked: string[] = []
+    let answer: (a: 'same' | 'other' | 'unknown') => void = () => {}
+    const router = routerOver(async () => transport, {
+      stillThere: (_tab, scope) => { asked.push(scope); return new Promise(resolve => { answer = resolve }) },
+      stillLoading: async () => true,
+    })
+    await router.forCall('A', 7)
+    router.mayHaveLeft(7)
+    await vi.advanceTimersByTimeAsync(3000) // A's probe is now asking the page
+    expect(asked).toEqual(['A'])
+    await router.forCall('B', 7) // A replaced on the tab
+    router.mayHaveLeft(7) // B's own probe, armed
+    answer('same') // the old page's late answer, tab still loading
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(asked).toEqual(['A', 'B']) // B's timer fired; A was not asked again
+    answer('other')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(transport.cancelled).toContain('链:B')
   })
 
   it('a certain drop marks every scope before any chain is asked to drain', async () => {
