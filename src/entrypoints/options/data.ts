@@ -51,8 +51,11 @@ export function useOptionsData(): OptionsData {
    * overlap can resolve out of order, and the Chrome card would then show another language's
    * availability (Codex on #157)
    */
+  /**
+   * The committed configuration owns the wanted target (set where the configuration lands); a lookup publishes only
+   * for it, and a download that ends after the target moved on re-checks the target of the moment (S1 review)
+   */
   const checkPack = useCallback(async (target: string) => {
-    wanted.current = target
     const state = await packState(target)
     if (wanted.current === target) setPack(state)
   }, [])
@@ -74,6 +77,7 @@ export function useOptionsData(): OptionsData {
     // them showed newer settings (the local review of S1)
     const init = async () => {
       const c = await getConfig()
+      wanted.current = c.targetLanguage
       setLocal(c)
       setFallbackReason(configFallbackReason())
       void checkPack(c.targetLanguage)
@@ -86,6 +90,7 @@ export function useOptionsData(): OptionsData {
     const unwatch = watchConfig(() => {
       const reload = async () => {
         const stored = await getConfig()
+        wanted.current = stored.targetLanguage
         setLocal(stored)
         void checkPack(stored.targetLanguage)
         return stored
@@ -129,6 +134,7 @@ export function useOptionsData(): OptionsData {
     const run = async () => {
       const next = fn(await getConfig())
       await setConfig(next)
+      wanted.current = next.targetLanguage
       setLocal(next)
       // A valid write **is** the repair: leaving the warning up would go on telling the reader that
       // the key and service they just fixed are not in effect (Codex on #157)
@@ -150,9 +156,9 @@ export function useOptionsData(): OptionsData {
       // translating into another language must keep the chain it started on (Codex on #157)
       await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).catch(() => undefined)
     } finally {
-      setPack(await packState(target))
+      await checkPack(wanted.current ?? target)
     }
-  }, [])
+  }, [checkPack])
 
   const clearCache = useCallback(async () => {
     const res = await sendMessage({ type: 'axt:cache-clear', paper: undefined })
