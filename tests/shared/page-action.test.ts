@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Progress } from '@/core/pipeline/run'
-import { behindSettings, messageFor, pageAction } from '@/shared/page-action'
+import { behindSettings, messageFor, pageAction, pageDecision } from '@/shared/page-action'
 
 // One decision for the popup's main button and the toggle (INVENTORY S2)
 
@@ -30,5 +30,23 @@ describe('pageAction', () => {
     expect(messageFor('translate')).toEqual({ type: 'axt:translate-page' })
     expect(messageFor('retranslate')).toEqual({ type: 'axt:translate-page', restart: true })
     expect(messageFor('restore')).toEqual({ type: 'axt:restore-page' })
+  })
+})
+
+describe('pageDecision', () => {
+  const saved = (over: Partial<{ revision: string | null; canRun: boolean; fallback: boolean }> = {}) => ({ revision: 'r1', canRun: true, fallback: false, ...over })
+
+  it('a running page always restores; a page behind the settings re-translates only on settings that run on their own (a fallback is not what the reader chose)', () => {
+    const on = { progress: progress('on'), running: running('r1') }
+    expect(pageDecision(on, saved({ canRun: false }))).toEqual({ action: 'restore', behind: false, enabled: true })
+    expect(pageDecision(on, saved({ revision: 'r2' }))).toEqual({ action: 'retranslate', behind: true, enabled: true })
+    expect(pageDecision(on, saved({ revision: 'r2', canRun: false, fallback: true }))).toEqual({ action: 'retranslate', behind: true, enabled: false })
+  })
+
+  it('a page that is not translated, or paused, starts when the chosen service runs or a fallback would', () => {
+    expect(pageDecision({ progress: progress('idle') }, saved({ canRun: false, fallback: true }))).toEqual({ action: 'translate', behind: false, enabled: true })
+    expect(pageDecision({ progress: progress('idle') }, saved({ canRun: false, fallback: false }))).toEqual({ action: 'translate', behind: false, enabled: false })
+    expect(pageDecision({ progress: progress('stopped', 'auth: bad key') }, saved({ canRun: false, fallback: true }))).toEqual({ action: 'retranslate', behind: false, enabled: true })
+    expect(pageDecision(undefined, saved())).toBeUndefined()
   })
 })

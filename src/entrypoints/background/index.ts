@@ -182,15 +182,21 @@ export default defineBackground(() => {
     if (alarm.name === RESTART_ALARM) void helperRestart.fired()
   })
 
-  /** The saved settings' identity for the toggle's "behind" test (shared/page-action.ts); the popup computes the same */
-  const savedRevision = () => getConfig().then(chainRevision)
+  /**
+   * The saved settings as the toggle decides on them (shared/page-action.ts): their identity, and whether they run —
+   * from the chain in force, which is built from them. The popup decides the same from the settings it holds
+   */
+  const saved = async () => {
+    const [config, status] = await Promise.all([getConfig(), transportOf().then(t => t.status())])
+    return { revision: await chainRevision(config), canRun: status.available, fallback: status.fallback !== undefined }
+  }
   const menuDeps = {
     create: (options: { id: string; title: string; contexts: string[]; documentUrlPatterns: string[] }) =>
       browser.contextMenus.create(options as Parameters<typeof browser.contextMenus.create>[0]),
     removeAll: () => browser.contextMenus.removeAll(),
     onClicked: (handler: Parameters<typeof browser.contextMenus.onClicked.addListener>[0]) => browser.contextMenus.onClicked.addListener(handler),
     send: (tabId: number, message: unknown) => browser.tabs.sendMessage(tabId, message as never),
-    savedRevision,
+    saved,
   }
   installContextMenu(menuDeps)
   // 读者在这次读还没回来的时候改了界面语言：watcher 已经换过语言包，这个旧快照不许再盖回去。
@@ -207,7 +213,7 @@ export default defineBackground(() => {
     onCommand: handler => browser.commands.onCommand.addListener(handler),
     activeTab: async () => (await browser.tabs.query({ active: true, currentWindow: true }))[0],
     send: (tabId, message) => browser.tabs.sendMessage(tabId, message),
-    savedRevision,
+    saved,
   })
 
   browser.tabs.onRemoved.addListener(tabId => dropTab(tabId, '关闭'))

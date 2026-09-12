@@ -34,7 +34,6 @@ function provider(over: Partial<ProviderStatus> = {}): ProviderStatus {
     engine: { id: 'microsoft', displayName: 'Microsoft' },
     chain: ['microsoft', 'google-web'],
     demotions: [],
-    revision: 'r1',
     ...over,
   }
 }

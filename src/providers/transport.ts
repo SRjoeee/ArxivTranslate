@@ -12,7 +12,6 @@ import { createFallbackService } from './fallback'
 import type { CancelledScopeRegistry } from './request/cancellation'
 import { createTranslateService, type CachePort, type TranslateCall, type TranslateMessageResponse, type TranslateService, type TranslateServiceDeps } from './translate-service'
 import type { ProviderErrorKind, TranslationProvider } from './types'
-import { chainRevision } from '@/config/revision'
 
 /** 此刻实际在用的引擎与最近一次降级原因（§8.5）；popup 据此解释译文为什么换了引擎 */
 export interface EngineStatus {
@@ -41,12 +40,6 @@ export interface ProviderStatus {
   /** The config this chain was built from: the popup waits for these to match what it just saved before restarting a page */
   targetLanguage: string
   promptId: string
-  /**
-   * The identity of the settings this chain was built from (`chainRevision`). A page records it at session start,
-   * so the popup can say "this page is on older settings" for **any** change — a new key, model, endpoint or prompt
-   * keeps the service id and the target, and comparing those alone missed all of them (Codex on #157)
-   */
-  revision: string
   engine: EngineStatus
   /** 链上引擎的 id，按优先级。popup 用它判断刚下好语言包的引擎有没有进链，e2e 用它断言降级 */
   chain: string[]
@@ -98,7 +91,6 @@ export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' |
  * 分享同一份并发预算，同时翻两篇的吞吐减半，但不会互相把对方打进限流。
  */
 export async function createLocalTransport(config: Config, deps: LocalTransportDeps): Promise<TranslationTransport> {
-  const revision = await chainRevision(config)
   const { chain, renderPath } = await (deps.buildChain ?? buildChain)(config)
   const primary = chain[0]!
   const chosen = chosenService(config)
@@ -196,7 +188,6 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
       renderPath,
       targetLanguage: config.targetLanguage,
       promptId: config.prompts.promptId,
-      revision,
       chain: chain.map(engine => engine.id),
       demotions: live.demotions.map(d => ({ id: d.id, kind: d.kind })),
       engine: {

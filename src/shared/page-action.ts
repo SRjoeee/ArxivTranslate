@@ -30,6 +30,37 @@ export function pageAction(page: Pick<PageStatus, 'progress' | 'running'> | unde
   return 'translate'
 }
 
+/** What the decision is made against: the saved settings' identity and whether they can run */
+export interface SavedSettings {
+  /** `chainRevision` of the stored configuration; null when unknown — a page is then never behind */
+  revision: string | null
+  /** The chosen service can run on its own: the popup decides from the settings (`runnable`), the background from the chain's status */
+  canRun: boolean
+  /** A free engine takes over when it cannot */
+  fallback: boolean
+}
+
+export interface PageDecision {
+  action: PageAction
+  behind: boolean
+  /** Whether the reader may press it: the popup disables the button, the toggle does nothing */
+  enabled: boolean
+}
+
+/**
+ * The action and whether it is open. A running page always restores. A page behind the settings re-translates only
+ * on settings that run on their own — a fallback is not what the reader chose, and the reader is told to fix the
+ * choice (popup P13). Anything else starts when something can run, the fallback included (§8.5). The toggle applies
+ * this too (the local review of INVENTORY S2): the keyboard command must not restart a page the button refuses to
+ */
+export function pageDecision(page: Pick<PageStatus, 'progress' | 'running'> | undefined, saved: SavedSettings): PageDecision | undefined {
+  const action = pageAction(page, saved.revision)
+  if (page === undefined || action === undefined) return undefined
+  const behind = behindSettings(page, saved.revision)
+  const enabled = action === 'restore' ? true : behind ? saved.canRun : saved.canRun || saved.fallback
+  return { action, behind, enabled }
+}
+
 /** The message each action is, the way the popup's buttons send them: a re-translation restarts the session in place */
 export function messageFor(action: PageAction): { type: 'axt:translate-page'; restart?: true } | { type: 'axt:restore-page' } {
   if (action === 'restore') return { type: 'axt:restore-page' }

@@ -14,6 +14,8 @@ import type { TranslateCall } from '@/providers/translate-service'
 import type { ImageBytes } from '@/core/image'
 import type { OcrCall, OcrLine } from '@/shared/ocr'
 import { S } from '@/ui/strings'
+import { chainRevision } from '@/config/revision'
+import { behindSettings } from '@/shared/page-action'
 
 const PAGE =
   '<h2 class="ltx_title ltx_title_section" id="s1">Introduction</h2>'
@@ -27,7 +29,7 @@ const settle = async (rounds = 4) => { for (let i = 0; i < rounds; i++) await ti
 function providerStatus(over: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
     providerId: 'microsoft', available: true, maxBatchChars: 100_000, maxBatchItems: 100, renderPath: 'tags',
-    targetLanguage: 'cmn', promptId: 'default', revision: 'r1', engine: { id: 'microsoft', displayName: 'Microsoft' },
+    targetLanguage: 'cmn', promptId: 'default', engine: { id: 'microsoft', displayName: 'Microsoft' },
     chain: ['microsoft'], demotions: [], ...over,
   }
 }
@@ -144,8 +146,25 @@ describe('page session', () => {
     expect(status.preference).toBe(DEFAULT_CONFIG.mode)
     expect(status.mode).toBe(effective)
     expect(status.progress.state).toBe('on')
-    expect(status.running).toEqual({ provider: DEFAULT_CONFIG.provider, target: DEFAULT_CONFIG.targetLanguage, engine: 'microsoft', revision: 'r1' })
+    expect(status.running).toEqual({ provider: DEFAULT_CONFIG.provider, target: DEFAULT_CONFIG.targetLanguage, engine: 'microsoft', revision: await chainRevision(DEFAULT_CONFIG) })
     expect(status.images).toBeUndefined()
+  })
+
+  it('the revision is the settings the session started on: a change saved while the status was awaited leaves the page behind them (INVENTORY S2 review)', async () => {
+    const h = harness({ holdStatusAt: 1 })
+    live = h.session
+    const pending = h.session.start()
+    await settle()
+    // The configuration was read; the status is still on its way; the reader saves a new target meanwhile
+    const changed = { ...h.config(), targetLanguage: 'jpn' as Config['targetLanguage'] }
+    await h.deps.config.set(changed)
+    h.releaseStatus()
+    expect(await pending).toEqual({ started: true })
+    const status = await h.session.status()
+    // The session translates into what it read; its revision says so, and the saved settings' digest says the page is behind
+    expect(status.running?.target).toBe(DEFAULT_CONFIG.targetLanguage)
+    expect(status.running?.revision).toBe(await chainRevision(DEFAULT_CONFIG))
+    expect(behindSettings(status, await chainRevision(changed))).toBe(true)
   })
 
   it('a second start is refused while the session is on; a restart replaces it and cancels the old scope', async () => {

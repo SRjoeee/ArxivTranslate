@@ -6,7 +6,7 @@
 // 一切换标签页就说错了。沉浸式翻译的那一条也是静态的。
 
 import type { PageStatus } from '@/shared/messages'
-import { messageFor, pageAction } from '@/shared/page-action'
+import { messageFor, pageDecision, type SavedSettings } from '@/shared/page-action'
 import { S } from '@/ui/strings'
 
 /** 菜单项 id；重建时按它删旧的，worker 每次唤醒都会重新跑一遍 create */
@@ -29,8 +29,8 @@ export const MENU_CONTEXTS = ['page', 'selection', 'link', 'image', 'video', 'au
 /** What the toggle needs: a way to ask the page and tell it, and the saved settings' identity (shared/page-action.ts) */
 export interface ToggleDeps {
   send<T>(tabId: number, message: { type: string }): Promise<T>
-  /** `chainRevision` of the stored configuration; null when it cannot be read (the page is then never "behind") */
-  savedRevision(): Promise<string | null>
+  /** The saved settings as the decision needs them; null when they cannot be read (a running page then restores) */
+  saved(): Promise<SavedSettings | null>
 }
 
 export interface MenuDeps extends ToggleDeps {
@@ -55,12 +55,12 @@ export interface CommandDeps extends ToggleDeps {
  */
 export async function toggleTranslation(deps: ToggleDeps, tabId: number): Promise<void> {
   try {
-    const [status, savedRevision] = await Promise.all([
+    const [status, saved] = await Promise.all([
       deps.send<Pick<PageStatus, 'progress' | 'running'>>(tabId, { type: 'axt:page-status' }),
-      deps.savedRevision().catch(() => null),
+      deps.saved().catch(() => null),
     ])
-    const action = pageAction(status, savedRevision)
-    if (action) await deps.send(tabId, messageFor(action))
+    const decision = pageDecision(status, saved ?? { revision: null, canRun: true, fallback: false })
+    if (decision?.enabled) await deps.send(tabId, messageFor(decision.action))
   } catch {
     // See above
   }

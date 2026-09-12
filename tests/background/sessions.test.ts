@@ -14,7 +14,7 @@ function fakeTransport(name: string, cancelled: string[] = []): TranslationTrans
     cancel: async scope => { cancelled.push(`${name}:${scope}`); return 1 },
     retire: () => { retired = true; cancelled.push(`${name} retired`); return 1 },
     isRetired: () => retired,
-    status: async () => ({ providerId: name, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', chain: [name], demotions: [], revision: 'r1', engine: { id: name, displayName: name } }),
+    status: async () => ({ providerId: name, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, targetLanguage: 'cmn', promptId: 'default', chain: [name], demotions: [], engine: { id: name, displayName: name } }),
   } as TranslationTransport & { name: string; cancelled: string[] }
 }
 

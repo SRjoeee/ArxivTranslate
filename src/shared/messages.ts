@@ -27,8 +27,9 @@ export interface PageStatus {
   session?: string | null
   /**
    * What the current session runs on: the service chosen when it started, its target language,
-   * and the service actually serving right now (a hand-over down the chain changes it). The popup
-   * compares it with the saved settings to know when the page is behind them
+   * the service actually serving right now (a hand-over down the chain changes it), and `revision` —
+   * `chainRevision` of the configuration the session started on. The popup and the toggle compare
+   * it with the saved settings' digest to know when the page is behind them (shared/page-action.ts)
    */
   running?: { provider: string; target: string; engine: string; revision: string }
 }

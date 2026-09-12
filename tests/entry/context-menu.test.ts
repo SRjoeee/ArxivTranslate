@@ -9,7 +9,7 @@ const progress = (state: Progress['state']): { progress: Progress } =>
 
 // 右键菜单的开关（issue #146）。原生右键菜单在 Playwright 里驱动不了，所以「点了之后做什么」
 // 只能在这一层钉住
-function fakeMenu(status?: { progress: Progress; running?: { provider: string; target: string; engine: string; revision: string } }, savedRevision: string | null = 'r1') {
+function fakeMenu(status?: { progress: Progress; running?: { provider: string; target: string; engine: string; revision: string } }, saved: { revision: string | null; canRun: boolean; fallback: boolean } | null = { revision: 'r1', canRun: true, fallback: false }) {
   const sent: { tabId: number; type: string; restart?: boolean }[] = []
   const created: unknown[] = []
   let click: ((info: { menuItemId: string | number }, tab?: { id?: number }) => void) | undefined
@@ -25,7 +25,7 @@ function fakeMenu(status?: { progress: Progress; running?: { provider: string; t
       }
       return {}
     }),
-    savedRevision: async () => savedRevision,
+    saved: async () => saved,
   }
   installContextMenu(deps as never)
   return { sent, created, click: (tabId?: number) => click?.({ menuItemId: MENU_ID }, tabId === undefined ? undefined : { id: tabId }) }
@@ -51,7 +51,7 @@ describe('右键菜单的翻译开关（#146）', () => {
       removeAll: () => new Promise(resolve => { removed = resolve }),
       onClicked: handler => { menu.clicked = handler },
       send: <T>() => Promise.resolve({} as T),
-      savedRevision: async () => null,
+      saved: async () => null,
     })
     // 菜单还没建出来，但监听器已经在：这一次唤醒的点击不会掉地上
     expect(menu.created).toHaveLength(0)
@@ -63,14 +63,28 @@ describe('右键菜单的翻译开关（#146）', () => {
     // The key is badged on that button (user 2026-09-11); restoring here would contradict what the badge promises.
     // "Behind" is the page's revision against the saved settings' digest — the menu reads the settings for it
     const running = { provider: 'microsoft', target: 'cmn', engine: 'microsoft', revision: 'r1' }
-    const behind = fakeMenu({ ...progress('on'), running }, 'r2')
+    const behind = fakeMenu({ ...progress('on'), running }, { revision: 'r2', canRun: true, fallback: false })
     behind.click(7)
     await vi.waitFor(() => expect(behind.sent).toHaveLength(2))
     expect(behind.sent[1]).toEqual({ tabId: 7, type: 'axt:translate-page', restart: true })
-    const current = fakeMenu({ ...progress('on'), running }, 'r1')
+    const current = fakeMenu({ ...progress('on'), running }, { revision: 'r1', canRun: true, fallback: false })
     current.click(7)
     await vi.waitFor(() => expect(current.sent).toHaveLength(2))
     expect(current.sent[1]).toEqual({ tabId: 7, type: 'axt:restore-page' })
+  })
+
+  it('a page behind settings that cannot run on their own is left alone, as the button it mirrors is disabled — a fallback does not make the toggle restart it (the local review of S2)', async () => {
+    const running = { provider: 'microsoft', target: 'cmn', engine: 'microsoft', revision: 'r1' }
+    const menu = fakeMenu({ ...progress('on'), running }, { revision: 'r2', canRun: false, fallback: true })
+    menu.click(7)
+    await vi.waitFor(() => expect(menu.sent).toHaveLength(1))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(menu.sent).toEqual([{ tabId: 7, type: 'axt:page-status' }])
+    // Not translated yet, with a fallback to run on: that one starts, as the button does
+    const idle = fakeMenu(progress('idle'), { revision: 'r1', canRun: false, fallback: true })
+    idle.click(8)
+    await vi.waitFor(() => expect(idle.sent).toHaveLength(2))
+    expect(idle.sent[1]).toEqual({ tabId: 8, type: 'axt:translate-page' })
   })
 
   it('the saved settings cannot be read: the page is not behind, a running page restores', async () => {
@@ -102,7 +116,7 @@ function fakeCommand(status: { progress: Progress } | undefined, active: { id?: 
   installToggleCommand({
     onCommand: (h: (command: string, tab?: { id?: number }) => void) => { fire = h },
     activeTab: async () => active,
-    savedRevision: async () => 'r1',
+    saved: async () => ({ revision: 'r1', canRun: true, fallback: false }),
     send: vi.fn(async (tabId: number, message: { type: string }) => {
       sent.push({ tabId, type: message.type })
       if (message.type === 'axt:page-status') {
