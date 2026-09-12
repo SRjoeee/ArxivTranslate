@@ -392,6 +392,38 @@ describe('createSessionRouter', () => {
     expect(chain.cancelled).toHaveLength(2)
   })
 
+  it('a provisional binding to a chain since retired is let go, and the first request still drops the tab\'s earlier session before binding the chain in force (ninth pass)', async () => {
+    const old = fakeTransport('旧')
+    const fresh = fakeTransport('新')
+    let current = old
+    const router = routerOver(async () => current)
+    // The tab's earlier session made its requests on the old chain; the new document's session is bound to it provisionally
+    router.bind('earlier', 7)
+    await router.forCall('earlier', 7)
+    router.bindTo('s1', old, 7)
+    old.retire?.()
+    current = fresh
+    expect(nameOf(await router.forCall('s1', 7))).toBe('新')
+    expect(router.transportFor('s1')).toBe(fresh)
+    expect(router.bound()).toEqual(['s1'])
+    expect(old.cancelled).toContain('旧:earlier')
+  })
+
+  it('dropAndRebindAll keeps a provisional session provisional: its first request still drops the tab\'s earlier session', async () => {
+    const old = fakeTransport('旧')
+    const fresh = fakeTransport('新')
+    let current = old
+    const router = routerOver(async () => current, { retireOthers: () => { old.retire?.(); return 0 } })
+    router.bind('earlier', 7)
+    await router.forCall('earlier', 7)
+    router.bindTo('s1', old, 7)
+    current = fresh
+    await router.dropAndRebindAll()
+    expect(router.bound().sort()).toEqual(['earlier', 's1'])
+    expect(nameOf(await router.forCall('s1', 7))).toBe('新')
+    expect(router.bound()).toEqual(['s1'])
+  })
+
   it('a provisional binding to a chain since retired is not used: the first request binds the chain in force', async () => {
     const old = fakeTransport('旧')
     const fresh = fakeTransport('新')

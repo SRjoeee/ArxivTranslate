@@ -232,20 +232,18 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       if (scope === undefined) return deps.current()
       const bound = sessions.get(scope)
       if (bound?.transport && !bound.provisional) return bound.transport
-      if (bound?.transport && !bound.transport.isRetired?.()) {
+      if (bound?.provisional) {
         // The first request of a session bound at status time: now it is the tab's session, and the tab's earlier
         // ones are stale (a refresh, a navigation without endRun) — the same drop a new scope gets below, deferred
-        // to here so that a binding made for a restart that lost cancels nothing (eighth pass)
-        const { provisional: _, ...settled } = bound
-        sessions.set(scope, { ...settled, ...(tabId !== undefined ? { tabId } : {}) })
+        // to here so that a binding made for a restart that lost cancels nothing (eighth pass). The drop happens
+        // whether the provisional chain still stands or was retired meanwhile (ninth pass); a retired one is let go
+        // and the loop below binds the chain in force, as for a fresh scope
+        const { provisional: _, transport, ...rest } = bound
+        const standing = transport && !transport.isRetired?.() ? transport : undefined
+        sessions.set(scope, { ...rest, ...(standing ? { transport: standing } : {}), ...(tabId !== undefined ? { tabId } : {}) })
         const stale = tabId !== undefined ? scopesOfTab(tabId).filter(other => other !== scope) : []
         if (stale.length > 0) await drop(stale)
-        return bound.transport
-      }
-      if (bound?.provisional) {
-        // Bound provisionally to a chain since retired: the loop below binds the chain in force, as for a fresh scope
-        const { provisional: _, transport: __, ...rest } = bound
-        sessions.set(scope, rest)
+        if (standing) return standing
       }
       if (!bound && deps.cancelled.has(scope)) {
         // A dropped session calling again (the old content script in this worker still sends): hand it the current
@@ -327,7 +325,8 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       for (const [scope, session] of sessions) {
         if (!session.transport?.isRetired?.()) continue
         taken.push(scope)
-        sessions.set(scope, session.tabId !== undefined ? { tabId: session.tabId } : {})
+        // A provisional session stays provisional: its deferred drop of the tab's earlier sessions is still owed
+        sessions.set(scope, { ...(session.tabId !== undefined ? { tabId: session.tabId } : {}), ...(session.provisional ? { provisional: true as const } : {}) })
       }
       // 2. The replacement. A session binds it on its next request anyway (forCall); binding the ones taken off
       //    a chain now keeps status answers and the holder's ownership current. A failed rebuild surfaces here
