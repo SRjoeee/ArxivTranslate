@@ -16,7 +16,7 @@ import { expectationsFromText, validate } from '@/core/protector/validate'
 import { createGlossaryMatcher, type GlossaryEntry } from './glossary'
 import { getRandomUUID } from '@/shared/uuid'
 import { BatchCountMismatchError, BatchQueue, type BatchExecutionMeta, type BatchOptions } from './request/batch-queue'
-import { CancelledScopeRegistry, isTranslationCancelledError } from './request/cancellation'
+import { type CancelledScopeRegistry, isTranslationCancelledError, TranslationCancelledError } from './request/cancellation'
 import { REQUEST_TIMEOUT_ERROR_NAME, RequestQueue, type QueueOptions } from './request/request-queue'
 import { attachRequestErrorMeta } from './request/retry-policy'
 import { ProviderError, isPermanentErrorKind, type ProviderErrorKind, type TranslatedSegment, type TranslateRequest, type TranslationProvider, type TranslateSegment } from './types'
@@ -85,24 +85,27 @@ export interface TranslateServiceDeps {
   cacheReadBudgetMs?: number
   /** 攒批参数覆盖（测试用） */
   batch?: Partial<Pick<BatchOptions<QueueItem, TranslationOutcome>, 'batchDelay' | 'maxRetries' | 'enableFallbackToIndividual'>>
-}
-
-export interface CancelOptions {
   /**
-   * 记住这个 scope 已经撤过，之后带它的调用一律直接 aborted（默认 true）。
-   *
-   * 用户按停止、标签页关掉——这些是**确定**的终结，记住它才能堵住「请求正挂在读缓存上、撤完才醒来」
-   * 那个窗口（#1881）。而**猜**出来的终结不能记：同文档换 hash 与真的跳走在 `tabs.onUpdated` 里
-   * 长得一模一样（实测 `changeInfo` 都只有 `{status:'loading'}`），猜错时页面还活着，记下去就等于
-   * 把它后半篇的翻译永久判死（用户 2026-09-09 报的参考文献全失败）
+   * Scopes the session router has ended for certain (ADR-0005). Read after the cache read, before the cache write
+   * and by the batch queue's liveness hook, so a call that was suspended when its scope was drained never enters a
+   * queue and never writes a result (#1881)
    */
-  remember?: boolean
+  cancelled: Pick<CancelledScopeRegistry, 'has'>
+  /**
+   * Whether the chain this service belongs to has been retired — a service on it deleted, the sessions moved on
+   * (ADR-0005). Unlike the registry this is not about a scope: a connection test carries none, and it must not
+   * reach the endpoint with a deleted key either (#157), so every call is refused after its awaits and every
+   * batch at dispatch
+   */
+  retired?: () => boolean
 }
 
 export interface TranslateService {
   translate(call: TranslateCall): Promise<TranslateMessageResponse>
-  /** 撤掉该 scope 排队与在飞的请求；返回撤掉的条数。默认之后带同一 scope 的调用直接返回 aborted */
-  cancel(scope: string, options?: CancelOptions): number
+  /** Drain the scope's queued and in-flight requests; returns how many. Refusing the scope's later calls is the registry's job, not this method's */
+  cancel(scope: string): number
+  /** Drain every scoped request, queued or in flight, whichever session left it here; returns how many. Retirement of the chain (ADR-0005) */
+  cancelAll(): number
 }
 
 /** Read Frog 的默认队列参数（DEFAULT_CONFIG.pageTranslation.requestQueueConfig 与 translation-queues.ts 里的常量） */
@@ -216,7 +219,8 @@ export async function readWithBudget(store: CachePort, keys: string[], budgetMs:
 
 export function createTranslateService(deps: TranslateServiceDeps): TranslateService {
   const queues = new Map<string, ProviderQueues>()
-  const cancelledScopes = new CancelledScopeRegistry()
+  /** A call that must not go on: its scope is dead, or this whole chain is */
+  const refused = (scope: string | undefined): boolean => deps.retired?.() === true || (scope !== undefined && deps.cancelled.has(scope))
   const baseTimeoutMs = deps.queue?.timeoutMs ?? DEFAULT_QUEUE_OPTIONS.timeoutMs
   const timeoutFor = (chars: number) => Math.min(baseTimeoutMs + chars * BATCH_TIMEOUT_PER_CHAR_MS, MAX_BATCH_TIMEOUT_MS)
 
@@ -276,6 +280,12 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
   }
 
   const translateItems = async (items: QueueItem[], ids: string[], signal: AbortSignal | undefined): Promise<TranslationOutcome[]> => {
+    // The last check before the endpoint, and the only one a retry passes through: the request queue retries the
+    // stored thunk without re-entering the batch queue, so a chain retired between two attempts must stop here.
+    // Non-retryable, so the queue does not try a third time (ADR-0005). The chain only, never the scopes: the items
+    // carry the first subscriber's scope, and a deduplicated peer — another tab, an unscoped connection test, a late
+    // joiner during a retry backoff — is known to the queue alone, which drains by refcount (eighteenth pass)
+    if (deps.retired?.()) throw attachRequestErrorMeta(new TranslationCancelledError(items[0]?.scope), { isRetryable: false })
     const first = items[0]!
     try {
       const result = await first.provider.translate({
@@ -333,6 +343,19 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       }
       return error
     }
+    /**
+     * What a request-queue task subscribes for this batch: the batch's scope union as flushed, minus the scopes
+     * that died since. A batch retry reuses the meta of its first flush, and re-subscribing a dead scope keeps the
+     * task alive after its last live subscriber is drained — the endpoint is then called for nobody (the local
+     * review of ADR-0005, nineteenth pass). `null`: every subscriber died, there is nothing to send for.
+     * `undefined` stays `undefined` — an unscoped member keeps the batch alive, as in the queues' refcount
+     */
+    const liveScopes = (meta: BatchExecutionMeta): readonly string[] | undefined | null => {
+      if (!meta.scopes || meta.scopes.length === 0) return meta.scopes
+      const live = meta.scopes.filter(scope => !deps.cancelled.has(scope))
+      return live.length > 0 ? live : null
+    }
+    const nobodyLeft = (meta: BatchExecutionMeta) => attachRequestErrorMeta(new TranslationCancelledError(meta.scopes?.join(',')), { isRetryable: false })
     const requestQueue = new RequestQueue(queueOptions)
     const batchQueue = new BatchQueue<QueueItem, TranslationOutcome>({
       maxCharactersPerBatch: provider.maxBatchChars,
@@ -347,7 +370,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
       getCharacters: item => item.text.length,
       getDedupKey: item => item.dedupKey,
       getScope: item => item.scope,
-      isScopeCancelled: scope => cancelledScopes.has(scope),
+      isScopeCancelled: scope => refused(scope),
       executeBatch: (items, meta) => {
         // 这一批所属的会话已经致命：当场拒，不进 RequestQueue、不打端点。BatchQueue 只对
         // BatchCountMismatchError 重试或走逐条兜底，所以这里拒了就是终局，不会绕出第二条路
@@ -357,16 +380,23 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         const chars = items.reduce((n, item) => n + item.text.length, 0)
         const hash = items.map(item => item.dedupKey ?? item.uid).join('|')
         const scheduleAt = Math.min(...items.map(item => item.scheduleAt))
-        return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, meta.scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
+        const scopes = liveScopes(meta)
+        if (scopes === null) return Promise.reject(nobodyLeft(meta))
+        return requestQueue.enqueue(signal => translateItems(items, ids, signal), scheduleAt, hash, scopes, { timeoutMs: timeoutFor(chars), deadlineAt: deadlineOf(meta) })
       },
       executeIndividual: (item, meta) => {
         const dead = fatalFor(meta)
         if (dead !== undefined) return Promise.reject(dead)
+        // The item's own subscribers as the batch queue hands them over — its scope and the peers deduplicated onto
+        // it — minus the ones that died since the flush. Neither the item's scope alone (a peer would be lost) nor
+        // the batch's union (an unrelated live tab would keep a closed tab's items running) says who still wants it
+        const scopes = liveScopes(meta)
+        if (scopes === null) return Promise.reject(nobodyLeft(meta))
         return requestQueue.enqueue(
           async signal => (await translateItems([item], [item.id], signal))[0]!,
           item.scheduleAt,
           item.dedupKey ?? item.uid,
-          item.scope ? [item.scope] : undefined,
+          scopes,
           // 逐条兜底是同一批文本的最后一程，不能再拿一份完整预算（Codex 在 #56 指出）
           { timeoutMs: timeoutFor(item.text.length), deadlineAt: deadlineOf(meta) },
         )
@@ -381,6 +411,8 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
   }
 
   const translate = async ({ request, providerId, cache, scope }: TranslateCall): Promise<TranslateMessageResponse> => {
+    /** Nothing of this call goes back: its scope died, or its chain was retired */
+    const refusal = (): TranslateMessageResponse => ({ ok: false, error: { kind: 'aborted', message: scope === undefined ? '已取消（链已退役）' : `已取消（scope: ${scope}）`, isolatable: false } })
     try {
       const provider = await deps.getProvider(providerId)
       const model = (await deps.getModel?.()) ?? ''
@@ -428,7 +460,7 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
         }
       }
       // 读缓存时让出过主线程，这期间 scope 可能已被撤销（Read Frog translation-queues.ts 也在 await 之后查一次）
-      if (scope && cancelledScopes.has(scope)) return { ok: false, error: { kind: 'aborted', message: `已取消（scope: ${scope}）`, isolatable: false } }
+      if (refused(scope)) return refusal()
       const cached = translated.size
 
       // 2. 未命中的逐段入队；同一次调用的段落批次键相同，会攒在一起
@@ -497,10 +529,18 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
               : { key, translation: value.text, paper: cache.paper })
           }
         })
-        // 写之前再查一次取消（Codex 在 #33 指出）：一次调用会被拆到多个批次，先完成的那些
-        // 可能在 cancel(scope) 撤掉其余批次之前就已经 fulfill，`Promise.allSettled` 醒来时会把它们写进库，
-        // 与「恢复原文之后不再写缓存」的承诺不符
-        if (store && writes.length > 0 && !(scope && cancelledScopes.has(scope))) await store.putMany(writes)
+        // The last word, after every batch has settled: the scope died or the chain was retired meanwhile, and
+        // nothing of this call goes back — no cache write (a batch that finished before the drain would land in
+        // the cache after "restore the page"; Codex on #33), no `partial` for the caller to render, no result
+        // from a task an unscoped subscriber kept alive through the drain (the local review of ADR-0005,
+        // fifteenth pass)
+        if (refused(scope)) return refusal()
+        if (store && writes.length > 0) {
+          await store.putMany(writes)
+          // The write was one more wait: a drop or a retirement during it must not hand the result over either.
+          // What was written stays — sound translations under keys derived from their content
+          if (refused(scope)) return refusal()
+        }
         if (failures.length > 0) {
           const error = pickError(failures)
           // key 没配 / 不认：这轮里再打多少次都是同一个 401。`failQueue` 只排空**那一刻**排在
@@ -534,10 +574,12 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     }
   }
 
-  const cancel = (scope: string, { remember = true }: CancelOptions = {}): number => {
-    // 先登记再排空：登记是同步的，还挂在读缓存上的调用醒来就能看到；
-    // 先撤批处理再撤请求队列，反过来攒着的批次会在两次排空之间刷出新任务（Read Frog translation-queues.ts:616）
-    if (remember) cancelledScopes.markScope(scope)
+  /**
+   * Drain only: whether the scope is dead from now on is the session router's decision, written to the registry
+   * this service reads before anything here is drained (ADR-0005). Batch queue before request queue — the other
+   * way round, a batch still gathering flushes new tasks between the two drains (Read Frog translation-queues.ts:616)
+   */
+  const cancel = (scope: string): number => {
     let cancelled = 0
     for (const { requestQueue, batchQueue } of queues.values()) {
       cancelled += batchQueue.cancelByScope(scope)
@@ -546,7 +588,18 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
     return cancelled
   }
 
-  return { translate, cancel }
+  // Same order as cancel(): a batch still gathering flushes new tasks between the two drains the other way round.
+  // Unscoped work (a connection test) is not drained — the retirement gate refuses its next attempt
+  const cancelAll = (): number => {
+    let cancelled = 0
+    for (const { requestQueue, batchQueue } of queues.values()) {
+      cancelled += batchQueue.cancelWhere(() => true)
+      cancelled += requestQueue.cancelWhere(() => true)
+    }
+    return cancelled
+  }
+
+  return { translate, cancel, cancelAll }
 }
 
 /** 一次调用里多段失败时报哪个：配置错误优先（run.ts 据此停下），其次真正的失败，最后才是取消 */

@@ -1,13 +1,20 @@
 // OCR 服务（DESIGN §15.2）：查 OCR 缓存，未命中才叫 helper，结果写回。
 // 缓存与译文共用一个 Dexie 库（cachePortOf），键由 ocrCacheKey 算——只随图片字节与 helper 版本变。
 import { ocrCacheKey } from '@/cache/key'
-import { CACHE_READ_BUDGET_MS, type CachePort, type CancelOptions, readWithBudget } from '@/providers/translate-service'
+import type { CancelledScopeRegistry } from '@/providers/request/cancellation'
+import { CACHE_READ_BUDGET_MS, type CachePort, readWithBudget } from '@/providers/translate-service'
 import type { HelperStatus, OcrCall, OcrMessageResponse, OcrResult } from '@/shared/ocr'
 import { HelperError, type HelperClient } from './helper'
 
 export interface OcrServiceDeps {
   helper: HelperClient
   cache: CachePort
+  /**
+   * Scopes the session router has ended for certain (ADR-0005), the same registry the translate services read.
+   * Checked at entry and again after the cache read: a drop can land in that window, when the request is not yet in
+   * the helper's queue and `helper.cancel` finds nothing (seen on a real machine)
+   */
+  cancelled: Pick<CancelledScopeRegistry, 'has'>
   /** 读缓存的等待上限（测试用）；默认与译文相同的 CACHE_READ_BUDGET_MS */
   cacheReadBudgetMs?: number
 }
@@ -16,8 +23,8 @@ export interface OcrService {
   /** `recheck` re-probes a host reported missing; see HelperClient.status */
   status(options?: { recheck?: boolean }): Promise<HelperStatus>
   ocr(call: OcrCall): Promise<OcrMessageResponse>
-  /** 撤掉该 scope 排队与在飞的识别；`remember: false` 只排空、不判死（见 `CancelOptions`） */
-  cancel(scope: string, options?: CancelOptions): number
+  /** Drain the scope's queued and in-flight recognitions; returns how many. Refusing the scope's later calls is the registry's job */
+  cancel(scope: string): number
 }
 
 /** 缓存里的记录得是我们写的那个形状，别的东西撞了键也不能当结果用 */
@@ -33,26 +40,21 @@ function parseCached(raw: string | null | undefined): OcrResult | null {
 }
 
 export function createOcrService(deps: OcrServiceDeps): OcrService {
-  /**
-   * 撤过的 scope（与 translate-service 同一约定：之后带同一 scope 的调用直接回 aborted）。
-   * 撤销可能落在读缓存的空窗里——那时请求还没排进 helper 队列，helper.cancel 撤了个空（真机实测）；
-   * 会话 id 不会重复，集合只随会话数增长
-   */
-  const cancelled = new Set<string>()
   const aborted = (): OcrMessageResponse => ({ ok: false, error: { kind: 'aborted', message: '会话已撤销' } })
 
   return {
     status: options => deps.helper.status(options),
 
     async ocr(call) {
-      if (call.scope && cancelled.has(call.scope)) return aborted()
+      if (call.scope && deps.cancelled.has(call.scope)) return aborted()
       const status = await deps.helper.status()
       if (!status.available) return { ok: false, error: { kind: 'network', message: status.reason ?? 'helper 不可用' } }
       const key = await ocrCacheKey(call.imageHash, status.version ?? 'unknown')
       // IndexedDB 可能挂住而不是拒绝：超预算当未命中，否则 helper 的超时永远开始不了、消息通道一直开着（Codex 在 #87 指出）
       const [hit] = await readWithBudget(deps.cache, [key], deps.cacheReadBudgetMs ?? CACHE_READ_BUDGET_MS)
-      // 查状态 / 读缓存期间被撤：命中也不回结果、更不把活交给 helper（Codex 在 #87 指出）
-      if (call.scope && cancelled.has(call.scope)) return aborted()
+      // Dropped while the status or the cache was being read: a hit is not returned either, and nothing goes to
+      // the helper (Codex on #87)
+      if (call.scope && deps.cancelled.has(call.scope)) return aborted()
       // OCR 走的是同一个缓存端口，但它存的是自己的 JSON，与句子对齐无关：只取译文那一栏
       const cached = parseCached(hit?.translation)
       if (cached) return { ok: true, result: cached, cached: true }
@@ -69,12 +71,9 @@ export function createOcrService(deps: OcrServiceDeps): OcrService {
       }
     },
 
-    cancel(scope, { remember = true } = {}) {
-      // 判死只给确定的终结用。猜出来的（`tabs.onUpdated` 分不出同文档换 hash 与真的跳走）不能判死：
-      // 猜错时页面还活着，它后面滚到的每一张图都会直接 aborted（Codex 在 #143 指出翻译那条改了、
-      // 这条没改）
-      if (remember) cancelled.add(scope)
-      return deps.helper.cancel(scope)
-    },
+    // Drain only: whether the scope is dead from now on is the session router's decision, recorded in the shared
+    // registry (ADR-0005) — a guessed end (`tabs.onUpdated` cannot tell a hash change from a navigation) must not
+    // leave every image the page scrolls to afterwards aborted (Codex on #143)
+    cancel: scope => deps.helper.cancel(scope),
   }
 }

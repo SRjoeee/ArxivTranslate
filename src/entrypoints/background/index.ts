@@ -1,10 +1,12 @@
-import type { Config } from '@/config/schema'
 import { cachePortOf, translationCache } from '@/cache'
 import { getConfig, watchConfig } from '@/config/storage'
-import { chainConfigChanged, createLocalTransport, type TranslationTransport } from '@/providers/transport'
+import { CancelledScopeRegistry } from '@/providers/request/cancellation'
+import { createLocalTransport } from '@/providers/transport'
 import { toErrorInfo } from '@/providers/translate-service'
 import { isAxtMessage } from '@/shared/messages'
 import { HELPER_HOST } from '@/shared/ocr'
+import { createChainHolder } from './chain'
+import { engineReady } from './engine-ready'
 import { createHelperClient } from './helper'
 import { createHelperWaiter } from './helper-await'
 import { createOcrService } from './ocr'
@@ -18,28 +20,22 @@ import { setLocale } from '@/ui/strings'
 // 异步响应必须用 sendResponse + return true。
 export default defineBackground(() => {
   const cache = cachePortOf(translationCache)
+  /** Scopes ended for certain — one registry (ADR-0005): the session router writes it, the chain's services and OCR read it */
+  const cancelled = new CancelledScopeRegistry()
 
-  /**
-   * 全浏览器共用一条链、一套队列（§8.2 的跨标签页额度策略）。懒建：worker 每次被唤醒都要重建，
-   * 只是为了清个缓存就先探一遍引擎可用性不值得
-   */
-  let active: Promise<{ config: Config; transport: TranslationTransport }> | null = null
-  const load = async (config?: Config) => {
-    const resolved = config ?? await getConfig()
-    return { config: resolved, transport: await createLocalTransport(resolved, { cache }) }
-  }
-  const activate = (config?: Config) => {
-    active = load(config)
-    return active
-  }
-  const transportOf = () => (active ?? activate()).then(a => a.transport)
+  /** The chain in force, one per worker (./chain.ts): built lazily, rebuilt when the configuration that shapes it changes */
+  const chain = createChainHolder({
+    load: async config => {
+      const resolved = config ?? await getConfig()
+      return { config: resolved, transport: await createLocalTransport(resolved, { cache, cancelled }) }
+    },
+    // The router is created below; a superseded chain is only ever swept after a build, long after that
+    owned: transport => router.sessionsOn(transport) > 0,
+  })
+  const transportOf = () => chain.current()
   /** 这个 worker 当前用的界面语言，用来认出「读者改了它」（右键菜单的标题要跟着重画） */
   let uiLanguage: string | null = null
 
-  /**
-   * 只有会换掉引擎链的配置字段才重建。content 每切一次显示模式就写一次配置，而那时页面往往正在翻——
-   * 无差别重建会把令牌桶与降级记录一起清掉（chainConfigChanged 的注释里有归类表）
-   */
   watchConfig(next => {
     // 界面语言变了要重画菜单：worker 不会为此重启，不重画的话标题一直停在旧语言（Codex 在 #161 指出）
     if (next.uiLanguage !== uiLanguage) {
@@ -47,11 +43,7 @@ export default defineBackground(() => {
       applyLocaleFrom(next.uiLanguage)
       refreshContextMenu(menuDeps)
     }
-    if (!active) return
-    active = active.then(
-      a => (chainConfigChanged(a.config, next) ? load(next) : { config: next, transport: a.transport }),
-      () => load(next),
-    )
+    chain.onConfig(next)
   })
 
   /**
@@ -71,9 +63,13 @@ export default defineBackground(() => {
     lastError: () => browser.runtime.lastError?.message,
     keepAlive: () => void browser.runtime.getPlatformInfo(),
   })
-  const ocr = createOcrService({ helper, cache })
-  const router = createSessionRouter(transportOf, {
-    onDrop: (scope, options) => ocr.cancel(scope, options),
+  const ocr = createOcrService({ helper, cache, cancelled })
+  const router = createSessionRouter({
+    current: transportOf,
+    cancelled,
+    retireOthers: () => chain.retireOthers(),
+    cancelScope: scope => chain.cancelScope(scope),
+    onDrop: scope => ocr.cancel(scope),
     /**
      * 那个标签页还是不是刚才那个页面：问它自己。
      *
@@ -223,21 +219,9 @@ export default defineBackground(() => {
           .catch((e: unknown) => console.error('[axt] provider-status 失败', e))
         return true
       case 'axt:engine-ready':
-        // 语言包下载完之前建的链里没有这个引擎（buildChain 会把 isAvailable 为假的剔掉），
-        // 或者它已被永久降级。重建一条新链，让它重新参与（§8.5，Codex 在 #50 指出）。
-        // **迁哪些会话由发起方决定**（Codex 在 #59 / #157 指出）：popup 的语言包下载只对它打开的那个
-        // 标签页说过「接下来的段落会用离线翻译」，就只迁那一个；删掉的服务必须处处停用，才迁全部；
-        // 其余只重建链，正在翻的页面保留它开始时的那条。被动的配置变更一律不迁（见 sessions.ts）
-        activate()
-          .then(async a => {
-            // Cancelling first is what makes a deleted service stop: re-pointing alone leaves its
-            // queued and in-flight work running on the transport being replaced (Codex on #157)
-            if (message.rebindAll) await router.dropAndRebindAll(a.transport)
-            else if (message.scope) router.rebind(message.scope, a.transport)
-            return a.transport.status()
-          })
-          .then(status => sendResponse({ reset: status.chain.includes(message.id) }))
-          .catch(() => sendResponse({ reset: false }))
+        // Rebuild and move whom the sender says (./engine-ready.ts): a downloaded language pack moves one tab, a
+        // deleted service moves everyone and retires its chain — the movers act on the chain in force
+        void engineReady(chain, router, message).then(sendResponse)
         return true
       // IndexedDB 不可用时也要回话，否则调用方等到的是"message channel closed"（Codex 在 #7 指出）
       case 'axt:cache-clear':

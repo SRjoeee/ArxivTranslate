@@ -9,7 +9,8 @@ import type { RenderPath } from '@/cache/key'
 import { buildChain } from '.'
 import { createOpenAICompatProvider } from './openai-compat'
 import { createFallbackService } from './fallback'
-import { createTranslateService, type CachePort, type CancelOptions, type TranslateCall, type TranslateMessageResponse, type TranslateServiceDeps } from './translate-service'
+import type { CancelledScopeRegistry } from './request/cancellation'
+import { createTranslateService, type CachePort, type TranslateCall, type TranslateMessageResponse, type TranslateService, type TranslateServiceDeps } from './translate-service'
 import type { ProviderErrorKind, TranslationProvider } from './types'
 
 /** 此刻实际在用的引擎与最近一次降级原因（§8.5）；popup 据此解释译文为什么换了引擎 */
@@ -59,13 +60,31 @@ export interface ProviderStatus {
 
 export interface TranslationTransport {
   translate(call: TranslateCall): Promise<TranslateMessageResponse>
-  /** 撤掉该 scope 排队与在飞的请求，返回撤掉的条数。`remember: false` 只排空、不判死（见 `CancelOptions`） */
-  cancel(scope: string, options?: CancelOptions): Promise<number>
+  /** Drain the scope's queued and in-flight requests; returns how many. Whether the scope is dead afterwards is the session router's decision (ADR-0005) */
+  cancel(scope: string): Promise<number>
   /** `scope` asks about that session's own chain rather than the current global one (§8.5) */
   status(scope?: string): Promise<ProviderStatus>
+  /**
+   * Local chains only (absent on the content side). Every scoped request queued or in flight on the chain is
+   * drained, whichever session left it here — a session moved on by a language pack leaves its earlier requests
+   * behind — and returned as the count; after this, a call still inside the chain (suspended on its cache read,
+   * outside every queue, or a connection test's retry) is refused when it wakes and caches nothing. The chain
+   * holder retires the chains a deletion replaces: the scope stays live, on the replacement (ADR-0005)
+   */
+  retire?(): number
+  /** Local chains only: whether retire() has been called — the router never binds a session to such a chain */
+  isRetired?(): boolean
+  /**
+   * Local chains only: a call is still inside the chain — suspended on its cache read, at the endpoint, in a
+   * retry backoff. The chain holder keeps a superseded chain while this is true, so a deleted service's chain
+   * can still be retired (ADR-0005)
+   */
+  busy?(): boolean
 }
 
 export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' | 'batch' | 'cacheReadBudgetMs'> {
+  /** The registry of scopes ended for certain, shared with the session router that writes it (ADR-0005); every service built here reads it */
+  cancelled: Pick<CancelledScopeRegistry, 'has'>
   /** 缓存端口。background 传本地 Dexie；不传就不缓存（测试） */
   cache?: CachePort
   /** 换掉建链（测试用） */
@@ -80,18 +99,27 @@ export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' |
 /** Bumped by every build, so a session can tell whether the chain moved on without it */
 let revision = 0
 
-export async function createLocalTransport(config: Config, deps: LocalTransportDeps = {}): Promise<TranslationTransport> {
+export async function createLocalTransport(config: Config, deps: LocalTransportDeps): Promise<TranslationTransport> {
   const built = ++revision
   const { chain, renderPath } = await (deps.buildChain ?? buildChain)(config)
   const primary = chain[0]!
   const chosen = chosenService(config)
   const model = chosen?.model
+  /**
+   * Set by retire(): this chain has been replaced. A scope moved to the replacement stays live in the registry,
+   * so a call of it suspended in one of these services would go on to the deleted provider when it wakes; and a
+   * connection test has no scope at all. The services read this gate next to the registry and stop both (#157)
+   */
+  let retired = false
+  const isRetired = () => retired
   const steps = chain.map(engine => ({
     provider: engine,
     service: createTranslateService({
       getProvider: async () => engine,
       // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
       getModel: async () => (engine.id === chosen?.id ? chosen.model : undefined),
+      cancelled: deps.cancelled,
+      retired: isRetired,
       ...(deps.cache ? { cache: deps.cache } : {}),
       ...(deps.queue ? { queue: deps.queue } : {}),
       ...(deps.batch ? { batch: deps.batch } : {}),
@@ -111,7 +139,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     const own = serviceOf(config, id)
     if (!own) return undefined
     const engine = createOpenAICompatProvider(own, { prompts: config.prompts })
-    return { provider: engine, service: createTranslateService({ getProvider: async () => engine, getModel: async () => own.model }) }
+    return { provider: engine, service: createTranslateService({ getProvider: async () => engine, getModel: async () => own.model, cancelled: deps.cancelled, retired: isRetired }) }
   }
 
   /**
@@ -119,12 +147,31 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
    * 链上有免费兜底就把它显示成成功，等于把 issue #42 抱怨的「两条路径不一致」换个方向再犯一次——
    * 用户会以为端点没问题，实际整页都在用 Google 翻
    */
-  const translate = (call: TranslateCall): Promise<TranslateMessageResponse> => {
+  /** Off-chain services with a call inside: built per named call, they are drained and retired with the chain */
+  const offChainLive = new Set<TranslateService>()
+  const route = async (call: TranslateCall): Promise<TranslateMessageResponse> => {
     if (call.providerId === undefined) return service.translate(call)
-    const step = steps.find(s => s.provider.id === call.providerId) ?? offChain(call.providerId)
+    const step = steps.find(s => s.provider.id === call.providerId)
+    if (step) return step.service.translate(call)
+    const own = offChain(call.providerId)
     // 这一条与段落无关，拆小了也还是同一个引擎不在链上
-    if (!step) return Promise.resolve({ ok: false, error: { kind: 'unknown', message: `引擎 ${call.providerId} 不在当前链上`, isolatable: false } })
-    return step.service.translate(call)
+    if (!own) return { ok: false, error: { kind: 'unknown', message: `引擎 ${call.providerId} 不在当前链上`, isolatable: false } }
+    offChainLive.add(own.service)
+    try {
+      return await own.service.translate(call)
+    } finally {
+      offChainLive.delete(own.service)
+    }
+  }
+  /** Calls inside this chain right now; `busy()` reports it to the chain holder */
+  let inFlight = 0
+  const translate = async (call: TranslateCall): Promise<TranslateMessageResponse> => {
+    inFlight++
+    try {
+      return await route(call)
+    } finally {
+      inFlight--
+    }
   }
 
   const status = async (): Promise<ProviderStatus> => {
@@ -166,8 +213,20 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
 
   return {
     translate,
-    cancel: async (scope, options) => service.cancel(scope, options),
+    cancel: async scope => {
+      let cancelled = service.cancel(scope)
+      for (const own of offChainLive) cancelled += own.cancel(scope)
+      return cancelled
+    },
     status,
+    retire: () => {
+      retired = true
+      let cancelled = service.cancelAll()
+      for (const own of offChainLive) cancelled += own.cancelAll()
+      return cancelled
+    },
+    isRetired: () => retired,
+    busy: () => inFlight > 0,
   }
 }
 

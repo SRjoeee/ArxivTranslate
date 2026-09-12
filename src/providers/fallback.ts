@@ -4,7 +4,7 @@
 //
 // 解决的问题：key 过期、额度用尽、网络抖动时 run.ts 会把整页翻译停死（no-key / auth 触发
 // scheduler.disconnect()），读者对着半篇译文干等。硬规则 4：失败必须可恢复并触发 fallback 链。
-import type { CancelOptions, TranslateCall, TranslateMessageResponse, TranslateService } from './translate-service'
+import type { TranslateCall, TranslateMessageResponse, TranslateService } from './translate-service'
 import { isPermanentErrorKind, type ProviderErrorKind, type TranslatedSegment, type TranslationProvider } from './types'
 
 export interface FallbackStep {
@@ -109,7 +109,9 @@ export function createFallbackService(
     //（Codex 在 #163 指出）。后来的覆盖先前的：那是更新的一次结果
     const gathered = new Map<string, TranslatedSegment>()
     const withGathered = (response: TranslateMessageResponse): TranslateMessageResponse => {
-      if (response.ok || gathered.size === 0) return response
+      // An aborted answer is the call's refusal — its scope died or its chain was retired — and carries nothing
+      // back, not even what an earlier engine on the chain translated (the local review of ADR-0005, sixteenth pass)
+      if (response.ok || gathered.size === 0 || response.error.kind === 'aborted') return response
       return { ...response, partial: [...gathered.values()] }
     }
     for (const [index, step] of chain.entries()) {
@@ -130,7 +132,8 @@ export function createFallbackService(
   }
 
   /** 恢复原文要撤掉每套队列：漏一个就有在飞请求回来往 DOM 写 */
-  const cancel = (scope: string, options?: CancelOptions): number => steps.reduce((n, step) => n + step.service.cancel(scope, options), 0)
+  const cancel = (scope: string): number => steps.reduce((n, step) => n + step.service.cancel(scope), 0)
+  const cancelAll = (): number => steps.reduce((n, step) => n + step.service.cancelAll(), 0)
 
   const status = (): FallbackStatus => ({
     configuredId: steps[0]!.provider.id,
@@ -140,5 +143,5 @@ export function createFallbackService(
     demotions: steps.filter(step => isDemoted(step.provider.id)).map(step => demotions.get(step.provider.id)!.info),
   })
 
-  return { translate, cancel, status }
+  return { translate, cancel, cancelAll, status }
 }
