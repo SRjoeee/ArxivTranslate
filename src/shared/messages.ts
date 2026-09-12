@@ -63,7 +63,13 @@ export interface AxtMessages {
    * chain would describe someone else's (Codex on #157). Without it the answer is the global one,
    * which is what the popup and the settings page want
    */
-  'axt:provider-status': { request: { scope?: string }; response: ProviderStatus }
+  /**
+   * popup / options / content → background: the chain's status. `scope` asks about the chain a session is on;
+   * `fresh` asks for a chain built from the configuration as stored now — what a page sends after saving a
+   * setting and before restarting on it (background/provider-status.ts says how the race with the storage event
+   * is closed)
+   */
+  'axt:provider-status': { request: { scope?: string; fresh?: boolean }; response: ProviderStatus }
   /** 清空缓存，或只清某篇论文 */
   'axt:cache-clear': { request: { paper?: string }; response: { ok: true; removed: number } | { ok: false; message: string } }
   'axt:cache-stats': { request: Record<never, never>; response: { ok: true; entries: number; bytes: number } | { ok: false; message: string } }
