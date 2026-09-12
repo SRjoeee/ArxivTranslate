@@ -1,3 +1,4 @@
+import { collectText, squash } from '@/core/text'
 // LaTeXML 规则模块。所有 ltx_* 选择器只能出现在本文件（CLAUDE.md 硬规则 2）。
 // 依据 DESIGN.md §5.1 / §5.2 / §5.3 / §5.6 / §6.1，实测依据见 docs/RESEARCH.md §2。
 // 本文件只放数据表与纯函数，不含遍历；遍历在 src/core/extractor。
@@ -108,7 +109,6 @@ export function eqnProseCell(row: Element): Element | null {
  * 与插图同样处理：克隆一份、删掉每对的原文成员，于是左栏是原组、右栏是同一组配中文说明（issue #152）
  */
 export const SPLIT_ROOTS = `figure, ${EQUATION_GROUP_TABLE}`
-
 
 /** 表格块的全部单元格，按文档序、任意深度：嵌套 tabular 的格也是外层块的格（§5.3） */
 export function tableCells(table: Element): Element[] {
@@ -221,7 +221,6 @@ export const PROTECT_RULES: readonly ProtectRule[] = [
  * 图形与镜像占一行、说明与译文占下一行，左右各自完整。
  * 表格不在此列——整表克隆已经是它的译文（§5.3）。
  */
-
 
 export type RuleKind = 'skip' | 'table' | 'unit' | 'protect'
 
@@ -441,9 +440,6 @@ export function documentRoot(doc: Document | Element): Element | null {
   return doc.querySelector(DOCUMENT_ROOT)
 }
 
-const ELEMENT_NODE = 1
-const TEXT_NODE = 3
-
 /**
  * 排除 protect / skip 子树后的文本，不 trim（§6.2 要求保留公式两侧的细空格）。
  * 不看 descend 标志：脚注正文对外层段落不是可见文本，descend 只影响 extractor 的块发现。
@@ -470,20 +466,10 @@ export function proseText(el: Element): string {
 }
 
 function textOf(el: Element, drop?: (el: Element) => boolean): string {
-  const parts: string[] = []
-  const walk = (node: Element) => {
-    for (const child of Array.from(node.childNodes)) {
-      if (child.nodeType === TEXT_NODE) {
-        parts.push((child as Text).data)
-      } else if (child.nodeType === ELEMENT_NODE) {
-        const el = child as Element
-        const kind = classify(el)?.kind
-        if (kind !== 'skip' && kind !== 'protect' && !drop?.(el)) walk(el)
-      }
-    }
-  }
-  walk(el)
-  return parts.join('')
+  return collectText(el, node => {
+    const kind = classify(node)?.kind
+    return kind === 'skip' || kind === 'protect' || !!drop?.(node)
+  })
 }
 
 const LETTER = /\p{L}/u
@@ -500,6 +486,6 @@ const NA_CELL = /^N\/A$/
 
 /** 输入应为 visibleText 的结果（已排除公式）；命中即原样复制，不翻译 */
 export function isNumericCell(text: string): boolean {
-  const t = text.replace(/\s+/g, ' ').trim()
+  const t = squash(text)
   return t === '' || NUMERIC_CELL.test(t) || SYMBOL_CELL.test(t) || NA_CELL.test(t)
 }

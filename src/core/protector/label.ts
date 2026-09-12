@@ -18,6 +18,7 @@ import { LABEL_FORMATTING } from '@/core/rules/latexml'
 import { cloneWithoutIds } from './clone'
 import { indexSpans, type WireSpan, wireOffsetAt } from './offsets'
 import type { ProtectedBlock } from './serialize'
+import { squash } from '@/core/text'
 
 /** Longer than this is a sentence set in italics, not a label: past what the replay covered. */
 const MAX_LABEL_WORDS = 8
@@ -79,7 +80,7 @@ function wireText(el: Element, slots: ReadonlyMap<number, Node>): string {
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     if (!protectedNodes.some(slot => slot.contains(node))) out += (node as Text).data
   }
-  return out.replace(/\s+/g, ' ').trim()
+  return squash(out)
 }
 
 /**

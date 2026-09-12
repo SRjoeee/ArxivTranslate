@@ -1,6 +1,7 @@
 // 论文级上下文（DESIGN §8.2）：标题与摘要，页面加载时抽一次（那时 DOM 里还没有译文；翻译过再抽会把上一轮的译文也算进摘要），每批 prompt 都带上。
 // Read Frog 是多调一次 LLM 给网页生成摘要；论文自带 abstract，直接用。
 import { AXT_CLASS_PREFIX } from '@/core/marks'
+import { collectText, squash } from '@/core/text'
 import { ABSTRACT, DOCUMENT_ROOT, DOCUMENT_TITLE, classify } from '@/core/rules/latexml'
 
 /** 摘要截断长度：每批都要带，太长就是白花 token */
@@ -27,16 +28,7 @@ function excluded(el: Element): boolean {
 }
 
 function text(el: Element | null | undefined): string {
-  if (!el) return ''
-  const parts: string[] = []
-  const walk = (node: Node) => {
-    for (const child of Array.from(node.childNodes)) {
-      if (child.nodeType === 3) parts.push((child as Text).data)
-      else if (child.nodeType === 1 && !excluded(child as Element)) walk(child)
-    }
-  }
-  walk(el)
-  return parts.join('').replace(/\s+/g, ' ').trim()
+  return el ? squash(collectText(el, excluded)) : ''
 }
 
 function clip(value: string, max: number): string {
