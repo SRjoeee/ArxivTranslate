@@ -17,7 +17,7 @@ const provider = (id: string): TranslationProvider => ({
 const ok = (id: string): TranslateMessageResponse => ({ ok: true, result: { segments: [{ id: 's1', text: `${id} 译文` }], provider: id }, cached: 0 })
 const fail = (kind: ProviderErrorKind, message: string = kind): TranslateMessageResponse => ({ ok: false, error: { kind, message, isolatable: true } })
 
-/** 每次调用依次返回预设的结果；用完后重复最后一个 */
+/** Returns the preset results one per call; once used up, repeats the last */
 function step(id: string, responses: TranslateMessageResponse[]): FallbackStep & { calls: number; cancelled: string[] } {
   const state = { calls: 0, cancelled: [] as string[] }
   return {
@@ -36,7 +36,7 @@ const partialFail = (kind: ProviderErrorKind, ids: string[]): TranslateMessageRe
   ({ ok: false, error: { kind, message: kind, isolatable: true }, partial: ids.map(id => ({ id, text: `${id} 译文` })) })
 
 describe('createFallbackService', () => {
-  it('首选成功时不碰后面的引擎', async () => {
+  it('when the first choice succeeds the engines behind it are not touched', async () => {
     const first = step('llm', [ok('llm')])
     const second = step('google-web', [ok('google-web')])
     const service = createFallbackService([first, second])
@@ -46,7 +46,7 @@ describe('createFallbackService', () => {
     expect(service.status()).toEqual({ configuredId: 'llm', activeId: 'llm', demotions: [] })
   })
 
-  it('auth 是配置问题：切到下一个引擎，本会话内不再试首选', async () => {
+  it('auth is a configuration problem: switch to the next engine, and do not try the first choice again in this session', async () => {
     const first = step('llm', [fail('auth', 'User not found.')])
     const second = step('google-web', [ok('google-web')])
     const service = createFallbackService([first, second])
@@ -63,15 +63,15 @@ describe('createFallbackService', () => {
       demotions: [demoted],
     })
 
-    // 第二次调用直接走降级引擎，不再浪费一次请求
+    // The second call goes straight to the fallback engine, wasting no request
     await service.translate(call)
     expect(first.calls).toBe(1)
     expect(second.calls).toBe(2)
   })
 
-  it('瞬时错误冷却到期后回到首选，成功即清空降级记录', async () => {
+  it('after a transient error\'s cooldown it returns to the first choice, and success clears the demotion record', async () => {
     let clock = 0
-    const first = step('llm', [fail('network', '连接被重置'), ok('llm')])
+    const first = step('llm', [fail('network', 'connection reset'), ok('llm')])
     const second = step('google-web', [ok('google-web')])
     const service = createFallbackService([first, second], { cooldownMs: 1000, now: () => clock })
 
@@ -80,18 +80,18 @@ describe('createFallbackService', () => {
 
     clock = 999
     await service.translate(call)
-    expect(first.calls).toBe(1) // 还在冷却里
+    expect(first.calls).toBe(1) // // still cooling down
 
     clock = 1000
     const back = await service.translate(call)
     expect(back.ok && back.result.provider).toBe('llm')
     expect(service.status().activeId).toBe('llm')
-    // 成功清空记录：demoted 只留作最近一次原因的展示
+    // Success clears the record: demoted only remains as the most recent reason for display
     expect(service.status().demoted?.kind).toBe('network')
   })
 
-  it('aborted 不降级也不换引擎：会话取消不是引擎的错', async () => {
-    const first = step('llm', [fail('aborted', '已取消（scope: s1）')])
+  it('aborted neither demotes nor switches engines: a session cancellation is not the engine\'s fault', async () => {
+    const first = step('llm', [fail('aborted', 'cancelled (scope: s1)')])
     const second = step('google-web', [ok('google-web')])
     const service = createFallbackService([first, second])
     const res = await service.translate(call)
@@ -100,7 +100,7 @@ describe('createFallbackService', () => {
     expect(service.status().activeId).toBe('llm')
   })
 
-  it('链上最后一个引擎失败时如实上报，run.ts 据此停下', async () => {
+  it('when the last engine of the chain fails it is reported as it is, and run.ts stops by it', async () => {
     const first = step('llm', [fail('auth')])
     const second = step('google-web', [fail('network')])
     const service = createFallbackService([first, second])
@@ -108,16 +108,16 @@ describe('createFallbackService', () => {
     expect(res).toEqual(fail('network'))
   })
 
-  it('全部降级后退回最后一个引擎，而不是无引擎可用', async () => {
+  it('with everything demoted it falls back to the last engine rather than no engine at all', async () => {
     const first = step('llm', [fail('auth')])
     const second = step('google-web', [fail('auth'), ok('google-web')])
     const service = createFallbackService([first, second])
-    await service.translate(call) // 两个都 auth，都被记账（最后一个是如实上报，不记）
+    await service.translate(call) // // both auth, both recorded (the last is reported as it is, not recorded)
     const res = await service.translate(call)
     expect(res.ok && res.result.provider).toBe('google-web')
   })
 
-  it('cancel 扇出到每套队列：漏一个就有在飞请求回来往 DOM 写', () => {
+  it('cancel fans out to every queue: miss one and an in-flight request comes back to write into the DOM', () => {
     const first = step('llm', [ok('llm')])
     const second = step('google-web', [ok('google-web')])
     const service = createFallbackService([first, second])
@@ -126,8 +126,8 @@ describe('createFallbackService', () => {
     expect(second.cancelled).toEqual(['session-1'])
   })
 
-  it('永久降级不会自己恢复：撤销由 background 重建整条链负责，这一层不提供 reset（issue #42）', async () => {
-    const first = step('chrome-builtin', [fail('no-key', '语言包未下载'), ok('chrome-builtin')])
+  it('a permanent demotion does not recover on its own: the background undoes it by rebuilding the whole chain, and this layer offers no reset (issue #42)', async () => {
+    const first = step('chrome-builtin', [fail('no-key', 'language pack not downloaded'), ok('chrome-builtin')])
     const second = step('google-web', [ok('google-web')])
     const service = createFallbackService([first, second])
     await service.translate(call)
@@ -137,22 +137,22 @@ describe('createFallbackService', () => {
     expect('reset' in service).toBe(false)
   })
 
-  it('只有一个引擎时原样返回错误，不吞不改', async () => {
+  it('with a single engine the error is returned as it is, neither swallowed nor changed', async () => {
     const only = step('llm', [fail('auth', 'bad key')])
     const service = createFallbackService([only])
     expect(await service.translate(call)).toEqual(fail('auth', 'bad key'))
     expect(service.status()).toEqual({ configuredId: 'llm', activeId: 'llm', demotions: [] })
   })
 
-  it('空链是编程错误，直接抛', () => {
+  it('an empty chain is a programming error and throws', () => {
     expect(() => createFallbackService([])).toThrow()
   })
 
-  it('默认冷却 60 秒', () => {
+  it('the default cooldown is 60 seconds', () => {
     expect(DEFAULT_COOLDOWN_MS).toBe(60_000)
   })
 
-  it('降级写一条警告日志，便于用户与 e2e 定位', async () => {
+  it('a demotion writes one warning log line, so the reader and e2e can locate it', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const service = createFallbackService([step('llm', [fail('auth', 'bad key')]), step('google-web', [ok('google-web')])])
     await service.translate(call)
@@ -161,10 +161,10 @@ describe('createFallbackService', () => {
   })
 })
 
-// Codex 在 #163 指出：链上每一步都重发整次调用，而缓存键带 provider，
-// 上一步译好的段落在下一步不会命中缓存——它译不出来就丢了
-describe('降级链上的部分成功', () => {
-  it('各步译出来的合起来带回去：主引擎出 A，备用出 B，调用方两段都要拿到', async () => {
+// Codex on #163: every step of the chain resends the whole call, and the cache key carries the provider,
+// so the segments the previous step translated do not hit the cache at the next — whatever it cannot translate is lost
+describe('partial success along the fallback chain', () => {
+  it('what each step translated goes back together: the main engine gives A, the fallback B, and the caller gets both', async () => {
     const first = step('a', [partialFail('network', ['A'])])
     const second = step('b', [partialFail('network', ['B'])])
     const service = createFallbackService([first, second])
@@ -173,7 +173,7 @@ describe('降级链上的部分成功', () => {
     if (!res.ok) expect(res.partial?.map(p => p.id).sort()).toEqual(['A', 'B'])
   })
 
-  it('后一步译出同一段就用后一步的：那是更新的结果', async () => {
+  it('a later step translating the same segment wins: that is the newer result', async () => {
     const first = step('a', [partialFail('network', ['A'])])
     const second = step('b', [{ ok: false, error: { kind: 'network', message: 'x', isolatable: true }, partial: [{ id: 'A', text: '新译文' }] }])
     const service = createFallbackService([first, second])
@@ -181,13 +181,13 @@ describe('降级链上的部分成功', () => {
     if (!res.ok) expect(res.partial).toEqual([{ id: 'A', text: '新译文' }])
   })
 
-  it('一步都没译出来就不带 partial 字段', async () => {
+  it('with nothing translated by any step there is no partial field', async () => {
     const service = createFallbackService([step('a', [fail('network')]), step('b', [fail('network')])])
     const res = await service.translate(call)
     if (!res.ok) expect(res.partial).toBeUndefined()
   })
 
-  it('成功的那一步照常直接返回，不掺前面的残片', async () => {
+  it('the succeeding step returns directly as usual, without the earlier steps\' fragments mixed in', async () => {
     const service = createFallbackService([step('a', [partialFail('network', ['A'])]), step('b', [ok('b')])])
     const res = await service.translate(call)
     expect(res.ok).toBe(true)

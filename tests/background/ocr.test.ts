@@ -5,7 +5,7 @@ import { type OcrBackend, OcrBackendError } from '@/entrypoints/background/ocr-b
 import { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import type { OcrResult } from '@/shared/ocr'
 
-// OCR 服务（DESIGN §15.2）：缓存按 imageHash | helper 版本；未命中才叫 helper；helper 不可用时如实回报
+// The OCR service (DESIGN §15.2): the cache is keyed by imageHash | helper version; the helper is called only on a miss; with the helper unavailable it reports so as it is
 
 const RESULT: OcrResult = { width: 10, height: 20, lines: [{ text: 'Static charge', quad: [[0, 0], [1, 0], [1, 1], [0, 1]], conf: 1 }] }
 
@@ -40,7 +40,7 @@ const build = (deps: Omit<OcrServiceDeps, 'cancelled'> & Partial<Pick<OcrService
 describe('createOcrService', () => {
   afterEach(() => { vi.useRealTimers() })
 
-  it('未命中：叫 helper、写回缓存；同一 imageHash 第二次直接命中，不再叫 helper', async () => {
+  it('a miss: calls the helper and writes back to the cache; the second time the same imageHash hits outright and the helper is not called again', async () => {
     const { backend, ocr } = fakeBackend()
     const cache = memoryCache()
     const service = build({ backend, cache: cache.port })
@@ -54,7 +54,7 @@ describe('createOcrService', () => {
     expect(ocr).toHaveBeenCalledTimes(1)
   })
 
-  it('helper 换了版本：键不同，重新识别', async () => {
+  it('the helper changed version: a different key, recognised again', async () => {
     const cache = memoryCache()
     const a = fakeBackend()
     await build({ backend: a.backend, cache: cache.port }).ocr(call)
@@ -65,21 +65,21 @@ describe('createOcrService', () => {
     expect(cache.store.size).toBe(2)
   })
 
-  it('缓存里撞键的东西不是我们的形状：当未命中', async () => {
+  it('something in the cache with a colliding key that is not our shape: treated as a miss', async () => {
     const { backend, ocr } = fakeBackend()
     const cache = memoryCache()
-    cache.store.set(await ocrCacheKey('h1', '0.1.0'), '译文而不是 OCR 结果')
+    cache.store.set(await ocrCacheKey('h1', '0.1.0'), 'a translation rather than an OCR result')
     const service = build({ backend, cache: cache.port })
     expect((await service.ocr(call)).ok).toBe(true)
     expect(ocr).toHaveBeenCalledTimes(1)
   })
 
-  it('helper 不可用：不查缓存、不叫 helper，回 network 错误带原因', async () => {
-    const { backend, ocr } = fakeBackend({ status: async () => ({ state: 'not-installed', reason: 'helper 未安装' }) })
+  it('the helper unavailable: no cache lookup, no helper call, a network error with the reason', async () => {
+    const { backend, ocr } = fakeBackend({ status: async () => ({ state: 'not-installed', reason: 'helper not installed' }) })
     const cache = memoryCache()
     const getMany = vi.spyOn(cache.port, 'getMany')
     const result = await build({ backend, cache: cache.port }).ocr(call)
-    expect(result).toEqual({ ok: false, error: { kind: 'network', message: 'helper 未安装' } })
+    expect(result).toEqual({ ok: false, error: { kind: 'network', message: 'helper not installed' } })
     expect(ocr).not.toHaveBeenCalled()
     expect(getMany).not.toHaveBeenCalled()
   })
@@ -94,11 +94,11 @@ describe('createOcrService', () => {
     expect(getMany).not.toHaveBeenCalled()
   })
 
-  it('helper 出错：OcrBackendError 的 kind 原样带回，不写缓存', async () => {
-    const { backend } = fakeBackend({ ocr: async () => { throw new OcrBackendError('aborted', '会话已撤销') } })
+  it('the helper errors: the OcrBackendError\'s kind is carried back as it is, nothing written to the cache', async () => {
+    const { backend } = fakeBackend({ ocr: async () => { throw new OcrBackendError('aborted', 'session withdrawn') } })
     const cache = memoryCache()
     const result = await build({ backend, cache: cache.port }).ocr(call)
-    expect(result).toEqual({ ok: false, error: { kind: 'aborted', message: '会话已撤销' } })
+    expect(result).toEqual({ ok: false, error: { kind: 'aborted', message: 'session withdrawn' } })
     expect(cache.store.size).toBe(0)
   })
 
@@ -136,19 +136,19 @@ describe('createOcrService', () => {
     release()
     expect(await pending).toEqual({ ok: false, error: { kind: 'aborted', message: '会话已撤销' } })
     expect(ocr).not.toHaveBeenCalled()
-    // 别的 scope 不受影响
+    // Other scopes are unaffected
     cache.port.getMany = original
     expect((await service.ocr({ ...call, scope: 's3' })).ok).toBe(true)
   })
 
-  it('读缓存有预算：IndexedDB 挂住不返回时超预算当未命中，识别照常进行（Codex 在 #87 指出）', async () => {
+  it('reading the cache has a budget: with IndexedDB hung the budget runs out, it counts as a miss, and recognition proceeds as usual (Codex on #87)', async () => {
     vi.useFakeTimers()
     const { backend, ocr } = fakeBackend()
     const cache = memoryCache()
-    // 等服务真的进到 getMany（前面的算键是真实的异步，假时钟推不动它），预算计时器在同一表达式里注册
+    // Wait until the service really reaches getMany (the key computation before it is real async, and the fake clock cannot advance it); the budget timer is registered in the same expression
     let reached: () => void = () => {}
     const reachedP = new Promise<void>(resolve => { reached = resolve })
-    cache.port.getMany = () => { reached(); return new Promise(() => {}) } // 永远不返回
+    cache.port.getMany = () => { reached(); return new Promise(() => {}) } // // never returns
     const service = build({ backend, cache: cache.port, cacheReadBudgetMs: 500 })
     const pending = service.ocr(call)
     await reachedP
@@ -159,7 +159,7 @@ describe('createOcrService', () => {
     expect(ocr).toHaveBeenCalledTimes(1)
   })
 
-  it('回应所在连接的版本与查缓存时的不同（读缓存期间重连、helper 换了版本）：按新版本落缓存（Codex 在 #87 指出）', async () => {
+  it('the version of the connection the reply came on differs from the one at lookup time (reconnected during the cache read, the helper changed version): stored under the new version (Codex on #87)', async () => {
     const { backend } = fakeBackend({ ocr: async () => ({ result: RESULT, version: '0.2.0' }) })
     const cache = memoryCache()
     await build({ backend, cache: cache.port }).ocr(call)
@@ -187,7 +187,7 @@ describe('createOcrService', () => {
     expect(ocr).not.toHaveBeenCalled()
   })
 
-  it('写缓存不阻塞回应：putMany 挂住时识别结果照样回去（Codex 在 #87 指出）', async () => {
+  it('writing the cache does not block the reply: with putMany hung the recognition result still goes back (Codex on #87)', async () => {
     const { backend } = fakeBackend()
     const cache = memoryCache()
     cache.port.putMany = () => new Promise(() => {})
@@ -195,7 +195,7 @@ describe('createOcrService', () => {
     expect(result).toEqual({ ok: true, result: RESULT, cached: false })
   })
 
-  it('cancel 与 status 直通 helper', async () => {
+  it('cancel and status pass straight through to the helper', async () => {
     const cancel = vi.fn(() => 2)
     const { backend } = fakeBackend({ cancel })
     const service = build({ backend, cache: memoryCache().port })
