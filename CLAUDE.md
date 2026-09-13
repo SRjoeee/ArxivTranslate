@@ -48,13 +48,14 @@ This is the current stack, not a fixed one: a change is allowed with evidence of
 
 ## Language
 
-Everything written for developers is English: identifiers, comments, docs, test names and assertion messages, commit messages (`type(scope): summary`), PR descriptions, issues. Convert existing Chinese where a change touches it — the passage and its surroundings, never a whole file for one line (an 800-line translation diff is unreviewable and breaks `git blame`; Codex on #120).
+Everything written for developers is English, and the repository holds no Chinese outside product data: identifiers, comments, docs (the frozen ones included — they were converted whole on 2026-09-13, content unchanged), test names and assertion messages, scripts and their output, commit messages (`type(scope): summary`), PR descriptions, issues. `pnpm check:english` (`scripts/check-english.mjs`, part of `pnpm lint`) is the gate: a file may hold no more lines with CJK characters than `scripts/english-allowlist.txt` grants it — lower an entry freely when lines go away, raise one only with a reason in the PR.
 
-Three kinds of Chinese are product, not prose, and stay:
+Four kinds of Chinese are product data, not prose, and stay:
 
-1. **Product copy** — the extension speaks Chinese to its readers; popup and options strings are the product.
-2. **Localization data** — `LANG_CODE_TO_ZH_NAME` / `LANG_CODE_TO_LOCALE_NAME` feed the language labels shown in settings.
-3. **Multilingual test inputs and expectations** — `weights -> 权重` in the prompt tests and `证明。` in the rules tests are the non-Latin coverage itself; translating them silently deletes it.
+1. **Product copy** — the locale packs (`src/locales/*`, `public/_locales`) are the product; a few strings reach the reader from outside the packs (the zod messages of `config/schema.ts` / `config/appearance.ts`, the popup's "no active tab" error) and are marked as such where they live until they move into the packs. A comment that refers to product copy quotes the English locale wording (“Translate this page”), not the Chinese.
+2. **Localization data** — `config/languages.ts` feeds the language labels shown in settings.
+3. **Multilingual test inputs and expectations** — `weights -> 权重` in the prompt tests, `证明。` in the rules tests and the Chinese UI strings the e2e scripts locate buttons by are the non-Latin coverage itself; translating them silently deletes it.
+4. **Evidence** — an observed machine-translation output (`state explosion` → 「州级爆炸性质」) or a Chinese example inside an English sentence is quoted as it was seen.
 
 Conversation with the owner is in Chinese.
 
