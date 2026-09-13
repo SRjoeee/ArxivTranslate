@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { PromptFileFormatError, downloadPromptFile, readPromptFile } from '@/providers/prompt-file'
 import {
   BUILT_IN_PROMPTS, DEFAULT_PROMPT_ID, PROMPT_TOKENS, getTokenCellText,
@@ -6,6 +6,7 @@ import {
 } from '@/providers/prompt-library'
 import { getRandomUUID as uuid } from '@/shared/uuid'
 import { O } from '@/ui/strings'
+import { drafts } from '@/ui/drafts'
 
 // The prompt library: the same features as Read Frog's components/prompt-configurator/* — the list,
 // reading a built-in one, copying it into an editable one, new / edit / delete, import / export, and
@@ -32,6 +33,10 @@ const button = { font: 'inherit', fontSize: 12 }
 
 export function PromptManager({ value, onChange }: { value: PromptsConfig; onChange: (next: PromptsConfig) => void }) {
   const [editor, setEditor] = useState<{ mode: EditorMode; draft: PromptTemplate } | null>(null)
+  // The editor's draft is local until 保存: the page must not reload under it (ui/drafts.ts). Keyed on whether an
+  // editor is open, not on the draft — every keystroke would otherwise end one hold and begin another
+  const editing = editor !== null
+  useEffect(() => (editing ? drafts.hold() : undefined), [editing])
   const [message, setMessage] = useState('')
   const areas = useRef<Record<Field, HTMLTextAreaElement | null>>({ systemPrompt: null, prompt: null })
   const lastFocused = useRef<Field>('prompt')

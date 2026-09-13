@@ -25,6 +25,9 @@ import { createProviderAsks } from './provider-asks'
 
 const scriptStart = performance.now()
 
+/** The stored interface language resolves to another pack than the one in use (chosen once, before the first paint) */
+const staleLocale = (c: Config) => pickLocale(c.uiLanguage, browserLanguages()) !== localeInUse()
+
 export interface PopupActions {
   translate(): void
   /** A new session over the running one, or after a pause: the page follows the saved settings */
@@ -126,11 +129,13 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
 
   useEffect(() => {
     console.debug(`[axt] popup mounted ${Math.round(performance.now() - scriptStart)} ms after script start`)
-    loadProvider()
     // The first read is queued on the write chain with everything that follows it: a slow first digest must not
     // land after a watcher reload settled newer settings (the local review of S1)
     const init = async () => {
       const c = await getConfig()
+      // A change landing between the locale's read (main.tsx) and this one would otherwise show its settings in the
+      // labels of the previous language (Codex on #185)
+      if (staleLocale(c)) { location.reload(); return c }
       await settle(c)
       void packs.check(c.targetLanguage)
       return c
@@ -146,22 +151,19 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     // A change saved elsewhere — the settings page, another tab's popup — shows here without reopening (INVENTORY S1).
     // Re-read on the serialized write chain rather than taken from the event, which carries no order (#182)
     const unwatch = watchConfig(() => {
-      const reload = async () => {
+      const follow = async () => {
         const stored = await getConfig()
         // The interface language was applied once at mount (applyLocale); a stored choice that resolves to another
         // pack takes a reload, as the settings page's own change does. Compared with the locale actually in use, not
         // with a value this hook recorded: a change landing between the locale's read and this hook's first read
         // would otherwise pass unnoticed (Codex on #185)
-        if (pickLocale(stored.uiLanguage, browserLanguages()) !== localeInUse()) {
-          location.reload()
-          return stored
-        }
+        if (staleLocale(stored)) { location.reload(); return stored }
         await settle(stored)
         void packs.check(stored.targetLanguage)
         void loadProvider(undefined, true)
         return stored
       }
-      writes.current = writes.current.then(reload, reload)
+      writes.current = writes.current.then(follow, follow)
     })
     return unwatch
   }, [refresh, packs, loadProvider, settle])
@@ -204,6 +206,12 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   // measured at millisecond round-trips (RESEARCH §6.7)
   const on = page?.progress.state === 'on'
   const session = page?.session ?? null
+  // The saved settings' chain is asked whenever the page is not running — at mount, and again when it stops. A page
+  // that is on shows its session's chain and the polling below stops with it: had the first ask failed, nothing would
+  // ask again, and the button would stay disabled after 显示原文 (the local review of S1, fourth pass)
+  useEffect(() => {
+    if (!on) void loadProvider()
+  }, [on, loadProvider])
   // Paused while a grant takes effect: the background has to be left alone to idle out (view-model.ts says why)
   const askBackground = pollsBackground(helper)
   useEffect(() => {

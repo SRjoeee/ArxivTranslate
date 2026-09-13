@@ -5,6 +5,7 @@ import { configSchema } from '@/config/schema'
 import { isLlmChosen } from '@/config/services'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
 import { O } from '@/ui/strings'
+import { drafts } from '@/ui/drafts'
 import type { OptionsData } from '../data'
 import { PromptManager } from '../PromptManager'
 
@@ -13,12 +14,15 @@ export function Prompts({ data }: { data: OptionsData }) {
   // The glossary is text on the page and entries in storage: pasting a batch beats editing rows
   const [text, setText] = useState<string | null>(null)
   useEffect(() => { if (config && text === null) setText(formatGlossaryText(config.glossary)) }, [config, text])
-  if (!config || text === null) return null
-  const parsed = parseGlossary(text)
+  const parsed = text === null ? null : parseGlossary(text)
   // A table can parse line by line and still break the schema's limits (200 entries, per-field
   // length, 6000 characters in all). Writing it would reject silently and leave the reader looking
   // at a glossary that is not in storage (Codex on #157)
-  const overLimit = parsed.issues.length === 0 && !configSchema.shape.glossary.safeParse(parsed.entries).success
+  const overLimit = parsed !== null && parsed.issues.length === 0 && !configSchema.shape.glossary.safeParse(parsed.entries).success
+  // A table that is not written yet is a draft: the page must not reload under it (ui/drafts.ts)
+  const unsaved = parsed !== null && (parsed.issues.length > 0 || overLimit)
+  useEffect(() => (unsaved ? drafts.hold() : undefined), [unsaved])
+  if (!config || parsed === null || text === null) return null
 
   return (
     <>

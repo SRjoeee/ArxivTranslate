@@ -11,8 +11,12 @@ import { type PackState, createPackLookup, downloadPack } from '@/shared/pack'
 import { localeInUse, S } from '@/ui/strings'
 import { pickLocale } from '@/locales'
 import { browserLanguages } from '@/ui/apply-locale'
+import { drafts } from '@/ui/drafts'
 
 export interface CacheStats { entries: number; bytes: number }
+
+/** The stored interface language resolves to another pack than the one in use (chosen once, before the first paint) */
+const staleLocale = (c: Config) => pickLocale(c.uiLanguage, browserLanguages()) !== localeInUse()
 
 export interface OptionsData {
   config: Config | null
@@ -52,6 +56,17 @@ export function useOptionsData(): OptionsData {
    * publishes, and none while its download is in flight
    */
   const [packs] = useState(() => createPackLookup({ publish: setPack }))
+  /**
+   * Apply the stored interface language the way this page's own change does — a reload — but not under a draft: a
+   * service being edited, a profile, a prompt is local until its own save, and the reload would discard it (the
+   * local review of S1, fourth pass). It waits for the last draft to close; a second change meanwhile adds nothing
+   */
+  const reloadDue = useRef(false)
+  const reload = useCallback(() => {
+    if (reloadDue.current) return
+    reloadDue.current = true
+    drafts.whenNone(() => location.reload())
+  }, [])
 
   const loadCache = useCallback(async () => {
     try {
@@ -70,6 +85,9 @@ export function useOptionsData(): OptionsData {
     // them showed newer settings (the local review of S1)
     const init = async () => {
       const c = await getConfig()
+      // A change landing between the locale's read (main.tsx) and this one would otherwise show its settings in the
+      // labels of the previous language (Codex on #185)
+      if (staleLocale(c)) reload()
       packs.want(c.targetLanguage)
       setLocal(c)
       setFallbackReason(configFallbackReason())
@@ -81,15 +99,12 @@ export function useOptionsData(): OptionsData {
     // store is re-read on the same serialized chain the page's own writes use, not taken from the event: events
     // carry no order, and one for an earlier write can arrive after a later write was already shown (#182)
     const unwatch = watchConfig(() => {
-      const reload = async () => {
+      const follow = async () => {
         const stored = await getConfig()
         // The interface language is chosen once before the page renders (main.tsx): a stored choice that resolves to
-        // another pack takes the same way this page's own change does — a reload. Compared with the locale in use,
-        // not with a recorded value (Codex on #185)
-        if (pickLocale(stored.uiLanguage, browserLanguages()) !== localeInUse()) {
-          location.reload()
-          return stored
-        }
+        // another pack takes the same way this page's own change does — a reload, deferred under a draft. Compared
+        // with the locale in use, not with a recorded value (Codex on #185). The settings below follow meanwhile
+        if (staleLocale(stored)) reload()
         packs.want(stored.targetLanguage)
         setLocal(stored)
         // A valid write elsewhere is the repair of a configuration this page had to fall back from (Codex on #185)
@@ -97,7 +112,7 @@ export function useOptionsData(): OptionsData {
         void packs.check(stored.targetLanguage)
         return stored
       }
-      writes.current = writes.current.then(reload, reload)
+      writes.current = writes.current.then(follow, follow)
     })
     // `recheck` on every open of a page: the reader may have installed the helper since the worker
     // last looked, and it remembers a missing host for its whole life. Chrome fails a connect to an
@@ -122,7 +137,7 @@ export function useOptionsData(): OptionsData {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [loadCache, packs])
+  }, [loadCache, packs, reload])
 
   /**
    * **Serialized**: each call reads storage, applies one change and writes it back, so two controls
