@@ -61,7 +61,12 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
   const fileInput = useRef<HTMLInputElement>(null)
 
   const builtIns = Object.values(BUILT_IN_PROMPTS)
-  const select = (promptId: string) => onChange(current => ({ ...current, promptId }))
+  // A choice made from a stale list must not store an id that names nothing: deleted in another tab before this
+  // one's refresh ran, the prompt would resolve to the default silently, and neither it nor the previous choice would
+  // translate (the local review of S1, thirteenth pass). Such a choice keeps what is stored
+  const select = (promptId: string) => onChange(current => (
+    builtIns.some(t => t.id === promptId) || current.patterns.some(p => p.id === promptId) ? { ...current, promptId } : current
+  ))
 
   function open(mode: EditorMode, template?: PromptTemplate) {
     setMessage('')

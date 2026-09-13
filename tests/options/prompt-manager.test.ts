@@ -65,6 +65,21 @@ describe('PromptManager: changes are updates of the stored prompts', () => {
     await mounted.unmount()
   })
 
+  it('choosing a prompt deleted elsewhere before this tab caught up keeps the stored choice', async () => {
+    // The thirteenth local pass of S1: the id would have been stored dangling, and translation would have used neither
+    // the requested prompt nor the one chosen before
+    const seen: PromptsConfig = { patterns: [template('a')], promptId: 'b' }
+    const updates: PromptsUpdate[] = []
+    const mounted = await mountElement(createElement(PromptManager, { value: seen, onChange: (update: PromptsUpdate) => { updates.push(update) } }))
+    const radios = Array.from(mounted.container.querySelectorAll('input[type="radio"]')) as HTMLInputElement[]
+    radios.at(-1)?.click()
+    await mounted.flush()
+    expect(updates).toHaveLength(1)
+    expect(updates[0]!({ patterns: [template('b')], promptId: 'b' }).promptId).toBe('b')
+    expect(updates[0]!({ patterns: [template('a'), template('b')], promptId: 'b' }).promptId).toBe('a')
+    await mounted.unmount()
+  })
+
   it('a deletion removes the prompt from the list as stored, keeping what was added elsewhere', async () => {
     const seen: PromptsConfig = { patterns: [template('a')], promptId: 'a' }
     const updates: PromptsUpdate[] = []
