@@ -396,7 +396,7 @@ describe('startTranslation', () => {
   })
 })
 
-describe('onRendered: hands over the blocks whose DOM just changed, once per batch (issue #46)', () => {
+describe('onRendered: hands over the blocks whose DOM just changed, for each batch (issue #46)', () => {
   it('twice per batch: once after the skeletons are inserted, once after the results are rendered, both with this batch\'s blocks', async () => {
     const doc = docOf()
     const blocks = extract(doc)
