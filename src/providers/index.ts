@@ -23,42 +23,47 @@ export function getProvider(config: Config): TranslationProvider {
 }
 
 /**
- * 降级链上的免费引擎，按优先级排列（DESIGN §8.5）。都不需要 key、不花钱。
- * 内置引擎在前：离线、单句 10–20 ms，而且不受任何限流；语言包没下载时 isAvailable() 为假，自动被跳过
+ * The free engines of the fallback chain, by priority (DESIGN §8.5). None needs a key or costs anything.
+ * The built-in engine first: offline, 10–20 ms a sentence, under no rate limit at all; with the language pack not downloaded isAvailable() is false and it is skipped of itself
  */
 const FREE_ENGINES: readonly ((config: Config) => TranslationProvider)[] = [
   config => createChromeBuiltinProvider(config.targetLanguage),
   () => createGoogleWebProvider(),
 ]
-// `microsoft` **故意不在这张表里**（#98）：它只保得住 markers，进了链会让「选 Google + 内置没装语言包」
-// 这个最常见组合把交集收缩成 {markers}，整个会话为一个用不上的兜底丢掉内联样式。
-// 反过来选微软时 Google 仍会进链兜底，因为 Google 两种格式都保得住。
-// 注意这只是绕开症状：协商本身是顺序相关的，#103 开放链自定义之前要先把规则改成「首选决定格式」
+// `microsoft` is **deliberately not in this table** (#98): it keeps markers only, and on the chain it would shrink
+// the intersection to {markers} for the most common combination, “Google chosen + the built-in without a pack”,
+// losing inline styling for a whole session for a fallback never used. The other way round, with Microsoft chosen
+// Google still joins as the fallback, since Google keeps both formats. Only the symptom is avoided here: the
+// negotiation itself is order-dependent, and before #103 opens the chain to customisation the rule has to become “the first choice decides the format”
 
 /**
- * 组装降级链并确定线上格式：配置里选的引擎在前，其后接不与它重复的免费引擎（DESIGN §8.5）。
+ * Assemble the fallback chain and settle the wire format: the configured engine first, then the free engines it does
+ * not duplicate (DESIGN §8.5).
  *
- * 两道过滤：
- * - `isAvailable()` 为假的步骤剔除（没配 key 的 LLM、探测不到的内置引擎），免得链里躺着必然失败的一环；
- *   首个引擎不可用时**保留**它——popup 要据此提示"未配置 API key"，而不是悄悄换成免费引擎
- * - **格式由首选引擎决定**：取它偏好序里的第一个，候选支持不了这个格式就不进链。
- *   `run.ts` 只在开始时取一次 capabilities，一次会话只能有一种格式（中途换会让先后渲染的块两套形状）。
+ * Two filters:
+ * - a step whose `isAvailable()` is false is dropped (an LLM without a key, a built-in engine that cannot be
+ *   probed), so no link of the chain is bound to fail; the first engine is **kept** when unavailable — the popup has
+ *   to say “no API key configured” by it rather than quietly switching to a free engine
+ * - **the first-choice engine decides the format**: the first of its preference order, and a candidate that cannot
+ *   keep it stays off the chain. `run.ts` takes the capabilities once at the start, and one session has one format
+ *   (changing halfway would render earlier and later blocks in two shapes).
  *
- * 这条规则是**顺序无关**的，这是它替换掉旧规则的理由。旧规则让交集随迭代顺序收缩，于是
- * **一个兜底引擎能改变首选引擎的渲染格式**：选了 Google（tags|markers）、内置又没装语言包时，
- * 一个 markers-only 的兜底会把整条会话拖到 markers，成对占位符被拍平、整页内联样式消失——
- * 而用户只是想有个兜底。#103 要开放链的顺序自定义，那条规则会让「调一下兜底优先级」变成
- * 「静默改变渲染格式」。今天两条规则产出的链完全相同（markers 引擎本来就救不了 tags 会话），
- * 所以这是把顺序相关换成顺序无关，不是行为变更。
+ * This rule is **order-independent**, which is why it replaced the old one. The old rule shrank the intersection with
+ * the iteration order, so **a fallback engine could change the first choice's render format**: Google chosen
+ * (tags|markers) with the built-in lacking its pack, a markers-only fallback would drag the whole session to markers,
+ * paired placeholders flattened, inline styling gone from the whole page — for a reader who only wanted a fallback.
+ * #103 is to open the chain's order to customisation, and that rule would turn “adjust the fallback priority” into
+ * “silently change the render format”. Today both rules produce the same chains (a markers engine could never rescue a
+ * tags session), so this trades order-dependent for order-independent, no behaviour change.
  *
- * - 选 Google（`['tags','markers']`）→ 锁定 `tags` → 内置（`['tags']`）进链，markers-only 的挡在外面
- * - 选微软（`['markers']`）→ 锁定 `markers` → Google 两种都保得住，进链兜底
- * - 首选 `wireFormats: []`（一个占位符都保不住）→ 整条会话走 `runs`。runs 发的是纯文本段，
- *   不需要共同格式，所以这时格式闸整个让开，否则首选一挂就没得降级（Codex 在 #107 指出）
+ * - Google chosen (`['tags','markers']`) → `tags` locked → the built-in (`['tags']`) joins, markers-only ones stay out
+ * - Microsoft chosen (`['markers']`) → `markers` locked → Google keeps both and joins as the fallback
+ * - a first choice with `wireFormats: []` (not one placeholder kept) → the whole session takes `runs`. runs sends
+ *   plain-text runs and needs no common format, so the format gate steps aside entirely, or the first choice failing would leave no fallback (Codex on #107)
  */
 export async function buildChain(
   config: Config,
-  /** 测试注入。用合成引擎才测得到还没接入的组合（markers-only 的引擎、`wireFormats` 为空的引擎） */
+  /** Test injection. Only synthetic engines reach the combinations not wired yet (a markers-only engine, one with empty `wireFormats`) */
   deps: { primary?: TranslationProvider; freeEngines?: readonly ((config: Config) => TranslationProvider)[] } = {},
 ): Promise<{ chain: TranslationProvider[]; renderPath: RenderPath }> {
   const freeEngines = deps.freeEngines ?? FREE_ENGINES
@@ -70,7 +75,7 @@ export async function buildChain(
       const candidate = create(config)
       if (candidate.id === primary.id) continue
       if (format !== undefined && !candidate.wireFormats.includes(format)) {
-        console.warn(`[axt] ${candidate.displayName} 不支持本次会话的线上格式 ${format}，不加入降级链`)
+        console.warn(`[axt] ${candidate.displayName} does not support this session's wire format ${format}; not joining the fallback chain`)
         continue
       }
       if (!(await candidate.isAvailable())) continue
@@ -78,9 +83,9 @@ export async function buildChain(
     }
   }
   if (format === undefined) return { chain, renderPath: 'runs' }
-  // 直接返回，不再做转换：`RenderPath = WireFormat | 'runs'` 已经接受任何线上格式。
-  // 留着 `format === 'markers' ? … : 'tags'` 的话，将来加第三种 WireFormat 会被**静默改写成 tags**，
-  // 只支持新格式的 provider 会收到 tags 序列化的批次、把占位符毁掉（Codex 在 #116 指出）
+  // Returned directly, no conversion: `RenderPath = WireFormat | 'runs'` accepts any wire format already. Keeping
+  // `format === 'markers' ? … : 'tags'` would **silently rewrite** a third WireFormat added later into tags, and a
+  // provider supporting only the new format would get batches serialised as tags and wreck the placeholders (Codex on #116)
   return { chain, renderPath: format }
 }
 

@@ -156,7 +156,7 @@ describe('createFallbackService', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const service = createFallbackService([step('llm', [fail('auth', 'bad key')]), step('google-web', [ok('google-web')])])
     await service.translate(call)
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('降级'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('demoted'))
     warn.mockRestore()
   })
 })

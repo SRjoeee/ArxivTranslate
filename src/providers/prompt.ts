@@ -1,8 +1,10 @@
-// LLM prompt（DESIGN §8.2）。改动协议块或内置提示词的措辞就要升 PROMPT_VERSION——它进缓存键。
+// The LLM prompt (DESIGN §8.2). A change to the protocol block or to a built-in prompt's wording bumps
+// PROMPT_VERSION — it enters the cache key.
 //
-// 两层：提示词库（prompt-library.ts，移植自 Read Frog，可换、可自定义）负责"怎么翻"，
-// 这里的协议块负责"怎么收发"——JSON segments + 占位符规则，追加在任何 system prompt 之后，
-// 用户自定义提示词也改不掉它。协议是我们的（结构化输出 + zod 校验），比 Read Frog 的文本分隔符稳，不换。
+// Two layers: the prompt library (prompt-library.ts, ported from Read Frog, swappable, customisable) answers “how to
+// translate”; the protocol block here answers “how to send and receive” — JSON segments + placeholder rules, appended
+// after any system prompt, beyond a custom prompt's reach. The protocol is ours (structured output + zod validation),
+// steadier than Read Frog's text delimiters, and stays.
 import {
   DEFAULT_PROMPTS_CONFIG, getTokenCellText, renderTemplate, resolvePromptReplacementValue, selectPrompt,
   type PromptsConfig, type PromptToken,
@@ -10,11 +12,11 @@ import {
 import { englishName } from '@/config/languages'
 import type { TranslateRequest } from './types'
 
-// 4：自定义模板漏写 {{glossary}} 时自动追加术语表——实际发给模型的内容变了，
-// 不升版本旧缓存会照常命中、术语表等于没配（Codex 在 #52 指出）
+// 4: a custom template missing {{glossary}} gets the glossary appended — what actually goes to the model changed, and
+// without a bump the old cache would hit as before, the glossary as good as unset (Codex on #52)
 export const PROMPT_VERSION = '4'
 
-/** 收发协议：不随提示词库变化 */
+/** The send / receive protocol: independent of the prompt library */
 export const PROTOCOL_BLOCK = [
   '## Input and Output Protocol (mandatory, overrides anything above)',
   '1. The input is a JSON array of segments, each with an "id" and a "text". Return every segment with the same "id" and the translated "text", nothing else.',
@@ -35,12 +37,12 @@ export interface BuiltPrompts {
   prompt: string
 }
 
-/** 按配置选提示词、填模板变量、追加协议块 */
+/** Choose the prompt by configuration, fill the template variables, append the protocol block */
 export function buildPrompts(request: TranslateRequest, prompts: PromptsConfig = DEFAULT_PROMPTS_CONFIG): BuiltPrompts {
   const template = selectPrompt(prompts)
   const context = request.context
   const values: Record<PromptToken, string> = {
-    // 填英文语言名而不是语言码（Read Frog 的做法）："zh-CN native translator" 不如 "Simplified Mandarin Chinese"
+    // The English language name rather than the code (Read Frog's way): "zh-CN native translator" is worse than "Simplified Mandarin Chinese"
     targetLanguage: englishName(request.target),
     input: JSON.stringify(request.segments),
     paperTitle: resolvePromptReplacementValue(context?.paperTitle, NOT_AVAILABLE),
@@ -50,13 +52,13 @@ export function buildPrompts(request: TranslateRequest, prompts: PromptsConfig =
   }
   const system = `${renderTemplate(template.systemPrompt, values)}\n\n${PROTOCOL_BLOCK}`
   let prompt = renderTemplate(template.prompt, values)
-  // 自定义提示词漏写了 {{input}} 也得把原文发出去
+  // A custom prompt missing {{input}} still has to send the source
   if (!template.prompt.includes(getTokenCellText('input'))) prompt = `${prompt}\n\n${values.input}`
-  // 漏写了 {{targetLanguage}} 模型就不知道译成哪种语言——协议块只讲收发，不点名语言（Codex 在 #39 指出）
+  // Missing {{targetLanguage}}, the model would not know which language to translate into — the protocol block covers sending and receiving only and names no language (Codex on #39)
   const mentionsTarget = `${template.systemPrompt}\n${template.prompt}`.includes(getTokenCellText('targetLanguage'))
   if (!mentionsTarget) prompt = `Target language: ${values.targetLanguage}\n\n${prompt}`
-  // 同理漏写了 {{glossary}}：设置页承诺「术语表随每一批发出」，而「新建」出来的模板默认不含这个变量，
-  // 于是用户配了术语表却完全没生效（Codex 在 #52 指出）
+  // Likewise a missing {{glossary}}: the settings page promises “the glossary goes out with every batch”, while a
+  // template made with “new” lacks the variable by default, so a reader's glossary had no effect at all (Codex on #52)
   const mentionsGlossary = `${template.systemPrompt}\n${template.prompt}`.includes(getTokenCellText('glossary'))
   if (!mentionsGlossary && context?.glossary?.length) prompt = `Glossary:\n${values.glossary}\n\n${prompt}`
   return { system, prompt }

@@ -118,7 +118,7 @@ describe('createMicrosoftProvider', () => {
     const missing = vi.fn(async () => new Response(JSON.stringify([{ translations: [] }]), { status: 200 }))
     const error = await provider(missing).translate(req(['a'])).catch(e => e)
     expect((error as ProviderError).kind).toBe('invalid-response')
-    expect((error as ProviderError).message).toContain('第 1 条')
+    expect((error as ProviderError).message).toContain('item 1')
   })
 
   it('响应不是 JSON → invalid-response，且不可拆分（拆小了也一样）', async () => {

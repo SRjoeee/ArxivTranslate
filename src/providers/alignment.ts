@@ -71,10 +71,11 @@ const SENTENCE_END = /[.!?。！？…]["'\u201d\u300d\u300f）)\]]*$/
  */
 const CONTINUATION = /^[a-z0-9([]/
 /**
- * 一个终止标点可能不止一个字符：走到它的末尾要跨过的东西。
+ * A terminator may be more than one character: what walking to its end has to cross.
  *
- * 重复的终止标点（`……`、`...`）与**明确的**收尾符号。**直引号不在里面**：`"` 和 `'` 既能收也能开，
- * `甲。|"乙。"` 里那个引号是下一句的开头，当成收尾就把它划给上一句了（Codex 在 #145 指出）
+ * Repeated terminators (`……`, `...`) and the **unambiguous** closers. **Straight quotes are not among them**: `"`
+ * and `'` both close and open, and in `甲。|"乙。"` the quote opens the next sentence — taken as a closer it would
+ * be given to the previous one (Codex on #145)
  */
 const TERMINATOR = /[.!?。！？…\u201d\u300d\u300f）)\]]/
 
@@ -98,17 +99,18 @@ const settled = (text: string, at: number): boolean => SENTENCE_END.test(text.sl
  * (measured, one regression before the two predicates were separated).
  */
 const snappable = (text: string, at: number): boolean => {
-  // 标点必须**紧贴**在前面（空格不算）。中间隔着占位符，说明下一句是从受保护内容开头的——
-  // 公式之类；把边界拉到它后面等于把这个公式判给上一句，而指针落在公式里时又会选到错的那一对
-  //（Codex 在 #145 指出）
+  // The punctuation has to sit **right before** (a space does not count). A placeholder in between means the next
+  // sentence begins with protected content — a formula, say; pulling the boundary behind it gives the formula to the
+  // previous sentence, and a pointer landing in the formula picks the wrong pair (Codex on #145)
   const before = text.slice(0, at).replace(/\s+$/, '')
   if (!SENTENCE_END.test(before)) return false
-  // 后面是小写字母或数字：`Vol. 2`、`3.5`，这个句点不是句末
+  // Followed by a lower-case letter or a digit: `Vol. 2`, `3.5`, this full stop ends no sentence
   if (CONTINUATION.test(text.slice(at).replace(LEADING_FILLER, ''))) return false
-  // 缩写的句点也不是句末——`U.S. D|epartment` 后面是大写，上一条看不出来。**但 `etc.` / `al.`
-  // 是真能结束句子的**，切句器对这两个就是按「后面是什么」来判的（`TERMINAL_ABBR` + `CONTINUES`），
-  // 一律否掉会让 `Tools, etc. T|he next` 修不回去（Codex 在 #145 指出）。这里的后面已经排除了
-  // 小写与数字，所以终止型缩写在这一步一律放行
+  // An abbreviation's full stop ends no sentence either — `U.S. D|epartment` is followed by a capital, which the
+  // previous test cannot see. **But `etc.` / `al.` really can end a sentence**, and the splitter decides those two
+  // by “what follows” (`TERMINAL_ABBR` + `CONTINUES`); refusing them outright would leave `Tools, etc. T|he next`
+  // uncorrectable (Codex on #145). What follows here has already excluded lower case and digits, so terminal
+  // abbreviations always pass at this step
   return !ABBR.test(before) || TERMINAL_ABBR.test(before)
 }
 
@@ -153,12 +155,13 @@ function snapAlignment(alignment: SentenceAlignment, sourceText: string, targetT
       cuts.push(at)
     }
     /**
-     * 走到整段终止标点的末尾。
+     * Walk to the end of the whole run of terminators.
      *
-     * 无论候选是往回还是往前找到的都要走这一趟，**吸附才是幂等的**：否则往回落在标点串中间
-     * （`Wait..|.`）的结果会在下一次校验时再往前挪一格，而 `verifyAlignment` 会跑不止一次
-     *（微软在 provider 里校验一次、服务层再一次，缓存命中还要再来一次），同一份对齐就会因为
-     * 走了哪条路而给出不同的高亮（Codex 在 #145 指出）
+     * Whichever way the candidate was found, backwards or forwards, this walk happens, **or the snap is not
+     * idempotent**: a backwards result landing in the middle of a punctuation run (`Wait..|.`) would move one more
+     * step at the next verification, and `verifyAlignment` runs more than once (Microsoft verifies in the provider,
+     * the service once more, and a cache hit once again), so one alignment would highlight differently by the path
+     * taken (Codex on #145)
      */
     const walk = (at: number): number => {
       let end = at
@@ -170,18 +173,19 @@ function snapAlignment(alignment: SentenceAlignment, sourceText: string, targetT
       for (let step = 1; step <= SNAP_WINDOW; step++) {
         const back = cut - step > 0 && snappable(text, cut - step) ? cut - step : undefined
         const forward = cut + step < text.length && snappable(text, cut + step) ? cut + step : undefined
-        // 两边一样近：既可能是引擎多切了一点、也可能是少切了一点，**没有证据偏向哪一边**
-        //（Codex 在 #145 指出）。而且边界之间是有关系的——留一个不动、邻居却动了，切出来的划分
-        //（实测 `[3, 1, 3]`）比引擎给的还糟。有一个说不准，这一侧就整个不动
+        // Equally near on both sides: the engine may have cut a little too much or a little too little, **with no
+        // evidence either way** (Codex on #145). And the boundaries are related — one left alone while its neighbour
+        // moves gives a worse partition (measured `[3, 1, 3]`) than the engine's. One undecidable, and the whole side stays
         if (back !== undefined && forward !== undefined) return undefined
         if (back !== undefined) return walk(back)
         if (forward !== undefined) return walk(forward)
       }
       return cut
     })
-    // **要么全用、要么全不用。** 逐个回退会让结果取决于迭代顺序：前一个因为撞上邻居被退回原位，
-    // 后一个再拿这个**已经退回**的值当邻居去校验，于是两个候选吸到同一个标点上时会切出
-    // `[1, 2, 4]` 这种错位（Codex 在 #145 指出）。对着候选的快照整体校验一次，不满足就整侧不动
+    // **All or nothing.** Backing off one by one would make the result depend on the iteration order: the first
+    // is returned to its place for hitting its neighbour, the next verifies against that **already returned** value,
+    // and two candidates snapping to the same punctuation cut a misaligned `[1, 2, 4]` (Codex on #145). The
+    // candidates are verified as a whole against their snapshot, and if that fails the whole side stays
     const ok = moved.every((cut, i) => {
       if (cut === undefined) return false
       const low = moved[i - 1] ?? 0

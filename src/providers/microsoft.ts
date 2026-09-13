@@ -15,10 +15,10 @@
 // 4. Batch size, concurrency and rate follow **our own measurements** of the Microsoft endpoint (below); upstream only
 //    has global settings, no per-provider values.
 //
-// 上游注释里那条关键知识：**端点每次请求都会跑 HTML 标记对齐器**，裸的 `<` 会融成伪标签
-//（`a < b and c > d` → `<B和C> d`）。Read Frog 的 translation-output-normalization.ts 说得更直白：
-// 「Google 和微软都把请求当 HTML 解析，所以适配器发送前转义、响应保持 HTML 编码，在这里只解码一次」。
-// 我们的 protector 正是这个形状（serialize 转义、rehydrate / joinRuns 只解一次）。
+// The key fact from the upstream comment: **the endpoint runs its HTML markup aligner on every request**, and a bare
+// `<` fuses into a pseudo-tag (`a < b and c > d` → `<B和C> d`). Read Frog's translation-output-normalization.ts puts
+// it plainly: “Google and Microsoft both parse the request as HTML, so the adapters escape before sending, responses
+// stay HTML-encoded, and decoding happens once, here”. Our protector has exactly that shape (serialize escapes, rehydrate / joinRuns decode once).
 import { toBcp47 } from '@/config/languages'
 import { kindOfStatus } from './http-errors'
 import { attachRequestErrorMeta } from './request/retry-policy'
@@ -29,12 +29,12 @@ import { type SentenceAlignment, verifyAlignment } from './alignment'
 const ENDPOINT = 'https://edge.microsoft.com/translate/translatetext'
 
 /**
- * 端点支持的目标语言（BCP-47）。取自它自己的公开语言表，2026-09-08：
+ * The target languages the endpoint supports (BCP-47). From its own public language table, 2026-09-08:
  *
  *     curl 'https://api.cognitive.microsofttranslator.com/languages?api-version=3.0&scope=translation'
  *
- * 我们的 179 个目标语言里 108 个落在这张表内、71 个不在（RESEARCH §5.1）。上游两个项目都没有这层——
- * Read Frog 是 `ISO6393_TO_6391` 映射缺失就抛错，等于翻到一半才失败。
+ * 108 of our 179 target languages fall inside this table and 71 outside (RESEARCH §5.1). Neither upstream project has
+ * this layer — Read Frog throws when its `ISO6393_TO_6391` map has no entry, failing halfway through a translation.
  */
 const SUPPORTED = new Set(`
   af am ar as az ba be bg bho bn bo brx bs ca cs cy da de doi dsb dv el en es es-MX et eu fa fi fil
@@ -45,43 +45,44 @@ const SUPPORTED = new Set(`
 `.trim().split(/\s+/))
 
 /**
- * 我们的目标语言（经 `toBcp47`）→ **实际发给端点的标签**。不在这张表里的原样发。
+ * Our target language (through `toBcp47`) → **the tag actually sent to the endpoint**. Not in this table, sent as it is.
  *
- * 两件事一起解决：公开表里没有的裸标签（`zh` / `sr` / `mn`），以及**端点自己的默认归一与我们的
- * 语言含义不符**的情况。后者是真 bug：`toBcp47('srp')` 给出 `sr`，端点把它归一成 **`sr-Latn`**（拉丁文），
- * 而我们的 `srp` 在 `languages.ts` 里写的是 **Serbian (Cyrillic)** ——等于悄悄换了文字，与 `zlm → ms-Arab`
- * 同一类（Codex 在 #115 指出）。显式发 `sr-Cyrl` 就不再依赖端点怎么默认。
+ * Two things settled together: bare tags the public table lacks (`zh` / `sr` / `mn`), and **the endpoint's own
+ * default normalisation disagreeing with what our language means**. The latter is a real bug: `toBcp47('srp')`
+ * gives `sr`, the endpoint normalises it to **`sr-Latn`** (Latin), while our `srp` is written **Serbian (Cyrillic)**
+ * in `languages.ts` — a silent change of script, the same class as `zlm → ms-Arab` (Codex on #115). Sent as
+ * `sr-Cyrl` explicitly, nothing depends on the endpoint's default any more.
  *
- * 逐条实测（2026-09-09）：`sr-Cyrl` → Неуронске…（西里尔）、`sr` → Neuronske…（拉丁）、
- * `mn-Cyrl` / `zh-Hans` / `zh-Hant` 均 200 且文字正确。
+ * Measured one by one (2026-09-09): `sr-Cyrl` → Неуронске… (Cyrillic), `sr` → Neuronske… (Latin), `mn-Cyrl` /
+ * `zh-Hans` / `zh-Hant` all 200 with the right script.
  */
 const REWRITE: Record<string, string> = {
-  zh: 'zh-Hans',      // toBcp47('cmn')，我们的默认目标
+  zh: 'zh-Hans',      // toBcp47('cmn'), our default target
   'zh-TW': 'zh-Hant', // toBcp47('cmn-Hant')
-  mn: 'mn-Cyrl',      // 现代蒙古语的通行文字；裸 mn 也是归到这里，显式写出来不依赖默认
-  sr: 'sr-Cyrl',      // ← 裸 sr 会被归成拉丁文，与我们的语言含义相反
-  ny: 'nya',          // ↓ 这两个反过来：端点用三字母码，`toBcp47` 却缩成两字母，缩完反而不在表里
+  mn: 'mn-Cyrl',      // the script modern Mongolian is written in; a bare mn normalises here too, written out so nothing depends on the default
+  sr: 'sr-Cyrl',      // ← a bare sr would be normalised to Latin, the opposite of what our language means
+  ny: 'nya',          // ↓ these two the other way round: the endpoint uses three-letter codes, `toBcp47` shortens to two letters, and the short form is not in the table
   lg: 'lug',
 }
 
 /**
- * 端点交付不了我们所标注的**文字**的目标语言。这三个在 `languages.ts` 里写的是「(Cyrillic)」，
- * 但端点表里没有对应的西里尔变体，`toBcp47` 给出的 `bs` / `uz` / `az` 实测都返回拉丁字母
- * （`languages.ts` 的 BCP47_OVERRIDES 注释里记着这次实测）。发出去会**静默换掉文字**，
- * 所以判为不支持、走降级——与 `zlm → ms-Arab` 因不在表里而判false 是同一个道理，只是这里
- * 两字母码碰巧落在表内，得显式挡一次（Codex 在 #115 指出）。
+ * Target languages whose **script**, as we label it, the endpoint cannot deliver. These three are written “(Cyrillic)”
+ * in `languages.ts`, the endpoint table has no Cyrillic variant for them, and the `bs` / `uz` / `az` that `toBcp47`
+ * gives measured Latin every time (the BCP47_OVERRIDES note of `languages.ts` records that measurement). Sent, they
+ * would **silently change the script**, so they are unsupported and fall back — the same reasoning as `zlm →
+ * ms-Arab` being false for not being in the table, only here the two-letter codes happen to be in it and have to be blocked explicitly (Codex on #115).
  */
 const SCRIPT_UNAVAILABLE = new Set(['bos', 'uzn', 'azj'])
 
-/** 实际发给端点的目标语言标签 */
+/** The target-language tag actually sent to the endpoint */
 function wireTarget(target: string): string {
   const tag = toBcp47(target)
   return REWRITE[tag] ?? tag
 }
 
 /**
- * 这个目标语言能不能翻。重写之后一律落在公开表的真实条目上，所以判定就是一句「在不在表里」——
- * 不做任何按主语言的推断（第一版那么写，把 `zlm → ms-Arab` 判成了支持，而它实测 400）。
+ * Can this target language be translated. After the rewrite every tag lands on a real entry of the public table, so
+ * the test is one “is it in the table” — no inference by primary language (the first version did that and judged `zlm → ms-Arab` supported, which measured 400).
  */
 export function supportsTarget(target: string): boolean {
   if (SCRIPT_UNAVAILABLE.has(target)) return false
@@ -104,9 +105,9 @@ async function translateTexts(
   signal?: AbortSignal,
 ): Promise<{ text: string; alignment?: SentenceAlignment }[]> {
   const doFetch = deps.fetch ?? globalThis.fetch
-  // 上游的处理：auto 表示让端点自己检测，参数留空。**我们这边目前到不了**——`TranslateRequest.source`
-  // 是字面量 `'en'`（arXiv 固定英文）。按 CLAUDE.md「没有额外负担的部分随模块一起搬」保留，
-  // 源语言将来放宽时就是现成的
+  // Upstream's handling: auto means letting the endpoint detect, the parameter left empty. **Unreachable on our side
+  // today** — `TranslateRequest.source` is the literal `'en'` (arXiv is English throughout). Kept per CLAUDE.md's “what
+  // adds no burden travels with the module”; ready for when the source language is opened up
   const query = new URLSearchParams({ from: from === 'auto' ? '' : from, to, isEnterpriseClient: 'false' })
   let response: Response
   try {
@@ -117,19 +118,19 @@ async function translateTexts(
       signal,
     })
   } catch (error) {
-    if (signal?.aborted) throw new ProviderError('aborted', '请求已取消', { cause: error })
+    if (signal?.aborted) throw new ProviderError('aborted', 'request cancelled', { cause: error })
     throw attachRequestErrorMeta(
-      new ProviderError('network', `网络错误：${error instanceof Error ? error.message : String(error)}`, { cause: error }),
+      new ProviderError('network', `network error: ${error instanceof Error ? error.message : String(error)}`, { cause: error }),
       { kind: 'network', isRetryable: true },
     )
   }
 
-  // 必须先于 json()：超限时它返回的是**纯文本** `Request exceeds the maximum allowed translation size.`，
-  // 直接 JSON.parse 会抛成 invalid-response，掩盖掉真正的 400（RESEARCH §5.1）
+  // Before json(): over the limit it returns **plain text**, `Request exceeds the maximum allowed translation size.`,
+  // and JSON.parse straight away would throw as invalid-response and mask the real 400 (RESEARCH §5.1)
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
     throw attachRequestErrorMeta(
-      new ProviderError(kindOfStatus(response.status), `translatetext ${response.status} ${response.statusText}${detail ? `：${detail.slice(0, 200)}` : ''}`),
+      new ProviderError(kindOfStatus(response.status), `translatetext ${response.status} ${response.statusText}${detail ? `: ${detail.slice(0, 200)}` : ''}`),
       { statusCode: response.status, responseHeaders: response.headers },
     )
   }
@@ -138,20 +139,20 @@ async function translateTexts(
   try {
     payload = await response.json()
   } catch (error) {
-    // 整个响应就不是 JSON：拆小批次重来也是一样的结果（§8.3）
-    throw new ProviderError('invalid-response', 'translatetext 返回的不是 JSON', { cause: error, isolatable: false })
+    // The whole response is not JSON: a smaller batch would come back the same (§8.3)
+    throw new ProviderError('invalid-response', 'translatetext did not return JSON', { cause: error, isolatable: false })
   }
 
   if (!Array.isArray(payload)) {
-    throw new ProviderError('invalid-response', `translatetext 响应格式异常：${JSON.stringify(payload).slice(0, 200)}`, { isolatable: false })
+    throw new ProviderError('invalid-response', `unexpected translatetext response shape: ${JSON.stringify(payload).slice(0, 200)}`, { isolatable: false })
   }
   if (payload.length !== texts.length) {
-    throw new ProviderError('invalid-response', `translatetext 返回 ${payload.length} 条，期望 ${texts.length} 条`)
+    throw new ProviderError('invalid-response', `translatetext returned ${payload.length} items, expected ${texts.length}`)
   }
   return payload.map((item: MicrosoftItem, i) => {
     const translation = item?.translations?.[0]
     const text = translation?.text
-    if (typeof text !== 'string') throw new ProviderError('invalid-response', `translatetext 第 ${i + 1} 条缺少译文`)
+    if (typeof text !== 'string') throw new ProviderError('invalid-response', `translatetext item ${i + 1} has no translation`)
     // The endpoint segments internally and reports it; we neither ask for it nor pay for it.
     // Measured over 60 real blocks: the partition was complete on all 60 and 96.2% of boundaries
     // landed after sentence punctuation — but only once whitespace was collapsed (#119), which is
@@ -165,53 +166,56 @@ async function translateTexts(
 }
 
 /**
- * 微软 Edge 的免费翻译端点。视为随时会断（DESIGN §8.3）：错误独立分类，失败可回退到别的 provider。
+ * Microsoft Edge's free translation endpoint. Taken as liable to break any time (DESIGN §8.3): its errors are
+ * classified on their own, and a failure falls back to another provider.
  *
- * **只保得住纯文本记号**：实测标签格式在它上面 0%（400 个占位符全丢，属性引号被转成全角、开标签被撕成
- * 裸文本），记号格式 98%（RESEARCH §5.1），所以 `wireFormats` 只有 `markers`。
+ * **It keeps plain-text markers only**: the tags format measured 0% on it (all 400 placeholders lost, attribute quotes
+ * turned full-width, opening tags torn into bare text), the markers format 98% (RESEARCH §5.1), so `wireFormats` is `markers` alone.
  */
 export function createMicrosoftProvider(targetLanguage: string, deps: MicrosoftDeps = {}): TranslationProvider {
   return {
     id: 'microsoft',
-    displayName: '微软翻译（免费）',
+    displayName: 'Microsoft translation (free)',
     kind: 'mt',
-    // 原生就有 `sentLen`，服务层不给它插句子标记（§8.6）
+    // `sentLen` is native, so the service inserts no sentence markers for it (§8.6)
   reportsSentences: true,
   wireFormats: WIRE_FORMATS.microsoft,
     /**
-     * 批量与并发按**微软自己的**响应特征定，不照抄 google-web（那组值是按 Google 63 ms 的响应调出来的，
-     * 抄过来会犯 google-web.ts 注释里记着的同一个错）。2026-09-08 实测，每个请求内容唯一以排除服务端缓存：
+     * Batch size and concurrency are set by **Microsoft's own** response profile, not copied from google-web (those
+     * values were tuned to Google's 63 ms responses, and copying them would repeat the mistake recorded in
+     * google-web.ts). Measured 2026-09-08, every request unique in content to rule out server caching:
      *
-     *   批量 414 字符 → 319 ms ｜ 2047 → 589 ms ｜ 8125 → **1516 ms**（延迟随批量线性涨）
-     *   并发 1 → 6.8k 字符/s ｜ 4 → 13.5k ｜ 8 → **23k**，墙钟仍是 ~700 ms，30 连发无 429
+     *   batch 414 characters → 319 ms | 2047 → 589 ms | 8125 → **1516 ms** (latency grows linearly with size)
+     *   concurrency 1 → 6.8k characters/s | 4 → 13.5k | 8 → **23k**, wall clock still ~700 ms, 30 in a row with no 429
      *
-     * 结论是**小批量 + 高并发**：吞吐由并发提供，批量只决定首屏要等多久。取 8000 会让首屏等 1.5 秒，
-     * 而吞吐并不因此更好。硬上限是每请求 50,000 字符（超了返回纯文本 400），2000 留了 25 倍余量。
+     * The conclusion is **small batches + high concurrency**: throughput comes from concurrency, and the batch size only
+     * sets how long the first screen waits. 8000 would make the first screen wait 1.5 seconds for no better throughput.
+     * The hard cap is 50,000 characters a request (over it, a plain-text 400); 2000 leaves 25× to spare.
      */
     maxBatchChars: 2000,
-    // 字数先到上限（2000 字符约 15 条），这个值只是不封顶的安全阀
+    // The character cap is reached first (2000 characters is about 15 items); this value is only the uncapped safety valve
     maxBatchItems: 100,
     maxConcurrent: 8,
-    // 实测没有限流；速率只当突发的安全闸——并发 8、单发约 600 ms，自然吞吐约 13/s，20/s 碰不到
+    // No rate limit measured; the rate is only a safety gate for bursts — concurrency 8 at about 600 ms each gives a natural throughput of about 13/s, and 20/s is never touched
     rateLimit: { rate: 20, capacity: 8 },
     async isAvailable() {
-      // 免费端点不需要凭据，但**它不是每种语言都翻**：不支持的目标语言会 400。
-      // 在这里报不可用，链就会自动跳过它（与 chrome-builtin 没下语言包时同一个机制）
+      // A free endpoint needs no credential, but **it does not translate every language**: an unsupported target is a 400.
+      // Reported unavailable here, the chain skips it of itself (the same mechanism as chrome-builtin without its pack)
       return supportsTarget(targetLanguage)
     },
     async translate(request: TranslateRequest): Promise<TranslateResult> {
       if (request.segments.length === 0) return { segments: [], provider: 'microsoft' }
-      // 目标语言不支持时**本地就退出**，不去问端点。`buildChain` 会把不可用的首选留在链首
-      // （popup 要据此提示），而 `fallback.ts` 挑步骤时看的是降级记录、不是 `isAvailable()`——
-      // 于是第一批请求仍会发出去换回 400，并发下甚至是好几发（Codex 在 #115 指出）
+      // An unsupported target language **exits locally**, without asking the endpoint. `buildChain` keeps an unavailable
+      // first choice at the head (the popup has to say so), while `fallback.ts` picks steps by hand-over records, not
+      // `isAvailable()` — so the first batch would still go out and come back 400, several at once under concurrency (Codex on #115)
       if (!supportsTarget(request.target)) {
-        throw new ProviderError('bad-request', `微软翻译不支持目标语言 ${request.target}`, { isolatable: false })
+        throw new ProviderError('bad-request', `Microsoft translation does not support the target language ${request.target}`, { isolatable: false })
       }
       const texts = request.segments.map(segment => segment.text)
-      // 协商层已经保证送进来的是 markers（纯文本）。万一漏了也不能把标签发出去：
-      // 端点没有 markup 模式，会按目标语言各异的方式把标签毁掉，事后无法还原（上游 Read Frog 的原话）
+      // The negotiation layer guarantees what comes in is markers (plain text). Should that ever slip, tags must still
+      // not be sent: the endpoint has no markup mode and wrecks tags in ways that vary by target language, beyond repair (upstream Read Frog's own words)
       if (texts.some(text => /<[a-z/]/i.test(text))) {
-        throw new ProviderError('bad-request', '微软端点不接受标签格式的占位符，只能走 markers', { isolatable: false })
+        throw new ProviderError('bad-request', 'the Microsoft endpoint does not accept tag placeholders; markers only', { isolatable: false })
       }
       const translated = await translateTexts(texts, request.source, wireTarget(request.target), deps, request.signal)
       return {
