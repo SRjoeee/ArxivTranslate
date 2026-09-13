@@ -1,4 +1,4 @@
-// 扩展内部消息协议。popup / content / background 之间只允许使用这里定义的类型。
+// The extension's internal message protocol. popup / content / background may only use the types defined here.
 import { browser } from 'wxt/browser'
 import type { BlockStats } from '@/core/extractor/stats'
 import type { Progress } from '@/core/pipeline/run'
@@ -8,21 +8,21 @@ import type { TranslateCall, TranslateMessageResponse } from '@/providers/transl
 import type { HelperStatus, ImageProgress, OcrCall, OcrMessageResponse } from './ocr'
 
 export interface PageStatus {
-  /** 当前页面的 arXiv id；不是 arXiv HTML 页面时为 null */
+  /** The current page's arXiv id; null when this is not an arXiv HTML page */
   paper: string | null
-  /** 实际生效的模式；窄视口下 side 会自动降级为 stack（§7.2） */
+  /** The mode in effect; on a narrow viewport side falls back to stack of itself (§7.2) */
   mode: Mode
-  /** 用户选定的模式，自动降级不改它 */
+  /** The mode the reader chose; the automatic fallback does not change it */
   preference: Mode
   progress: Progress
-  /** 图片翻译的进度（§15）；helper 不可用或设置里全关时没有 */
+  /** The image translation's progress (§15); absent without the helper or with every mode off in the settings */
   images?: ImageProgress
   /**
-   * 这个页面此刻的会话 id（没在翻时为 null）。
+   * This page's session id right now (null when not translating).
    *
-   * background 靠它回答「这个标签页还是不是刚才那个页面」：`tabs.onUpdated` 分不出同文档换 hash
-   * 与真的跳走，而页面自己分得出——它还在，就还答得出同一个 id（Codex 在 #143 指出「猜」不能只靠
-   * 「目的地会不会再发请求」）
+   * The background answers “is this tab still the page it was” by it: `tabs.onUpdated` cannot tell a same-document
+   * hash change from a real departure, and the page itself can — still there, it still answers with the same id
+   * (Codex on #143: the “guess” cannot rest on “will the destination request again” alone)
    */
   session?: string | null
   /**
@@ -42,7 +42,7 @@ export interface PageStatus {
   running?: { provider: string; target: string; engine: string; revision: string }
 }
 
-/** 消息表：type → { request, response } */
+/** The message table: type → { request, response } */
 export interface AxtMessages {
   /**
    * popup → content: start translating the page. `restart` starts a new session over a running one
@@ -53,19 +53,19 @@ export interface AxtMessages {
    * toggle waits for the chain's probes) cannot undo what the reader did in between (sixth and twelfth passes)
    */
   'axt:translate-page': { request: { mode?: Mode; restart?: boolean; epoch?: string }; response: { started: boolean; reason?: string } }
-  /** popup → content：中止并恢复原文. `epoch` as above: a restore decided on an earlier epoch is `refused` */
+  /** popup → content: stop and restore the original. `epoch` as above: a restore decided on an earlier epoch is `refused` */
   'axt:restore-page': { request: { epoch?: string }; response: { removedNodes: number; refused?: true } }
-  /** popup → content：切换模式（只改 <html> 上的属性，不重新翻译；§4 第 9 步） */
+  /** popup → content: switch the mode (changes the attribute on <html> only, no retranslation; §4 step 9) */
   'axt:set-mode': { request: { mode: Mode }; response: { mode: Mode; preference: Mode } }
-  /** popup → content：进度 */
+  /** popup → content: the progress */
   'axt:page-status': { request: Record<never, never>; response: PageStatus }
-  /** popup → background：连通性 */
+  /** popup → background: connectivity */
   'axt:ping': { request: Record<never, never>; response: { ok: true; version: string } }
-  /** popup → content script：内存中 Block[] 的统计 */
+  /** popup → content script: statistics of the in-memory Block[] */
   'axt:stats': { request: Record<never, never>; response: BlockStats }
-  /** content / options → background：翻译一批 segment（§8.0：建链、排队、发请求都在 background） */
+  /** content / options → background: translate a batch of segments (§8.0: the chain, the queues and the requests all live in the background) */
   'axt:translate': { request: TranslateCall; response: TranslateMessageResponse }
-  /** content → background：撤掉一次会话排队与在飞的请求（恢复原文、重开） */
+  /** content → background: withdraw a session's queued and in-flight requests (restore, restart) */
   'axt:cancel-scope': { request: { scope: string }; response: { cancelled: number } }
   /**
    * popup / options / content → background: what the chain can do and how it is doing.
@@ -83,10 +83,10 @@ export interface AxtMessages {
    * records (target, revision) and what serves its requests are one chain
    */
   'axt:provider-status': { request: { scope?: string; fresh?: boolean }; response: ProviderStatus }
-  /** 清空缓存，或只清某篇论文 */
+  /** Clear the cache, or one paper only */
   'axt:cache-clear': { request: { paper?: string }; response: { ok: true; removed: number } | { ok: false; message: string } }
   'axt:cache-stats': { request: Record<never, never>; response: { ok: true; entries: number; bytes: number } | { ok: false; message: string } }
-  /** popup → content：把翻失败的块再翻一遍（§7.6） */
+  /** popup → content: translate the failed blocks once more (§7.6) */
   'axt:retry-failed': { request: Record<never, never>; response: { retried: number } }
   /**
    * popup / options → background: something the reader did changed which services can serve
@@ -98,8 +98,8 @@ export interface AxtMessages {
    *
    * Which sessions move onto the new chain is the caller's to say, because only the caller knows
    * what it promised (Codex on #157):
-   * - `scope` — that one session. The popup's pack download says "接下来的段落会用离线翻译" about
-   *   the tab it is open on, and about no other.
+   * - `scope` — that one session. The popup's pack download promises offline translation for the coming passages of
+   *   the tab it is open on, and of no other.
    * - `rebindAll` — every session. Only for a service the reader deleted: it has to stop serving
    *   everywhere, and that outweighs moving an unrelated tab onto another chain.
    * - neither — rebuild only. Later sessions see the new chain; the ones translating keep theirs.
@@ -131,12 +131,12 @@ export interface AxtMessages {
    * itself, and by then the popup that asked is long closed.
    */
   'axt:helper-await': { request: { start?: boolean }; response: { until: number | null } }
-  /** content → background：给一张位图做 OCR；结果按 imageHash 缓存（§15.2） */
+  /** content → background: OCR one bitmap; the result is cached by imageHash (§15.2) */
   'axt:ocr': { request: OcrCall; response: OcrMessageResponse }
 }
 
 export type AxtMessageType = keyof AxtMessages
-/** 分配式条件类型：让 switch (message.type) 能按 type 收窄到对应的 request 形状 */
+/** A distributive conditional type, so switch (message.type) narrows to the matching request shape by type */
 export type AxtMessage<T extends AxtMessageType = AxtMessageType> = T extends unknown ? { type: T } & AxtMessages[T]['request'] : never
 export type AxtResponse<T extends AxtMessageType> = AxtMessages[T]['response']
 
@@ -172,14 +172,16 @@ export function decodeReply<T>(reply: T | FailureReply): T {
   return reply
 }
 
-/** 发给 background；MV3 下 sendMessage 不传回调即返回 Promise */
+/** Send to the background; under MV3 sendMessage returns a Promise when called without a callback */
 export function sendMessage<T extends AxtMessageType>(message: AxtMessage<T>): Promise<AxtResponse<T>> {
   return (browser.runtime.sendMessage(message) as Promise<AxtResponse<T> | FailureReply>).then(decodeReply)
 }
 
-/** 发给当前活动标签页的 content script；标签页上没有接收方时 Promise 会 reject。不读 url，无需 tabs 权限 */
+/** Send to the active tab's content script; the Promise rejects when the tab has no receiver. Reads no url, so no tabs permission */
 export async function sendToActiveTab<T extends AxtMessageType>(message: AxtMessage<T>): Promise<AxtResponse<T>> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
+  // Reader-visible: the popup's action guard shows this message verbatim through S.actionFailed, so it is product copy in the
+  // interface's default language, not developer text — mapping it onto the locale pack is an open item (like the zod messages of config/schema.ts)
   if (tab?.id == null) throw new Error('没有活动标签页')
   return browser.tabs.sendMessage(tab.id, message) as Promise<AxtResponse<T>>
 }

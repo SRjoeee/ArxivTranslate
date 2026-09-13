@@ -1,55 +1,60 @@
-// 页内锚点的兜底（issue #44）：only 模式把有译文的原块 `display: none`（§7.4），
-// 指向那些块的交叉引用就此失效——目标没有布局盒，浏览器不知道往哪滚。
+// In-page anchors, the fallback (issue #44): only mode hides the original blocks that have a translation with
+// `display: none` (§7.4), and every cross-reference into them stops working — the target has no layout box, so the
+// browser has nowhere to scroll.
 //
-// 实测 2609.00246（Chromium，only 模式，整篇翻完）：61 个页内锚点的目标不可见，
-// 点其中的「§7」（`#S7.p3.1`，目标是 `p.ltx_p`，`display: none`，`data-axt-state="translated"`）
-// 后 `scrollY` 从 0 到 0——**一动没动**，而它的译文就在旁边。12 篇 fixture 里
-// 3374 个页内锚点有 118 个（3.5%）的目标落在翻译块内，几乎全是 `.ltx_p`。
+// Measured on 2609.00246 (Chromium, only mode, the whole paper translated): 61 in-page anchors had an invisible
+// target; clicking “§7” (`#S7.p3.1`, target `p.ltx_p`, `display: none`, `data-axt-state="translated"`) took
+// `scrollY` from 0 to 0 — **not a pixel** — while its translation sat right beside it. Across the 12 fixtures, 118
+// of 3374 in-page anchors (3.5%) point into translated blocks, almost all `.ltx_p`.
 //
-// 做法是把导航落到译文上，而不是把原文放出来：读者在 only 模式下点「见 §7」，
-// 想看的是 §7 的中文。§7.4 也明确禁止用 `display: revert` 撤销隐藏（会连站点自己的 display 一起撤）。
-// 与 §7.1 一致：不改 DOM，只挂事件；side / stack 下目标本来就可见，这里一次都不介入。
+// The way out is to land the navigation on the translation, not to reveal the original: a reader in only mode who
+// clicks a “see §7” reference wants §7 in Chinese. §7.4 also forbids `display: revert` to undo the hiding (it would undo the
+// site's own display too). In keeping with §7.1: the DOM is not changed, only listeners are attached; in side / stack
+// the target is visible anyway and this never steps in.
 import type { Block } from '@/core/extractor'
 import { ID_ATTR } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
 import { ERROR_CLASS, FOR_ATTR, MIRROR_CLASS, PENDING_CLASS, SPLIT_ATTR, SPLIT_CLASS, SPLIT_OF_ATTR } from './attrs'
 
-/** 有布局盒才谈得上滚过去；`display: none` 的元素 `getClientRects()` 是空的 */
+/** Only an element with a layout box can be scrolled to; `getClientRects()` of a `display: none` element is empty */
 function visible(el: Element): boolean {
   return el.getClientRects().length > 0
 }
 
-/** `#S7.p3.1` → 元素。id 里的点不影响 getElementById，但 href 可能是转义过的 */
+/** `#S7.p3.1` → element. Dots in an id do not bother getElementById, but the href may be escaped */
 function targetOf(doc: Document, href: string): Element | null {
   if (!href.startsWith('#') || href.length < 2) return null
   const raw = href.slice(1)
   let id = raw
-  try { id = decodeURIComponent(raw) } catch { /* 非法转义就按原样查 */ }
+  try { id = decodeURIComponent(raw) } catch { /* a malformed escape is looked up as written */ }
   return doc.getElementById(id) ?? doc.getElementById(raw)
 }
 
 /**
- * 目标不可见时的替身：从目标所在的块起，**逐层向外**找第一条看得见的译文。
+ * The stand-in for an invisible target: from the block the target sits in, the first visible translation found
+ * **walking outwards**.
  *
- * 不能只看最近的那个块（Codex 在 #80 指出）：翻译单元是可以嵌套的（段落里的脚注正文、
- * 致谢里的标题——12 篇 fixture 里有 55 个这样的块），而嵌套单元的译文是插在**外层原块内部**的。
- * only 模式把外层原块整个藏起来时，里层的译文跟着一起没了，可外层自己的译文就在旁边看得见。
- * 停在 `closest()` 会返回 null，链接照样点不动。
+ * The nearest block alone is not enough (Codex on #80): translation units nest (a footnote body inside a
+ * paragraph, a heading inside the acknowledgements — 55 such blocks across the 12 fixtures), and a nested unit's
+ * translation is inserted **inside the outer original block**. When only mode hides the outer block whole, the
+ * inner translation goes with it, while the outer block's own translation is visible right beside. Stopping at
+ * `closest()` would return null and the link would stay dead.
  *
- * 挑的是**真译文**——镜像是右栏的配平副本、pending 是圆环、error 是失败小部件，
- * 滚到它们等于滚到一个空盒子
+ * What is picked is a **real translation** — a mirror is the right column's balancing copy, a pending node is the
+ * ring, an error node is the failure widget; scrolling to any of them is scrolling to an empty box
  */
 function standIn(doc: Document, target: Element): Element | null {
-  // 拆开的插图（Codex 在 #80 指出）：side 模式下 splitFigures 把整张图克隆成"只有译文"的一份，
-  // 切到 only 之后 `[data-axt-split]` 那份原件被整个藏起来（modes.css），可见的是紧跟其后的克隆——
-  // 而克隆被 stripIds 剥了 id，`#S2.F2` 这类图注引用指不到它。插图又不是翻译单元，
-  // 底下那圈块查找根本够不着，所以先在这里把它接过去
+  // Split figures (Codex on #80): in side mode splitFigures clones the whole figure into a translation-only copy;
+  // after a switch to only, the `[data-axt-split]` original is hidden whole (modes.css) and what is visible is the
+  // clone right after it — whose ids stripIds removed, so a caption reference like `#S2.F2` cannot reach it. A figure
+  // is not a translation unit either, so the block search below never gets there; hand it over here first
   const split = target.closest(`[${SPLIT_ATTR}]`)
   const clone = split?.nextElementSibling
   if (clone?.classList.contains(SPLIT_CLASS) && visible(clone)) {
-    // 指向图**内部**某一处的锚点要落到克隆里对应的那一处，不是整张图的顶部——
-    // 2312.17141 有 21 个这种锚点（`#S3.Ex73`–`Ex79` 是 Figure 6 里的公式行，Codex 在 #80 指出）。
-    // 克隆把原 id 挪进了 data-axt-split-of，按它找；找不到（那处在克隆里被摘掉了）才退回图顶
+    // An anchor into a point **inside** the figure must land on that point in the clone, not on the figure's top —
+    // 2312.17141 has 21 such anchors (`#S3.Ex73`–`Ex79` are equation rows inside Figure 6; Codex on #80). The clone
+    // moved the original id into data-axt-split-of; look it up by that, and fall back to the figure's top only when
+    // that point was removed from the clone
     const id = target.getAttribute('id')
     const inner = id ? clone.querySelector(`[${SPLIT_OF_ATTR}="${CSS.escape(id)}"]`) : null
     if (inner && visible(inner)) return inner
@@ -67,17 +72,18 @@ function standIn(doc: Document, target: Element): Element | null {
   return null
 }
 
-/** 这个 href 该由我们接管吗？接管的话给出滚动目标 */
+/** Should this href be taken over? If so, the scroll target */
 function resolve(doc: Document, href: string): Element | null {
   const target = targetOf(doc, href)
-  // 目标不存在（外链、空 hash）或本来就看得见：交给浏览器，我们不掺和
+  // No such target (an external link, an empty hash) or a target visible anyway: the browser's business, not ours
   if (!target || visible(target)) return null
   return standIn(doc, target)
 }
 
 /**
- * 挂上兜底，返回卸载函数。content script 在会话开始时装、恢复原文时拆。
- * 三种入口都要管：点链接、地址栏改 hash / 站点脚本跳转（hashchange）、前进后退（popstate）
+ * Attach the fallback; returns the teardown. The content script attaches it when a session starts and removes it
+ * when the original is restored. All three entries are covered: a link click, a hash changed in the address bar or
+ * by a site script (hashchange), back and forward (popstate)
  */
 export function installAnchorFallback(doc: Document): () => void {
   const view = doc.defaultView
@@ -86,18 +92,19 @@ export function installAnchorFallback(doc: Document): () => void {
   const scrollTo = (node: Element) => node.scrollIntoView({ block: 'start' })
 
   /**
-   * 自己刚写进去的 hash：`location.hash = …` 派发的 `hashchange` 是**异步**的，
-   * 同步的布尔守卫在事件到达前就被重置了，所以记住值而不是记一个标志
+   * The hash this code just wrote: the `hashchange` that `location.hash = …` dispatches is **asynchronous**, and a
+   * synchronous boolean guard would be reset before the event arrived — so the value is remembered, not a flag
    */
   let selfNavHash: string | null = null
 
   /**
-   * 换 hash 并滚过去。用 `location.hash` 而不是 `pushState`（Codex 在 #80 指出）：
-   * 原生的锚点跳转会派发 `hashchange`，`pushState` 不会，页面脚本或别的扩展就观察不到
-   * 「点了隐藏目标」这件事——而它们对地址栏改动、前进后退都收得到通知，行为不一致。
-   * arXiv 自己眼下没有监听（实测 2609.00246：`hashchange` / `popstate` 注册数为 0，
-   * `window.onhashchange` 为 null），所以这条是保住语义，不是修一个正在发生的 bug。
-   * hash 没变时不写，避免多一条历史记录；无论写没写都要滚——原生行为就是点同一个锚点也照样跳
+   * Change the hash and scroll there. `location.hash`, not `pushState` (Codex on #80): a native anchor jump
+   * dispatches `hashchange` and `pushState` does not, so a page script or another extension would never observe
+   * that “a hidden target was clicked” — while it is told about every address-bar change and every back or
+   * forward, an inconsistency. arXiv itself listens to neither today (measured on 2609.00246: 0 `hashchange` /
+   * `popstate` listeners, `window.onhashchange` null), so this keeps the semantics rather than fixing a live bug.
+   * An unchanged hash is not written, to avoid one more history entry; written or not, the scroll happens — the
+   * native behaviour jumps on a click of the same anchor too
    */
   const navigate = (href: string, node: Element) => {
     const next = href.slice(1)
@@ -111,13 +118,13 @@ export function installAnchorFallback(doc: Document): () => void {
   const onClick = (event: Event) => {
     if (event.defaultPrevented) return
     const mouse = event as MouseEvent
-    // 中键、Ctrl/Cmd 点击是「在新标签打开」，不该被接管
+    // A middle click, or Ctrl / Cmd + click, is “open in a new tab” and must not be taken over
     if (mouse.button !== 0 || mouse.metaKey || mouse.ctrlKey || mouse.shiftKey || mouse.altKey) return
     const anchor = (event.target as Element | null)?.closest?.('a[href]')
     if (!anchor) return
-    // target 指向别的浏览上下文时，普通左键点击同样是「在新标签 / 别的框架里打开」——
-    // 拦下来再 preventDefault 就把它变成了当前页跳转（Codex 在 #80 指出）。
-    // arXiv 上一个都没有（12 篇 fixture 的 3386 个页内锚点全部不带 target），这是结构保证
+    // A target naming another browsing context makes a plain left click “open in a new tab / another frame” as well —
+    // intercepting it and calling preventDefault would turn it into a same-page jump (Codex on #80). arXiv has none
+    // (all 3386 in-page anchors across the 12 fixtures carry no target); this is a structural guarantee
     const target = anchor.getAttribute('target')
     if (target && target !== '_self') return
     const href = anchor.getAttribute('href') ?? ''
@@ -128,7 +135,7 @@ export function installAnchorFallback(doc: Document): () => void {
   }
 
   const onHashChange = () => {
-    // 自己写的那次已经滚过了，再滚一遍是白做
+    // The write this code made has scrolled already; scrolling again would be wasted work
     if (selfNavHash !== null && view.location.hash === selfNavHash) { selfNavHash = null; return }
     selfNavHash = null
     const node = resolve(doc, view.location.hash)
@@ -145,7 +152,7 @@ export function installAnchorFallback(doc: Document): () => void {
   }
 }
 
-/** 供测试与调试：这个块的锚点在当前模式下会不会失效 */
+/** For tests and debugging: would this block's anchors stop working in the current mode */
 export function anchorWouldBreak(doc: Document, block: Block): boolean {
   return !visible(block.el) && standIn(doc, block.el) !== null
 }

@@ -33,7 +33,7 @@ describe('createMessageTransport', () => {
   it('a structured error when the background is unreachable: an exception would be taken for a crash by run.ts and the whole batch marked failed', async () => {
     const { send } = recorder(() => { throw new Error('Extension context invalidated.') })
     const res = await createMessageTransport(send).translate({ request: { segments: [], source: 'en', target: 'cmn' } })
-    expect(res).toEqual({ ok: false, error: { kind: 'network', message: '无法与扩展后台通信：Extension context invalidated.', isolatable: false } })
+    expect(res).toEqual({ ok: false, error: { kind: 'network', message: 'cannot reach the extension background: Extension context invalidated.', isolatable: false } })
   })
 
   it('cancel sends axt:cancel-scope and returns the count withdrawn; unsendable counts as 0', async () => {

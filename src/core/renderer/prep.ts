@@ -1,17 +1,21 @@
-// 译文到达后的整理（DESIGN §7.2 / §10，issue #46）：脚注归位、拆图、镜像、缩表、对齐边距。
+// The tidy after a translation arrives (DESIGN §7.2 / §10, issue #46): footnote placement, split figures, mirrors,
+// table fitting, margin alignment.
 //
-// 以前每一趟都对整个 document 跑一遍五个步骤。实测 2312.17141：一次会话 31 趟、累计 1.9 秒，
-// 而单独一趟只要 34 ms——代价全在重复，尤其两处：
-//   - `createMirrors` 每趟用裸 `:has()` 扫 5 万节点，可译文到达根本不改变任何镜像判定
-//     （块标记在会话开始就写完了，§7.3），第一趟之后全是白扫；
-//   - `fitTables` 里 `measureColumn` 读 `gridTemplateColumns` 的解析值要强制布局，而它是三个写 DOM
-//     的步骤之后第一个读几何的，整篇的强制布局都算在它头上（上游有写的趟 130–158 ms）。
+// Every pass used to run all five steps over the whole document. Measured on 2312.17141: 31 passes in one session,
+// 1.9 seconds in all, while one pass alone takes 34 ms — the cost is all repetition, in two places above all:
+//   - `createMirrors` scanned 50 000 nodes with a bare `:has()` every pass, though an arriving translation changes
+//     no mirror decision at all (the block marks are written when the session starts, §7.3): after the first pass
+//     every scan was for nothing;
+//   - `measureColumn` in `fitTables` reads the resolved `gridTemplateColumns`, which forces layout, and it was the
+//     first read of geometry after three DOM-writing steps, so the whole page's forced layout was charged to it
+//     (130–158 ms in a pass with writes upstream).
 //
-// 现在：pipeline 每批把刚动过 DOM 的块交出来（`onRendered`），合并器攒成脏集合，每趟只整理这些块
-// 所在的那几个容器；镜像整个会话只跑一次；栏宽在每趟**开头、写任何东西之前**读，且只在标记为
-// 陈旧时读——prep 是 setTimeout 任务，开头那一刻浏览器刚渲染过，布局是干净的。
+// Now: the pipeline hands over the blocks whose DOM it just touched per batch (`onRendered`), the coalescer
+// collects them into a dirty set, and each pass tidies only the few containers those blocks sit in; the mirrors run
+// once per session; the column width is read at the **start of a pass, before anything is written**, and only when
+// marked stale — prep is a setTimeout task, and at its start the browser has just rendered, so the layout is clean.
 //
-// 五个整理步骤的签名本来就收 `Document | Element`，这里只是终于给了它们一个更窄的根。
+// The five tidy steps always took `Document | Element`; here they are finally given a narrower root.
 import { ID_ATTR } from '@/core/extractor'
 import { DOCUMENT_ROOT } from '@/core/rules/latexml'
 import { createCoalescer, type Coalescer } from '@/core/scheduler/coalesce'
@@ -23,33 +27,34 @@ import { dropStaleSplits, outermostFigure, splitFigures } from './split-figures'
 import { fitTables, measureColumn, resetFitCache, watchFontLoads } from './table-fit'
 
 export interface Prep {
-  /** 这些块（或图片目标，§15）刚动过 DOM：排一趟只碰它们所在容器的整理 */
+  /** These blocks (or image targets, §15) just touched the DOM: schedule a pass tidying only their containers */
   touch(items: ReadonlyArray<{ el: Element }>): void
-  /** 排一趟全量（进 side、栏宽变化、会话开始） */
+  /** Schedule a full pass (entering side, the column width changed, a session started) */
   touchAll(): void
-  /** 撤掉排着的那一趟（离开 side） */
+  /** Cancel the scheduled pass (leaving side) */
   cancel(): void
-  /** 新会话：镜像重新允许跑一次、量宽缓存清空、栏宽重读 */
+  /** A new session: the mirrors may run once more, the width cache is cleared, the column width is re-read */
   reset(): void
-  /** 栏宽可能变了（窗口宽度变化）：下一趟开头重读 */
+  /** The column width may have changed (window resized): re-read at the start of the next pass */
   refreshColumn(): void
 }
 
 export interface PrepOptions {
   isSide: () => boolean
-  /** 每趟结束报一行（有变化时）；e2e 与手测靠它 */
+  /** One line reported at the end of each pass (when something changed); e2e and manual testing rely on it */
   trace?: (line: string) => void
-  /** 测试注入：栏宽 */
+  /** Test injection: the column width */
   columnWidth?: (root: Element) => number
   delay?: number
   maxWait?: number
 }
 
 /**
- * 一个脏块要整理的根：它的父元素（同容器里的配对，含相邻兄弟边距的那一对）、
- * 它所有祖先块各自的父元素（内层脚注先于外层块到达时外层的副本要能补上），
- * 以及它所在最外层 figure 的父元素（`splitFigures` 只扫后代，根得比 figure 高一层）。
- * 被别的根包含的根去掉——整理步骤都幂等，重复只是白做
+ * The roots a dirty block needs tidied: its parent element (the pairs in the same container, the adjacent-sibling
+ * margin pair included), the parent of each of its ancestor blocks (an inner footnote arriving before the outer block
+ * must be able to fill the outer's copy), and the parent of the outermost figure it sits in (`splitFigures` scans
+ * descendants only, so the root has to be one level above the figure). Roots contained in other roots are dropped —
+ * the tidy steps are idempotent, and a repeat is only wasted work
  */
 export function rootsOf(blocks: Iterable<Element>): Element[] {
   const roots = new Set<Element>()
@@ -73,41 +78,45 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
 
   const run = (scope: Element[] | null) => {
     const t0 = performance.now()
-    // 栏宽：写任何东西之前读。这一刻布局是干净的（上一帧刚渲染完），不会付整篇强制布局的钱。
-    // 要拿**翻译根**去量，不是 <html>：measureColumn 靠 closest(DOCUMENT_ROOT) 找网格轨道，
-    // 从 <html> 出发找不到、退路的 parentElement 又是 null，结果栏宽 0、整趟一张表都不缩
-    //（e2e 抓到：1440px 下 0 张缩放、3 张超栏）
+    // The column width: read before anything is written. The layout is clean at this moment (the last frame has just
+    // rendered), so no whole-page forced layout is paid for. Measured from the **translation root**, not <html>:
+    // measureColumn finds the grid track through closest(DOCUMENT_ROOT), which from <html> finds nothing, and the
+    // fallback parentElement is null — column width 0, and not a single table shrinks the whole pass (caught by e2e:
+    // at 1440px 0 tables scaled, 3 over the column)
     if (options.isSide() && columnStale) {
       const root = doc.querySelector(DOCUMENT_ROOT) ?? doc.documentElement
       column = columnWidth(root)
       columnStale = false
     }
     const roots: Array<Document | Element> = scope === null ? [doc] : rootsOf(scope)
-    // 边距先**读**：这一刻还没写任何东西，样式是干净的（上一帧刚渲染完，pipeline 插的译文早就算过了）。
-    // 放到插节点之后再读，`:has()` 的失效会让这一次 getComputedStyle 花掉整篇重算的钱
+    // The margins are **read** first: nothing has been written yet and the styles are clean (the last frame has just
+    // rendered; the translations the pipeline inserted were computed long ago). Read after nodes are inserted, the
+    // invalidation of `:has()` makes this getComputedStyle pay for a whole-page recalculation
     let margins: PairMarginPlan[] = options.isSide() ? roots.map(r => readPairMargins(r)) : []
-    // 边注的下排也在这里读——**整篇一起**（一条推多少取决于它前面所有条，§7.2），而且搭上面那次读的车：
-    // 这一刻的布局已经被上面那行算过了，多读几个矩形不再付强制布局的钱
+    // The margin-note stacking is read here too — **the whole paper at once** (how far one is pushed depends on every
+    // note before it, §7.2) — and rides on the read above: the layout at this moment was computed by that line, and a
+    // few more rectangles cost no further forced layout
     const noteLayout = options.isSide() ? planMarginNotes(doc) : null
     let notes = 0
     for (const r of roots) notes += localizeNotes(r)
     const t1 = performance.now()
-    // 签名过期的拆图副本先丢掉：非 side 下叠加层进了被隐藏的原件那种（§15.2），回 side 全量再重建；
-    // side 下也要——插图唯一的译文（叠加层）被摘掉后 needsSplit 为假、splitFigures 会跳过它，旧副本就一直挂着（Codex 在 #89 指出）
+    // Split copies whose signature expired are dropped first: outside side, the overlay went into the hidden original
+    // (§15.2), and a full pass rebuilds them on returning to side; in side as well — once a figure's only translation
+    // (the overlay) is taken away, needsSplit is false, splitFigures skips it, and the old copy would hang on (Codex on #89)
     for (const r of roots) dropStaleSplits(r)
     if (!options.isSide()) return
 
-    // 先整块拆插图，再补镜像：拆过的插图不再参与镜像（两套方案会重复一份）
+    // Figures are split whole first, mirrors filled in after: a split figure takes no part in mirroring (the two would duplicate a copy)
     let split = 0
     for (const r of roots) split += splitFigures(r)
     const t2 = performance.now()
-    // 镜像整个会话只跑一次，而且要等块标记写完（否则整块克隆，issue #67）：
-    // 判定全看 data-axt-id 与 .axt-t 兄弟，译文到达不会改变任何一处
+    // The mirrors run once per session, and only once the block marks are written (or a block is cloned whole,
+    // issue #67): the decision reads data-axt-id and .axt-t siblings only, which an arriving translation changes nowhere
     let made = 0
     if (scope === null && !mirrorsDone && doc.querySelector(`[${ID_ATTR}]`)) {
       made = createMirrors(doc)
       mirrorsDone = true
-      // 镜像也是译文节点，同样受站点相邻兄弟规则影响，得在它们插进来之后再读一次——整个会话只有这一趟
+      // Mirrors are translation nodes too, subject to the site's adjacent-sibling rules the same way, so one more read after they are in — the only such pass in a session
       if (made) margins = [readPairMargins(doc)]
     }
     const t3 = performance.now()
@@ -119,17 +128,19 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
       scrolled += fit.scrolled
     }
     const t4 = performance.now()
-    // 边距最后**写**：读是趟开头做的
+    // The margins are **written** last: the read was done at the start of the pass
     let aligned = 0
     for (const plan of margins) aligned += writePairMargins(plan)
     const moved = noteLayout ? applyMarginNotes(noteLayout) : 0
     const t5 = performance.now()
-    // 这一趟动过 DOM 的话，上面那份边注计划就是按动之前的位置算的：译文让边注变高、缩表与拆图让块上下挪。
-    // 再排一趟去量新位置——单独一个任务，从干净的布局开始读、读完再写，不在这一趟里读后写（§10）。
-    // 没动过就不排：那一趟的读要付一次强制布局，最重的 fixture 上是一百多毫秒
+    // If this pass touched the DOM, the margin-note plan above was computed from the positions before it: translations
+    // make notes taller, table fitting and split figures move blocks up and down. Another pass is scheduled to
+    // measure the new positions — a task of its own, reading from a clean layout and writing after, never reading
+    // after writing within one pass (§10). Nothing touched, nothing scheduled: that pass's read costs one forced
+    // layout, over a hundred milliseconds on the heaviest fixture
     if (notes || split || fitted || made || aligned) restack.schedule()
 
-    // 每趟都报（包括什么都没做的）：累计耗时要把"白跑"的趟也算进去，e2e 的整理成本断言靠它
+    // Every pass reports (the ones that did nothing included): the cumulative cost has to count the wasted passes too, and the e2e tidy-cost assertion relies on it
     options.trace?.(
       `side prep${scope === null ? ' (full)' : ` (${scope.length} blocks, ${roots.length} roots)`}: `
       + `+${split} figures split, +${made} mirrors, ${fitted} tables scaled, ${scrolled} scrollable, ${aligned} margins aligned, ${notes} notes localized, ${moved} notes stacked; `
@@ -138,13 +149,13 @@ export function createPrep(doc: Document, options: PrepOptions): Prep {
   }
 
   const coalescer: Coalescer<Element> = createCoalescer(run, { delay: options.delay ?? 150, maxWait: options.maxWait ?? 1000 })
-  // 边注下排：读全篇边注的位置、写各自的位移。与上面那趟分开，因为它要量的是那一趟写完的结果
+  // Margin-note stacking: read every note's position over the whole paper, write each offset. Separate from the pass above because what it measures is that pass's written result
   const restack: Coalescer = createCoalescer(() => {
     if (!options.isSide()) return
     const moved = applyMarginNotes(planMarginNotes(doc))
     if (moved) options.trace?.(`margin notes: ${moved} stacked`)
   }, { delay: options.delay ?? 150, maxWait: options.maxWait ?? 1000 })
-  // 字体加载完成：自然宽度变了（缓存由 watchFontLoads 清），栏宽也顺手重读一次，然后全量整理一趟
+  // Fonts finished loading: natural widths changed (the cache is cleared by watchFontLoads); the column width is re-read along the way, then one full tidy pass
   watchFontLoads(doc, () => {
     columnStale = true
     coalescer.schedule()

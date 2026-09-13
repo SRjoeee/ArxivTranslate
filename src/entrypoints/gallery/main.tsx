@@ -26,7 +26,7 @@ await applyLocale(brand => `${brand} · ${GALLERY_TITLE}`)
 function Gallery() {
   return (
     <div className="min-h-screen bg-bg p-8 font-ui text-fg">
-      <h1 className="mb-6 text-[18px] font-bold">Popup · 状态表（docs/UI.md §4）</h1>
+      <h1 className="mb-6 text-[18px] font-bold">Popup · state table (docs/UI.md §4)</h1>
       <div className="flex flex-col gap-8">
         {POPUP_FIXTURES.map(f => {
           const view = derivePopupView(f.input)

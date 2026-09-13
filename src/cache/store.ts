@@ -11,7 +11,7 @@
 import Dexie, { type DexieOptions, type Table } from 'dexie'
 import type { SentenceAlignment } from '@/providers/alignment'
 
-/** 一条缓存记录里可被消费的部分：译文，以及产生它的引擎报回的句子对齐（issue #105） */
+/** The part of a cache record that is consumed: the translation, and the sentence alignment reported by the engine that produced it (issue #105) */
 export interface CachedEntry {
   translation: string
   alignment?: SentenceAlignment
@@ -19,10 +19,10 @@ export interface CachedEntry {
 
 export interface CacheRecord {
   key: string
-  /** arXiv id，便于按论文清理与导出 */
+  /** The arXiv id, for per-paper cleanup and export */
   paper: string
   translation: string
-  /** 句子对齐；旧记录没有这个字段，读回来就是没有高亮，不需要作废缓存 */
+  /** The sentence alignment; an old record has no such field, which reads back as no highlight and needs no cache invalidation */
   alignment?: SentenceAlignment
   createdAt: number
   lastAccessedAt: number
@@ -30,7 +30,7 @@ export interface CacheRecord {
   byteSize: number
 }
 
-/** 记录 → 可消费的部分。`alignment` 缺席时不带这个键，调用方按「没有对齐」处理 */
+/** Record → the consumed part. With `alignment` absent the key is omitted, and the caller treats it as “no alignment” */
 const entryOf = (record: CacheRecord): CachedEntry => (record.alignment ? { translation: record.translation, alignment: record.alignment } : { translation: record.translation })
 
 export interface CacheLimits {
@@ -41,7 +41,7 @@ export interface CacheLimits {
   memoryEntries: number
 }
 
-// 一篇论文几百个块，"重开秒出"需要按月计的 TTL 与足够的容量
+// A paper is hundreds of blocks; “instant on reopening” needs a TTL in months and enough capacity
 export const DEFAULT_CACHE_LIMITS: CacheLimits = {
   ttlMs: 30 * 24 * 60 * 60 * 1000,
   maxEntries: 20_000,
@@ -58,7 +58,7 @@ export class CacheDatabase extends Dexie {
   constructor(name = CACHE_DB_NAME, options?: DexieOptions) {
     super(name, options)
     this.version(1).stores({ entries: '&key, paper, createdAt, expiresAt, lastAccessedAt' })
-    // v2 只多一个 byteSize 索引：靠它用"只读索引键"的方式求和，初始化总量时不必把记录读出来
+    // v2 only adds a byteSize index: it sums by reading index keys alone, so initialising the totals need not read the records
     this.version(2).stores({ entries: '&key, paper, createdAt, expiresAt, lastAccessedAt, byteSize' })
   }
 }
@@ -70,22 +70,22 @@ export function createCacheDb(name?: string, options?: DexieOptions): CacheDatab
 const byteSizeOf = (value: string) => new TextEncoder().encode(value).byteLength
 
 /**
- * 译文缓存由 background 统一持有：IndexedDB 之外保留一层小型热数据内存缓存。
- * 读取、写入和维护失败都降级为未命中，无痕模式、禁用 IndexedDB 或配额不足时仍能翻译。
+ * The translation cache is held by the background alone: a small hot in-memory layer in front of IndexedDB.
+ * Failed reads, writes and maintenance all degrade to a miss, so translation goes on in incognito, with IndexedDB disabled or without quota.
  */
 export class TranslationCache {
   readonly db: CacheDatabase
   readonly limits: CacheLimits
   private readonly memory = new Map<string, CacheRecord>()
-  /** 持久层的条数与字节数；null 表示尚未统计。每次 set 增量更新，clear / cleanup 后作废重算 */
+  /** The persistent layer's count and bytes; null until counted. Updated incrementally by every set; voided and recounted after clear / cleanup */
   private totals: { count: number; bytes: number } | null = null
   /**
-   * 正在统计中的那次，**连同它开始时的代际号**（Codex 在 #14 与 #63 指出）。
-   * 只记 Promise 不记代际的话：统计在飞时 clear() 作废账面，之后开始的 set 捕获的是新代际，
-   * 却复用了作废之前那个 Promise——两个代际号相等，过时快照照样落地
+   * The count in progress, **together with the generation it started in** (Codex on #14 and #63).
+   * With the Promise alone and no generation: clear() voids the totals while a count is in flight, a set started
+   * afterwards captures the new generation yet reuses the Promise from before the voiding — the two generation numbers agree, and the stale snapshot lands all the same
    */
   private counting: { generation: number; promise: Promise<{ count: number; bytes: number }> } | null = null
-  /** 每次 clear / cleanup 作废账面时 +1：统计期间被作废的快照不能落地 */
+  /** +1 on every clear / cleanup that voids the totals: a snapshot voided while counting must not land */
   private totalsGeneration = 0
 
   constructor(options: { db?: CacheDatabase; limits?: Partial<CacheLimits> } = {}) {
@@ -97,7 +97,7 @@ export class TranslationCache {
     return record.expiresAt <= now || record.createdAt + this.limits.ttlMs <= now
   }
 
-  /** 重新插入以移动到 LRU 最新位置，超过热层上限时从最旧开始淘汰 */
+  /** Reinserted to move to the LRU's newest position; beyond the hot layer's cap the oldest is evicted first */
   private remember(record: CacheRecord): void {
     this.memory.delete(record.key)
     this.memory.set(record.key, record)
@@ -113,12 +113,12 @@ export class TranslationCache {
   }
 
   /**
-   * 每个 background 生命周期只做一次：orderBy(index).keys() 只读索引键，不反序列化记录。
+   * Once per background lifetime: orderBy(index).keys() reads index keys only and deserialises no record.
    *
-   * **必须单飞**（Codex 在 #14 指出）：统计要 await 一次索引查询，几个 set 并发进来时会全部看到
-   * `totals` 是 null、各自算出一份快照，然后各自增量更新自己那份，最后只有最后赋值的那份留下——
-   * 先前那些 set 的计数就永久丢了，库可能悄悄超出条数与字节上限。background 的消息监听器天然并发，
-   * 一篇论文开始翻时就是一批 set 同时到达
+   * **Must fly alone** (Codex on #14): the count awaits one index query, and several sets arriving concurrently would
+   * all see `totals` null, each compute a snapshot, each update its own incrementally, and only the last assigned
+   * would remain — the earlier sets' counts lost for good, and the store could quietly exceed the count and byte caps.
+   * The background's message listener is concurrent by nature, and a paper starting to translate is a burst of sets at once
    */
   private async ensureTotals(): Promise<{ count: number; bytes: number }> {
     for (;;) {
@@ -130,14 +130,14 @@ export class TranslationCache {
         this.counting = pending
       }
       const counted = await this.counting.promise
-      // **正确性靠这一行**：等待期间别人已经落地了一份就用那份。少了它，每个调用方各自赋值一份，
-      // 只有最后那份留下，先前那些 set 的增量永久丢失（单飞只是顺带少扫几遍索引，不是这条的关键）
+      // **Correctness rests on this line**: if somebody landed a snapshot while waiting, that one is used. Without it every
+      // caller assigns its own, only the last remains, and the earlier sets' increments are lost for good (flying alone only saves a few index scans; it is not the crux)
       if (this.totals) return this.totals
       if (generation === this.totalsGeneration) {
         this.totals = counted
         return this.totals
       }
-      // 统计期间被 clear / cleanup 作废过：这份快照数的是删之前的库，丢掉重来
+      // Voided by a clear / cleanup during the count: this snapshot counted the store before the deletion; dropped and redone
     }
   }
 
@@ -147,9 +147,9 @@ export class TranslationCache {
   }
 
   /**
-   * 账面作废。删除**前后各调一次**：前一次让并发的写立刻停止使用旧账面，
-   * 后一次把「与删除赛跑、数到删除之前那份库」的统计标记为过时——只在前面调的话，
-   * 那份统计看到的代际号仍是当前值，会把删掉的条目当成还在（实测：clear 之后紧接着 set，账面多算 2 条）
+   * Void the totals. Called **once before and once after** a deletion: the first makes concurrent writes stop using the
+   * old totals at once, the second marks a count “racing the deletion, counting the store before it” as stale — called
+   * before only, that count still sees the current generation and would take the deleted entries for present (measured: a set right after clear over-counted by 2)
    */
   private invalidateTotals(): void {
     this.totals = null
@@ -157,18 +157,18 @@ export class TranslationCache {
   }
 
   /**
-   * 惰性删掉一条过期记录，并**只在真的删掉时**同步账面（Codex 在 #14 与 #63 指出）。
+   * Lazily delete one expired record, and reconcile the totals **only when it was really deleted** (Codex on #14 and #63).
    *
-   * 不减账的话 `totals` 会一直多算这一条，接近上限时 `evictIfNeeded` 会为一条其实已经不存在的记录
-   * 多淘汰一条**没过期的**。而按 `delete(key)` 是否 resolve 来减又会减多次——一批里出现重复的键时
-   * `getMany` 会并发读同一条过期记录，Dexie 对**已经被删掉**的行照样算删除成功，于是每个调用方都减一次。
-   * 事务里先读再删，同时解决两件事：已经被别人删掉的读不到、不重复减账；被并发 `set` 覆盖成新记录的
-   * 不再过期、不会误删，也不会拿旧的 byteSize 去减（Codex 在 #63 指出）
+   * Unreconciled, `totals` keeps over-counting it, and near the cap `evictIfNeeded` evicts one **unexpired** record
+   * for one that no longer exists. Decrementing by whether `delete(key)` resolves would decrement several times — with
+   * a duplicate key in one batch `getMany` reads the same expired record concurrently, Dexie counts a delete of an
+   * **already deleted** row as a success, and every caller decrements once. Read then delete in one transaction settles
+   * both: one already deleted by somebody else is not found and not decremented twice; one overwritten meanwhile by a concurrent `set` is no longer expired, is not deleted by mistake, and its old byteSize is not subtracted (Codex on #63)
    */
   private async dropExpired(key: string, now: number): Promise<void> {
     await this.db.transaction('rw', this.db.entries, async () => {
       const current = await this.db.entries.get(key)
-      // 读到之后可能有并发的 set 覆盖了这个键：那条是新的，不能删，也不能拿旧的 byteSize 去减账
+      // A concurrent set may have overwritten this key since the read: that record is new, not to be deleted, and its old byteSize not to be subtracted
       if (!current || !this.isExpired(current, now)) return
       await this.db.entries.delete(key)
       this.forgetTotals(current.byteSize)
@@ -185,7 +185,7 @@ export class TranslationCache {
     return totals.count > this.limits.maxEntries || totals.bytes > this.limits.maxBytes
   }
 
-  /** 超限才淘汰：每轮只取最旧的一批记录，取到够为止，不扫全库 */
+  /** Evict only over the cap: each round takes the oldest batch of records, until enough, never scanning the whole store */
   private async evictIfNeeded(totals: { count: number; bytes: number }): Promise<void> {
     const batchSize = 128
     while (this.overLimit(totals)) {
@@ -217,7 +217,7 @@ export class TranslationCache {
       }
       hot.lastAccessedAt = now
       this.remember(hot)
-      // 与原实现不同：热层命中也回写持久层的访问时间，否则持久层 LRU 会按过时的时间淘汰错误条目
+      // Unlike the original: a hot-layer hit writes the access time back to the persistent layer too, or the persistent LRU evicts the wrong entries by stale times
       await this.db.entries.update(key, { lastAccessedAt: now }).catch(() => undefined)
       return entryOf(hot)
     }
@@ -233,20 +233,21 @@ export class TranslationCache {
       this.remember(record)
       return entryOf(record)
     } catch (error) {
-      console.warn('[axt] 缓存读取失败，按未命中处理', error)
+      console.warn('[axt] cache read failed; treated as a miss', error)
       return null
     }
   }
 
   /**
-   * 空译文与过大单项不入库；写入后在同一事务里按条数与总字节数做持久层 LRU 淘汰。
+   * An empty translation and an oversized item are not stored; after writing, the persistent LRU evicts by count and
+   * total bytes in the same transaction.
    *
-   * 值可以只是译文，也可以带上句子对齐——两种形态而不是加一个尾参数，是因为 `now` 已经占了第四位，
-   * 在它前面插参数会打断所有传 `now` 的调用点。
+   * The value may be the translation alone or carry the sentence alignment — two shapes rather than a trailing
+   * parameter, because `now` holds the fourth position already, and a parameter before it would break every call site passing `now`.
    */
   async set(key: string, value: string | CachedEntry, paper: string, now = Date.now()): Promise<boolean> {
     const { translation, alignment } = typeof value === 'string' ? { translation: value, alignment: undefined } : value
-    // 对齐一起计入字节数：它随记录持久化，不算进来的话总量会低估
+    // The alignment counts into the bytes: it persists with the record, and uncounted the totals would under-estimate
     const byteSize = byteSizeOf(key) + byteSizeOf(translation) + (alignment ? byteSizeOf(JSON.stringify(alignment)) : 0)
     if (!translation || byteSize > this.limits.maxEntryBytes) return false
     const record: CacheRecord = { key, paper, translation, createdAt: now, lastAccessedAt: now, expiresAt: now + this.limits.ttlMs, byteSize }
@@ -254,7 +255,7 @@ export class TranslationCache {
     try {
       const totals = await this.ensureTotals()
       await this.db.transaction('rw', this.db.entries, async () => {
-        // 覆盖同一个键时旧记录的字节数要先减掉，否则总量只增不减
+        // Overwriting the same key subtracts the old record's bytes first, or the totals only ever grow
         const previous = await this.db.entries.get(key)
         await this.db.entries.put(record)
         if (previous) totals.bytes = Math.max(0, totals.bytes - previous.byteSize)
@@ -262,18 +263,18 @@ export class TranslationCache {
         totals.bytes += byteSize
         await this.evictIfNeeded(totals)
       })
-      // 持久化成功后再进热层，防止两层状态分叉
+      // Into the hot layer only after persisting succeeded, so the two layers' states do not fork
       if (!this.memory.has(key) || this.memory.get(key) !== record) this.remember(record)
       return true
     } catch (error) {
-      console.warn('[axt] 缓存写入失败', error)
+      console.warn('[axt] cache write failed', error)
       return false
     }
   }
 
   /**
-   * 清掉过期条目。失败要**抛出去**而不是吞掉：唯一的运行时调用方是 cache-stats，
-   * 吞掉的话统计会把清不掉的过期条目当成功结果报给设置页（Codex 在 #52 指出）
+   * Delete the expired entries. A failure is **thrown**, not swallowed: the only runtime caller is cache-stats, and
+   * swallowed, the statistics would report the expired entries it could not remove to the settings page as a success (Codex on #52)
    */
   async cleanup(now = Date.now()): Promise<void> {
     try {
@@ -283,12 +284,12 @@ export class TranslationCache {
       this.invalidateTotals()
       for (const [key, record] of this.memory) if (this.isExpired(record, now)) this.memory.delete(key)
     } catch (error) {
-      console.warn('[axt] 缓存清理失败', error)
+      console.warn('[axt] cache cleanup failed', error)
       throw error
     }
   }
 
-  /** 清空全部，或只清某篇论文；返回删除条数 */
+  /** Clear everything, or one paper only; returns how many were deleted */
   async clear(paper?: string): Promise<number> {
     this.invalidateTotals()
     if (paper === undefined) {
@@ -305,7 +306,7 @@ export class TranslationCache {
     return keys.length
   }
 
-  /** 与 ensureTotals 同样只读索引键，popup 打开时不必把整库读出来 */
+  /** Reads index keys only, like ensureTotals, so opening the popup need not read the whole store */
   async stats(): Promise<{ entries: number; bytes: number }> {
     const sizes = (await this.db.entries.orderBy('byteSize').keys()) as number[]
     return { entries: sizes.length, bytes: sizes.reduce((sum, size) => sum + (size || 0), 0) }

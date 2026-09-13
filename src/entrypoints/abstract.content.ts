@@ -1,7 +1,7 @@
-// 摘要页上的双语入口（issue #146）。这里**只做这一件事**：整条翻译流水线一行都不加载。
+// The bilingual entry on the abstract page (issue #146). **This one thing only**: not a line of the translation pipeline is loaded.
 //
-// 语言包是直接读的，不走 `@/ui/strings`：那个模块会把 179 个语言名与外观模块一起拉进来，而这个脚本
-// 在每一个 arXiv 摘要页上都跑。要的只是一句话（Codex 在 #161 指出这句话本来是写死的中文）。
+// The locale pack is read directly, not through `@/ui/strings`: that module pulls in 179 language names and the
+// appearance module, and this script runs on every arXiv abstract page. All it needs is one sentence (Codex on #161: the sentence used to be hard-coded Chinese).
 import { LOCALES, pickLocale } from '@/locales'
 import { injectBilingualLink, relabelBilingualLink } from '@/core/abstract/link'
 
@@ -9,8 +9,8 @@ export default defineContentScript({
   matches: ['https://arxiv.org/abs/*'],
   runAt: 'document_idle',
   async main() {
-    // 直接读那一个字段，不走 `getConfig`：它会把 zod、整份 schema 与语言表都拉进这个包，
-    // 而这里只要一个字符串。读不到就跟随浏览器，与别处一致
+    // Reads that one field directly, not through `getConfig`: that would pull zod, the whole schema and the language
+    // table into this bundle, and only one string is needed here. Unreadable, it follows the browser, as everywhere else
     const stored = await browser.storage.local.get('config').catch(() => ({}))
     const chosen = (stored as { config?: { uiLanguage?: string } }).config?.uiLanguage
     const ui = browser.i18n?.getUILanguage?.()
@@ -21,7 +21,7 @@ export default defineContentScript({
     }
     injectBilingualLink(document, label(chosen))
 
-    // 这一页可能一直开着，而读者去设置页把界面语言换了：别处都跟着换了，这里也要跟上（Codex 在 #161 指出）
+    // This page may stay open while the reader changes the interface language on the settings page: everywhere else follows, and so must this (Codex on #161)
     browser.storage.local.onChanged.addListener(changes => {
       const next = (changes.config?.newValue as { uiLanguage?: string } | undefined)?.uiLanguage
       if (next !== undefined) relabelBilingualLink(document, label(next))

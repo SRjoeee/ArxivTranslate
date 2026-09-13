@@ -6,12 +6,12 @@ import type { Config } from './schema'
 import { sha256Hex } from '@/shared/digest'
 
 /**
- * 建链要读的配置字段。其余字段（模式、样式、预加载、术语表）改了**不能**重建：
- * content 每切一次显示模式就写一次配置，而那时页面往往正在翻，重建会把令牌桶和降级记录一起清掉。
- * `tests/providers/transport.test.ts` 守着这张表：新增配置字段必须显式归类。
+ * The configuration fields a chain build reads. A change to any other field (mode, style, preload, glossary) must
+ * **not** rebuild: the content script writes the configuration on every display-mode switch, usually while the page is
+ * translating, and a rebuild would clear the token buckets and the hand-over records with it. `tests/providers/transport.test.ts` guards this table: a new configuration field must be classified explicitly.
  */
 export const CHAIN_CONFIG_FIELDS = ['provider', 'services', 'prompts', 'targetLanguage', 'fallback'] as const
-/** 与 CHAIN_CONFIG_FIELDS 互补，两者之和必须覆盖 Config 的全部字段 */
+/** The complement of CHAIN_CONFIG_FIELDS; the two together must cover every field of Config */
 export const VOLATILE_CONFIG_FIELDS = ['version', 'mode', 'glossary', 'appearance', 'preload', 'image', 'reading', 'uiLanguage'] as const
 
 export function chainConfigChanged(a: Config, b: Config): boolean {
@@ -39,7 +39,7 @@ function canonical(value: unknown): unknown {
   return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical((value as Record<string, unknown>)[key])]))
 }
 
-/** 逐字段比较而不是序列化：配置里有 API key，不给它多留一份副本（硬规则 7） */
+/** Compared field by field rather than serialised: the configuration holds an API key, and it gets no extra copy (hard rule 7) */
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false

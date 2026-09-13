@@ -1,4 +1,4 @@
-// 提示词与术语: how an LLM service translates. The free services read neither, so the section says
+// Prompts: how an LLM service translates. The free services read neither, so the section says
 // so rather than hiding itself — a reader looking for the glossary should find it either way.
 import { useEffect, useRef, useState } from 'react'
 import { configSchema } from '@/config/schema'

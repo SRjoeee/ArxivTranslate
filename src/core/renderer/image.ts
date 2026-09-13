@@ -1,38 +1,39 @@
-// 图片叠加层（DESIGN §15.2）：<img> 的下一个兄弟 `.axt-img`，里面每个译文标签一个 span，
-// 位置与尺寸按归一化坐标写成百分比、字号写成容器查询单位——全部在 JS 里算成字符串写一次，**不读任何几何**。
-// 叠加层不带 .axt-t（理由见 marks.ts 的 IMG_CLASS），只在成功时插；等待 / 失败没有 DOM 节点。
-// 与 §7.1 一致：<img> 本身一个属性都不加；恢复原文时 restore 按 INJECTED_SELECTOR 整层删掉。
+// The image overlay (DESIGN §15.2): the <img>'s next sibling `.axt-img`, one span per translated label inside;
+// position and size are written as percentages of the normalised coordinates, the font size in container query
+// units — all computed into strings in JS and written once, **reading no geometry**. The overlay carries no .axt-t
+// (marks.ts says why under IMG_CLASS) and is inserted on success only; pending and failure have no DOM node. In
+// keeping with §7.1: the <img> itself gains no attribute; restore removes the whole layer by INJECTED_SELECTOR.
 import { IMG_CLASS } from '@/core/marks'
 import { DIR_ATTR, FOR_ATTR, LANG_ATTR, MIRROR_CLASS, SPLIT_FOR_ATTR } from './attrs'
 
-/** <html> 上的模式闸：用户勾选的模式集合，空格分隔，CSS 用 ~= 匹配当前模式（§15 的设置项） */
+/** The mode gate on <html>: the set of modes the reader ticked, space-separated; CSS matches the current mode with ~= (the §15 setting) */
 export const IMG_MODES_ATTR = 'data-axt-img-modes'
 
 export interface ImageTarget {
   id: string
   el: Element
   /**
-   * 位图走「取字节 → OCR」，外链 SVG 图直接读 `contentDocument` 里的字形（§15.5），
-   * 内联 TikZ 图读 `foreignObject` 里的 HTML 与它的矩形（§15.6）。
-   * 三条路在 `linesToBoxes` 汇合，之后的叠加层、缓存、调度完全一样
+   * A bitmap goes “bytes → OCR”, an external SVG figure reads the glyphs of its `contentDocument` directly (§15.5),
+   * an inline TikZ figure reads the HTML inside `foreignObject` and its rectangle (§15.6). The three meet in
+   * `linesToBoxes`; the overlay, the cache and the scheduling after that are one and the same
    */
   kind: 'raster' | 'svg' | 'picture'
 }
 
-/** 一个译文标签：位置与尺寸是图的归一化坐标（0–1，左上原点），lines 是 OCR 合并进来的行数 */
+/** One translated label: position and size in the image's normalised coordinates (0–1, top-left origin); lines is how many OCR lines were merged into it */
 export interface ImageLabel {
   x: number
   y: number
   w: number
   h: number
   lines: number
-  /** OCR 原文，hover 显示 */
+  /** The OCR source text, shown on hover */
   source: string
-  /** 译文 */
+  /** The translation */
   text: string
-  /** 文字方向，弧度；不在表示横排（§15.5） */
+  /** Text direction in radians; absent means horizontal (§15.5) */
   angle?: number
-  /** 斜标签自己的长与厚，都按图**宽**的比例；与 angle 同时出现 */
+  /** A tilted label's own length and thickness, both as fractions of the image's **width**; present with angle */
   len?: number
   thick?: number
 }
@@ -42,7 +43,7 @@ export function setImageModes(doc: Document, modes: readonly string[]): void {
   else doc.documentElement.removeAttribute(IMG_MODES_ATTR)
 }
 
-/** 目标已有的叠加层（同一父元素里、data-axt-for 指向它的） */
+/** The overlay the target already has (in the same parent, data-axt-for pointing at it) */
 export function overlayOf(target: ImageTarget): Element | null {
   const parent = target.el.parentElement
   if (!parent) return null
@@ -60,16 +61,17 @@ export function clearImage(target: ImageTarget): boolean {
 }
 
 /**
- * 这张图在**整个文档里**的叠加层，包括 side 模式拆图副本里的那一份。
+ * This image's overlays **anywhere in the document**, the one inside a side-mode split copy included.
  *
- * `clearImage` 只看图自己的兄弟位置，够用于「换一份新的」——副本会在整理时按签名重建。
- * 但「不再翻这张图了」的场合不够：副本里那份还挂着，而 only 模式下**原件是藏起来的**，
- * 读者看到的正是副本里那份上一轮、甚至上一种目标语言的译文（Codex 在 #134 指出）
+ * `clearImage` looks only at the image's own sibling slot, enough for “replace with a fresh one” — the copy is
+ * rebuilt by signature at the next tidy. Not enough for “no longer translating this image”: the copy's overlay
+ * stays, and in only mode **the original is hidden**, so what the reader sees is exactly the copy's overlay from
+ * the previous run, or even the previous target language (Codex on #134)
  */
 export function clearImageEverywhere(target: ImageTarget): number {
   const doc = target.el.ownerDocument
-  // 副本里那份认的是 `data-axt-split-for`：`stripIds` 会把克隆件上的每个 `data-axt-*` 抹掉，
-  // 只按 `data-axt-for` 找的话副本里那份永远留着（Codex 在 #134 指出）
+  // The copy's overlay answers to `data-axt-split-for`: `stripIds` wipes every `data-axt-*` off the clone, so a lookup
+  // by `data-axt-for` alone would leave the copy's overlay there for good (Codex on #134)
   const id = CSS.escape(target.id)
   const stale = Array.from(doc.querySelectorAll(`.${IMG_CLASS}[${FOR_ATTR}="${id}"], .${IMG_CLASS}[${SPLIT_FOR_ATTR}="${id}"]`))
   for (const node of stale) node.remove()
@@ -77,8 +79,9 @@ export function clearImageEverywhere(target: ImageTarget): number {
 }
 
 /**
- * 一段文字大约占多少 em 宽：CJK 一字一 em，其余按 0.55 em 估（西文平均字宽），空格 0.3 em。
- * 只用来给字号一个宽度上限，不求精确——译文多半是中文，通常比原文短，字号由框高决定
+ * Roughly how many ems a run of text spans: one em per CJK character, 0.55 em for the rest (the average width of
+ * Latin letters), 0.3 em for a space. Only an upper bound for the font size, not a measurement — the translation is
+ * mostly Chinese and usually shorter than the source, and the box height decides the size
  */
 export function emWidth(text: string): number {
   let width = 0
@@ -91,24 +94,28 @@ export function emWidth(text: string): number {
 }
 
 /**
- * 标签的内联样式：位置与尺寸都是图的百分比，字号 = min(按框高, 按框宽)，单位是容器查询单位
- * （叠加层是 size 容器，1cqh = 图高的 1%，1cqw = 图宽的 1%）。行高 1.15，一行占框高的 72% 左右；
- * 多行框按行数均摊。**不读任何几何**，整串在 JS 里算成字符串写一次。
+ * A label's inline style: position and size as percentages of the image, font size = min(by box height, by box
+ * width), in container query units (the overlay is a size container: 1cqh is 1% of the image's height, 1cqw 1% of
+ * its width). Line height 1.15, one line takes about 72% of the box height; a multi-line box shares it out by line
+ * count. **No geometry is read**: the whole string is computed in JS and written once.
  *
- * **竖排标签（`angle`）不能用百分比。** 绕中心转 90° 之后，框的 width 变成屏幕上的竖向长度、
- * height 变成横向厚度；而 `width: X%` 是容器**宽**的百分比，容器不是正方形时长度就错了。
- * 所以竖排的 width 写成 `cqh`（图高的百分比，文字真正延伸的那根轴）、height 写成 `cqw`，
- * left / top 用 `calc()` 从中心减去一半 —— 两种单位在 calc 里可以相减，都是同一个容器的百分比。
+ * **A vertical label (`angle`) cannot use percentages.** Rotated 90° about its centre, the box's width becomes the
+ * vertical extent on screen and its height the horizontal thickness; `width: X%` is a percentage of the container's
+ * **width**, wrong for the length whenever the container is not square. So a vertical label's width is written in
+ * `cqh` (a percentage of the image height — the axis the text really runs along) and its height in `cqw`, with
+ * left / top as `calc()` from the centre minus half — the two units subtract inside calc, both being percentages
+ * of the same container.
  */
 export function labelStyle(label: ImageLabel): string {
   const pct = (v: number) => `${(v * 100).toFixed(3)}%`
   const cq = (v: number) => `${(v * 100).toFixed(3)}cqw`
   const lines = Math.max(1, label.lines)
   if (label.angle && label.len && label.thick) {
-    // 斜标签沿**自己的轴**摆：盒子是文字自己的长与厚（不是轴对齐外接框——那个框只在 90° 的倍数上
-    // 与文字重合，5° 时比文字大一圈），中心对中心放好再整体转过去。两根轴都用 cqw
-    // （图宽的百分比，一个长度单位），这样一个数在哪个方向上都是同一段实际长度；
-    // 换成 `width: X%` 就会变成「容器宽的百分比」，容器不是正方形时竖向长度就错了
+    // A tilted label sits along **its own axis**: the box is the text's own length and thickness (not the axis-aligned
+    // bounding box — that one coincides with the text only at multiples of 90° and is a size larger at 5°), placed
+    // centre on centre and then rotated as a whole. Both axes use cqw (a percentage of the image width, one length
+    // unit), so one number is the same real length whichever way it points; `width: X%` would become “a percentage
+    // of the container width”, wrong for the vertical length whenever the container is not square
     const cx = label.x + label.w / 2
     const cy = label.y + label.h / 2
     const byThickness = (72 * label.thick) / lines
@@ -118,15 +125,16 @@ export function labelStyle(label: ImageLabel): string {
       + `font-size:min(${byThickness.toFixed(2)}cqw,${byLength.toFixed(2)}cqw)`
   }
   const byHeight = (72 * label.h) / lines
-  // 宽度上限：整段文字分成 lines 行，每行大约 emWidth / lines 个 em；留 8% 边距
+  // The width cap: the text splits into `lines` rows of about emWidth / lines ems each; 8% margin kept
   const byWidth = (92 * label.w * lines) / emWidth(label.text)
   return `left:${pct(label.x)};top:${pct(label.y)};width:${pct(label.w)};height:${pct(label.h)};font-size:min(${byHeight.toFixed(2)}cqh,${byWidth.toFixed(2)}cqw)`
 }
 
 /**
- * 给一张图插叠加层；幂等，重复渲染替换不叠加。返回叠加层节点。
- * 紧跟在图后面的镜像先删掉：镜像每会话只跑一次、跑在 OCR 之前，会插在图与叠加层之间——
- * 叠加层必须是图的**下一个**兄弟（锚点按"前面最近的同名锚点"解析，`img:has(+ .axt-img)` 也只认相邻）
+ * Insert an image's overlay; idempotent, a re-render replaces rather than stacks. Returns the overlay node.
+ * A mirror right after the image is removed first: mirrors run once per session, before OCR, and would sit between
+ * the image and the overlay — the overlay must be the image's **next** sibling (anchors resolve to “the nearest
+ * preceding node of that name”, and `img:has(+ .axt-img)` accepts an adjacent one only)
  */
 export function renderImage(target: ImageTarget, labels: readonly ImageLabel[]): Element {
   clearImage(target)
@@ -137,7 +145,7 @@ export function renderImage(target: ImageTarget, labels: readonly ImageLabel[]):
   node.className = IMG_CLASS
   node.setAttribute(FOR_ATTR, target.id)
   const lang = doc.documentElement.getAttribute(LANG_ATTR)
-  // 图里的标签同样要 `dir`：一个阿拉伯语标签在 ltr 的基方向下标点会跑到另一头（§7.5）
+  // A label in an image needs `dir` as well: an Arabic label under an ltr base direction puts its punctuation at the wrong end (§7.5)
   const dir = doc.documentElement.getAttribute(DIR_ATTR)
   for (const label of labels) {
     const span = doc.createElement('span')

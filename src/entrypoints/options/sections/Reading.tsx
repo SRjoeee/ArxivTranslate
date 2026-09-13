@@ -1,4 +1,4 @@
-// 阅读: the two appearance lists (translation styles, hover bands) and when translation starts.
+// Reading: the two appearance lists (translation styles, hover bands) and when translation starts.
 // Everything is immediate: choosing a tile or dragging a slider writes the config, and the page
 // being read picks it up through its own config watcher.
 import { useRef, useState } from 'react'

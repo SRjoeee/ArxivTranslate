@@ -1,6 +1,6 @@
 // swift-tools-version: 5.9
-// axt-helper：arXiv HTML Translator 的本机 OCR 助手（DESIGN §15）。
-// 无第三方依赖；Vision 与 ImageIO 是系统框架，import 即链接。
+// axt-helper: the local OCR helper of arXiv HTML Translator (DESIGN §15).
+// No third-party dependencies; Vision and ImageIO are system frameworks, linked by import.
 import PackageDescription
 
 let package = Package(

@@ -1,54 +1,59 @@
-/* 译文外观（DESIGN §7.5）。v12 起不再有 21 个固定预设：读者自己配的「样式」= 文字颜色 + 透明度
-   + 下划线 + 悬停前模糊 + 高级 CSS 声明，所以这里只剩三条规则，值全部通过变量到达。
-   颜色与透明度由 style-preset.ts 的 `appearanceRule` 写成变量（`--axt-color` 由 modes.css 的
-   `.axt-t { color: var(--axt-color, inherit) }` 消费）；下划线与模糊各由 <html> 上的一个属性开关。
-   与模式属性同一层写在 <html> 上，切换只改属性、不动 DOM。
+/* The translation's appearance (DESIGN §7.5). Since v12 there are no 21 fixed presets: a “style” the reader
+   configures = text colour + opacity + underline + blur until hover + advanced CSS declarations, so only three
+   rules remain here and every value arrives through a variable. Colour and opacity are written as variables by
+   `appearanceRule` in style-preset.ts (`--axt-color` is consumed by `.axt-t { color: var(--axt-color, inherit) }`
+   in modes.css); underline and blur are each switched by one attribute on <html>. Written on <html> at the same
+   level as the mode attribute: a switch changes attributes, never the DOM.
 
-   下划线与模糊的写法移植自 reference/kiss-translator/src/config/styles.js + src/libs/style.js@c95bd46
-   （GPL-3.0），2026-09-05 移植、2026-09-10 改写：改用 data 属性与 --axt-* 变量、排除非译文节点。
-   绿色等预设颜色取自 reference/read-frog/src/assets/styles/custom-translation-node.css@9b44f82
-   （GPL-3.0），现在是 config/appearance.ts 里的一个内置配置项。登记见 docs/THIRD_PARTY.md。
+   The underline and blur rules are ported from reference/kiss-translator/src/config/styles.js +
+   src/libs/style.js@c95bd46 (GPL-3.0), 2026-09-05, modified 2026-09-10: data attributes and --axt-* variables
+   instead, non-translation nodes excluded. The preset colours such as the green come from
+   reference/read-frog/src/assets/styles/custom-translation-node.css@9b44f82 (GPL-3.0), now one built-in entry in
+   config/appearance.ts. Registered in docs/THIRD_PARTY.md.
 
-   **两条纪律**：
-   1. 译文节点复制原块的 class（§7.1），字体、字号、行高、对齐、grid 位置都随站点样式走；
-      外观只加装饰性属性，绝不写 font / font-size / line-height / display / margin / width
-      （§7.5 记着 font: inherit 把摘要标题的 1.4rem 覆盖成父级默认值的实测教训，presets.test.ts 用正则守着）。
-   2. **下划线必须显式画到原子行内元素上**：CSS 规范里 text-decoration 不会传播到
-      inline-block、inline-table 与 MathML 这类原子行内盒，于是公式、行内盒处的线会断掉
-      （用户反馈，2026-09-05 实测：math 与 .ltx_inline-block 上 text-decoration-line 计算值是 none）。
-      `text-decoration: inherit` 也不行——text-decoration-line 不是继承属性，中间隔一层普通 span 就断了；
-      只能把同一条声明显式写到那些元素上，见下面的共享规则。 */
+   **Two disciplines**:
+   1. A translation node copies the original block's class (§7.1), so font, size, line height, alignment and grid
+      position all follow the site's styles; the appearance adds decorative properties only and never writes font /
+      font-size / line-height / display / margin / width (§7.5 records the measured lesson of font: inherit
+      overriding the abstract heading's 1.4rem with the parent's default; presets.test.ts guards it with a regex).
+   2. **The underline must be drawn explicitly on atomic inline elements**: by the CSS specification
+      text-decoration does not propagate into atomic inline boxes such as inline-block, inline-table and MathML, so
+      the line breaks at formulas and inline boxes (the owner's feedback; measured 2026-09-05: the computed
+      text-decoration-line on math and .ltx_inline-block is none). `text-decoration: inherit` does not work either —
+      text-decoration-line is not inherited, and one ordinary span in between breaks it; the same declaration has to
+      be written explicitly on those elements, see the shared rule below. */
 
 html[data-axt-on] {
-  /* 装饰色默认跟随正文色，深色模式下自动成立；配置里选了文字颜色就用那个 */
+  /* The decoration colour follows the text colour by default, which holds in dark mode of itself; a text colour chosen in the configuration takes over */
   --axt-deco-color: color-mix(in oklab, currentColor 40%, transparent);
-  /* Read Frog 译文默认的绿：对照高亮的默认底色 */
+  /* Read Frog's default translation green: the default band colour of the hover highlight */
   --axt-green: oklch(0.693 0.17 162.48);
 }
 
-/* ── 下划线：四种线型各设一个变量，一条共享规则同时作用到译文与其中的原子行内元素 ────────── */
+/* ── Underline: one variable per line style, one shared rule reaching the translation and the atomic inline elements inside it ────────── */
 
 html[data-axt-underline="solid"] { --axt-deco-style: solid; }
 html[data-axt-underline="dotted"] { --axt-deco-style: dotted; }
 html[data-axt-underline="dashed"] { --axt-deco-style: dashed; }
 html[data-axt-underline="wavy"] { --axt-deco-style: wavy; }
 
-/* 共享规则按属性**有值**匹配，不写成 html[data-axt-on]：那会给没选下划线的配置也写上
-   text-decoration，把站点自己给链接、引用标记画的线抹掉 */
+/* The shared rule matches on the attribute **having a value**, not on html[data-axt-on]: that would write
+   text-decoration for configurations without an underline too, wiping the lines the site draws on links and citation marks */
 html[data-axt-underline] :is(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split), .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) :is(math, .ltx_inline-block, svg, img)) {
   text-decoration: underline var(--axt-deco-style) var(--axt-color, var(--axt-deco-color));
   text-underline-offset: 0.25em;
   text-decoration-thickness: var(--axt-deco-thickness, 1px);
 }
 
-/* ── 悬停前模糊：背诵与自测用（Read Frog 的 blur、KISS 的 fuzzy） ──────────────────────
-   末尾那道 :not(:where(…) *) 把嵌套的译文排除掉：side 模式的 localizeNotes 会把脚注译文
-   （.axt-note-t.axt-t）插进段落译文内部，而 opacity 与 filter 都作用于整棵子树——两层都匹配的话
-   实测滑杆 0.5 会渲染成 0.375 × 0.375 ≈ 0.14，模糊也会叠成两次 blur(4px)（Codex 在 #106 指出）。
-   淡化与模糊由最外层译文一次性负责，里面的跟着走。这道闸用 :where() + * 写，特异度是 0，不影响层叠 */
+/* ── Blur until hover: for recitation and self-testing (Read Frog's blur, KISS's fuzzy) ──────────────────────
+   The :not(:where(…) *) at the end excludes nested translations: side mode's localizeNotes puts a footnote's
+   translation (.axt-note-t.axt-t) inside a paragraph's translation, and opacity and filter both apply to the whole
+   subtree — with both layers matching, a slider at 0.5 measured 0.375 × 0.375 ≈ 0.14, and the blur stacked to two
+   blur(4px) (Codex on #106). The outermost translation fades and blurs once, and what is inside follows. The gate
+   is written with :where() + * at specificity 0, so it does not disturb the cascade */
 html[data-axt-blur] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split):not(:where(.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)) *) {
   filter: blur(4px);
-  /* 乘上用户设定的透明度，而不是把它顶掉（Codex 在 #106 指出） */
+  /* Multiplied by the reader's opacity, not overriding it (Codex on #106) */
   opacity: calc(var(--axt-opacity, 1) * 0.75);
   transition: filter 0.15s ease-out, opacity 0.15s ease-out;
 }
@@ -58,11 +63,11 @@ html[data-axt-blur] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split
 }
 
 @media (prefers-reduced-motion: reduce) {
-  /* 悬停清晰的 150 ms 过渡也是动效（Codex 在 #52 指出） */
+  /* The 150 ms transition to sharp on hover is motion too (Codex on #52) */
   html[data-axt-blur] .axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split) {
     transition: none;
   }
 }
 
-/* 高级 CSS 声明不在这里：读者写的声明块由 style-preset.ts 包进
-   html[data-axt-on] .axt-t:not(…) { … } 后与本文件一起注入，排在最后，有最后的发言权 */
+/* The advanced CSS declarations are not here: the reader's declaration block is wrapped by style-preset.ts in
+   html[data-axt-on] .axt-t:not(…) { … } and injected with this file, last, with the final word */

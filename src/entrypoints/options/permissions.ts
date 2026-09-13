@@ -4,8 +4,8 @@
 import { browser } from 'wxt/browser'
 
 /**
- * 申请 host 权限失败的两种情形：地址本身不合法，或读者在 Chrome 的弹窗里点了拒绝。
- * 报**是哪一种**，句子在语言包里——这一层不认识界面语言（Codex 在 #161 指出）
+ * The two ways a host permission request fails: the address itself is invalid, or the reader declined in Chrome's prompt.
+ * Reports **which one**; the sentence is in the locale pack — this layer knows no interface language (Codex on #161)
  */
 export class PermissionError extends Error {
   constructor(readonly kind: 'badURL' | 'denied', readonly origin?: string) {

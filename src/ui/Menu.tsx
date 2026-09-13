@@ -165,7 +165,7 @@ export function Menu({ anchor, trigger, hug = false, items, label, search, searc
                 <span className="truncate text-[13px] font-semibold">{item.name}</span>
                 {/* A preview is a sample drawn in the style, not information: it says nothing to a
                     reader who cannot see it, and it would swallow the option's name in the
-                    accessible name. Every other hint here is real ("免费", "尚未配置 API Key") */}
+                    accessible name. Every other hint here is real ("Free", "No API key yet") */}
                 {item.hint && <span aria-hidden={item.preview ? 'true' : undefined} style={item.preview} className={`truncate text-[11px] ${item.preview ? '' : 'text-fg-2'}`}>{item.hint}</span>}
               </span>
               {item.selected && <Check />}

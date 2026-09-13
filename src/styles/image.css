@@ -1,23 +1,28 @@
-/* 图片叠加层（DESIGN §15.2）：<img> 的下一个兄弟 .axt-img，内部每个 span 一个译文标签。
-   叠加层**不带 .axt-t**——带了会被 side 的配对网格排到右栏、拆图时把 <img> 当配对原件删掉、被预设装饰。
+/* The image overlay (DESIGN §15.2): the <img>'s next sibling .axt-img, one translated label per span inside.
+   The overlay **carries no .axt-t** — with it, side's pairing grid would put it in the right column, a split would
+   remove the <img> as a pair's original, and the presets would decorate it.
 
-   定位用 CSS 锚点定位（Chrome ≥131，anchor-scope）：图声明锚点名，叠加层用 anchor() / anchor-size()
-   贴到图的盒子上——零 JS 几何读取、零 ResizeObserver，图随栏宽缩放时自动跟随；拆图副本结构相同，
-   锚点自动成立。父元素做定位祖先并限定锚点作用域，一个父元素里多张图各找各的（同名锚点按"前面最近的"解析，
-   兄弟关系一旦被别的节点插进来就会串到上一张图，作用域是第二道保险）。
-   不支持锚点定位的浏览器：@supports 不成立，叠加层一直 display: none，不会掉到图下面。
+   Positioned with CSS anchor positioning (Chrome ≥131, anchor-scope): the image declares an anchor name and the
+   overlay sticks to the image's box with anchor() / anchor-size() — no JS geometry reads, no ResizeObserver, and
+   the overlay follows as the image scales with the column; a split copy has the same structure, so its anchor
+   holds by itself. The parent is the positioning ancestor and scopes the anchor, so several images in one parent
+   each find their own (an anchor name resolves to “the nearest preceding one”, and once another node is inserted
+   between siblings it would cross over to the previous image; the scope is the second safeguard).
+   In a browser without anchor positioning the @supports fails and the overlay stays display: none, never falling
+   below the image.
 
-   可见性只看 <html> 上的两个属性：当前模式 + 用户勾选的模式集合（data-axt-img-modes，空格分隔）。
-   叠加层自己没有状态属性——拆图克隆会把 data-axt-* 全剥掉。 */
+   Visibility reads two attributes on <html> only: the current mode + the modes the reader ticked
+   (data-axt-img-modes, space-separated). The overlay carries no state attribute of its own — a split clone strips
+   every data-axt-*. */
 
-/* 基线在 @supports 之外：不支持锚点定位的浏览器也不能让叠加层掉成一段普通文字排在图下面（Codex 在 #89 指出） */
+/* The baseline sits outside @supports: a browser without anchor positioning must not let the overlay fall below the image as a run of ordinary text (Codex on #89) */
 .axt-img {
   display: none;
 }
 
 @supports (top: anchor(top)) and (anchor-scope: --x) {
-  /* 内联 TikZ 图（§15.6）也是锚点：叠加层同样贴它的盒子。svg 自己会被 side 的配对规则当成媒体，
-     不会被当成翻译块 */
+  /* An inline TikZ figure (§15.6) is an anchor too: the overlay sticks to its box the same way. The svg itself is
+     media to side's pairing rules, never a translation block */
   html[data-axt-on] :is(img, object, svg):has(+ .axt-img) {
     anchor-name: --axt-img;
   }
@@ -34,9 +39,9 @@
     left: anchor(left);
     width: anchor-size(width);
     height: anchor-size(height);
-    /* 标签字号用容器查询单位（cqh / cqw）按框高与字数算，不读布局 */
+    /* The label's font size is computed from the box height and the character count in container query units (cqh / cqw), reading no layout */
     container-type: size;
-    /* 图所在的 figure 可能是配对网格容器：脱离网格流（先例 modes.css 的 .ltx_item > .ltx_tag） */
+    /* The figure the image sits in may be a pairing grid container: out of the grid flow (precedent: .ltx_item > .ltx_tag in modes.css) */
     grid-column: auto;
     grid-row: auto;
     margin: 0;
@@ -44,7 +49,7 @@
     border: 0;
     pointer-events: none;
     z-index: 1;
-    /* 站点给 figure 里的块加的居中 / 字号不该传给标签 */
+    /* The centring / font size the site gives blocks inside a figure must not reach the label */
     text-align: initial;
     font-size: initial;
     line-height: initial;
@@ -56,7 +61,7 @@
     display: block;
   }
 
-  /* 照 Safari 的样子：白色圆角半透明框盖住原文字，字号随框高；hover 显示原文（title） */
+  /* After Safari's look: a white rounded translucent box over the original text, the font size following the box height; the original shows on hover (title) */
   .axt-img > span {
     position: absolute;
     box-sizing: border-box;
@@ -76,26 +81,29 @@
     overflow-wrap: anywhere;
     pointer-events: auto;
     cursor: default;
-    /* 竖排标签绕自己的中心转（§15.5）。默认值就是它，写出来是为了不被站点样式改掉——
-       原点一偏，标签就飞出图外 */
+    /* A vertical label rotates about its own centre (§15.5). That is the default, written out so the site's styles
+       cannot change it — an origin off centre sends the label out of the image */
     transform-origin: 50% 50%;
   }
 
-  /* side：插图整块拆两份（§7.2），叠加层属于「只有译文」的副本，原件那份隐藏。
-     只限 side——stack 显示原件、only 显示副本，叠加层跟着显示的那份走。
-     特异度与上面的显示规则相同，必须写在后面。
+  /* side: the figure is split in two (§7.2); the overlay belongs to the translation-only copy, and the original's is
+     hidden. side only — stack shows the original, only shows the copy, and the overlay goes with whichever shows.
+     The specificity equals the display rule above, so this must come after it.
 
-     条件写成「在 figure 里、且不在任何 .axt-split 后代中」，而不是「在 [data-axt-split] 里」——
-     后者只在拆图**之后**成立，而叠加层是先插进原件、等 prep 的防抖合并器（故意的批处理延迟）
-     跑到才拆图的。实测那中间态有 150–166 ms：白框先按整栏宽（960 / 797px）画在左栏的图上，
-     然后整片消失、以半栏宽（468px）在右栏重现——就是用户看到的「滑到图片时闪一下」（issue #109）。
-     这条不能用「不在 .axt-split 里就藏」：figure 之外的图（collectImageTargets 扫全文，不限 figure）
-     永远不会被拆，那样它们的叠加层在 side 下会永久消失。也不能用「最近的 figure 不是 .axt-split」：
-     嵌套分图交给最外层一起复制，副本里那层嵌套 figure 自己没有 .axt-split，会被误伤。
+     The condition is written as “inside a figure, and inside no descendant of .axt-split”, not “inside
+     [data-axt-split]” — the latter holds only **after** the split, while the overlay is inserted into the original
+     first and the figure is split only once prep's debounced coalescer (a deliberate batching delay) runs. That
+     intermediate state measured 150–166 ms: the white box painted at full column width (960 / 797px) over the
+     image in the left column, then vanished whole and reappeared at half width (468px) in the right — the “flash
+     when scrolling to an image” the owner saw (issue #109). It cannot be “hide unless inside .axt-split”: images
+     outside a figure (collectImageTargets scans the whole text, figures or not) are never split, and their
+     overlays would vanish for good in side. Nor “the nearest figure is not .axt-split”: a nested sub-figure is
+     copied with its outermost, and the nested figure inside the copy has no .axt-split of its own — hit by mistake.
 
-     选择器里带上 [data-axt-img-modes~="side"] 是为了**特异度**：显示规则是 (0,3,1)，
-     而 `figure` 只值 (0,0,1)，不带这个属性的话整条是 (0,2,2)，输给显示规则、一行都不生效
-     （第一版就是这么写的，实测叠加层照样以 960px 出现在原件上）。带上之后是 (0,3,2)，稳赢 */
+     [data-axt-img-modes~="side"] is in the selector for **specificity**: the display rule is (0,3,1), `figure`
+     alone is worth (0,0,1), and without the attribute the whole rule is (0,2,2), losing to the display rule and
+     applying nowhere (the first version was written so, and the overlay measured 960px on the original all the
+     same). With it the rule is (0,3,2) and wins outright */
   html[data-axt-mode="side"][data-axt-img-modes~="side"] figure .axt-img:not(:where(.axt-split) *) {
     display: none;
   }

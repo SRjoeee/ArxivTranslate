@@ -19,8 +19,8 @@ import { applyLocaleFrom, resolveLocale } from '@/ui/apply-locale'
 import { setLocale } from '@/ui/strings'
 import { savedFromStatus } from '@/shared/page-action'
 
-// background：消息路由 + 引擎链 + 队列 + 缓存（DESIGN §8.0）。WXT ≥0.20 不带 polyfill，
-// 异步响应必须用 sendResponse + return true。
+// The background: message routing + the engine chain + the queues + the cache (DESIGN §8.0). WXT ≥0.20 ships no
+// polyfill, so an asynchronous response needs sendResponse + return true.
 export default defineBackground(() => {
   const cache = cachePortOf(translationCache)
   /** Scopes ended for certain — one registry (ADR-0005): the session router writes it, the chain's services and OCR read it */
@@ -36,14 +36,14 @@ export default defineBackground(() => {
     owned: transport => router.sessionsOn(transport) > 0,
   })
   const transportOf = () => chain.current()
-  /** 这个 worker 当前用的界面语言，用来认出「读者改了它」（右键菜单的标题要跟着重画） */
+  /** The interface language this worker uses, to recognise “the reader changed it” (the context menu's title has to be redrawn) */
   let uiLanguage: string | null = null
 
   // The chain learns of a change by reading the store, in order with the popup's `fresh` asks — never from the
   // event's own value, which carries no order (provider-status.ts says why)
   const offers = createConfigOffers({ load: getConfig, chain })
   watchConfig(next => {
-    // 界面语言变了要重画菜单：worker 不会为此重启，不重画的话标题一直停在旧语言（Codex 在 #161 指出）
+    // A changed interface language redraws the menu: the worker does not restart for it, and unredrawn the title would stay in the old language (Codex on #161)
     if (next.uiLanguage !== uiLanguage) {
       uiLanguage = next.uiLanguage
       applyLocaleFrom(next.uiLanguage)
@@ -53,16 +53,16 @@ export default defineBackground(() => {
   })
 
   /**
-   * 会话与链的绑定（见 ./sessions.ts）：一次会话认准它开始时的那条链，标签页关掉就撤掉它的请求。
-   * 代价是配置恰好在翻译中途变更时新旧两条链短暂并存、跨标签页的并发预算翻倍，直到旧会话结束；
-   * 这是有意的取舍——宁可短暂多一套队列，也不能让一轮译文中途换引擎或换语言（Codex 在 #59 指出）。
+   * The binding of sessions to chains (see ./sessions.ts): a session holds to the chain it started on, and a closed
+   * tab withdraws its requests. The price is two chains briefly side by side when the configuration changes in the
+   * middle of a translation, the cross-tab concurrency budget doubled until the old session ends; a deliberate trade — better one extra set of queues for a while than a round of translation changing engine or language halfway (Codex on #59).
    * A settings change while a page is on therefore starts a **new** session that replaces the
    * old one in place (content `start(…, restart)`, DESIGN §8.5); the old session's requests are
    * cancelled by its scope as before
    */
   /**
-   * 图片翻译的本机 OCR helper（DESIGN §15）：懒连接，有请求在飞时定时调一个无害 API 保活——
-   * 端口开着不能阻止 worker 被回收。撤会话时排队的识别一起撤（router 的 onDrop）
+   * The local OCR helper of image translation (DESIGN §15): connected lazily, with a harmless API called on a timer while
+   * a request is in flight, as a keep-alive — an open port does not keep the worker from being reclaimed. Withdrawing a session withdraws its queued recognitions too (the router's onDrop)
    */
   const helper = createHelperClient({
     connect: () => browser.runtime.connectNative(HELPER_HOST),
@@ -81,14 +81,14 @@ export default defineBackground(() => {
     cancelScope: scope => chain.cancelScope(scope),
     onDrop: scope => ocr.cancel(scope),
     /**
-     * 那个标签页还是不是刚才那个页面：问它自己。
+     * Is that tab still the page it was: ask it.
      *
-     * 页面还在就答得出同一个会话 id；真跳走了 content script 已经没了，`sendMessage` 直接抛。
-     * 只在宽限到点时问一次，而且只在这个标签页那段时间一个请求都没有的情况下才走到这里
+     * A page still there answers with the same session id; navigated away, its content script is gone and
+     * `sendMessage` throws outright. Asked once only when the grace expires, and only when the tab made no request at all in that time
      */
     /**
-     * 这个标签页还在加载吗。`tabs.get` 的 `status` 不在需要 `tabs` 权限的那几个字段里
-     * （被挡的是 url / title / favIconUrl），所以这条不扩权限
+     * Is this tab still loading. `status` of `tabs.get` is not among the fields that need the `tabs` permission (url /
+     * title / favIconUrl are the guarded ones), so this asks for no wider permission
      */
     stillLoading: async tabId => {
       try {
@@ -102,21 +102,21 @@ export default defineBackground(() => {
         const status = await browser.tabs.sendMessage(tabId, { type: 'axt:page-status' })
         return (status as { session?: string | null } | undefined)?.session === scope ? 'same' : 'other'
       } catch {
-        // 消息没送到：可能真没了，也可能新文档的 content script 还没装上。分不清就不判死
+        // The message did not arrive: the page may be gone, or the new document's content script may not be installed yet. Indistinguishable, so no death sentence
         return 'unknown'
       }
     },
   })
 
-  // 两个生命周期钩子都只给 tabId / status，不需要 "tabs" 权限
+  // Both lifecycle hooks give only tabId / status, needing no "tabs" permission
   const dropTab = (tabId: number, why: string) => {
     void router.dropTab(tabId).then(n => {
-      if (n > 0) console.debug(`[axt] 标签页 ${tabId} ${why}，撤掉 ${n} 个排队 / 在飞的请求`)
+      if (n > 0) console.debug(`[axt] tab ${tabId} ${why}: ${n} queued / in-flight requests withdrawn`)
     })
   }
-  // 右键菜单（issue #146）：第二个入口，动作与 popup 走同一条消息。
-  // **同步注册**，读语言包不等（context-menu.ts 说明为什么）：菜单先用兜底语言建出来，
-  // 语言包读到之后再重建一次，标题就跟着界面语言走了（UI.md §6）
+  // The context menu (issue #146): the second entry, the same message as the popup's action.
+  // **Registered synchronously**, without waiting for the locale pack (context-menu.ts says why): the menu is built in
+  // the fallback language first and rebuilt once the pack is read, so the title follows the interface language (UI.md §6)
   /**
    * Say something to every tab that will listen. No `tabs` permission is needed to enumerate ids,
    * and a tab without our content script simply rejects — there is nothing to filter on and nothing
@@ -138,9 +138,9 @@ export default defineBackground(() => {
   }
 
   /**
-   * 安装引导的等待（§15.4）：读者复制走安装命令之后，由这里定时探，探到了就广播——
-   * 读者不必回到扩展点任何东西。截止时间存在 **session** storage：浏览器关掉之后
-   * 这次安装就不必再等了
+   * The guided install's wait (§15.4): once the reader has copied the install command, this probes on a timer and
+   * broadcasts a find — the reader need not come back to the extension and click anything. The deadline lives in
+   * **session** storage: once the browser is closed this install need not be waited for any more
    */
   const AWAIT_KEY = 'axt-helper-await-until'
   const helperWaiter = createHelperWaiter({
@@ -160,9 +160,9 @@ export default defineBackground(() => {
     },
     warn: (message, error) => console.debug(message, error),
   })
-  // worker 醒来就把等待接上：读者可能还在终端里，而这个 worker 是上一个被回收后新起的。
-  // **唤醒 worker 的往往正是 popup 那条查询**，所以查询必须等这一步读完 storage 才能回答，
-  // 否则它拿到的是还没恢复的 null（Codex 在 #166 指出）
+  // The wait is picked up as soon as the worker wakes: the reader may still be in the terminal, and this worker is a
+  // fresh one after the previous was reclaimed. **What wakes the worker is often the popup's own query**, so the query
+  // has to wait for this read of storage before answering, or it gets the null not yet restored (Codex on #166)
   const helperRestored = helperWaiter.resume()
 
   /**
@@ -201,9 +201,9 @@ export default defineBackground(() => {
     saved,
   }
   installContextMenu(menuDeps)
-  // 读者在这次读还没回来的时候改了界面语言：watcher 已经换过语言包，这个旧快照不许再盖回去。
-  // **先判断再应用**：`applyLocale` 自己就会 setLocale，等它回来再看闸，包已经被换回旧的了
-  //（Codex 在 #161 两轮分别指出这处与它的位置）
+  // The reader changed the interface language while this read was out: the watcher has swapped the pack already, and
+  // this old snapshot must not put it back. **Judge, then apply**: `applyLocale` itself calls setLocale, and checking
+  // the gate after it returns, the pack has been swapped back already (Codex on #161, in two rounds: this place and its position)
   void resolveLocale().then(code => {
     if (uiLanguage !== null) return
     uiLanguage = code
@@ -218,16 +218,17 @@ export default defineBackground(() => {
     saved,
   })
 
-  browser.tabs.onRemoved.addListener(tabId => dropTab(tabId, '关闭'))
+  browser.tabs.onRemoved.addListener(tabId => dropTab(tabId, 'closed'))
   /**
-   * 导航离开也要撤（Codex 在 #59 指出）：`onRemoved` 只管关闭，标签页跳到别的网址时不触发。
-   * 而「同一标签页出现新 scope 就撤掉旧的」那条只在**新页面也是 arXiv 论文**时才会发生——
-   * 跳到任何别的站点，旧队列就一直跑到批次耗尽预算为止。
+   * Navigating away withdraws too (Codex on #59): `onRemoved` covers closing only, and a tab moving to another URL
+   * does not fire it. And “a new scope on the same tab withdraws the old one” happens only when **the new page is an
+   * arXiv paper too** — moved to any other site, the old queue runs on until the batches exhaust their budget.
    *
-   * **但 loading 分不出同文档换 hash 与真的跳走**：实测点正文里的引用跳到参考文献时，`changeInfo`
-   * 同样只有 `{status:'loading'}`，没有 `url` 可比（这两个钩子都不带 `tabs` 权限）。当场撤等于把
-   * 一个还活着的页面判死，它后半篇的译文会全部 aborted（用户 2026-09-09 报的）。所以交给 router
-   * 按住一会儿：这个标签页再来一次请求就说明页面还在，撤销取消
+   * **But loading cannot tell a same-document hash change from a real departure**: measured, clicking a citation in
+   * the body that jumps to the references gives a `changeInfo` of just `{status:'loading'}` as well, with no `url` to
+   * compare (neither hook carries the `tabs` permission). Withdrawing on the spot sentences a living page to death,
+   * and the translations of its second half all come back aborted (reported by the owner on 2026-09-09). So the router
+   * holds it for a while: one more request from this tab means the page is still there, and the withdrawal is cancelled
    */
   // Named, because it comes off while a grant takes effect (ADR-0002): a tab whose title ticks — a clock, a chat
   // app's unread count — is an event every few seconds from a tab that is not ours, and each one resets the worker's
@@ -236,10 +237,10 @@ export default defineBackground(() => {
   // navigates away is not noticed — the old session's queued batches run until they finish or this worker dies with
   // them, and the fresh worker starts with no sessions and learns them from the pages' next calls
   const onTabUpdated: Parameters<typeof browser.tabs.onUpdated.addListener>[0] = (tabId, changeInfo) => {
-    // **loading 与 complete 都要按一次**。跨文档导航提交得慢时，旧文档在 loading 之后还活着，
-    // 到点探针问到的是它、答的是同一个会话，撤销就被放掉了——而它随后就没了，再没人问第二次
-    //（Codex 在 #143 指出）。complete 时新文档已经就位：同文档换 hash 的话探针照样答「还在」，
-    // 真跳走的话答的就是新会话或者根本答不上
+    // **Both loading and complete press once.** When a cross-document navigation commits slowly, the old document is
+    // still alive after loading, the probe at the deadline reaches it, it answers with the same session, and the
+    // withdrawal is let go — then it is gone and nobody asks a second time (Codex on #143). At complete the new document
+    // is in place: a same-document hash change still answers “still here”, a real departure answers with a new session or not at all
     if (changeInfo.status === 'loading' || changeInfo.status === 'complete') router.mayHaveLeft(tabId)
   }
   browser.tabs.onUpdated.addListener(onTabUpdated)
@@ -251,7 +252,7 @@ export default defineBackground(() => {
         sendResponse(handlePing(browser.runtime.getManifest().version))
         return true
       case 'axt:translate':
-        // 建链失败（provider 构造抛错）也要如实回话：不回的话调用方等到的是"message channel closed"
+        // A failed chain build (a provider constructor throwing) is answered honestly too: unanswered, the caller waits for “message channel closed”
         router.forCall(message.scope, sender.tab?.id)
           .then(t => t.translate(message))
           .catch((e: unknown) => ({ ok: false as const, error: toErrorInfo(e) }))
@@ -273,9 +274,9 @@ export default defineBackground(() => {
         // deleted service moves everyone and retires its chain — the movers act on the chain in force
         void engineReady(chain, router, message).then(sendResponse)
         return true
-      // IndexedDB 不可用时也要回话，否则调用方等到的是"message channel closed"（Codex 在 #7 指出）
+      // With IndexedDB unavailable an answer still goes back, or the caller waits for “message channel closed” (Codex on #7)
       case 'axt:cache-clear':
-        // 失败要如实回报：吞掉异常回 { removed: 0 } 的话，IndexedDB 用不了时用户会以为已经清干净（Codex 在 #52 指出）
+        // A failure is reported as it is: swallowing the exception into { removed: 0 } would let the reader believe the cache cleared when IndexedDB is unusable (Codex on #52)
         translationCache.clear(message.paper)
           .then(removed => sendResponse({ ok: true, removed }))
           .catch((e: unknown) => sendResponse({ ok: false, message: e instanceof Error ? e.message : String(e) }))
@@ -291,8 +292,8 @@ export default defineBackground(() => {
         })
         return true
       case 'axt:helper-await':
-        // 一条消息两种用法：带 start 是「复制走了，开始等」，不带是「还在等吗」——
-        // popup 一失焦就销毁，重开时靠后一种把同一次等待接上（DESIGN §15.4）
+        // One message, two uses: with start it is “copied, start waiting”, without it “still waiting?” — the popup is
+        // destroyed on losing focus and picks the same wait up again with the latter on reopening (DESIGN §15.4)
         if (message.start) {
           void helperWaiter.start().then(() => sendResponse({ until: helperWaiter.until() }))
           return true
@@ -300,17 +301,17 @@ export default defineBackground(() => {
         void helperRestored.then(() => sendResponse({ until: helperWaiter.until() }))
         return true
       case 'axt:ocr':
-        // 先把 scope 绑到 sender 的标签页：它可能是这个标签页第一条带 scope 的消息，不绑的话关标签页时 dropTab 撤不到
-        // 排队的识别。只记关联、不建链：OCR 不能等翻译链构造（Codex 在 #87 两轮指出）
+        // The scope is bound to the sender's tab first: this may be the tab's first message carrying a scope, and unbound,
+        // dropTab could not withdraw the queued recognition when the tab closes. The association only, no chain: OCR must not wait for the translation chain to build (Codex on #87, two rounds)
         if (message.scope) router.bind(message.scope, sender.tab?.id)
         ocr.ocr(message)
           .catch((e: unknown) => ({ ok: false as const, error: { kind: 'unknown' as const, message: e instanceof Error ? e.message : String(e) } }))
           .then(sendResponse)
         return true
       case 'axt:cache-stats':
-        // 与 cache-clear 同一套协议：失败要如实回报，不能把「IndexedDB 用不了」显示成「缓存是空的」。
-        // 统计前先清过期条目——`get()` 只是把它们当未命中，从不删除，不清的话页面上会一直显示
-        // 一堆已经用不了的条数与体积；这也是 cleanup() 在运行时唯一的调用点（Codex 在 #52 指出）
+        // The same protocol as cache-clear: a failure is reported as it is, and “IndexedDB unusable” must not show as “the
+        // cache is empty”. Expired entries are cleaned before counting — `get()` only treats them as misses and never
+        // deletes, and uncleaned the page would keep showing a heap of unusable counts and bytes; this is also cleanup()'s only call site at run time (Codex on #52)
         translationCache.cleanup()
           .then(() => translationCache.stats())
           .then(stats => sendResponse({ ok: true, ...stats }))
