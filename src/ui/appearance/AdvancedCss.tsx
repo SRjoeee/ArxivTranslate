@@ -19,7 +19,11 @@ export function AdvancedCss({ value, onChange }: { value: string; onChange: (nex
    */
   const [draft, setDraft] = useState(value)
   const committed = useRef(value)
-  /** Blocks handed up and not yet seen landing, oldest first */
+  /**
+   * Blocks handed up and not yet seen landing, oldest first. A block equal to the committed one is handed up but
+   * not waited for: its landing changes nothing, so nothing would ever mark it seen, and the box would take every
+   * later change elsewhere for the store lagging it (the local review of S1, tenth pass)
+   */
   const handed = useRef<string[]>([])
   if (committed.current !== value) {
     committed.current = value
@@ -43,7 +47,7 @@ export function AdvancedCss({ value, onChange }: { value: string; onChange: (nex
               setDraft(e.target.value)
               // Only a block that will survive the schema is handed up; the rest stays here with its reason
               if (sanitizeCustomCss(e.target.value).ok) {
-                handed.current.push(e.target.value)
+                if (e.target.value !== committed.current) handed.current.push(e.target.value)
                 onChange(e.target.value)
               }
             }}

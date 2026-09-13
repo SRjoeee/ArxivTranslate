@@ -60,6 +60,21 @@ describe('AdvancedCss', () => {
     await mounted.unmount()
   })
 
+  it('undoing to the saved block waits for nothing: a change elsewhere afterwards shows', async () => {
+    // The tenth local pass of S1: the undo was handed up and waited for, its landing changed no prop, and the wait
+    // never ended — every later change elsewhere was taken for the store lagging the box
+    const onChange = () => undefined
+    const mounted = await mountElement(createElement(AdvancedCss, { value: 'color: red;', onChange }))
+    await open(mounted)
+    type(box(mounted.container), 'color: {')
+    await mounted.flush()
+    type(box(mounted.container), 'color: red;')
+    await mounted.flush()
+    await mounted.rerender(createElement(AdvancedCss, { value: 'color: blue;', onChange }))
+    expect(box(mounted.container).value).toBe('color: blue;')
+    await mounted.unmount()
+  })
+
   it('its own blocks landing later are not news: the second keystroke survives the first echo', async () => {
     const handed: string[] = []
     const onChange = (css: string) => handed.push(css)
