@@ -1,31 +1,31 @@
-// 识别助手的安装引导（UI.md S-O-27，DESIGN §15.4）。popup 与设置页**共用这一个组件**：
-// 两处要说的是同一件事，分两套写法只会漂移。
+// The recognition helper's guided install (UI.md S-O-27, DESIGN §15.4). The popup and the settings page **share this
+// one component**: both have the same thing to say, and two versions would only drift apart.
 //
-// 流程两步：打开终端、执行命令。**没有第三步**——原来那个「我已经装好了」按钮把程序自己
-// 答得出的问题推给了读者，而他按下它的时候多半还在终端里。复制之后由 background 定时探，
-// 探到就广播，页面上停着的图自己开始翻（§15.4）。
+// Two steps: open a terminal, run the command. **No third step** — the old “I have installed it” button pushed a
+// question the program can answer itself onto the reader, who is most likely still in the terminal when pressing it.
+// After the copy the background probes on a timer, broadcasts on detection, and the figures waiting on the page start translating of themselves (§15.4).
 //
-// 等待状态存在 background 而不是这里：popup 一失焦就销毁，读者切到终端的那一刻这个组件
-// 就没了；重新打开时靠 `axt:helper-await` 问一句把同一次等待接上。
+// The waiting state lives in the background, not here: the popup is destroyed the moment it loses focus, so this
+// component is gone the instant the reader switches to the terminal; on reopening, one `axt:helper-await` question picks the same wait up again.
 import { useEffect, useState } from 'react'
 import { browser } from 'wxt/browser'
 import { sendMessage } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
 import { HELPER_GUIDE_URL, S, helperInstallCommand } from '@/ui/strings'
 
-/** 已复制停留多久：够读，又不至于看着像卡住 */
+/** How long “Copied” stays: long enough to read, not so long it looks stuck */
 const COPIED_MS = 1500
 
 export function HelperSetup({ extensionId }: { extensionId: string }) {
   const [copied, setCopied] = useState(false)
   const [copyFailed, setCopyFailed] = useState(false)
-  /** 等到什么时候；null 表示没在等。来源是 background，不是本组件的 state */
+  /** Until when to wait; null when not waiting. Comes from the background, not this component's state */
   const [until, setUntil] = useState<number | null>(null)
-  /** 这一窗等完了也没探到 */
+  /** This window ran out without a detection */
   const [timedOut, setTimedOut] = useState(false)
   const command = helperInstallCommand(extensionId)
 
-  // 挂载时问一句：读者可能是复制完切去终端、再回来重开的（popup 失焦即销毁）
+  // Ask once on mount: the reader may have copied, switched to the terminal, and come back to reopen (the popup is destroyed on losing focus)
   useEffect(() => {
     let alive = true
     void sendMessage({ type: 'axt:helper-await' })
@@ -34,8 +34,8 @@ export function HelperSetup({ extensionId }: { extensionId: string }) {
     return () => { alive = false }
   }, [])
 
-  // 这一窗走完就把话说出来。用 background 给的截止时间而不是本地计时：
-  // 重开之后剩多久是它说了算
+  // Say so once this window has run out. The deadline the background gave, not a local timer:
+  // after a reopen, how much is left is its call
   useEffect(() => {
     if (until === null) return
     setTimedOut(false)
@@ -46,7 +46,7 @@ export function HelperSetup({ extensionId }: { extensionId: string }) {
   }, [until])
 
   // The background broadcasts the state it finds (`axt:helper-state`); the page's data layer takes it and this
-  // component is replaced by 「已就绪」. What is left to do here is to stop the wait line at once — the reader may see
+  // component is replaced by the ready state. What is left to do here is to stop the wait line at once — the reader may see
   // the frame before the parent re-renders
   useEffect(() => {
     const onState = (message: unknown) => {
@@ -58,13 +58,13 @@ export function HelperSetup({ extensionId }: { extensionId: string }) {
   }, [])
 
   /**
-   * 只在写入成功之后才说「已复制」。剪贴板被挡住时若照说不误，读者手上其实什么都没有，
-   * 而这是整个安装唯一悬着的一步（Codex 在 #161 指出）
+   * Say “Copied” only after the write succeeded. Said regardless with the clipboard blocked, the reader would in
+   * fact hold nothing, and this is the one step of the whole install left hanging (Codex on #161)
    */
   const copy = async () => {
-    // 复制即开始等：读者接下来就要切到终端，那一刻这个组件已经不在了。
-    // **剪贴板被挡住时同样要开始**——那条路上的提示是「请手动选中命令后复制」，读者照做、装成了，
-    // 却没人在探，页面上停着的图就一直停着，而确认按钮已经没有了（Codex 在 #166 指出）
+    // Copying starts the wait: the reader is about to switch to the terminal, and this component is gone by then.
+    // **It starts with the clipboard blocked too** — that path's hint says to select the command and copy it by hand; the
+    // reader does, installs, and nobody is probing: the figures waiting on the page wait forever, and the confirm button is gone (Codex on #166)
     const beginWaiting = () => void sendMessage({ type: 'axt:helper-await', start: true })
       .then(({ until: deadline }) => setUntil(deadline))
       .catch(() => undefined)
@@ -89,9 +89,9 @@ export function HelperSetup({ extensionId }: { extensionId: string }) {
       <Step n={1} title={S.setup.step1} hint={S.setup.step1Hint} />
 
       <Step n={2} title={S.setup.step2} hint={copyFailed ? S.setup.copyFailed : copied ? S.helper.copied : S.setup.step2Hint}>
-        {/* 命令整块是一个按钮：读者第一下要点的就是它。**折行而不是横向滚动**——
-            这是一条 `curl | bash`，看不到结尾便无从判断是否应当执行。`select-all` 让
-            ⌘A 落在命令上而不是整页 */}
+        {/* The whole command is one button: it is the first thing the reader will click. **Wrapped, not scrolled
+            sideways** — this is a `curl | bash`, and with the end out of sight there is no telling whether to run it.
+            `select-all` makes ⌘A land on the command rather than the whole page */}
         <button
           type="button"
           onClick={() => void copy()}
@@ -103,9 +103,9 @@ export function HelperSetup({ extensionId }: { extensionId: string }) {
         </button>
       </Step>
 
-      {/* 这一行是整个流程的关键：它取代了「我已经装好了」按钮，读者据此知道可以走开了。
-          等待中与超时是同一处的两种说法，不切换界面——读者不必在两处之间比对进度。
-          **还没复制时什么都不说**：那时步骤二的提示已经写着「点击复制」，再说一遍是废话 */}
+      {/* This line is the crux of the whole flow: it replaces the “I have installed it” button, and by it the reader knows
+          they may walk away. Waiting and timed out are two wordings in one place, no change of interface — the reader
+          need not compare progress across two places. **Nothing is said before the copy**: step two's hint already says “Click to copy”, and saying it again is noise */}
       {(until !== null || timedOut) && (
         <p role="status" className={`text-[11px] leading-relaxed ${timedOut ? 'text-accent' : 'text-fg-2'}`}>
           {timedOut ? S.setup.notYet : S.setup.waiting}
@@ -117,7 +117,7 @@ export function HelperSetup({ extensionId }: { extensionId: string }) {
   )
 }
 
-/** 一个带序号的步骤：序号自成一列，标题与它下面的控件才对得齐 */
+/** A numbered step: the number is a column of its own, so the title and the control below it line up */
 function Step({ n, title, hint, children }: { n: number; title: string; hint: string; children?: React.ReactNode }) {
   return (
     <div className="flex gap-2.5">

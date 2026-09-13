@@ -1,4 +1,4 @@
-// 数据: what the extension keeps on this machine. Today that is the translation cache; the
+// Data: what the extension keeps on this machine. Today that is the translation cache; the
 // diagnostics export (#156) will join it here.
 import { Confirm } from '@/ui/Confirm'
 import { O } from '@/ui/strings'
@@ -12,7 +12,7 @@ export function Data({ data }: { data: OptionsData }) {
         <span className="flex min-w-0 flex-col">
           <span className="text-[13px] font-semibold">{O.data.cache}</span>
           <span className="text-[11px] text-fg-2">
-            {/* 读不到就说读不到：显示成「0 条」会让用户以为缓存是空的（Codex 在 #52 指出） */}
+            {/* Unreadable is reported as unreadable: shown as “0 entries”, a failure would make the reader think the cache is empty (Codex on #52) */}
             {cacheError ? O.data.cacheError : cache ? O.data.cacheLine(cache.entries, (cache.bytes / 1024 / 1024).toFixed(1)) : '…'}
           </span>
         </span>

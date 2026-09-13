@@ -47,7 +47,7 @@ export function App() {
           ))}
 
           {/* The interface's own language, under the nav rather than in a section: it belongs to
-              none of them, and it must not sit next to 目标语言, which is a different choice
+              none of them, and it must not sit next to the target language, which is a different choice
               (S-O-05). Changing it reloads the page — the words are read once, before the first
               paint, so that nothing is ever half translated */}
           {data.config && (

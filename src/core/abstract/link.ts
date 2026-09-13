@@ -1,21 +1,21 @@
-// 摘要页的双语入口（issue #146）：在「Access Paper」里 arXiv 自己的 HTML 链接下面加一条，
-// 点进去直接是已经在翻的 HTML 全文。
+// The bilingual entry on the abstract page (issue #146): one more line under arXiv's own HTML link in “Access Paper”,
+// leading straight to the HTML full text already translating.
 //
-// **URL 用 arXiv 给的那一个**，只补一个 `#axt-translate`——content script 见到这个 hash 会自动开始翻译。
-// 自己拼 `arxiv.org/html/<id>` 会在论文有多个版本时指到错的那一版（它的 href 里带 `v7`）。
+// **The URL is the one arXiv gives**, plus a `#axt-translate` — the content script starts translating of itself on seeing that hash.
+// Building `arxiv.org/html/<id>` ourselves would point at the wrong version of a paper with several (its href carries the `v7`).
 
 import { HTML_LINK } from '@/core/rules/abstract'
 
-/** 我们插进去的那一条；`restore` 不管摘要页，但标记仍然要有，好识别、好幂等 */
+/** The line we insert; `restore` leaves the abstract page alone, but the mark is still needed, for recognition and idempotence */
 export const ABS_LINK_CLASS = 'axt-abs-link'
-/** 让 content script 一进页面就开始翻的 hash（DESIGN §4.1） */
+/** The hash that makes the content script start translating as soon as it enters the page (DESIGN §4.1) */
 export const AUTO_TRANSLATE_HASH = '#axt-translate'
 
 /**
- * 插入双语入口，返回是否插了。
+ * Insert the bilingual entry; returns whether it was inserted.
  *
- * 三种情况什么都不做：这不是摘要页、这篇论文没有 HTML 版（`HTML_LINK` 不存在）、已经插过了。
- * 幂等是因为它便宜：arXiv 的摘要页不会重渲染，但一个只在特定 DOM 形状下才对的假设不值得依赖。
+ * Nothing happens in three cases: this is not an abstract page, the paper has no HTML version (`HTML_LINK` absent), or it was inserted already.
+ * Idempotent because it is cheap: arXiv's abstract page does not re-render, but an assumption that only holds under one DOM shape is not worth relying on.
  */
 export function injectBilingualLink(doc: Document, label: string): boolean {
   const html = doc.querySelector<HTMLAnchorElement>(HTML_LINK)
@@ -25,7 +25,7 @@ export function injectBilingualLink(doc: Document, label: string): boolean {
   if (item.parentElement.querySelector(`.${ABS_LINK_CLASS}`)) return false
 
   const link = doc.createElement('a')
-  // arXiv 自己的按钮样式：这一条要看起来就是「Access Paper」里的一员，而不是外挂上去的
+  // arXiv's own button style: this line has to look like a member of “Access Paper”, not something bolted on
   link.className = `abs-button ${ABS_LINK_CLASS}`
   link.href = `${html.href}${AUTO_TRANSLATE_HASH}`
   link.textContent = label

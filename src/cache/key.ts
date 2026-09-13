@@ -1,25 +1,26 @@
-// 缓存键（DESIGN §9）：sha256(providerId | model | PROMPT_VERSION | promptKey | context | RULES_VERSION | target | renderPath | normalizedText)。
-// 提示词与上下文以**结构化原文**进载荷，不先压成 32 位 hash：DJB2 撞了外层 SHA-256 也分不开
-//（Codex 在 #28 给出实例：标题 19k04n01vcr73f 与 1efm0uaep90s9 的 DJB2 相同）。
-// 借鉴 FluentRead：identity 做结构化的确定性序列化（JSON 数组），不用分隔符拼用户文本，避免撞键。
-// 这里不引用 ./store：content 侧要算键但不能把 Dexie 打进包（DESIGN §8.0）。
+// The cache key (DESIGN §9): sha256(providerId | model | PROMPT_VERSION | promptKey | context | RULES_VERSION | target | renderPath | normalizedText).
+// The prompt and the context enter the payload as **structured source text**, not squeezed into a 32-bit hash first:
+// a DJB2 collision cannot be told apart by the outer SHA-256 (Codex on #28 gave the instance: the titles
+// 19k04n01vcr73f and 1efm0uaep90s9 share a DJB2). After FluentRead: identity is a structured, deterministic
+// serialisation (a JSON array), never user text joined with separators, so keys cannot collide.
+// ./store is not imported here: the content side computes keys but must not bundle Dexie (DESIGN §8.0).
 import { RULES_VERSION } from '@/core/rules/latexml'
 import { PROMPT_VERSION } from '@/providers/prompt'
 import type { WireFormat } from '@/core/protector/tokens'
 import { sha256Hex } from '@/shared/digest'
 
 /**
- * 渲染路径 = 线上格式（见 protector/tokens.ts）再加一个切段兜底 `runs`。
+ * The render path = the wire format (see protector/tokens.ts) plus the run-splitting fallback `runs`.
  *
- * 曾经叫 `markup` / `markers` / `runs`，与 `WireFormat` 的 `tags` / `markers` 是**同一个东西的两套名字**，
- * 中间靠一个映射函数来回换。那正是「三处硬编码 `'tags'` 会漏」的温床——新加的调用点写错一个字面量，
- * 类型系统拦不住。统一之后 `serialize(el, renderPath)` 这种写法直接成立（issue #108）。
+ * Once `markup` / `markers` / `runs`, **two sets of names for the same thing** as `WireFormat`'s `tags` / `markers`,
+ * converted back and forth by a mapping function. That was the breeding ground of “three hard-coded `'tags'` will
+ * miss one” — a new call site with one wrong literal, and the type system cannot catch it. Unified, `serialize(el, renderPath)` simply holds (issue #108).
  */
 export type RenderPath = WireFormat | 'runs'
 
 /**
- * 渲染路径 → 线上格式。名字统一之后这里只剩一件**真事**：`runs` 不走占位符，
- * 它送的是切好的纯文本段，但仍要按某种规则转义，取 `tags`（`& < >` 转实体）。
+ * Render path → wire format. With the names unified only one **real** thing remains here: `runs` takes no
+ * placeholders, sends cut plain-text runs, yet still has to escape by some rule, and takes `tags` (`& < >` as entities).
  */
 export function wireFormatOf(path: RenderPath): WireFormat {
   return path === 'runs' ? 'tags' : path
@@ -36,40 +37,40 @@ export interface CacheIdentity {
   providerId: string
   model: string
   promptVersion: string
-  /** 提示词身份（prompt-library.promptKey：内置是 id，自定义是全文）；免费引擎没有提示词，传空串 */
+  /** The prompt's identity (prompt-library.promptKey: the id for a built-in, the full text for a custom one); a free engine has no prompt and passes the empty string */
   promptKey: string
-  /** 进 prompt 的上下文：译文随标题 / 摘要 / 章节 / 术语表变化，同一段文字在另一篇论文里不能拿来命中。免费引擎不看上下文，传 undefined */
+  /** The context that enters the prompt: the translation follows the title / abstract / section / glossary, and the same passage in another paper must not hit. A free engine reads no context and passes undefined */
   context?: CacheContext
   rulesVersion: string
   target: string
   renderPath: RenderPath
-  /** 发给模型的文本（含占位符），归一化在这里做 */
+  /** The text sent to the model (placeholders included); normalised here */
   text: string
   /**
-   * 句子边界（§8.6）。**必须进键**：两个块可以序列化成同一份线上文本，而槽位语义不同、
-   * `cutsOf` 因此给出不同的切点——键里不带它，第二个块就会命中第一个块的条目，
-   * 连同它那份对不上的对齐一起（`verifyAlignment` 只查条数与总长，挡不住这种）
-   *（Codex 在 #137 指出）。不切句的调用不带这个字段，键与从前一致
+   * The sentence boundaries (§8.6). **Must enter the key**: two blocks can serialise to the same wire text with
+   * different slot semantics, and `cutsOf` then gives different cut points — without it in the key the second block
+   * hits the first's entry, its mismatched alignment included (`verifyAlignment` checks counts and total lengths only
+   * and cannot catch this) (Codex on #137). A call that cuts no sentences omits the field, and the key is as before
    */
   cuts?: readonly number[]
 }
 
 /**
- * 改变键的算法或归一化规则时递增，旧数据自然失效。
- * 3：加入 markers 路径（#104）；4：markup 改名 tags（#108，键里存的是这个字符串）；
- * 5：序列化开始折叠空白（#119）。**这一次不是键的算法变了，是旧条目的内容坏了**——
- * 带硬换行的请求让微软逐行翻译（`state explosion` → 「州级爆炸性质」），而 `normalizeText`
- * 让带换行和折叠后的两种文本算出同一个键，于是那些坏译文会在 30 天 TTL 内继续被原样返回、
- * 修复根本到不了已经翻过的块。递增版本号把它们一次作废（Codex 在 #122 指出）。
- *
- * 6：句子对齐开始给不汇报句边界的引擎插标记（§8.6，#105）。**送出去的请求变了**——同一段文本
- * 现在带着 `<x id="N"/>` 边界标记发出——所以旧条目描述的不再是同一次请求。不递增的话，
- * 30 天 TTL 内已经翻过的论文全都命中不带对齐的旧条目，高亮在那些页面上一直是黑的
- *（Codex 在 #137 指出）。
+ * Bumped when the key's algorithm or the normalisation rules change, so old data expires of itself.
+ * 3: the markers path added (#104); 4: markup renamed tags (#108; the key stores that string); 5: serialisation
+ * started collapsing whitespace (#119). **That time the key's algorithm did not change; the old entries' content was
+ * wrong** — requests with hard line breaks made Microsoft translate line by line (`state explosion` → 「州级爆炸性质」),
+ * and `normalizeText` gave the broken-line and collapsed texts the same key, so those bad translations would have
+ * been served as they were for the 30-day TTL, the fix never reaching blocks translated already. Bumping the version
+ * voided them at once (Codex on #122).
+ * 6: sentence alignment started inserting markers for engines that report no boundaries (§8.6, #105). **The request
+ * sent changed** — the same text now goes out with `<x id="N"/>` boundary markers — so an old entry no longer
+ * describes the same request. Unbumped, every paper translated within the 30-day TTL would hit the old entries
+ * without alignment, and the highlight would stay dark on those pages (Codex on #137).
  */
 export const CACHE_KEY_VERSION = 6
 
-/** NFC + 连续空白折成一个空格 + 首尾 trim。只用于算键，不改动送翻译的文本 */
+/** NFC + runs of whitespace collapsed to one space + trimmed. For the key only; the text sent for translation is untouched */
 export function normalizeText(text: string): string {
   return text.normalize('NFC').replace(/\s+/g, ' ').trim()
 }
@@ -91,23 +92,23 @@ export async function buildCacheKey(identity: CacheIdentity): Promise<string> {
   return sha256Hex(payload)
 }
 
-/** 把 PROMPT_VERSION / RULES_VERSION 填进 identity 后算键 */
+/** Compute the key with PROMPT_VERSION / RULES_VERSION filled into the identity */
 export function cacheKeyFor(identity: Omit<CacheIdentity, 'promptVersion' | 'rulesVersion'>): Promise<string> {
   return buildCacheKey({ ...identity, promptVersion: PROMPT_VERSION, rulesVersion: RULES_VERSION })
 }
 
-/** 上下文的确定性序列化：字段顺序固定，缺省当空 */
+/** The context's deterministic serialisation: fixed field order, absent as empty */
 function contextPayload(context: CacheContext | undefined): unknown[] {
   if (!context) return []
   return [context.paperTitle ?? '', context.abstract ?? '', context.sectionTitle ?? '', (context.glossary ?? []).map(g => [g.term, g.translation])]
 }
 
-/** 改变 OCR 结果的存储形状或行的过滤前提时递增 */
+/** Bumped when the OCR result's stored shape or the line-filtering premises change */
 export const OCR_KEY_VERSION = 1
 
 /**
- * OCR 结果的缓存键（DESIGN §15.2）：识别是确定性的，只随图片字节与 helper 版本变；
- * 与译文的键分开算——每行的翻译走普通文字缓存，键里不带 imageHash
+ * The OCR result's cache key (DESIGN §15.2): recognition is deterministic and varies with the image bytes and the
+ * helper version only; computed apart from the translation key — each line's translation goes through the ordinary text cache, whose key carries no imageHash
  */
 export function ocrCacheKey(imageHash: string, helperVersion: string): Promise<string> {
   return sha256Hex(JSON.stringify(['ocr', OCR_KEY_VERSION, imageHash, helperVersion]))

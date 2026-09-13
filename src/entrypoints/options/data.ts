@@ -79,7 +79,7 @@ export function useOptionsData(): OptionsData {
   const loadCache = useCallback(async () => {
     try {
       const res = await sendMessage({ type: 'axt:cache-stats' })
-      // 读不到就说读不到：把失败显示成「0 条」会让用户以为缓存是空的（Codex 在 #52 指出）
+      // Unreadable is reported as unreadable: showing a failure as “0 entries” would make the reader think the cache is empty (Codex on #52)
       if (res.ok) { setCache({ entries: res.entries, bytes: res.bytes }); setCacheError('') }
       else { setCache(null); setCacheError(res.message) }
     } catch (e) {
@@ -135,7 +135,7 @@ export function useOptionsData(): OptionsData {
     }
     browser.runtime.onMessage.addListener(onHelperState)
     void loadCache()
-    // 翻译发生在别的标签页：切回设置页时重新读一次，否则显示的永远是打开那一刻的数字
+    // Translation happens in other tabs: re-read on returning to the settings page, or the numbers shown are forever those of the moment it opened
     const onVisible = () => { if (!document.hidden) void loadCache() }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)

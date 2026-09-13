@@ -105,7 +105,7 @@ export function profileName(profile: { id: string; name: string }, kind: 'styles
 }
 
 /**
- * The order the three modes are offered in (UI.md S-P-70). 左右 comes first: on a wide screen it is
+ * The order the three modes are offered in (UI.md S-P-70). “Side by side” comes first: on a wide screen it is
  * the layout most readers stay in. Presentation only — `MODE_VALUES` (config/schema.ts) stays the
  * data order, and both the popup's mode bar and the settings page's image modes read this one
  */

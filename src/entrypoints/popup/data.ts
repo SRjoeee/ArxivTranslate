@@ -46,19 +46,19 @@ export interface PopupActions {
   setHighlight(on: boolean): void
   setImages(on: boolean): void
   downloadPack(): void
-  /** `section` 省略时开到设置页自己的默认分节；带上时直接开到那一节 */
+  /** With `section` omitted, opens the settings page on its own default section; with it, straight to that section */
   openOptions(section?: OptionsSection): void
   /** What the permission step found after a grant (ui/HelperPermission.tsx) */
   helperStatus(status: HelperStatus): void
 }
 
-/** 设置页的分节名，与 options/App.tsx 的 SECTIONS 一致 */
+/** The settings page's section names, matching SECTIONS in options/App.tsx */
 export type OptionsSection = 'services' | 'reading' | 'prompts' | 'data'
 
 /**
- * 打开设置页。**不带分节时用 `openOptionsPage`**：它会把已经开着的那个标签页拉到前面，而不是再开一个。
- * 带分节时只能自己建标签页——`openOptionsPage` 递不进 hash，而设置页正是靠 hash 认分节的（App.tsx）。
- * 让读者点「管理译文样式」却落在「翻译服务」那一节，比多开一个标签页更糟
+ * Open the settings page. **Without a section, `openOptionsPage`**: it brings the tab already open to the front rather than opening another.
+ * With a section only a tab of our own will do — `openOptionsPage` passes no hash, and the settings page tells sections apart by the hash (App.tsx).
+ * A reader who clicks “Manage styles…” and lands on “Services” is worse off than one with an extra tab
  */
 function openOptions(section?: OptionsSection): void {
   if (!section) return void browser.runtime.openOptionsPage()
@@ -207,7 +207,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const session = page?.session ?? null
   // The saved settings' chain is asked whenever the page is not running — at mount, and again when it stops. A page
   // that is on shows its session's chain and the polling below stops with it: had the first ask failed, nothing would
-  // ask again, and the button would stay disabled after 显示原文 (the local review of S1, fourth pass)
+  // ask again, and the button would stay disabled after “Show original” (the local review of S1, fourth pass)
   useEffect(() => {
     if (!on) void loadProvider()
   }, [on, loadProvider])
@@ -317,7 +317,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     // The page's config watcher redraws the translations in the new style; no session restarts
     chooseStyle: id => void guard(async () => {
       setMenu(null)
-      // 最后一行不是样式，是去管理它们的地方（S-P-83）。样式住在「阅读」那一节，所以带上分节
+      // The last row is not a style but the place to manage them (S-P-83). Styles live in the “Reading” section, so the section goes along
       if (id === MANAGE_STYLES) return void openOptions('reading')
       // Same as the service menu: this list may have been built before another tab deleted the
       // profile, and a dangling id leaves every profile unmarked while the page reads the first

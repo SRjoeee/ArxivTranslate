@@ -93,8 +93,8 @@ export interface PopupView {
 }
 
 /**
- * 「不是论文页」那一屏。**按调用时算，不在模块加载时算**：这个模块在 `applyLocale` 之前就被导入，
- * 常量会把兜底语言冻在里面，于是中文界面上会出现一个英文按钮（Codex 在 #161 指出）
+ * The “not a paper page” screen. **Computed at call time, not at module load**: this module is imported before
+ * `applyLocale`, a constant would freeze the fallback language into it, and a Chinese interface would show one English button (Codex on #161)
  */
 const empty = (): PopupView => ({
   empty: true,
@@ -169,7 +169,7 @@ export function derivePopupView(input: PopupInput): PopupView {
   // The page runs on settings other than the saved ones. A change made here restarts the page at
   // once (data.ts), so this is what is left: a choice that cannot start, and a change made from
   // another tab, which leaves this page pinned to the session it began (Codex on #157). Either way
-  // the reader is offered 重新翻译 — enabled when the saved settings can actually run. The rule is
+  // the reader is offered “Translate again” — enabled when the saved settings can actually run. The rule is
   // the toggle's too (shared/page-action.ts): the page's revision against the saved settings' digest
   const decision = pageDecision(page, { revision: savedRevision, canRun, fallback: !!saved?.fallback }) ?? { action: 'translate' as const, behind: false, enabled: canRun || !!saved?.fallback }
   const { action, behind } = decision
@@ -195,7 +195,7 @@ export function derivePopupView(input: PopupInput): PopupView {
   const failed = failedCount > 0 && progress.state !== 'idle' && !progress.fatal && !page.images?.fatal ? S.failed.text(failedCount) : null
 
   const primary: PopupView['primary'] = { label: action === 'restore' ? S.primary.restore : action === 'retranslate' ? S.primary.retranslate : S.primary.translate, action, disabled: !decision.enabled }
-  // On every action the key actually performs, 显示原文 included: ⌥T translates a page that is not
+  // On every action the key actually performs, “Show original” included: ⌥T translates a page that is not
   // translated and restores one that is, so the badge belongs on both faces of the same button
   // (user 2026-09-11). A paused session retries rather than restores, which is what its label says
   if (!primary.disabled && shortcut) primary.shortcut = shortcut
@@ -257,7 +257,7 @@ function menuOf(kind: MenuKind, config: Config, pack: PackState | null): NonNull
       // Whatever the settings page holds, in its order: the reader's own profiles sit among the
       // built-in ones there, and a second order here would make the same list read as two lists.
       // Each name carries the same sample sentence the settings tiles use, drawn in that style —
-      // the names alone ("淡一档", "模糊") do not show what they do
+      // the names alone ("Muted", "Blurred") do not show what they do
       return {
         kind,
         label: S.rows.style,
@@ -270,7 +270,7 @@ function menuOf(kind: MenuKind, config: Config, pack: PackState | null): NonNull
             preview: styleTile(p),
             selected: p.id === config.appearance.activeStyle,
           })),
-          // 与服务菜单同一个位置、同一种角色：最后一行不是样式，是去管理它们的入口（S-P-83）
+          // The same position and role as in the service menu: the last row is not a style but the way in to managing them (S-P-83)
           { id: MANAGE_STYLES, name: S.rows.manageStyles, selected: false },
         ],
       }

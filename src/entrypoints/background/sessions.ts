@@ -1,21 +1,24 @@
-// 会话与链的绑定（DESIGN §8.0，Codex 在 #59 指出的两条）。
+// The binding of sessions to chains (DESIGN §8.0; the two points Codex made on #59).
 //
-// 请求搬回 background 之后多出两个暴露面，都因为 scope 不再和「它从哪来、绑哪条链」关联：
-//
-// 1. 配置中途变更会换掉正在进行的那一轮用的链。popup 的提示词下拉写完就落盘，界面上明说
-//    「恢复原文后再点翻译生效」；`chrome-builtin` 更是在构造时就把语言对固定下来，中途改目标语言
-//    会让同一轮里先后出现两种语言。所以**一次会话认准它开始时的那条链**，重建只影响之后的会话。
-// 2. 标签页关掉时队列还在 worker 里活着。搬迁前请求跑在 content 里，关页面连带就没了；现在不撤的话
-//    关掉的标签页还会继续发付费请求，直到批次耗尽预算（单批最长 180 秒）。
+// Moving the requests back into the background opened two exposures, both because a scope was no longer tied to
+// “where it came from and which chain it is bound to”:
+// 1. A configuration change halfway swaps the chain a round in progress is using. The popup's prompt drop-down writes
+//    to disk as soon as it is set, and the interface says outright “takes effect on the next translation after
+//    restore”; `chrome-builtin` even fixes the language pair at construction, so changing the target language halfway
+//    would give one round two languages. So **a session holds to the chain it started on**, and a rebuild affects
+//    later sessions only.
+// 2. When a tab closes, its queues live on in the worker. Before the move the requests ran in the content script and
+//    died with the page; now, unwithdrawn, a closed tab would keep sending paid requests until the batches exhausted
+//    their budget (up to 180 seconds a batch).
 import type { CancelledScopeRegistry } from '@/providers/request/cancellation'
 import type { TranslationTransport } from '@/providers/transport'
 
 export interface SessionRouter {
-  /** 取这次调用该用的链：带 scope 的绑定到它开始时的那条，不带的（设置页连接测试）用当前那条 */
+  /** The chain this call should use: with a scope, the one it was bound to at its start; without (the settings page's connection test), the current one */
   forCall(scope: string | undefined, tabId: number | undefined): Promise<TranslationTransport>
   /**
-   * 只记下 scope 属于哪个标签页，不建链、不等待：图片 OCR 的第一条请求要绑 tab 才撤得到，
-   * 但不能让它等翻译链构造（Codex 在 #87 指出）。同一标签页的旧 scope 顺手撤掉
+   * Record only which tab a scope belongs to, building no chain and awaiting nothing: an image OCR's first request has
+   * to be bound to its tab to be withdrawable, but must not wait for the translation chain to build (Codex on #87). The tab's old scopes are withdrawn along the way
    */
   bind(scope: string, tabId: number | undefined): void
   /**
@@ -24,18 +27,18 @@ export interface SessionRouter {
    * first request (`forCall`), not now. Nothing happens for a scope already on a chain or already dropped
    */
   bindTo(scope: string, transport: TranslationTransport, tabId: number | undefined): void
-  /** 撤掉这些 scope 并解绑，返回撤掉的条数 */
+  /** Withdraw these scopes and unbind them; returns how many were withdrawn */
   drop(scopes: readonly string[]): Promise<number>
-  /** 标签页关闭：撤掉挂在它上面的会话 */
+  /** The tab closed: withdraw the sessions hanging on it */
   dropTab(tabId: number): Promise<number>
   /**
-   * 这个标签页**可能**跳走了（`tabs.onUpdated` 报了 loading）。
+   * This tab **may** have navigated away (`tabs.onUpdated` reported loading).
    *
-   * 只是可能：同文档换 hash 与真的跳到别的网址在那个事件里完全一样——实测两种情况 `changeInfo`
-   * 都只有 `{status:'loading'}`，没有 `url` 可比（没有 `tabs` 权限）。所以不当场撤，先按住
-   * `NAVIGATION_GRACE_MS`；这段时间里这个标签页只要还有一次请求，就说明页面还活着，取消这次撤销。
-   * 真跳走的页面不会再有请求，宽限到点照撤（用户 2026-09-09 报的：点正文里的引用跳到参考文献，
-   * 那一整块的译文全部失败）
+   * Only may: a same-document hash change and a real move to another URL look exactly alike in that event —
+   * measured, `changeInfo` is `{status:'loading'}` alone in both cases, with no `url` to compare (no `tabs`
+   * permission). So nothing is withdrawn on the spot; it is held for `NAVIGATION_GRACE_MS`, and one request from this
+   * tab in that time means the page is alive and cancels the withdrawal. A page really gone makes no more requests, and
+   * the withdrawal goes ahead at the deadline (reported by the owner on 2026-09-09: clicking a citation in the body that jumps to the references failed the whole block's translations)
    */
   mayHaveLeft(tabId: number): void
   /**
@@ -55,7 +58,7 @@ export interface SessionRouter {
   transportFor(scope: string): TranslationTransport | undefined
   /** How many sessions are on this chain; the chain holder keeps a superseded chain while any is */
   sessionsOn(transport: TranslationTransport): number
-  /** 当前还绑着的 scope，按绑定顺序 */
+  /** The scopes still bound, in binding order */
   bound(): string[]
 }
 
@@ -108,23 +111,23 @@ export interface SessionRouterDeps {
 }
 
 /**
- * 「可能跳走了」按住多久再撤。
+ * How long a “may have navigated away” is held before withdrawing.
  *
- * 只需要盖住「页面还活着，正要为新露出来的内容发请求」这段：跳到参考文献之后，视口观察器在同一帧
- * 就把新块排上了。给到 3 秒是留足余量，代价是真跳走的标签页多跑 3 秒——原先那条路径的暴露上限是
- * 一个批次的预算（180 秒），这点增量可以忽略
+ * It only has to cover “the page is alive and about to request the content just revealed”: after a jump to the
+ * references, the viewport observer queues the new blocks in the same frame. 3 seconds leaves ample room, at the
+ * cost of a tab really gone running 3 seconds longer — the old path's exposure was one batch's budget (180 seconds), and this increment is negligible
  */
 const NAVIGATION_GRACE_MS = 3000
 
 export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
-  /** transport 在第一次 forCall 时才填：bind 过的会话先只有 tabId */
+  /** Filled by the transport at the first forCall: a session that was only bound has a tabId alone */
   /**
    * `provisional`: bound to a chain at status time (`bindTo`), before the session has made a request. Such a binding
    * takes nothing from the tab's other sessions yet — a restart whose status came back late must not cancel the
    * restart that won (the local review of INVENTORY S2, eighth pass); the first request makes it the tab's session
    */
   const sessions = new Map<string, { transport?: TranslationTransport; tabId?: number; provisional?: true }>()
-  /** 按住的「可能跳走了」，按标签页；这个标签页再来一次请求就取消 */
+  /** The held “may have navigated away”, per tab; one more request from the tab cancels it */
   const leaving = new Map<number, ReturnType<typeof setTimeout>>()
 
   /**
@@ -133,7 +136,7 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
    * re-arming its stale scopes over the newer timer (the local review of ADR-0005, fourth pass)
    */
   const probes = new Map<number, number>()
-  /** 这个标签页还活着：把按住的撤销取消掉 */
+  /** This tab is alive: the held withdrawal is cancelled */
   const stayed = (tabId: number | undefined): void => {
     if (tabId === undefined) return
     probes.set(tabId, (probes.get(tabId) ?? 0) + 1)
@@ -144,10 +147,10 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
   }
 
   /**
-   * 「还在加载就再问一遍」最多几轮。
+   * How many rounds of “still loading, ask again” at most.
    *
-   * 有上限是因为一直卡在加载中的标签页会让它变成一个永不停止的轮询。四轮 ~12 秒之后仍然
-   * 在加载、而且页面还答得出同一个会话，那就当它确实是同一个文档
+   * Capped because a tab stuck loading would turn this into a poll that never stops. Still loading after four rounds
+   * (~12 seconds) and the page still answering with the same session, it is taken for the same document
    */
   const LOADING_RETRIES = 3
 
@@ -168,7 +171,7 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       // page's translation switches chains midway, exactly what §8.0's "a session keeps the chain it started on"
       // prevents (Codex on #143). Drain, keep the binding: a real navigation clears it with the tab close or the next scope
       if (remember) sessions.delete(scope)
-      // 别的按 scope 排队的东西（图片 OCR）先撤，不等建链：建链可能挂在 Translator.availability() 上（Codex 在 #87 指出）
+      // Whatever else is queued by scope (image OCR) is withdrawn first, without waiting for the chain: building it may hang on Translator.availability() (Codex on #87)
       cancelled += deps.onDrop?.(scope) ?? 0
       // Every chain still holding the scope's work, not only the one it is bound to (see `cancelScope`); it
       // builds no chain and needs no binding — a scope never bound at all (the worker restarted, the binding
@@ -177,8 +180,8 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
         cancelled += await deps.cancelScope(scope)
         continue
       }
-      // Without the holder: 只经 bind 绑过、从没翻过字的会话（bound 有值、没 transport）：这个 worker 里没有它的翻译请求，不用为撤它建一条链。
-      // 完全没绑过的也要撤：worker 中途重启过，绑定丢了但队列里可能还有这个 scope 的任务
+      // Without the holder: a session only bound and never translating (bound set, no transport) has no translation
+      // request in this worker, and no chain is built to withdraw it. One never bound is withdrawn too: the worker restarted halfway, the binding is lost, but the queues may still hold this scope's tasks
       if (bound && !bound.transport) continue
       const transport = bound?.transport ?? await deps.current()
       cancelled += await transport.cancel(scope)
@@ -187,10 +190,10 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
   }
 
   /**
-   * 按住一次撤销，到点问页面自己。
+   * Hold a withdrawal, and ask the page itself at the deadline.
    *
-   * 「还在加载」时页面的回答不可信——正在离开的旧文档也还答得出同一个会话——所以那时不下结论，
-   * 再按一次（有上限，见 `LOADING_RETRIES`）
+   * While “still loading” the page's answer cannot be trusted — an old document on its way out still answers with the
+   * same session — so no conclusion is drawn then, and it is held once more (capped, see `LOADING_RETRIES`)
    */
   const arm = (tabId: number, scopes: readonly string[], attempt: number): void => {
     stayed(tabId)
@@ -199,7 +202,7 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
     leaving.set(tabId, setTimeout(() => {
       leaving.delete(tabId)
       void (async () => {
-        // 没有探针时按原来的判断走：证据仍然只有「这段时间没有请求」，那只够软撤
+        // Without a probe the old judgement stands: the only evidence is still “no request in this time”, enough for a soft withdrawal only
         const answers = deps.stillThere
           ? await Promise.all(scopes.map(s => deps.stillThere!(tabId, s)))
           : scopes.map(() => 'unknown' as const)
@@ -211,8 +214,8 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
           arm(tabId, scopes, attempt + 1)
           return
         }
-        // 答上来了但换了会话：页面确实走了，这是确定的终结，判死——否则挂在 helper 握手上、
-        // 还没进任何队列的那些请求醒来之后照发不误（Codex 在 #143 指出）
+        // Answered, but with another session: the page really left, a certain end, sentenced — otherwise the requests hung
+        // on the helper handshake, in no queue yet, would go out as usual once they woke (Codex on #143)
         const confirmed = scopes.filter((_, i) => answers[i] === 'other')
         const unsure = scopes.filter((_, i) => answers[i] === 'unknown')
         if (confirmed.length > 0) await drop(confirmed)
@@ -235,9 +238,9 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
 
   return {
     async forCall(scope, tabId) {
-      // **不因为「这个标签页又发请求了」就取消按住的撤销**：真跳走时旧文档常常还能再发一两条，
-      // 那只证明新文档还没接管，不证明页面还在。取消掉之后新文档一提交，content script 就没了，
-      // 也没人再武装一次，旧会话的队列会一直跑（Codex 在 #143 指出）。到点问页面自己才是判据
+      // **A held withdrawal is not cancelled because “this tab requested again”**: on a real departure the old document
+      // can often send one or two more, which only proves the new document has not taken over, not that the page is
+      // there. Cancelled, the content script is gone once the new document commits, nobody arms it again, and the old session's queue runs on (Codex on #143). Asking the page itself at the deadline is the criterion
       if (scope === undefined) return deps.current()
       const bound = sessions.get(scope)
       if (bound?.transport && !bound.provisional) return bound.transport
@@ -262,8 +265,8 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
         return transport
       }
       if (!bound) {
-        // 一个标签页同时只有一个会话：出现新 scope 说明上一轮没走 endRun（导航、刷新），把它撤掉。
-        // bind 过的（bound 有值、没 transport）已经在 bind 里撤过了
+        // One session per tab at a time: a new scope means the previous round never went through endRun (navigation, a
+        // reload), so it is withdrawn. A bound one (bound set, no transport) was withdrawn in bind already
         const stale = tabId !== undefined ? supersededOn(tabId, scope) : []
         // Register before the first await, as bind() does for OCR: a tab closed while the chain is being built
         // must find this scope among its sessions, or dropTab marks nothing and the continuation below binds a
@@ -312,8 +315,8 @@ export function createSessionRouter(deps: SessionRouterDeps): SessionRouter {
       return drop(scopesOfTab(tabId))
     },
     mayHaveLeft(tabId) {
-      // 现在挂在这个标签页上的会话，取的是**按住那一刻**的：页面自己第一次加载也会报 loading，
-      // 那时它还没有会话，到点再取就会把这中间刚开起来的那个会话撤掉
+      // The sessions hanging on this tab are taken **as of the hold**: a page's own first load reports loading too, when it
+      // has no session yet, and taken at the deadline that would withdraw the session just started in between
       arm(tabId, scopesOfTab(tabId), 0)
     },
     async rebind(scope) {

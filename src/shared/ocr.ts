@@ -1,19 +1,19 @@
-// 图片翻译的共享类型（DESIGN §15）：content 发 OCR 请求、background 调 helper、两边都要认同一份形状。
-// 这里不引用 Dexie 与 provider，content 的包不能带上它们（§8.0）。
+// The shared types of image translation (DESIGN §15): the content side sends OCR requests, the background calls the
+// helper, and both must agree on one shape. Neither Dexie nor a provider is imported here; the content bundle must not carry them (§8.0).
 import type { ProviderErrorKind } from '@/providers/types'
 
-/** Native Messaging 的 host 名（helper/install.sh 写进 manifest 的那个） */
+/** The Native Messaging host name (the one helper/install.sh writes into the manifest) */
 export const HELPER_HOST = 'io.github.srjoeee.arxivtranslate'
-/** 与 helper/Sources/axt-helper/main.swift 的 PROTOCOL 一致 */
+/** Matches PROTOCOL in helper/Sources/axt-helper/main.swift */
 export const HELPER_PROTOCOL = 1
 
-/** 归一化四角，左上原点：[左上, 右上, 右下, 左下]（§15.3） */
+/** Normalised corners, top-left origin: [top-left, top-right, bottom-right, bottom-left] (§15.3) */
 export type Quad = [[number, number], [number, number], [number, number], [number, number]]
 
 export interface OcrLine {
   text: string
   quad: Quad
-  /** Vision 的置信度 0–1 */
+  /** Vision's confidence, 0–1 */
   conf: number
   /**
    * Text direction in radians, absent when upright. Only the SVG path (§15.5) sets it, from the
@@ -41,9 +41,9 @@ export interface OcrResult {
   width: number
   height: number
   lines: OcrLine[]
-  /** helper 的回应超过大小上限、按置信度丢过行（§15.3）；结果不完整，调用方可据此提示 */
+  /** The helper's reply exceeded the size cap and lines were dropped by confidence (§15.3); the result is incomplete, and the caller may say so */
   truncated?: boolean
-  /** 图片的帧数；> 1 是动图，helper 只识别了第 0 帧，扩展不给动图叠译文 */
+  /** The image's frame count; > 1 is an animation, the helper recognised frame 0 only, and the extension overlays no translation on animations */
   frames?: number
 }
 
@@ -65,16 +65,16 @@ export type HelperStatus =
   | { state: 'ready'; version: string }
 export type HelperState = HelperStatus['state']
 
-/** content → background：给一张图做 OCR。图片字节已经在 content 侧哈希过，background 只按它查缓存 */
+/** content → background: OCR one image. The bytes were hashed on the content side already; the background looks the cache up by the hash alone */
 export interface OcrCall {
-  /** 图片字节的 SHA-256（shared/digest.ts） */
+  /** The SHA-256 of the image bytes (shared/digest.ts) */
   imageHash: string
-  /** base64 编码的图片字节 */
+  /** The image bytes, base64-encoded */
   image: string
   mime: string
-  /** 论文 id，缓存记录按它索引（清缓存时一起清） */
+  /** The paper id; cache records are indexed by it (cleared together) */
   paper: string
-  /** 会话 id：恢复原文 / 关标签页时撤掉排队的识别 */
+  /** The session id: queued recognitions are withdrawn on restore / tab close */
   scope?: string
 }
 
@@ -82,12 +82,12 @@ export type OcrMessageResponse =
   | { ok: true; result: OcrResult; cached: boolean }
   | { ok: false; error: { kind: ProviderErrorKind; message: string } }
 
-/** 图片翻译的进度（与 Progress 同样可序列化，popup 显示用）：总数、进入过视口的、翻完的、失败的 */
+/** The image translation's progress (serialisable like Progress, for the popup): total, entered the viewport, done, failed */
 export interface ImageProgress {
   total: number
   requested: number
   done: number
   failed: number
-  /** 配置级错误（auth / no-key）后停下的原因；popup 据此不再给无效的重试 */
+  /** Why it stopped after a configuration-level error (auth / no-key); the popup offers no futile retry by it */
   fatal?: string
 }

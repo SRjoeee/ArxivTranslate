@@ -31,8 +31,8 @@ const CARD = 'rounded-card bg-card shadow-[0_1px_2px_rgba(30,30,36,0.06)]'
 
 export function PopupView({ view, error, actions }: { view: View; error: string | null; actions: PopupActions }) {
   /**
-   * 引导展开没展开。放在这里而不是 view model：它只是这一次打开 popup 的界面状态，
-   * 真正要跨 popup 活下来的是「正在等」，那个在 background（DESIGN §15.4）
+   * Whether the guided install is unfolded. Here rather than in the view model: it is the interface state of this one
+   * opening of the popup; what has to outlive the popup is “waiting”, and that lives in the background (DESIGN §15.4)
    */
   const [setupOpen, setSetupOpen] = useState(false)
   return (
@@ -73,8 +73,8 @@ export function PopupView({ view, error, actions }: { view: View; error: string 
               <Button variant="solid" onClick={actions.retryFailed}>{S.failed.retry}</Button>
             </Bubble>
           )}
-          {/* The card while the helper is not ready: one line and the step it calls for — 「允许」 for the permission
-              (ADR-0002), 「安装」 to unfold the guided install in place (UI.md S-P-86…88). Both steps are the components
+          {/* The card while the helper is not ready: one line and the step it calls for — “Allow” for the permission
+              (ADR-0002), “Install” to unfold the guided install in place (UI.md S-P-86…88). Both steps are the components
               the settings page uses: two surfaces, one wording */}
           {view.helper && (
             <div className={`${CARD} flex flex-col gap-2 px-3.5 py-3 text-[12px] leading-relaxed`}>
@@ -96,7 +96,7 @@ export function PopupView({ view, error, actions }: { view: View; error: string 
           <Button variant={view.primary.action === 'restore' ? 'secondary' : 'primary'} disabled={view.primary.disabled} aria-label={view.primary.label} onClick={actions[view.primary.action]}>
             {view.primary.label}
             {view.primary.shortcut && (
-              // `current`: the chip reads on the red 翻译本页 and on the plain 显示原文 alike, where a
+              // `current`: the chip reads on the red “Translate this page” and on the plain “Show original” alike, where a
               // white chip would disappear into the button
               <kbd className="rounded-[6px] bg-current/15 px-1.5 py-0.5 font-ui text-[11px] font-semibold">{view.primary.shortcut}</kbd>
             )}
@@ -107,7 +107,7 @@ export function PopupView({ view, error, actions }: { view: View; error: string 
           {view.mode.note && <p className="px-1 text-[11px] text-fg-2">{view.mode.note}</p>}
 
           {/* The three reading choices on one row: two switches and the way in to the styles. The
-              row is what the menu is measured against — a menu the width of the 译文样式 button
+              row is what the menu is measured against — a menu the width of the “Style” button
               alone would be a column of clipped names (S-P-82) */}
           <ReadingRow view={view} actions={actions} />
         </>
@@ -185,7 +185,7 @@ function MenuRow({ kind, label, row, view, actions, compact = false, last = fals
 }
 
 /**
- * The last row of the popup: 对照高亮, 图片翻译 and the way in to 译文样式, side by side. All three
+ * The last row of the popup: “Hover highlight”, “Images” and the way in to “Style”, side by side. All three
  * are "how this reads", as against the card at the top, which is what translates (S-P-82).
  *
  * The **row** is the menu's anchor, not the button: the menu is then as wide as the card above it
@@ -231,7 +231,7 @@ function ReadingRow({ view, actions }: { view: View; actions: PopupActions }) {
 function Chevron({ up = false }: { up?: boolean }): ReactNode {
   return <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-fg-2/60"><path d={up ? 'm18 15-6-6-6 6' : 'm6 9 6 6 6-6'} /></svg>
 }
-// The three mode marks (the reviewer's, 2026-09-10). The 仅译文 lines are drawn in the card colour
+// The three mode marks (the reviewer's, 2026-09-10). The translation-only mark's lines are drawn in the card colour
 // rather than white so they stay visible on the light fill of a selected segment in dark mode
 function StackIcon() {
   return <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5" /><path d="M3.5 12h17v5a3.5 3.5 0 0 1-3.5 3.5H7A3.5 3.5 0 0 1 3.5 17z" fill="currentColor" stroke="none" /></svg>
