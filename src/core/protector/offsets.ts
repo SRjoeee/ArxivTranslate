@@ -208,22 +208,6 @@ function carveOut(node: Element): Range[] {
   return out
 }
 
-/**
- * Wire interval `[from, to)` as ranges.
- *
- * **Usually one range, but not always.** `serialize` skips nodes we injected ourselves, so when an
- * inner block finished translating first its translation sits in the DOM between two runs that are
- * adjacent in wire coordinates. One range spanning that gap would contain the inner translation and
- * highlight it as if it were source text (Codex pointed this out on #123), so the interval is cut
- * at every such discontinuity. `Highlight` takes any number of ranges, so the caller just spreads
- * them.
- *
- * A boundary inside a placeholder resolves to that node's own boundary, so a sentence that opens or
- * closes on a formula still contains it.
- *
- * Returns an empty array when there is nothing to select: no spans, an empty interval, or an
- * interval past the end of the wire text.
- */
 /** The next node in document order after this whole subtree, never leaving `scope`. */
 function afterSubtree(node: Node, scope: Node): Node | undefined {
   let current: Node | null = node

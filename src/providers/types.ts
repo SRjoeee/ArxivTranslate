@@ -29,7 +29,7 @@ export interface TranslateRequest {
   segments: TranslateSegment[]
   /** Fixed in v1 */
   source: 'en'
-  /** BCP-47, such as zh-CN */
+  /** ISO 639-3 (config/languages.ts), such as cmn; each provider converts for its own API */
   target: string
   context?: TranslateContext
   /** Never crosses a message boundary; attached by the caller inside the background */

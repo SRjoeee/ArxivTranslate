@@ -1,7 +1,7 @@
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'wxt'
 
-// The WXT project configuration. host_permissions arrive with the network engines in Phase 3.
+// The WXT project configuration.
 export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
