@@ -1,13 +1,13 @@
-// A/B 无障碍审计（issue #72，DESIGN §7.4b）：同一篇论文跑两次 axe——不装扩展是基线，装了扩展是对照，
-// 只报「装扩展之后新增」的那些。绝对分数由 arXiv 决定，我们改不了也不该改（§7.4b：改宿主页面的
-// 标题层级 / 地标 / 表头都要改写原文档子树，直接违反 §7.1 的 DOM 不变量），所以门槛只看差集。
+// The A/B accessibility audit (issue #72, DESIGN §7.4b): axe runs twice on the same paper — without the extension as the baseline, with it as the treatment,
+// reporting only what is “added once the extension is installed”. The absolute score is arXiv's, which we cannot and should not change (§7.4b: fixing the host page's
+// heading levels / landmarks / table headers means rewriting the original document subtree, a direct breach of the DOM invariant of §7.1), so the gate looks at the difference only.
 //
-// 这件事之所以要自动化：同事上一轮的审计把 arXiv / LaTeXML 自己的四个问题算到了扩展头上，
-// 当时是手工对照「不装扩展的同一页面」才分清归属的。审计任何注入型扩展都会重复这场误会。
+// Why this is automated: a colleague's earlier audit charged four of arXiv / LaTeXML's own problems to the extension,
+// and only a manual comparison against “the same page without the extension” sorted out who owned what. Auditing any injecting extension repeats that confusion.
 //
-// 用法：pnpm build && pnpm e2e:a11y   （首次先 npx playwright install chromium）
-// 环境变量：AXT_PAPER 换论文；AXT_HEADED=1 看着跑。
-// 换论文值得跑一跑：2401.00596（参考文献带链接 + 无标签 <object>）当初就是靠它抓到镜像漏标 inert 的。
+// Usage: pnpm build && pnpm e2e:a11y   (first time: npx playwright install chromium)
+// Environment: AXT_PAPER picks the paper; AXT_HEADED=1 watches it run.
+// Changing the paper is worth a run: 2401.00596 (references with links + unlabelled <object>) is what caught the mirror missing inert in the first place.
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import AxeBuilder from '@axe-core/playwright'
@@ -19,17 +19,17 @@ const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chro
 const PROFILE = `${HERE}.profile-a11y`
 const BASE_PROFILE = `${HERE}.profile-a11y-base`
 const SHOTS = `${HERE}.shots`
-/** §7.4b 当初手工实测的就是这篇：h6 1 个、h5 1 个、main 0 个、12 张表里 8 张没 th */
+/** The one §7.4b measured by hand back then: 1 h6, 1 h5, 0 main, 8 of 12 tables without th */
 const PAPER = process.env.AXT_PAPER ?? '2410.00260'
 const PAPER_URL = `https://arxiv.org/html/${PAPER}`
 const IDLE = /session idle: (\d+)\/(\d+) requested of (\d+), (\d+) failed, (\d+) cached/
 const LAUNCH = { channel: 'chromium', headless: !process.env.AXT_HEADED, viewport: { width: 1440, height: 900 } }
 
 /**
- * 文档级规则：命中**哪个**元素取决于兄弟结构——「页面内容没被 landmark 包住」这类规则，axe 报的是
- * 最外层那个不在 landmark 里的元素，我们往里插译文就会让它换一个元素来报，按元素求差必然误报。
- * 这类只比「基线里这条规则出现过没有」：根因是宿主页面一个 landmark 都没有（§7.4b 实测 main 为 0），
- * 而给别人的页面补 landmark 要改写原文档子树，§7.1 不允许。真出现基线里没有的新规则，照样会报出来。
+ * Document-level rules: **which** element they hit depends on the sibling structure — for a rule like “page content is not wrapped in a landmark”, axe reports
+ * the outermost element outside a landmark, and inserting our translation makes it report a different element, so a per-element difference is a certain false positive.
+ * These are compared only as “did the rule appear in the baseline”: the root cause is the host page having no landmark at all (§7.4b measured main = 0),
+ * and adding a landmark to somebody else's page means rewriting the original document subtree, which §7.1 forbids. A new rule absent from the baseline is still reported.
  */
 const DOCUMENT_RULES = new Set([
   'region', 'landmark-one-main', 'landmark-unique', 'landmark-no-duplicate-contentinfo',
@@ -38,19 +38,19 @@ const DOCUMENT_RULES = new Set([
 ])
 
 /**
- * axe 的判据与浏览器实际行为脱节的规则：不凭版本号豁免，**在跑这一轮的浏览器里逐个实测**，
- * 过不了的照样判失败（Codex 在 #99 指出：无条件豁免会在没有该行为的浏览器上给出绿灯）。
+ * Rules whose axe criterion has drifted from real browser behaviour: not excused by version number, but **measured one by one in the browser running this round**,
+ * and one that fails is still a failure (Codex on #99: an unconditional excuse gives a green light on a browser without that behaviour).
  *
- * - `scrollable-region-focusable`：axe 查的是滚动容器上有没有 `tabindex`。Chrome 从 127 起给
- *   「没有可聚焦子元素的滚动容器」内置了顺序焦点，而 manifest 的 `minimum_chrome_version` 是 131
- *   （§15.2 的锚点定位要求），所有能装上本扩展的 Chrome 都在范围内。这里用往返法逐个验：
- *   聚焦 → Shift+Tab 退到上一个 → Tab 应当回到它，回得来才说明它真在顺序焦点里。
- *   另一半理由是就算想按 axe 说的加 `tabindex`，side 模式那几个滚动容器里有一半是**原节点**
- *   （`#alg1.4`、`#S2.T1.2`、`#S2.F2`），给它们加属性会违反 §7.1 的 DOM 不变量。
+ * - `scrollable-region-focusable`: axe checks whether the scroll container has a `tabindex`. Since 127 Chrome gives
+ *   “a scroll container without focusable children” sequential focus built in, and the manifest's `minimum_chrome_version` is 131
+ *   (required by §15.2's anchor positioning), so every Chrome that can install this extension is in range. Verified here one by one with the round trip:
+ *   focus → Shift+Tab back to the previous → Tab should return to it; only if it returns is it really in sequential focus.
+ *   The other half of the reason: even to add `tabindex` as axe says, half of side mode's scroll containers are **original nodes**
+ *   (`#alg1.4`, `#S2.T1.2`, `#S2.F2`), and adding an attribute to them would breach the DOM invariant of §7.1.
  */
 const VERIFY_KEYBOARD = new Set(['scrollable-region-focusable'])
 
-/** 往返法实测键盘够不够得到：聚焦 → Shift+Tab → Tab 能回来，才算在顺序焦点里 */
+/** Round-trip measurement of keyboard reachability: focus → Shift+Tab → Tab returns, only then is it in sequential focus */
 async function keyboardReachable(page, selectors) {
   const out = []
   for (const sel of selectors) {
@@ -76,27 +76,27 @@ const check = (name, ok, detail) => {
 }
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-/** axe 的结果拍平成一条条「某个节点违反了某条规则」 */
+/** axe's result flattened into “this node broke this rule” entries */
 const flatten = result => result.violations.flatMap(v =>
   v.nodes.map(n => ({ rule: v.id, impact: v.impact ?? '', target: n.target, html: (n.html ?? '').replace(/\s+/g, ' ').slice(0, 140) })))
 
 /**
- * 在页面里给每条违规算一个**两次运行可比的键**。
+ * Compute a **key comparable across two runs** for every violation on the page.
  *
- * 不能直接拿 axe 给的选择器求差（issue #72 的核心难点）：我们把译文作为兄弟节点插进去，
- * `:nth-child` 会整体位移，同一个宿主页面的问题在两次运行里选择器就不一样了，全是误报。
+ * The selector axe gives cannot be differenced directly (the core difficulty of issue #72): we insert translations as sibling nodes,
+ * `:nth-child` shifts wholesale, and the same host-page problem gets a different selector in the two runs — all false positives.
  *
- * 键的算法：
- * - 节点落在我们注入的内容里 → 顺着 `data-axt-for` 找回它翻译的那个原块，用**原块**的键。
- *   §7.4b 说的「双语渲染让 h6 从 1 个变 2 个」由此自动归为继承：译文那份映射回原块，
- *   而原块的键基线里已经有了。译文上原块没有的问题（漏标 lang、叠加层对比度不足）则映射不到，
- *   基线里找不到 → 判为新增。
- * - 映射不回原块的注入内容（图片叠加层、失败控件）→ 键带 `axt:` 前缀，基线里必然没有，一律算新增。
- * - 宿主元素 → 用它自己的稳定键。
+ * The key's algorithm:
+ * - A node inside content we injected → follow `data-axt-for` back to the original block it translates and use the **original block's** key.
+ *   §7.4b's “bilingual rendering turns 1 h6 into 2” is thereby classed as inherited of itself: the translation's copy maps back to the original block,
+ *   whose key the baseline already has. A problem on the translation that the original does not have (a missing lang, insufficient overlay contrast) maps nowhere,
+ *   is not found in the baseline → counted as new.
+ * - Injected content that maps to no original block (the image overlay, the failure widget) → the key carries an `axt:` prefix, is never in the baseline, and always counts as new.
+ * - A host element → its own stable key.
  *
- * 稳定键：有 `id` 就用 `#id`（LaTeXML 给绝大多数块都发了 `S1.p1` 这类 id，命中率很高）；
- * 没有就往上走到最近一个带 id 的祖先，沿途拼标签名与**排除 `.axt-*` 之后**的同标签兄弟序号。
- * 排除注入的兄弟，正是让两次运行的序号对得上的关键。
+ * The stable key: with an `id`, `#id` (LaTeXML gives most blocks an id like `S1.p1`, so the hit rate is high);
+ * without one, walk up to the nearest ancestor with an id, joining tag names and the same-tag sibling index **with `.axt-*` excluded** along the way.
+ * Excluding the injected siblings is exactly what makes the indices agree across the two runs.
  */
 const KEYED = items => {
   const INJECTED = '.axt-t, .axt-img, .axt-note-t, .axt-skel'
@@ -117,10 +117,10 @@ const KEYED = items => {
     }
     return parts.join('>') || '<root>'
   }
-  // 译文是原块的结构副本，所以「译文里的这个元素」在原块里有个对应元素：
-  // 记下它相对译文根的路径（标签 + 同标签序号），再拿同一条路径从原块走下去
-  // 序号两侧都排除注入的兄弟：原块在 stack 下自己也会被插进译文（嵌套块，例如表格单元格），
-  // 不排除的话副本与原件的序号对不上
+  // The translation is a structural copy of the original block, so “this element inside the translation” has a counterpart in the original:
+  // record its path relative to the translation root (tag + same-tag index), then walk the same path down from the original block
+  // The index excludes injected siblings on both sides: under stack the original itself gets translations inserted into it (nested blocks, table cells for instance),
+  // and without the exclusion the copy's and the original's indices would not agree
   const sameTag = (parent, tag) => [...parent.children].filter(s => s.tagName === tag && !s.matches(INJECTED))
   const pathTo = (el, root) => {
     const parts = []
@@ -144,16 +144,16 @@ const KEYED = items => {
     return cur
   }
   return items.map(item => {
-    // target 是数组；多于一项说明穿过了 shadow root（只有失败控件用 shadow，§7.6）
+    // target is an array; more than one entry means it crossed a shadow root (only the failure widget uses shadow, §7.6)
     const [outer] = item.target
     const el = typeof outer === 'string' ? document.querySelector(outer) : null
     if (!el) return { ...item, key: `${item.rule}@?${item.target.join(' ')}`, origin: 'unresolved' }
     const injected = el.closest(INJECTED)
     if (!injected) return { ...item, key: `${item.rule}@${stable(el)}`, origin: 'host' }
-    // 最近的那个「能对回原文」的锚：译文用 data-axt-for，side 的拆图副本用 data-axt-split-of。
-    // 副本的 data-axt-for 是合成的 `split:N`，指不到任何 data-axt-id（Codex 在 #99 指出）——
-    // 不认 data-axt-split-of 的话，副本里那些**继承自原件**的问题（例如没标签的 <object>）
-    // 会被算成扩展引入的
+    // The nearest anchor that “maps back to the source”: a translation uses data-axt-for, side's split copy data-axt-split-of.
+    // The copy's data-axt-for is a synthetic `split:N` pointing at no data-axt-id (Codex on #99) —
+    // without recognising data-axt-split-of, the problems inside the copy **inherited from the original** (an unlabelled <object>, say)
+    // would be counted as introduced by the extension
     const anchor = el.closest('[data-axt-for], [data-axt-split-of]')
     const forId = anchor?.getAttribute('data-axt-for')
     const splitOf = anchor?.getAttribute('data-axt-split-of')
@@ -163,19 +163,19 @@ const KEYED = items => {
     const path = original && anchor ? pathTo(el, anchor) : null
     const counterpart = path ? follow(original, path) : null
     if (counterpart) return { ...item, key: `${item.rule}@${stable(counterpart)}`, origin: splitOf && !counterpart.closest(INJECTED) ? 'split' : 'translation' }
-    // 对不上原文的注入内容（图片叠加层、失败控件，或结构与原件不同构）→ 基线里必然没有，算新增
+    // Injected content that maps to no source (the image overlay, the failure widget, or a structure not isomorphic to the original) → never in the baseline, counts as new
     return { ...item, key: `${item.rule}@axt:${injected.className}:${stable(injected.parentElement ?? injected)}`, origin: 'injected' }
   })
 }
 
-/** 跑一次 axe，把每条违规都换算成可比的键 */
+/** Run axe once and convert every violation into a comparable key */
 const audit = async page => page.evaluate(KEYED, flatten(await new AxeBuilder({ page }).analyze()))
 
 /**
- * 逐屏往下滚：一次跳到底只会让最后一屏进入观察器。
- * 每一步都**重读**文档高度（Codex 在 #99 指出）：译文是边滚边插进去的，文档会越滚越长，
- * 拿滚之前那个高度当上界会停在半路；而没进过视口的块不会有 pending 节点，静止判定照样成立，
- * 于是下半篇被悄悄跳过、审计覆盖不到
+ * Scroll down screen by screen: jumping to the bottom at once only lets the last screen enter the observer.
+ * Every step **re-reads** the document height (Codex on #99): translations are inserted while scrolling, the document keeps growing,
+ * and the height from before the scroll as the bound would stop halfway; blocks that never entered the viewport have no pending node, so the settled check still holds,
+ * and the lower half of the paper would be skipped silently, out of the audit's reach
  */
 async function scrollThrough(page) {
   for (let y = 0, guard = 0; guard < 500; guard++, y += 800) {
@@ -190,10 +190,10 @@ async function scrollThrough(page) {
 }
 
 /**
- * 静止的判定照 extension.mjs：最后一条 idle 行连续 3 秒没变，且页面上没有 pending 节点。
- * 光看「有没有 idle 行」不够（Codex 在 #99 指出）：超时退出、或者有块翻失败时也拿得到一行，
- * 那时页面上是圆环与错误控件，审计的就不是译文了，还会报出一个漂亮的空差集。
- * 所以要同时满足：真的稳住了、请求过的块全部完成、零失败
+ * The settled check follows extension.mjs: the last idle line unchanged for 3 seconds in a row, and no pending node on the page.
+ * “Is there an idle line” alone is not enough (Codex on #99): a timeout exit, or a block failing to translate, also yields a line,
+ * and then the page shows rings and error widgets, what is audited is not the translation, and a fine empty difference is reported.
+ * So all three must hold: really settled, every requested block done, zero failures
  */
 async function waitSettled(page, logs) {
   let last = null
@@ -215,11 +215,11 @@ rmSync(PROFILE, { recursive: true, force: true })
 rmSync(BASE_PROFILE, { recursive: true, force: true })
 mkdirSync(SHOTS, { recursive: true })
 
-// ── 基线：同一篇，不装扩展 ────────────────────────────────────────────────
+// ── The baseline: the same paper, no extension ────────────────────────────────
 const baseContext = await chromium.launchPersistentContext(BASE_PROFILE, LAUNCH)
 const basePage = await baseContext.newPage()
 await basePage.goto(PAPER_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-await sleep(2_000) // arXiv 自己的脚本（主题、ToC、阅读模式）跑完再审
+await sleep(2_000) // let arXiv's own scripts (theme, ToC, reading mode) finish before auditing
 const baseline = await audit(basePage)
 await basePage.screenshot({ path: `${SHOTS}/a11y-baseline.png` })
 await baseContext.close()
@@ -227,39 +227,39 @@ await baseContext.close()
 const baseKeys = new Set(baseline.map(i => i.key))
 const baseRuleSet = new Set(baseline.map(i => i.rule))
 const baseRules = [...baseRuleSet].sort()
-// 基线本身必须查出东西来：一条都没有多半是 axe 没跑起来，那样"差集为空"就成了空断言
-check('基线（不装扩展）确实查出了宿主页面自带的问题', baseline.length > 0,
-  `${baseline.length} 条、${baseRules.length} 类：${baseRules.join(' / ')}`)
+// The baseline itself must find something: none at all most likely means axe did not run, and “the difference is empty” would be an empty assertion
+check('the baseline (no extension) really finds the host page\'s own problems', baseline.length > 0,
+  `${baseline.length} violations, ${baseRules.length} rules: ${baseRules.join(' / ')}`)
 
-// ── 对照：装扩展，三种模式各审一次 ────────────────────────────────────────
+// ── The treatment: with the extension, one audit per mode ────────────────────────────────
 const context = await chromium.launchPersistentContext(PROFILE, {
   ...LAUNCH,
   args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`],
 })
 
-// 真实论文的导航给足时间：Playwright 默认 30 s，而 arXiv 在连着跑几十轮之后会明显变慢
-// （实测同一篇 curl 要 26 s）。断言各自的等待没有放宽，放宽的只是「把页面拿到手」这一步
+// Navigation to a real paper gets ample time: Playwright's default is 30 s, and arXiv slows down markedly after dozens of consecutive runs
+// (measured: curl on the same paper took 26 s). No assertion's own wait is loosened; only the “get the page” step is
 context.setDefaultNavigationTimeout(90_000)
 let [worker] = context.serviceWorkers()
 if (!worker) worker = await context.waitForEvent('serviceworker')
 const extId = worker.url().split('/')[2]
 
 const options = await openOptions(context, extId)
-await chooseBuiltIn(options, 'Google 翻译') // 免费服务，不花钱
+await chooseBuiltIn(options, 'Google 翻译') // the free service, costs nothing
 await options.close()
 
 const logs = []
 const page = await context.newPage()
 page.on('console', m => { if (m.text().includes('[axt]')) logs.push(m.text()) })
 await page.goto(`${PAPER_URL}#axt-translate`, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-// 整篇滚一遍：只翻首屏的话，审计覆盖不到正文的绝大部分（§10 的加载模式）
+// Scroll the whole paper: translating the first screen only, the audit would miss most of the body (the loading model of §10)
 await scrollThrough(page)
 const settled = await waitSettled(page, logs)
-check('整篇翻完再审计：翻译静止、请求过的块全部完成、零失败', settled.ok,
-  `${settled.idle ? `${settled.idle.requested}/${settled.idle.total} 个块请求过；` : ''}${settled.text}`)
+check('audit after the whole paper is translated: settled, every requested block done, zero failures', settled.ok,
+  `${settled.idle ? `${settled.idle.requested}/${settled.idle.total} blocks requested; ` : ''}${settled.text}`)
 
-// popup 按**活动标签页**取状态：论文页不在前台时它渲染的是另一套 UI，模式按钮根本不出现。
-// 所以 goto 之后必须先把论文页提回前台再等按钮，而且全程不能把 popup 提到前台（照 image.mjs 的顺序）
+// The popup takes the status from the **active tab**: with the paper page not in front it renders another UI, and the mode buttons never appear.
+// So after goto the paper page must be brought to the front before waiting for the buttons, and the popup must never be brought to the front (the order image.mjs uses)
 const popupUrl = `chrome-extension://${extId}/popup.html`
 
 for (const [label, button] of [['stack', '上下'], ['side', '左右'], ['only', '仅译文']]) {
@@ -270,7 +270,7 @@ for (const [label, button] of [['stack', '上下'], ['side', '左右'], ['only',
   await control.waitFor({ timeout: 10_000 })
   await control.click()
   await popup.close()
-  await sleep(2_000) // side 要拆图与镜像，给版式一点时间落定
+  await sleep(2_000) // side splits figures and mirrors; give the layout a moment to settle
   const withExt = await audit(page)
   const isNew = i => (DOCUMENT_RULES.has(i.rule) ? !baseRuleSet.has(i.rule) : !baseKeys.has(i.key))
   const candidates = withExt.filter(i => isNew(i) && VERIFY_KEYBOARD.has(i.rule))
@@ -278,24 +278,24 @@ for (const [label, button] of [['stack', '上下'], ['side', '左右'], ['only',
   const excused = candidates.filter((_, n) => reachable[n])
   const introduced = [
     ...withExt.filter(i => isNew(i) && !VERIFY_KEYBOARD.has(i.rule)),
-    ...candidates.filter((_, n) => !reachable[n]), // 实测键盘够不到的，不豁免
+    ...candidates.filter((_, n) => !reachable[n]), // measured as unreachable by keyboard: not excused
   ]
   await page.screenshot({ path: `${SHOTS}/a11y-${label}.png` })
   const byRule = [...new Set(introduced.map(i => i.rule))].sort()
-  const tail = excused.length > 0 ? `；另有 ${excused.length} 条 ${[...new Set(excused.map(i => i.rule))].join(' / ')} 已当场实测键盘够得到、豁免` : ''
-  check(`${label} 模式：没有由扩展引入的无障碍问题`, introduced.length === 0,
+  const tail = excused.length > 0 ? `; ${excused.length} more of ${[...new Set(excused.map(i => i.rule))].join(' / ')} measured keyboard-reachable on the spot and excused` : ''
+  check(`${label} mode: no accessibility problem introduced by the extension`, introduced.length === 0,
     (introduced.length === 0
-      ? `共 ${withExt.length} 条，全部在基线里已有（宿主页面自带）`
-      : `新增 ${introduced.length} 条、${byRule.length} 类：${byRule.join(' / ')}`) + tail)
+      ? `${withExt.length} in all, every one already in the baseline (the host page's own)`
+      : `${introduced.length} new, ${byRule.length} rules: ${byRule.join(' / ')}`) + tail)
   const show = (items, mark) => {
     for (const item of items.slice(0, 12)) {
       console.log(`    ${mark} ${item.impact.padEnd(8)} ${item.rule}  [${item.origin}]  ${item.key}`)
       console.log(`               ${item.html}`)
     }
-    if (items.length > 12) console.log(`    …… 另有 ${items.length - 12} 条`)
+    if (items.length > 12) console.log(`    … ${items.length - 12} more`)
   }
   show(introduced, '✗')
-  show(excused, '·') // 豁免的也打出来，免得它悄悄变多
+  show(excused, '·') // the excused are printed too, so they cannot grow quietly
 }
 
 await context.close()

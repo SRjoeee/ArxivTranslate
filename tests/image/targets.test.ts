@@ -6,10 +6,10 @@ import { collectImageTargets } from '@/core/image'
 import { IMG_CLASS, T_CLASS } from '@/core/marks'
 import { docOf } from '../renderer/helpers'
 
-// 图片翻译的目标（DESIGN §15.2）：翻译根内的位图，块内的与我们自己节点里的不算
+// The targets of image translation (DESIGN §15.2): bitmaps inside the translation root; those inside blocks and inside our own nodes do not count
 
 describe('collectImageTargets', () => {
-  it('2507.00150：6 张曲线图，id 取元素 id', () => {
+  it('2507.00150: 6 plot images, the id taken from the element id', () => {
     const doc = new DOMParser().parseFromString(readFileSync(join(import.meta.dirname, '../fixtures/arxiv/2507.00150.html'), 'utf8'), 'text/html')
     markBlocks(extract(doc))
     const targets = collectImageTargets(doc)
@@ -18,7 +18,7 @@ describe('collectImageTargets', () => {
     expect(targets.every(t => t.el.tagName === 'IMG')).toBe(true)
   })
 
-  it('块内的图不翻（它会随占位符克隆进译文、only 模式下原块整个隐藏），译文与叠加层里的也不算', () => {
+  it('an image inside a block is not translated (it is cloned into the translation with the placeholder, and in only mode the whole original block is hidden); those inside translations and overlays do not count either', () => {
     const doc = docOf(`<figure class="ltx_figure"><img class="ltx_graphics" src="a.png"><figcaption class="ltx_caption" id="c">Cap</figcaption></figure>`
       + `<div class="ltx_para"><p class="ltx_p" id="p">Inline <img class="ltx_graphics" src="b.png"> here.</p></div>`
       + `<figure class="ltx_figure ${T_CLASS}"><img class="ltx_graphics" src="c.png"></figure>`
@@ -27,10 +27,10 @@ describe('collectImageTargets', () => {
     const targets = collectImageTargets(doc)
     expect(targets).toHaveLength(1)
     expect(targets[0]!.el.getAttribute('src')).toBe('a.png')
-    expect(targets[0]!.id).toBe('axt-img-1') // 没有 id 的图编号
+    expect(targets[0]!.id).toBe('axt-img-1') // an image without an id is numbered
   })
 
-  it('内联 TikZ 图（§15.6）：带词的收，纯公式的不收，块内的照旧不收', () => {
+  it('inline TikZ pictures (§15.6): those with words are collected, formula-only ones are not, those inside blocks still not', () => {
     const node = (inner: string) =>
       `<foreignObject><span class="ltx_foreignobject_container"><span class="ltx_foreignobject_content">${inner}</span></span></foreignObject>`
     const math = '<math class="ltx_Math"><semantics><mrow>E1</mrow><annotation encoding="application/x-tex">E_1</annotation></semantics></math>'
@@ -45,7 +45,7 @@ describe('collectImageTargets', () => {
     expect(targets[0]!.kind).toBe('picture')
   })
 
-  it('没有块标记时块内的图也会被收进来：调用方必须在标记写完之后再收', () => {
+  it('without block marks images inside blocks are collected too: the caller must collect only after the marks are written', () => {
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p">Inline <img class="ltx_graphics" src="b.png"> here.</p></div>')
     expect(collectImageTargets(doc)).toHaveLength(1)
     markBlocks(extract(doc))

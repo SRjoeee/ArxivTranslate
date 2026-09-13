@@ -1,5 +1,7 @@
 # axt-helper: the local OCR helper for image translation
 
+[中文](README.zh-CN.md)
+
 When the extension translates the text inside bitmaps on a Mac (DESIGN §15), the OCR is done by this small Swift program
 with Apple Vision; the translation and the overlay stay in the extension. It talks to the extension through Chrome's
 Native Messaging (stdio, length-prefixed JSON); the protocol is in `docs/DESIGN.md` §15.3. The core is ported from

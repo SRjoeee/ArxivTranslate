@@ -1,15 +1,15 @@
-// issue #42 的收益回归：把翻译请求搬回 background 之后，**不返 CORS 头的 http 本机端点**重新可用。
-// 改之前 content script 的 fetch 带页面 origin、要走预检，而且 https 页面根本够不着 http 端点
-//（混合内容），本地 Ollama 这类端点必然失败；改之后请求从 background 发出，两道限制都不适用。
-// 实测依据见 RESEARCH §6.7。
+// The gain of issue #42, as a regression: with translation requests moved back into the background, an **http localhost endpoint that returns no CORS headers** is usable again.
+// Before the change the content script's fetch carried the page's origin and needed a preflight, and an https page could not reach an http endpoint at all
+// (mixed content), so an endpoint like a local Ollama was bound to fail; after it the requests leave from the background, and neither restriction applies.
+// The measurements are in RESEARCH §6.7.
 //
-// 对照实验（2026-09-06，AXT_EXT_DIR 指向 main 的构建）：搬迁前设置页「测试连接」照样通过（它一直走
-// background），但整页翻译 0/12 段来自本机端点、端点收到 0 个请求，而页面自己发了 21 个被混合内容
-// 拦掉的请求——链静默降级到 google-web，页面上照样是通顺的中文。所以这里断言的是「译文带 MARK 前缀」，
-// 不是「翻出了中文」：后者在坏掉的架构上也成立。
+// A control experiment (2026-09-06, AXT_EXT_DIR pointing at main's build): before the move the settings page's “Connect” still passed (it has always gone
+// through the background), yet a whole-page translation had 0/12 passages from the local endpoint, the endpoint received 0 requests, and the page itself sent 21 requests blocked
+// as mixed content — the chain fell back silently to google-web, and the page still read as fluent Chinese. So the assertion here is “the translation carries the MARK prefix”,
+// not “it translated into Chinese”: the latter holds on the broken architecture too.
 //
-// 用法：pnpm build && pnpm e2e:local-endpoint     （首次先 npx playwright install chromium）
-// 环境变量：AXT_PAPER 换论文；AXT_HEADED=1 看着跑。
+// Usage: pnpm build && pnpm e2e:local-endpoint     (first time: npx playwright install chromium)
+// Environment: AXT_PAPER picks the paper; AXT_HEADED=1 watches it run.
 import { createServer } from 'node:http'
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -23,7 +23,7 @@ const EXT = `${HERE}.ext-local`
 const PROFILE = `${HERE}.profile-local`
 const SHOTS = `${HERE}.shots`
 const PAPER = process.env.AXT_PAPER ?? '2410.00260'
-/** 译文前缀：只有真的走了本机端点才会出现，降级到 google-web 就没有 */
+/** The translation prefix: appears only when the local endpoint was really used; a fallback to google-web has none */
 const MARK = '〖LOCAL〗'
 
 const results = []
@@ -33,10 +33,10 @@ const check = (name, ok, detail) => {
 }
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
-// ── 假端点：OpenAI 兼容，**刻意不发任何 CORS 头**，预检一律 405 ───────────
+// ── The fake endpoint: OpenAI-compatible, **deliberately sends no CORS header**, every preflight 405 ───────────
 const seen = { post: 0, options: 0, origins: new Set() }
 
-/** 用户消息里带的是 JSON.stringify(segments)（src/providers/prompt.ts）；从后往前试最长的合法数组 */
+/** The user message carries JSON.stringify(segments) (src/providers/prompt.ts); try the longest valid array from the end backwards */
 function segmentsFrom(prompt) {
   const start = prompt.indexOf('[{"id":')
   if (start < 0) return null
@@ -47,7 +47,7 @@ function segmentsFrom(prompt) {
       const parsed = JSON.parse(prompt.slice(start, end))
       if (Array.isArray(parsed) && parsed.every(s => typeof s?.id === 'string' && typeof s?.text === 'string')) return parsed
     } catch {
-      // 这个右括号在字符串里，试更短的
+      // This closing bracket is inside a string; try a shorter one
     }
   }
   return null
@@ -71,13 +71,13 @@ const server = createServer((req, res) => {
       const user = [...(parsed.messages ?? [])].reverse().find(m => m.role === 'user')
       segments = segmentsFrom(typeof user?.content === 'string' ? user.content : '')
     } catch {
-      // 交给下面的 400
+      // Left to the 400 below
     }
     if (!segments) {
-      res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: '认不出 segments' } }))
+      res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { message: 'segments not recognised' } }))
       return
     }
-    // 原样回声加前缀：占位符原封不动，校验必过；前缀让 DOM 上能认出译文来自本机端点
+    // Echo as it is with the prefix: placeholders untouched, so validation must pass; the prefix lets the DOM show the translation came from the local endpoint
     const content = JSON.stringify({ segments: segments.map(s => ({ id: s.id, text: `${MARK}${s.text}` })) })
     res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
       id: 'chatcmpl-local', object: 'chat.completion', created: 0, model: 'local-echo',
@@ -89,12 +89,12 @@ const server = createServer((req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const PORT = server.address().port
 const BASE_URL = `http://127.0.0.1:${PORT}/v1`
-console.log(`假端点在 ${BASE_URL}（无 CORS 头，预检 405）`)
+console.log(`fake endpoint at ${BASE_URL} (no CORS headers, preflight 405)`)
 
-// ── 装扩展：复制一份构建产物，只给它加本机 host 权限 ──────────────────────
-// 正式构建里 http://*/* 是 optional_host_permissions，要用户在设置页点保存时逐个授权；
-// 那是个原生弹窗，Playwright 点不到（实测会一直挂住）。授权流程不是本条 e2e 的被测对象，
-// 所以在**副本**的 manifest 里预置权限，仓库里的 wxt.config.ts 不动
+// ── Installing the extension: a copy of the build, given the localhost host permission only ──────────────────────
+// In the real build http://*/* is an optional_host_permissions entry, granted one by one when the reader saves on the settings page;
+// that is a native prompt Playwright cannot click (measured: it hangs for good). The grant flow is not what this e2e tests,
+// so the permission is preset in the **copy's** manifest, and the repository's wxt.config.ts stays as it is
 rmSync(PROFILE, { recursive: true, force: true })
 copyWithGrants(SRC, EXT, { hostPermissions: ['http://127.0.0.1/*'] })
 mkdirSync(SHOTS, { recursive: true })
@@ -110,14 +110,14 @@ if (!worker) worker = await context.waitForEvent('serviceworker')
 const extId = worker.url().split('/')[2]
 console.log(`extension ${extId} loaded from ${EXT}`)
 
-// ── 设置页：添加一个指向本机端点的服务，「连接」验证 ──────────────────────────
+// ── The settings page: add a service pointing at the local endpoint, verified by “Connect” ──────────────────────────
 const options = await openOptions(context, extId)
-// 「连接」本身就是保存 + 验证：它按名字指名这个服务，不走备用服务，端点坏了不会显示成功
+// “Connect” itself is save + verify: it names this service, does not go through the fallback service, and shows no success on a broken endpoint
 const testText = await addService(options, { name: 'local echo', baseURL: BASE_URL, model: 'local-echo' })
-check('设置页连接打到不返 CORS 头的 http 本机端点', /已连接/.test(testText), testText)
+check('the settings page connects to an http localhost endpoint that returns no CORS headers', /已连接/.test(testText), testText)
 await options.screenshot({ path: `${SHOTS}/local-endpoint-options.png` })
 
-// ── 真实论文页：译文必须带本机端点的前缀（降级到 google-web 就不会有）────────
+// ── A real paper page: the translation must carry the local endpoint's prefix (a fallback to google-web would have none) ────────
 const postsBeforePage = seen.post
 const page = await context.newPage()
 const pageRequests = []
@@ -136,14 +136,14 @@ const dom = await page.evaluate(mark => {
     sample: nodes[0]?.textContent?.slice(0, 60) ?? '',
   }
 }, MARK)
-check('https 论文页翻译走本机 http 端点：译文全部来自它，没有降级',
+check('the https paper page translates through the local http endpoint: every translation comes from it, no fallback',
   dom.translations > 0 && dom.fromLocal === dom.translations && dom.errors === 0,
-  `${dom.fromLocal}/${dom.translations} 段带本机前缀，${dom.errors} 个失败控件；样例「${dom.sample}」`)
-check('端点收到的是页面翻译的请求，不只是那次连接测试', seen.post > postsBeforePage, `连接测试后又收到 ${seen.post - postsBeforePage} 个请求`)
-check('没有任何预检：请求是从扩展 origin 发出的，不是页面 origin',
+  `${dom.fromLocal}/${dom.translations} passages carry the local prefix, ${dom.errors} failure widgets; sample “${dom.sample}”`)
+check('the endpoint received the page translation\'s requests, not only the connection test', seen.post > postsBeforePage, `${seen.post - postsBeforePage} more requests after the connection test`)
+check('no preflight at all: the requests leave from the extension origin, not the page origin',
   seen.options === 0 && !seen.origins.has('https://arxiv.org'),
-  `OPTIONS ${seen.options} 个；见到的 Origin：${[...seen.origins].join(', ')}`)
-check('页面自己一个请求都没发（旧架构下这里会有被混合内容拦掉的请求）', pageRequests.length === 0, `${pageRequests.length} 个`)
+  `${seen.options} OPTIONS; origins seen: ${[...seen.origins].join(', ')}`)
+check('the page itself sent not one request (the old architecture had requests blocked as mixed content here)', pageRequests.length === 0, `${pageRequests.length} requests`)
 await page.screenshot({ path: `${SHOTS}/local-endpoint-paper.png` })
 
 await context.close()

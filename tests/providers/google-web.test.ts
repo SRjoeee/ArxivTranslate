@@ -13,7 +13,7 @@ const okResponse = (items: string[]) =>
   new Response(JSON.stringify([items, 'en']), { status: 200, headers: { 'Content-Type': 'application/json' } })
 
 describe('createGoogleWebProvider', () => {
-  it('一次请求带上全部段落，按下标映射回 id', async () => {
+  it('one request carries every segment, mapped back to ids by index', async () => {
     const fetch = vi.fn(async () => okResponse(['一', '二', '三']))
     const provider = createGoogleWebProvider({ fetch: fetch as unknown as typeof globalThis.fetch })
     const result = await provider.translate(req(['one', 'two', 'three']))
@@ -25,24 +25,24 @@ describe('createGoogleWebProvider', () => {
     expect(result.provider).toBe('google-web')
   })
 
-  it('占位符原样穿过（端点保留标记，走 tags 路径）', async () => {
+  it('placeholders pass through as they are (the endpoint keeps the markup, the tags path)', async () => {
     const text = 'Let <x id="1"/> be a <t id="2">connected</t> graph.'
     const translated = '让 <x id="1"/> 是一个 <t id="2">连通的</t> 图。'
     const provider = createGoogleWebProvider({ fetch: (async () => okResponse([translated])) as unknown as typeof globalThis.fetch })
     const result = await provider.translate(req([text]))
     expect(result.segments[0]?.text).toBe(translated)
-    // 两种都保得住（tags 100% / markers 98.9%），tags 排前面：选微软时链上才留得住它做兜底（#104）
+    // Both are kept (tags 100% / markers 98.9%), tags first: only then does the chain keep it as the fallback when Microsoft is chosen (#104)
     expect(provider.wireFormats).toEqual(['tags', 'markers'])
   })
 
-  it('空请求不发网络请求', async () => {
+  it('an empty request sends no network request', async () => {
     const fetch = vi.fn()
     const provider = createGoogleWebProvider({ fetch: fetch as unknown as typeof globalThis.fetch })
     expect(await provider.translate(req([]))).toEqual({ segments: [], provider: 'google-web' })
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('429 归类为 rate-limit 并带上响应头供退避使用', async () => {
+  it('429 is classified rate-limit with the response headers for the backoff', async () => {
     const response = new Response('slow down', { status: 429, headers: { 'Retry-After': '30' } })
     const provider = createGoogleWebProvider({ fetch: (async () => response) as unknown as typeof globalThis.fetch })
     const error = await provider.translate(req(['x'])).catch((e: unknown) => e)
@@ -51,21 +51,21 @@ describe('createGoogleWebProvider', () => {
     expect(getRequestErrorMeta(error).statusCode).toBe(429)
   })
 
-  it('其他非 2xx 归类为 network 且可重试', async () => {
+  it('any other non-2xx is classified network and retryable', async () => {
     const provider = createGoogleWebProvider({ fetch: (async () => new Response('boom', { status: 503 })) as unknown as typeof globalThis.fetch })
     const error = await provider.translate(req(['x'])).catch((e: unknown) => e)
     expect((error as ProviderError).kind).toBe('network')
     expect(getRequestErrorMeta(error).statusCode).toBe(503)
   })
 
-  it('fetch 抛错归类为 network 且标记可重试', async () => {
+  it('a fetch that throws is classified network and marked retryable', async () => {
     const provider = createGoogleWebProvider({ fetch: (async () => { throw new Error('dns') }) as unknown as typeof globalThis.fetch })
     const error = await provider.translate(req(['x'])).catch((e: unknown) => e)
     expect((error as ProviderError).kind).toBe('network')
     expect(getRequestErrorMeta(error).isRetryable).toBe(true)
   })
 
-  it('已取消时归类为 aborted', async () => {
+  it('cancelled is classified aborted', async () => {
     const controller = new AbortController()
     controller.abort()
     const provider = createGoogleWebProvider({ fetch: (async () => { throw new Error('aborted') }) as unknown as typeof globalThis.fetch })
@@ -73,7 +73,7 @@ describe('createGoogleWebProvider', () => {
     expect((error as ProviderError).kind).toBe('aborted')
   })
 
-  it('条数对不上或结构异常归类为 invalid-response', async () => {
+  it('a count mismatch or a malformed structure is classified invalid-response', async () => {
     const short = createGoogleWebProvider({ fetch: (async () => okResponse(['只有一条'])) as unknown as typeof globalThis.fetch })
     const e1 = await short.translate(req(['a', 'b'])).catch((e: unknown) => e)
     expect((e1 as ProviderError).kind).toBe('invalid-response')
@@ -84,35 +84,35 @@ describe('createGoogleWebProvider', () => {
     expect((e2 as ProviderError).kind).toBe('invalid-response')
   })
 
-  it('免费端点无需凭据，isAvailable 恒为 true', async () => {
+  it('the free endpoint needs no credentials; isAvailable is always true', async () => {
     expect(await createGoogleWebProvider().isAvailable()).toBe(true)
   })
 })
 
-describe('HTTP 状态到错误类型（Codex 在 #17 指出）', () => {
+describe('HTTP status to error kind (Codex on #17)', () => {
   const respond = (status: number) => createGoogleWebProvider({
     fetch: async () => new Response('{}', { status, statusText: 'x' }),
   }).translate({ segments: [{ id: 'a', text: 'A' }], source: 'en', target: 'cmn' })
 
-  it('4xx 不能归成 network：retry-policy 先看 kind 再看状态码，network 会被判定可重试', async () => {
-    // 400 归 bad-request，元数据里 isRetryable 为假；归 network 的话一次必败的请求要重试满 3 次再逐条拆分
+  it('4xx must not go to network: retry-policy looks at the kind before the status code, and network is judged retryable', async () => {
+    // 400 goes to bad-request, isRetryable false in the metadata; as network a request bound to fail would retry the full 3 times and then split segment by segment
     await expect(respond(400)).rejects.toMatchObject({ kind: 'bad-request' })
     await expect(respond(404)).rejects.toMatchObject({ kind: 'bad-request' })
   })
 
-  it('401 / 403 归 auth，429 归 rate-limit', async () => {
+  it('401 / 403 go to auth, 429 to rate-limit', async () => {
     await expect(respond(401)).rejects.toMatchObject({ kind: 'auth' })
     await expect(respond(403)).rejects.toMatchObject({ kind: 'auth' })
     await expect(respond(429)).rejects.toMatchObject({ kind: 'rate-limit' })
   })
 
-  it('408 / 409 与 5xx 仍是瞬时的，照旧重试', async () => {
+  it('408 / 409 and 5xx are still transient and retried as before', async () => {
     for (const status of [408, 409, 500, 502, 503]) {
       await expect(respond(status)).rejects.toMatchObject({ kind: 'network' })
     }
   })
 
-  it('bad-request 不可重试，但仍触发降级链：换个引擎可能就成了', async () => {
+  it('bad-request is not retryable but still triggers the fallback chain: another engine may well succeed', async () => {
     const { getRequestErrorMeta } = await import('@/providers/request/retry-policy')
     const error = await respond(400).catch(e => e as Error)
     expect(getRequestErrorMeta(error).isRetryable).toBe(false)

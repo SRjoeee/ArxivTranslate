@@ -1,6 +1,6 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`side 模式的容器覆盖 > 2312.17141.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2312.17141.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {
     "ltx_flex_figure": 3,
@@ -11,7 +11,7 @@ exports[`side 模式的容器覆盖 > 2312.17141.html：配对能否连到翻译
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2312.17527.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2312.17527.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {
     "ltx_note": 4,
@@ -20,7 +20,7 @@ exports[`side 模式的容器覆盖 > 2312.17527.html：配对能否连到翻译
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2401.00418.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2401.00418.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {
     "ltx_note": 2,
@@ -29,7 +29,7 @@ exports[`side 模式的容器覆盖 > 2401.00418.html：配对能否连到翻译
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2401.00596.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2401.00596.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {
     "ltx_note": 15,
@@ -38,7 +38,7 @@ exports[`side 模式的容器覆盖 > 2401.00596.html：配对能否连到翻译
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2410.00260.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2410.00260.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {
     "ltx_flex_figure": 2,
@@ -48,7 +48,7 @@ exports[`side 模式的容器覆盖 > 2410.00260.html：配对能否连到翻译
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2507.00150.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2507.00150.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {
     "ltx_note": 7,
@@ -57,21 +57,21 @@ exports[`side 模式的容器覆盖 > 2507.00150.html：配对能否连到翻译
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2608.29808.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2608.29808.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {},
   "connected": "437/437",
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2608.30667.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2608.30667.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {},
   "connected": "1/1",
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2609.00245.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2609.00245.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {
     "ltx_note": 11,
@@ -80,7 +80,7 @@ exports[`side 模式的容器覆盖 > 2609.00245.html：配对能否连到翻译
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2609.00246.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2609.00246.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {
     "ltx_note": 9,
@@ -89,14 +89,14 @@ exports[`side 模式的容器覆盖 > 2609.00246.html：配对能否连到翻译
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2609.03768.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2609.03768.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {},
   "connected": "178/178",
 }
 `;
 
-exports[`side 模式的容器覆盖 > 2609.04056.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > 2609.04056.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {
     "ltx_note": 2,
@@ -105,7 +105,7 @@ exports[`side 模式的容器覆盖 > 2609.04056.html：配对能否连到翻译
 }
 `;
 
-exports[`side 模式的容器覆盖 > synthetic-structures.html：配对能否连到翻译根，快照记录被排除项挡住的数量 1`] = `
+exports[`side mode's container coverage > synthetic-structures.html: whether a pair reaches the translation root; the snapshot records how many each exclusion blocked 1`] = `
 {
   "blockedBy": {
     "tbody": 2,

@@ -19,8 +19,8 @@ const asRehydrated = (wire: string, fmt: 'tags' | 'markers') =>
   tokenize(wire, fmt).map(t => (t.kind === 'text' ? { kind: t.kind, text: decodeText(t.text) } : t))
 
 describe('positioned token scan (#105)', () => {
-  // 整套 fixture × 两种格式扫一遍，是 CPU 密集的一趟；跑满时它与另外一百多个测试文件抢 worker，
-  // 实测挂在全局 30s 上（空载 5s、并发时 31–38s）。这条与产品行为无关，给它自己的余量
+  // Scanning the whole fixture set × two formats is a CPU-bound pass; at full load it competes with the other hundred-odd test files for workers,
+  // measured to hang on the global 30 s (5 s idle, 31–38 s concurrent). This is unrelated to product behaviour, so it gets a margin of its own
   it('agrees with tokenize across every fixture in both formats', { timeout: 120_000 }, () => {
     // The scan mirrors tokenize rather than changing it, because tokenize is the protector's
     // hottest path and its markers branch has already turned `@@` back into `@`. Mirroring only

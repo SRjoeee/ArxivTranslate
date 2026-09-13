@@ -109,34 +109,34 @@ describe('SVG glyph extraction (#121)', () => {
   })
 
   it('keeps a run at any angle, with its own length and thickness', () => {
-    // v1 只画 0 与 ±90°，其余角度整条丢掉——全语料 1.16% 的字形分布在 42 种角度上，
-    // 2609.10326v1 的 `reheating`（6°）与 `radiation domination`（5°）正是其中两条（用户 2026-09-11 反馈）。
-    // 丢掉的理由是叠加层只会用「轴对齐外接框 + 象限」描述标签，而那个框只在 90° 的倍数上与文字重合；
-    // 现在标签自带长与厚（都按图宽的比例），任何角度都摆得下
+    // v1 drew 0 and ±90° only and dropped every other angle whole — 1.16% of the corpus's glyphs spread over 42 angles,
+    // and `reheating` (6°) and `radiation domination` (5°) of 2609.10326v1 are two of them (the owner's report of 2026-09-11).
+    // The reason for dropping them was that the overlay described a label by “axis-aligned bounding box + quadrant” only, and that box coincides with the text only at multiples of 90°;
+    // now a label carries its own length and thickness (both as fractions of the image width), and any angle fits
     const at = (a: number, b: number) => `<use data-text="A" transform="matrix(${a},${b},0,0,50,50)"/>`
     const parse = (markup: string) =>
       new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${markup}</svg>`, 'image/svg+xml').documentElement
     const line = (a: number, b: number) => linesOf(parse(at(a, b)))[0]!
 
-    // 横排：不带角度，与 OCR 后端给出的形状一致，也因此可以与上一行合并
+    // Horizontal: no angle, the same shape the OCR backend gives, and therefore mergeable with the line above
     expect(line(10, 0).angle).toBeUndefined()
     expect(line(10, 0).len).toBeUndefined()
-    // 斜的、竖的、倒的都留下，各自带着自己的盒子
+    // Tilted, vertical and upside down all stay, each with its own box
     for (const [a, b, degrees] of [[0, -10, -90], [0, 10, 90], [-10, 0, 180], [10 * Math.cos(-Math.PI / 6), 10 * Math.sin(-Math.PI / 6), -30]] as const) {
       const l = line(a, b)
       expect([degrees, Math.round(((l.angle ?? 0) * 180) / Math.PI)]).toEqual([degrees, degrees])
-      // 一个字形：长 = 一个名义字宽 0.7em，厚 = 字号，都按图宽 100 归一化
+      // One glyph: length = one nominal glyph width of 0.7em, thickness = the font size, both normalised to an image width of 100
       expect([degrees, l.len, l.thick]).toEqual([degrees, 0.07, 0.1])
     }
-    // runsOf 一如既往照读不误
+    // runsOf reads as it always did
     expect(runsOf(parse(at(10 * Math.cos(-Math.PI / 6), 10 * Math.sin(-Math.PI / 6))))).toHaveLength(1)
   })
 
-  it('把贴近水平的残差归零，别的角度原样留着', () => {
-    // 横排这一档必须是**精确的 0**：每个下游只问 angle 真不真——`linesToBoxes` 不合并带角度的行，
-    // `labelStyle` 也会改走旋转那一支。差千分之一度的水平标签曾因此被画成细高条（Codex 在 #134 指出）。
-    // 语料里确有 17 条贴近水平但不为零的行，其中两条（2609.08661v1/fig2.svg 的 `ym`、`xm`）要翻。
-    // 反过来 ±90° 不再需要吸附：旋转那一支按真实角度转，差几微度看不出来
+  it('snaps near-horizontal residuals to zero and leaves other angles as they are', () => {
+    // The horizontal step must be an **exact 0**: every consumer only asks whether angle is truthy — `linesToBoxes` does not merge lines with an angle,
+    // and `labelStyle` takes the rotation branch too. A horizontal label a thousandth of a degree off was once drawn as a tall thin strip because of it (Codex on #134).
+    // The corpus really has 17 near-horizontal but non-zero lines, two of which (`ym`, `xm` of 2609.08661v1/fig2.svg) need translating.
+    // ±90° on the other hand needs no snapping any more: the rotation branch rotates by the real angle, and a few microdegrees are invisible
     const at = (degrees: number) => {
       const radians = (degrees * Math.PI) / 180
       return `<use data-text="A" transform="matrix(${10 * Math.cos(radians)},${10 * Math.sin(radians)},0,0,50,50)"/>`
@@ -147,7 +147,7 @@ describe('SVG glyph extraction (#121)', () => {
 
     for (const degrees of [0, 0.5, -0.5, 1.7, -1.7]) expect([degrees, angleOf(degrees)]).toEqual([degrees, undefined])
     expect('angle' in linesOf(parse(at(0.5)))[0]!).toBe(false)
-    // 1.8° 以上就是一条斜标签了
+    // From 1.8° up it is a tilted label
     expect(Math.round(((angleOf(2) ?? 0) * 180) / Math.PI)).toBe(2)
     for (const degrees of [90, 89.5, -90, -90.5]) {
       expect([degrees, Math.round((((angleOf(degrees) ?? 0) * 180) / Math.PI) * 10) / 10]).toEqual([degrees, degrees])

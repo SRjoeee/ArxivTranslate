@@ -8,7 +8,7 @@ import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import type { OcrCall } from '@/shared/ocr'
 import { docOf } from '../renderer/helpers'
 
-// SVG 图（DESIGN §15.5）：不取字节、不发 OCR，直接读 contentDocument 里的字形
+// SVG figures (DESIGN §15.5): no bytes fetched, no OCR sent; the glyphs are read straight from the contentDocument
 
 const PLOT = readFileSync(join(import.meta.dirname, '../fixtures/svg/2609.03768-fig_closure.svg'), 'utf8')
 
@@ -55,7 +55,7 @@ function setup(markup: string | null, extra: Partial<ImageRunOptions> = {}) {
   const options: ImageRunOptions = {
     doc, targets: targets.filter(t => t.kind === 'svg'), paper: '2609.03768', target: 'cmn', scope: 's1',
     renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
-    fetchBytes: async () => { throw new Error('SVG 路径不该取字节') },
+    fetchBytes: async () => { throw new Error('the SVG path must not fetch bytes') },
     ocr, translate, isEnabled: () => true, isCurrent: () => true,
     ...extra,
   }
@@ -135,12 +135,12 @@ describe('SVG figures in the image pipeline (§15.5)', () => {
     }))
     const run = startImageTranslation({
       doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
-      fetchBytes: async () => { throw new Error('不该取字节') },
+      fetchBytes: async () => { throw new Error('must not fetch bytes') },
       ocr: vi.fn(async () => ({ ok: true as const, result: { width: 1, height: 1, lines: [] }, cached: false })),
       translate, isEnabled: () => true, isCurrent: () => true,
     })
     const pending = run.translate(targets)
-    // 加载完成之后才有内容，然后派 load 事件
+    // The content exists only after loading, then the load event is dispatched
     markup = PLOT
     el.dispatchEvent(new Event('load'))
     await pending
@@ -179,7 +179,7 @@ describe('SVG figures in the image pipeline (§15.5)', () => {
 
     helperReady = true
     run.resume()
-    // `resume` 交给 `translate` 是不等待的，满载时一个 tick 不够
+    // `resume` hands over to `translate` without waiting; at full load one tick is not enough
     for (let i = 0; i < 50 && ocr.mock.calls.length === 0; i++) await new Promise(r => setTimeout(r, 5))
     expect(ocr).toHaveBeenCalledTimes(1)
   })

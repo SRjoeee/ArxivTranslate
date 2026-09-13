@@ -40,7 +40,7 @@ export async function chooseBuiltIn(options, name) {
 
 /**
  * Add one of the reader's services through the drawer. `connect` also saves it and chooses it, so
- * this returns whatever the drawer reported (「已连接 · N ms」 or the reason it failed).
+ * this returns whatever the drawer reported (“Connected · N ms” or the reason it failed).
  */
 export async function addService(options, { name, baseURL, model, apiKey = '' }) {
   await openSection(options, 'services')
@@ -63,7 +63,7 @@ export async function addService(options, { name, baseURL, model, apiKey = '' })
 
 /**
  * Open a service, clear its key, connect again. Returns what the drawer reported — with no key the
- * endpoint answers `no-key`, so this proves 清除 actually cleared it rather than writing the old
+ * endpoint answers `no-key`, so this proves “Clear” actually cleared it rather than writing the old
  * key back (the drawer opens with the stored key in its form, and reading that prop instead of the
  * form is the mistake this guards).
  */
@@ -127,7 +127,7 @@ export async function chooseLanguage(options, search, name) {
   await sleep(200)
 }
 
-/** 提前翻译的范围 / 开始翻译的时机 are named stops, not numbers */
+/** The “how far ahead to translate” range and the “when to start translating” threshold are named stops, not numbers */
 export async function setPreload(options, { range, threshold }) {
   await openSection(options, 'reading')
   if (range) await options.getByRole('button', { name: range, exact: true }).click()
