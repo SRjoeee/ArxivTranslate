@@ -36,7 +36,7 @@ describe('the runs path', () => {
     expect(layout.runs).toEqual(['a &lt; b ', ' c'])
     // The engine normalises < to an entity: decoded when joining, the reader sees <, not &lt;
     expect(htmlOf(joinRuns(['甲 &lt; 乙 ', ' 丙'], layout, b, document))).toBe('甲 &lt; 乙 <math class="ltx_Math"><mi>x</mi></math> 丙')
-    // An engine returning the bare < is right too: decoding entities is idempotent
+    // An engine returning the bare < is right too: decoding leaves this input unchanged
     expect(htmlOf(joinRuns(['甲 < 乙 ', ' 丙'], layout, b, document))).toBe('甲 &lt; 乙 <math class="ltx_Math"><mi>x</mi></math> 丙')
   })
 
