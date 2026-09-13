@@ -176,8 +176,8 @@ export function createMicrosoftProvider(targetLanguage: string, deps: MicrosoftD
     id: 'microsoft',
     kind: 'mt',
     // `sentLen` is native, so the service inserts no sentence markers for it (§8.6)
-  reportsSentences: true,
-  wireFormats: WIRE_FORMATS.microsoft,
+    reportsSentences: true,
+    wireFormats: WIRE_FORMATS.microsoft,
     /**
      * Batch size and concurrency are set by **Microsoft's own** response profile, not copied from google-web (those
      * values were tuned to Google's 63 ms responses, and copying them would repeat the mistake recorded in

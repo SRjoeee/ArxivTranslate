@@ -6,6 +6,7 @@ import {
 } from '@/providers/prompt-library'
 import { getRandomUUID as uuid } from '@/shared/uuid'
 import { O } from '@/ui/strings'
+import { Confirm } from '@/ui/Confirm'
 import { drafts } from '@/ui/drafts'
 
 // The prompt library: the same features as Read Frog's components/prompt-configurator/* — the list,
@@ -89,7 +90,6 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
   }
 
   function remove(template: PromptTemplate) {
-    if (!window.confirm(O.prompts.manager.removeConfirm(template.name))) return
     onChange(current => ({
       patterns: current.patterns.filter(p => p.id !== template.id),
       promptId: current.promptId === template.id ? DEFAULT_PROMPT_ID : current.promptId,
@@ -154,7 +154,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
             <span>{template.name}<small style={small}>{O.prompts.manager.custom}</small></span>
           </label>
           <button type="button" style={button} onClick={() => open('edit', template)}>{O.prompts.manager.edit}</button>
-          <button type="button" style={button} onClick={() => remove(template)}>{O.prompts.manager.remove}</button>
+          <Confirm label={O.prompts.manager.remove} confirmLabel={O.prompts.manager.removeConfirm} cancelLabel={O.prompts.manager.cancel} onConfirm={() => remove(template)} />
         </div>
       ))}
 

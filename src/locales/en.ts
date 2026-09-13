@@ -226,7 +226,7 @@ const O: Locale['O'] = {
       edit: 'Edit',
       editTitle: 'Edit prompt',
       remove: 'Delete',
-      removeConfirm: name => `Delete the prompt “${name}”?`,
+      removeConfirm: 'Confirm delete',
       create: 'New',
       createTitle: 'New prompt',
       importFailed: {
