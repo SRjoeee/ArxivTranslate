@@ -78,8 +78,11 @@ export function fallbackText(reason: FallbackReason): string {
   switch (reason.kind) {
     case 'tooNew':
       return O.fallbackWhy.tooNew(reason.stored, reason.supported)
-    case 'invalid':
-      return O.fallbackWhy.invalid(reason.where, reason.message)
+    case 'invalid': {
+      // The field's own sentence when the pack has one; the zod diagnostic otherwise (it is English developer text)
+      const key = reason.where.split('.').filter(s => !/^\d+$/.test(s)).pop() ?? ''
+      return O.fallbackWhy.invalid(reason.where, O.fallbackWhy.field[key] ?? reason.message)
+    }
     default:
       return O.fallbackWhy.unknown
   }

@@ -4,6 +4,18 @@
 import type { ProviderErrorKind } from '@/providers/types'
 import { PREVIEW_SOURCE, PREVIEW_TARGET } from './preview'
 
+/** What the settings page says about a field the schema refused (config/schema.ts, config/appearance.ts, config/services.ts) */
+const FIELD: Record<string, string> = {
+  provider: '不是有效的翻译服务',
+  glossary: '术语表总长超过上限，会显著增加每一批的 token',
+  color: '不是有效的颜色值',
+  css: '只填声明，不写选择器和花括号',
+  baseURL: '不是有效的地址',
+  apiKey: 'API Key 不合法',
+  model: '模型名不能为空',
+  name: '名称长度不合法',
+}
+
 const S = {
   brand: 'Read arXiv', // S-P-01
   settings: '设置', // S-P-02, and the button on every note
@@ -96,6 +108,8 @@ const S = {
     narrow: '窗口较窄，暂按上下显示', // S-P-74
   },
   actionFailed: (message: string) => message, // S-P-90
+  /** The popup action found no active tab to talk to (shared/messages.ts throws NoActiveTabError) */
+  noActiveTab: '没有活动标签页',
   /** 论文页里的文字（S-I）与右键菜单，与 popup 用同一套语言包 */
   page: {
     retry: '重试', // S-I-02
@@ -106,6 +120,7 @@ const S = {
     nothingToTranslate: '这一页没有可翻译的内容',
     abstractLink: (brand: string) => `双语版本（${brand}）`, // 摘要页的入口（issue #146）
     backendSilent: '扩展后台没有响应',
+    backendSilentWith: (detail: string) => `扩展后台没有响应：${detail}`,
     noService: '未配置 API key，请先到设置页填写',
   },
 } as const
@@ -120,10 +135,15 @@ const O = {
   fallbackWhy: {
     tooNew: (stored: number, supported: number) => `存储里的配置是 v${stored}，这个版本只认到 v${supported}（可能装过更新的版本）`,
     invalid: (where: string, message: string) => (where ? `${where}：${message}` : message),
+    /** The sentence for a field the schema refused, by the field's name; the zod message itself is the diagnostic */
+    field: FIELD,
     unknown: '未知原因',
   },
   fallbackNotice: '设置读取失败，当前使用默认设置；已保存的 API Key 与服务选择均未生效。请重新填写。',
   services: {
+    /** One validation failure of the drawer's form, and what joins several, in this language's punctuation */
+    issue: (field: string, message: string) => `${field}：${FIELD[String(field).split('.').pop() ?? ''] ?? `不合法（${message}）`}`,
+    issueSeparator: '；',
     builtIn: '内置服务',
     mine: '我的服务',
     empty: '还没有添加服务。添加后即可使用 LLM 翻译。',
@@ -171,6 +191,7 @@ const O = {
     reset: '重置',
     resetHint: '把内置配置恢复原样，自己添加的保留',
     editTitle: '编辑配置',
+    editAria: (name: string) => `编辑配置：${name}`,
     name: '名称',
     color: '文字颜色',
     bandColor: '底色',

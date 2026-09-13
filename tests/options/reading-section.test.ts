@@ -37,7 +37,7 @@ function data(config: Config, patches: Config[] = []): OptionsData {
 
 const dialog = (container: HTMLElement) => container.querySelector('[role="dialog"]')
 /** The tile's edit control, not the tile itself (whose label is the bare name) */
-const editButton = (container: HTMLElement) => Array.from(container.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === `${O.reading.editTitle}：Mine`)
+const editButton = (container: HTMLElement) => Array.from(container.querySelectorAll('button')).find(b => b.getAttribute('aria-label') === O.reading.editAria('Mine'))
 const typeInto = (input: HTMLInputElement, value: string) => {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value)
   input.dispatchEvent(new Event('input', { bubbles: true }))

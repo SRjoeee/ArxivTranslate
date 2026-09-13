@@ -48,3 +48,36 @@ describe('the strings themselves', () => {
     expect(all).not.toMatch(/去填|去修|去查看|没翻出来|翻完/)
   })
 })
+
+describe('fallbackText', () => {
+  // The zod messages are diagnostics; the reader sees the pack's sentence for the field that failed (the owner's
+  // decision of 2026-09-13 to move the reader-visible strings into the packs)
+  const invalid = (where: string, message = 'zod said so') => ({ kind: 'invalid' as const, where, message })
+  it('names the field in the interface language and leaves the zod diagnostic out when the pack knows the field', async () => {
+    // The namespace, not a destructured copy: S and O are live bindings that setLocale reassigns
+    const strings = await import('@/ui/strings')
+    setLocale('zh-CN')
+    expect(strings.fallbackText(invalid('provider'))).toBe(`provider：${strings.O.fallbackWhy.field.provider}`)
+    expect(strings.fallbackText(invalid('appearance.styles.2.color'))).toBe(`appearance.styles.2.color：${strings.O.fallbackWhy.field.color}`)
+    expect(strings.fallbackText(invalid('provider'))).not.toContain('zod said so')
+    setLocale('en')
+    expect(strings.fallbackText(invalid('services.0.baseURL'))).toBe(`services.0.baseURL: ${strings.O.fallbackWhy.field.baseURL}`)
+    setLocale('zh-CN')
+  })
+  it('falls back to the diagnostic for a field the pack has no sentence for', async () => {
+    const strings = await import('@/ui/strings')
+    expect(strings.fallbackText(invalid('reading.margin', 'Too big'))).toBe('reading.margin：Too big')
+  })
+})
+
+describe('the settings drawer issue sentence', () => {
+  it('speaks each language with its own punctuation and wraps an unknown field in that language', async () => {
+    const strings = await import('@/ui/strings')
+    setLocale('en')
+    expect(strings.O.services.issue('baseURL', 'Invalid URL')).toBe(`baseURL: ${strings.O.fallbackWhy.field.baseURL}`)
+    expect(strings.O.services.issue('thinking', 'Invalid enum')).toBe('thinking: Invalid enum')
+    setLocale('zh-CN')
+    expect(strings.O.services.issue('baseURL', 'Invalid URL')).toBe(`baseURL：${strings.O.fallbackWhy.field.baseURL}`)
+    expect(strings.O.services.issue('thinking', 'Invalid enum')).toBe('thinking：不合法（Invalid enum）')
+  })
+})
