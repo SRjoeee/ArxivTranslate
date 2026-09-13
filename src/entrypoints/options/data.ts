@@ -59,13 +59,16 @@ export function useOptionsData(): OptionsData {
   /**
    * Apply the stored interface language the way this page's own change does — a reload — but not under a draft: a
    * service being edited, a profile, a prompt is local until its own save, and the reload would discard it (the
-   * local review of S1, fourth pass). It waits for the last draft to close; a second change meanwhile adds nothing
+   * local review of S1, fourth pass). It waits for the last draft to close, then for the page's own writes: a draft's
+   * save is queued on the chain in the same breath as its editor closes, and a reload issued at once would cut it off
+   * before its read of the store came back (fifth pass). A second change meanwhile adds nothing
    */
   const reloadDue = useRef(false)
   const reload = useCallback(() => {
     if (reloadDue.current) return
     reloadDue.current = true
-    drafts.whenNone(() => location.reload())
+    const go = () => location.reload()
+    drafts.whenNone(() => void writes.current.then(go, go))
   }, [])
 
   const loadCache = useCallback(async () => {
