@@ -60,7 +60,7 @@ Accessibility: stack 572 axe findings, side 592, only 402 — **all present on t
 
 ## Core user tasks the rebuild keeps verifying (charter §6)
 
-1. Open a paper; the blocks inside the viewport plus the configured preload margin translate without scrolling (`DEFAULT_PRELOAD` is 1 000 px / threshold 0; the suites select the 半屏 preset); scrolling to the end translates every block; nothing beyond the margin is requested.
+1. Open a paper; the blocks inside the viewport plus the configured preload margin translate without scrolling (`DEFAULT_PRELOAD` is 1 000 px / threshold 0; the suites select the “½ screen” preset); scrolling to the end translates every block; nothing beyond the margin is requested.
 2. Switch side / stack / only without re-translating; side keeps pairs aligned and tables inside their column.
 3. Restore the original: the DOM equals the pre-translation DOM, no attributes remain, no requests follow.
 4. Close the tab or navigate away: the background stops sending.

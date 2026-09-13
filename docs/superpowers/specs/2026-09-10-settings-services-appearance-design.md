@@ -70,11 +70,11 @@ and a model, exactly what the single endpoint is today.
 
 - Choosing = clicking a card or a row's radio; effective at once.
 - A row opens the **service drawer**: 名称 · 接口地址 · API Key (•••• 已保存 + 清除) · 模型 ·
-  更多选项 ▸ 深度思考. Footer: 「连接」(saves, requests the origin if needed, verifies with a
-  one-line result: 已连接 · {ms} ms / the S-E reason) · 「删除」(confirm). 「添加服务」opens the
-  same drawer empty; 「连接」on a new service adds it and chooses it.
+  更多选项 ▸ 深度思考. Footer: “连接” (saves, requests the origin if needed, verifies with a
+  one-line result: 已连接 · {ms} ms / the S-E reason) · “删除” (confirm). “添加服务” opens the
+  same drawer empty; “连接” on a new service adds it and chooses it.
 - Empty list: one line, 还没有添加服务。添加后即可使用 LLM 翻译。
-- Chrome's card: greyed with 「下载」 until the pack is `available` (S-P-40…43 wording).
+- Chrome's card: greyed with “下载” until the pack is `available` (S-P-40…43 wording).
 
 ### 2.4 Popup
 
@@ -103,7 +103,7 @@ interface StyleProfile {
 
 Shipped profiles (all in the list from the start, editable, deletable, restored by 重置):
 
-| id | 名称 | what it is |
+| id | name | what it is |
 |---|---|---|
 | `follow` | 与原文相同 | color '', opacity 1, no underline — today's `none` |
 | `green` | 绿色 | Read Frog's green (`oklch(0.693 0.17 162.48)`), readable on arXiv's white and its dark theme |
@@ -219,5 +219,5 @@ defaults.
 
 ## 7. Out of scope
 
-Vendor templates for services; native Anthropic / Gemini kinds; 排版 (#47); 分栏 (#83); the
+Vendor templates for services; native Anthropic / Gemini kinds; typesetting (#47, 排版); column layout (#83, 分栏); the
 hosted free LLM (#97); the diagnostics export (#156).

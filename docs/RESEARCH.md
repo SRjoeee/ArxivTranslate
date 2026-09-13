@@ -1,34 +1,36 @@
-# Phase 0 研究记录
+# Phase 0 research record
 
-日期：2026-09-03 · 对应 DESIGN.md v0.1 · 状态：Phase 0 任务 1–7 全部完成
+> Translated into English on 2026-09-13 as part of the repository-wide English sweep; the content is the frozen record and is unchanged.
+
+Date: 2026-09-03 · corresponds to DESIGN.md v0.1 · status: Phase 0 tasks 1–7 all complete
 
 [Note 2026-09-12: this file grew past Phase 0 — §5.1 and §6.4–6.11 are measurements made up to 2026-09-09. It is a frozen record of the MVP (ADR-0001 §3): cite it as evidence, do not treat it as the spec. The status of every row of the §7 revision list is given under that heading.]
 
-本文记录 Phase 0 的实测结论。凡与 DESIGN.md 不一致之处，只在此记录并在 §7 提修订建议，不直接改设计。
-脚本：`pnpm fixtures:stats`（`scripts/fixtures-stats.ts`，规则覆盖率审计）、`scripts/phase0/fetch-candidates.sh`（候选抓取）、`scripts/phase0/candidate-stats.sh`（粗粒度特征计数）、`scripts/phase0/td-numeric-calib.ts`（§5.3 数值格正则校准）、`scripts/phase0/translator-probe.js`（Translator API 探测）。
-Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起生效。
+This document records the measured conclusions of Phase 0. Wherever they disagree with DESIGN.md, the disagreement is only recorded here and a revision proposed in §7; the design is not changed directly.
+Scripts: `pnpm fixtures:stats` (`scripts/fixtures-stats.ts`, the rule coverage audit), `scripts/phase0/fetch-candidates.sh` (candidate fetching), `scripts/phase0/candidate-stats.sh` (coarse feature counts), `scripts/phase0/td-numeric-calib.ts` (calibration of the §5.3 numeric-cell regex), `scripts/phase0/translator-probe.js` (the Translator API probe).
+Phase 0 has no test or build target yet; `pnpm test` / `pnpm build` apply from Phase 1.
 
 ---
 
-## 1. Fixture
+## 1. Fixtures
 
-10 篇保存在 `tests/fixtures/arxiv/<id>.html`，清单与选择理由见该目录的 `README.md`。覆盖：公式密集（3 篇）、算法/代码块（4 篇）、大表格/数值表（4 篇）、脚注/定理（4 篇）、2023 年 4 篇、2024/2025 各 1 篇、2026 年 4 篇、`.ltx_ERROR` 2 篇（其中 1 篇为转换失败页）。
+10 papers are saved in `tests/fixtures/arxiv/<id>.html`; the list and the reasons for choosing them are in that directory's `README.md`. Coverage: formula-dense (3), algorithm / code blocks (4), large tables / numeric tables (4), footnotes / theorems (4), 4 from 2023, 1 each from 2024 / 2025, 4 from 2026, `.ltx_ERROR` 2 (one of them a failed-conversion page).
 
-**关键发现**
+**Key findings**
 
-1. **线上不存在"早期 LaTeXML 版本"的页面。** 56 篇候选（2023-12 至 2026-09）的生成器注释全部是 `LaTeXML oxide (version 0.7.6)`，2023 年 12 月的论文也不例外；带版本号的 URL（`/html/2312.17127v1`）同样返回 oxide 0.7.6。arXiv 已用新转换器重新生成了历史文章，旧输出不可得。因此"按年份覆盖 LaTeXML 版本差异"这一目标在当前无法通过线上页面达成，规则只需针对 oxide 0.7.6 一个版本；但版本探测与分叉机制仍应保留，以应对将来的再次升级。
-2. 并非所有论文都有 HTML：60 篇候选中 4 篇 404（无 LaTeX 源或转换失败未发布）。扩展只需处理有 HTML 的页面，无需额外判断。
-3. 转换失败但已发布的页面存在（`2608.30667`）：`<title>` 为 "Untitled Document"，正文只有一个 `.ltx_p`，`.ltx_ERROR` 标出未定义宏。扩展在这类页面上必须安静退出或只翻译能翻译的部分，不能报错。
-4. 抓取注意事项：`export.arxiv.org` 的 http 会 301 到 https，curl 需 `-L`；API 的 `[a TO b]` 需 `-g` 关闭 glob；单个请求偶发挂起，必须设 `--max-time`；遵守 3 秒间隔。
-5. **旧式 id 的论文也有 HTML**（2026-09-05 curl 核实 Codex #9 的评论）：`/html/hep-th/9901001` 返回完整的 LaTeXML 页面（`article.ltx_document`，标题 "String Junctions and Their Duals…"），`/html/math/0601001` 同样 200。`paperIdFromUrl` 因此要收 `archive[.subject]/YYMMNNN[vN]`。
+1. **No page of an “early LaTeXML version” exists online.** The generator comment of all 56 candidates (2023-12 to 2026-09) is `LaTeXML oxide (version 0.7.6)`, papers from December 2023 included; a versioned URL (`/html/2312.17127v1`) returns oxide 0.7.6 too. arXiv has regenerated its historical articles with the new converter and the old output is unobtainable. The goal “cover LaTeXML version differences by year” therefore cannot be met through online pages today, and the rules need only target the one version oxide 0.7.6; the version probe and the branching mechanism should stay all the same, against a future upgrade.
+2. Not every paper has HTML: 4 of the 60 candidates were 404 (no LaTeX source, or a failed conversion never published). The extension only needs to handle pages that have HTML, with no extra check.
+3. Pages that failed conversion yet were published exist (`2608.30667`): the `<title>` is "Untitled Document", the body is a single `.ltx_p`, `.ltx_ERROR` marks the undefined macros. On such a page the extension must exit quietly or translate only what it can, never report an error.
+4. Fetching notes: `export.arxiv.org` over http 301s to https, so curl needs `-L`; the API's `[a TO b]` needs `-g` to switch globbing off; a single request occasionally hangs, so `--max-time` is a must; keep the 3-second interval.
+5. **Papers with old-style ids have HTML too** (curl-verified 2026-09-05 after Codex's comment on #9): `/html/hep-th/9901001` returns a complete LaTeXML page (`article.ltx_document`, title "String Junctions and Their Duals…"), `/html/math/0601001` is 200 likewise. `paperIdFromUrl` therefore has to accept `archive[.subject]/YYMMNNN[vN]`.
 
-## 2. 规则覆盖率审计
+## 2. Rule coverage audit
 
-方法：`pnpm fixtures:stats` 用 happy-dom 解析 10 篇 fixture，规则从 `src/core/rules/latexml.ts`（`RULES_VERSION 0.1.0-phase0`，DESIGN.md §5.1 / §5.2 逐条录入）导入，对翻译根 `article.ltx_document` 内每个非空白文本节点向上找最近的跳过规则祖先 S 与翻译单元祖先 U，归为四类：`unit`（在单元内、无跳过）、`protected`（S 在 U 内部，即块内受保护节点）、`skipped`（S 在 U 之上或无 U）、`uncovered`（两者都无）。完整报表见 `docs/phase0/rules-audit.md`（生成物）。
+Method: `pnpm fixtures:stats` parses the 10 fixtures with happy-dom, imports the rules from `src/core/rules/latexml.ts` (`RULES_VERSION 0.1.0-phase0`, entered rule by rule from DESIGN.md §5.1 / §5.2), and for every non-blank text node inside the translation root `article.ltx_document` looks upward for the nearest skip-rule ancestor S and translation-unit ancestor U, sorting into four classes: `unit` (inside a unit, no skip), `protected` (S inside U, i.e. a protected node within a block), `skipped` (S above U, or no U), `uncovered` (neither). The full report is `docs/phase0/rules-audit.md` (generated).
 
-### 2.1 总览
+### 2.1 Overview
 
-| fixture | 解析 ms | 文本节点 | unit | protected | skipped | uncovered |
+| fixture | parse ms | text nodes | unit | protected | skipped | uncovered |
 |---|---|---|---|---|---|---|
 | 2312.17141 | 238 | 18375 | 19.6% | 51.2% | 29.1% | 14 |
 | 2312.17527 | 53 | 4294 | 21.9% | 47.9% | 30.2% | 0 |
@@ -41,195 +43,195 @@ Phase 0 尚无测试与构建目标，`pnpm test` / `pnpm build` 从 Phase 1 起
 | 2609.00245 | 618 | 37556 | 12.9% | 49.6% | 37.5% | 0 |
 | 2609.00246 | 263 | 16279 | 26.9% | 30.6% | 42.4% | 3 |
 
-2026-09-05 为 side 模式版式回归又抓了两篇（未入上表的统计）：2609.04056（math.OC，定理里只含公式的列表项、右侧沟槽的致谢块）、2609.03768（physics.comp-ph，表格 + 脚注在单列 flex 图里），见 `tests/fixtures/arxiv/README.md`。
+Two more were fetched on 2026-09-05 for the side-mode layout regression (not counted in the table above): 2609.04056 (math.OC; formula-only list items inside a theorem, an acknowledgements block in the right gutter), 2609.03768 (physics.comp-ph; a table + footnote inside a single-column flex figure), see `tests/fixtures/arxiv/README.md`.
 
-合计 112,268 个文本节点，漏网 33 个（0.03%）。happy-dom 解析 1.8 MB 页面 618 ms，可直接用于 Vitest。`protected` 占比高是因为 MathML 内部的 `mo` / `mi` / `mn` / `annotation` 都算文本节点。
+112,268 text nodes in all, 33 uncovered (0.03%). happy-dom parses the 1.8 MB page in 618 ms, directly usable in Vitest. The high `protected` share is because the `mo` / `mi` / `mn` / `annotation` inside MathML all count as text nodes.
 
-### 2.2 (a) 规则中不存在于任何 fixture 的选择器
+### 2.2 (a) Selectors in the rules that match no fixture
 
-所有规则都有匹配元素，但 `.ltx_author` 与 `.ltx_date` 在 10 篇里**从未出现**（authors 规则靠同一选择器里的 `.ltx_authors` / `.ltx_contact` 命中）。真实的作者区类名是 `.ltx_authors > .ltx_creator > .ltx_personname` / `.ltx_author_notes` / `.ltx_role_affiliation` / `.ltx_contact`，日期是 `.ltx_dates`（3 篇）。
+Every rule has matching elements, but `.ltx_author` and `.ltx_date` **never occur** in the 10 papers (the authors rule hits through the `.ltx_authors` / `.ltx_contact` in the same selector). The real author-area class names are `.ltx_authors > .ltx_creator > .ltx_personname` / `.ltx_author_notes` / `.ltx_role_affiliation` / `.ltx_contact`; the date is `.ltx_dates` (3 papers).
 
-### 2.3 (b) 漏网文本
+### 2.3 (b) Uncovered text
 
-33 个节点全部在 frontmatter / backmatter，正文段落零漏网：
+All 33 nodes are in the frontmatter / backmatter; body paragraphs have zero uncovered:
 
-| 结构 | 节点 | 处理建议 |
+| Structure | Nodes | Suggested handling |
 |---|---|---|
-| `div.ltx_acknowledgements`（含内部 `.ltx_text`、`a.ltx_ref.ltx_url`） | 12 | 新增翻译单元 |
-| `.ltx_pubnotes.ltx_pubnotes_meta > .ltx_pubnote.ltx_role_{ccs,doi,journal,number,publicationmonth}`（ACM 模板的出版元数据，带 `.ltx_note_name` 标签） | 12 | 新增跳过规则 `.ltx_pubnotes` |
-| `div.ltx_dates` | 3 | 跳过（替换规则中不存在的 `.ltx_date`） |
-| `sup.ltx_note_mark` 直接位于 `.ltx_note.ltx_role_footnotetext` 下 | 2 | `.ltx_note_mark` 进受保护列表（见 2.5） |
-| `div.ltx_keywords`（含 `.ltx_text` 子节点） | 2 | 新增翻译单元 |
-| `div.ltx_subtitle` | 1 | 并入标题规则 |
-| `svg foreignObject > .ltx_foreignobject_content`（TikZ 图内文字） | 1 | 跳过整个 `svg` |
+| `div.ltx_acknowledgements` (with inner `.ltx_text`, `a.ltx_ref.ltx_url`) | 12 | New translation unit |
+| `.ltx_pubnotes.ltx_pubnotes_meta > .ltx_pubnote.ltx_role_{ccs,doi,journal,number,publicationmonth}` (the ACM template's publication metadata, with `.ltx_note_name` labels) | 12 | New skip rule `.ltx_pubnotes` |
+| `div.ltx_dates` | 3 | Skip (replaces the `.ltx_date` that does not exist in the rules) |
+| `sup.ltx_note_mark` directly under `.ltx_note.ltx_role_footnotetext` | 2 | `.ltx_note_mark` into the protected list (see 2.5) |
+| `div.ltx_keywords` (with `.ltx_text` children) | 2 | New translation unit |
+| `div.ltx_subtitle` | 1 | Folded into the title rule |
+| `svg foreignObject > .ltx_foreignobject_content` (text inside a TikZ picture) | 1 | Skip the whole `svg` |
 
-### 2.4 规则冗余与优先级
+### 2.4 Rule redundancy and priority
 
-同一单元元素同时命中多条规则的组合：`p+theorem` 30,607、`p+item+theorem` 9,626、`p+item` 1,830、`p+abstract` 150。§5.1 的 `.ltx_abstract .ltx_p`、`.ltx_item .ltx_p`、`.ltx_theorem .ltx_p, .ltx_proof .ltx_p` 三条**完全被 `.ltx_p` 覆盖**，作为独立规则违反"恰好一条"。建议删除，或改为上下文标记（给 prompt 提供"这是定理/摘要"的信息），不参与块判定。
+Combinations of several rules matching one unit element at once: `p+theorem` 30,607, `p+item+theorem` 9,626, `p+item` 1,830, `p+abstract` 150. §5.1's three rules `.ltx_abstract .ltx_p`, `.ltx_item .ltx_p`, `.ltx_theorem .ltx_p, .ltx_proof .ltx_p` are **entirely covered by `.ltx_p`**, and as independent rules they break “exactly one”. Suggested: delete them, or turn them into context marks (giving the prompt the information “this is a theorem / the abstract”) that take no part in block classification.
 
-### 2.5 §6.1 受保护节点必须进规则表
+### 2.5 The protected nodes of §6.1 must enter the rule table
 
-审计只用了 §5.2 的跳过规则，结果暴露出 §6.1 列出的 void 节点目前会被当作段落正文：
+The audit used only §5.2's skip rules, and the result exposes that the void nodes §6.1 lists are treated as paragraph body today:
 
-| 元素 | 有直接文本的元素数 | 说明 |
+| Element | Elements with direct text | Notes |
 |---|---|---|
-| `a.ltx_ref`（含 `span.ltx_ref_tag.ltx_text`） | 1045 + 1639 | 交叉引用 "Section 2"、"Theorem 1" 及其编号 |
-| `cite.ltx_cite.ltx_citemacro_*` | 713 | 引用标记 |
-| `sup.ltx_note_mark` | 112 | 脚注标记，在 `.ltx_note` 外层与 `.ltx_note_content` 内层各出现一次 |
+| `a.ltx_ref` (with `span.ltx_ref_tag.ltx_text`) | 1045 + 1639 | Cross-references "Section 2", "Theorem 1" and their numbers |
+| `cite.ltx_cite.ltx_citemacro_*` | 713 | Citation marks |
+| `sup.ltx_note_mark` | 112 | Footnote marks, once in the outer `.ltx_note` and once inside `.ltx_note_content` |
 
-它们要作为 void 占位符写进 `latexml.ts`（`PROTECT_RULES`），与 `.ltx_tag`、`math`、`code`、`.ltx_font_typewriter` 同级。另一个结构性发现：**脚注是嵌套块**——`.ltx_note`（含 mark + `.ltx_note_outer > .ltx_note_content`）整体位于 `.ltx_p` 内部，而 `.ltx_note_content` 本身是翻译单元。提取时外层段落应把整个 `.ltx_note` 视为 void 占位符，脚注正文单独成块；`.ltx_note_content` 内的第二个 `.ltx_note_mark` 与 `.ltx_note_type`（"footnotemark:"，仅 1 篇）作 void。
+They have to be written into `latexml.ts` (`PROTECT_RULES`) as void placeholders, on the same level as `.ltx_tag`, `math`, `code`, `.ltx_font_typewriter`. Another structural finding: **footnotes are nested blocks** — `.ltx_note` (mark + `.ltx_note_outer > .ltx_note_content`) sits whole inside the `.ltx_p`, while `.ltx_note_content` is itself a translation unit. On extraction the outer paragraph should treat the whole `.ltx_note` as a void placeholder and the footnote body becomes a block of its own; the second `.ltx_note_mark` inside `.ltx_note_content` and `.ltx_note_type` ("footnotemark:", 1 paper only) are voids.
 
-### 2.6 表格单元格与 §5.3 数值格正则
+### 2.6 Table cells and the §5.3 numeric-cell regex
 
-`scripts/phase0/td-numeric-calib.ts` 对 5,487 个 `.ltx_td` 统计（排除 MathML 子树后的可见文本）：空格 271、纯公式 294、命中初稿正则 3,236（59%）、散文 1,686。初稿正则有两个问题：
+`scripts/phase0/td-numeric-calib.ts` over 5,487 `.ltx_td` (visible text with MathML subtrees excluded): 271 empty, 294 pure formula, 3,236 (59%) matching the draft regex, 1,686 prose. The draft regex has two problems:
 
-- **误判**：字符类里的 `e` / `E`（为指数准备）让以 E 开头的词整体匹配——`ERROR` 90 次、`Esp`、`ESBMC`。修法：要求至少一个数字（前置断言 `(?=.*\d)`）。
-- **漏判**：`✓` 167 次、`N/A` 17 次、单字母 `G` / `N` / `Y` / `S`、带括号单位 `(kpc)`、`Au+Au`。修法：增加"纯符号"分支（`✓ ✗ ✔ ✘ – — −`）和 `N/A`。
+- **False positives**: the `e` / `E` in the character class (meant for exponents) lets words starting with E match whole — `ERROR` 90 times, `Esp`, `ESBMC`. Fix: require at least one digit (a lookahead `(?=.*\d)`).
+- **False negatives**: `✓` 167 times, `N/A` 17 times, single letters `G` / `N` / `Y` / `S`, units in parentheses `(kpc)`, `Au+Au`. Fix: add a “pure symbol” branch (`✓ ✗ ✔ ✘ – — −`) and `N/A`.
 
-另有 427 个大写枚举值 `TRUE` / `FALSE` / `UNKNOWN`（单篇）——这是值不是散文，但正则无法与缩写词区分，交给 provider 处理即可（LLM 会保留）。建议的正则：`^(?=.*\d)[\s\d.,+\-±×^%()/*eE−–—:;~<>=≤≥∼]+(\s*[a-zA-Zμ°%]{1,4})?$` 或 `^[✓✗✔✘–—−\-·×*]+$` 或 `^N/A$`。带单位的 `7.7 GeV` 之类命中正确。
+There are also 427 upper-case enumeration values `TRUE` / `FALSE` / `UNKNOWN` (one paper) — values, not prose, but a regex cannot tell them from abbreviations; leave them to the provider (an LLM keeps them). Suggested regex: `^(?=.*\d)[\s\d.,+\-±×^%()/*eE−–—:;~<>=≤≥∼]+(\s*[a-zA-Zμ°%]{1,4})?$` or `^[✓✗✔✘–—−\-·×*]+$` or `^N/A$`. Values with units such as `7.7 GeV` match correctly.
 
-### 2.7 代码与算法框
+### 2.7 Code and algorithm boxes
 
-- listing 容器类是 `.ltx_listing`（有时叠加 `.ltx_lstlisting`、`.ltx_lst_language_*`），行是 `.ltx_listingline`，行号是 `.ltx_tag.ltx_tag_listingline`。`.ltx_listing_data`（隐藏的原始代码数据）需要跳过。
-- 算法框 `figure.ltx_float.ltx_algorithm`（2 篇）/ `.ltx_float_algorithm`（1 篇）内部是 `.ltx_listingline`，已被 code 规则覆盖；框内 `.ltx_caption` 正常翻译。
-- `.ltx_verbatim` 2 篇，`pre` / `code` 标签未在正文中单独出现（等宽文本都是 `.ltx_text.ltx_font_typewriter`，2,488 个元素）。
+- The listing container class is `.ltx_listing` (sometimes with `.ltx_lstlisting`, `.ltx_lst_language_*` on top), lines are `.ltx_listingline`, line numbers `.ltx_tag.ltx_tag_listingline`. `.ltx_listing_data` (the hidden raw code data) needs skipping.
+- Algorithm boxes `figure.ltx_float.ltx_algorithm` (2 papers) / `.ltx_float_algorithm` (1 paper) hold `.ltx_listingline` inside, covered by the code rule already; the `.ltx_caption` inside the box translates as usual.
+- `.ltx_verbatim` in 2 papers; `pre` / `code` tags do not occur on their own in the body (monospace text is all `.ltx_text.ltx_font_typewriter`, 2,488 elements).
 
-### 2.8 (c) 类名分布
+### 2.8 (c) Class name distribution
 
-翻译根内共 255 个 `ltx_*` 类名，仅 2 个（`ltx_Math`、`ltx_p` 级别的基础类）在全部 10 篇出现；长尾主要是模板相关（ACM 的 `ltx_affiliation_*`、`ltx_role_*`）、bibliography 细分（`ltx_bib_*` 20 余个，只在 2609.00246）、定理种类（`ltx_theorem_*`）、listing 语言（`ltx_lst_language_*`）。这些都在已有单元内部，不需要单独规则。因所有 fixture 同为 oxide 0.7.6，此表反映的是内容分布而非版本差异。
+255 `ltx_*` class names inside the translation root; only 2 (`ltx_Math`, base classes of the `ltx_p` level) occur in all 10 papers; the long tail is mostly template-related (ACM's `ltx_affiliation_*`, `ltx_role_*`), bibliography subdivisions (`ltx_bib_*`, twenty-odd, only in 2609.00246), theorem kinds (`ltx_theorem_*`), listing languages (`ltx_lst_language_*`). All of these sit inside existing units and need no rule of their own. Since every fixture is oxide 0.7.6 alike, this table reflects content distribution, not version differences.
 
-### 2.9 SVG 图占比（§15.1）
+### 2.9 Share of SVG figures (§15.1)
 
-翻译根内 `svg` 共 164 个，全部是 `svg.ltx_picture`（TikZ），其中 2608.29808 占 114、2312.17141 占 43（大多带 `ltx_markedasmath`，是画出来的公式）；**没有一个含 `<text>`**，文字只以 `foreignObject > .ltx_foreignobject_content` 形式出现且全部 fixture 仅 1 个文本节点。位图 `img.ltx_graphics` 共 13 个（5 篇）。结论：SVG 图在实践中没有可翻译的 DOM 文字，v1 整体跳过 `svg`；§15 的 OCR 路线只对 `img` 有意义。
+164 `svg` inside the translation root, all `svg.ltx_picture` (TikZ), 114 of them in 2608.29808 and 43 in 2312.17141 (most with `ltx_markedasmath`, formulas drawn as pictures); **not one contains `<text>`**; text appears only as `foreignObject > .ltx_foreignobject_content`, and across all fixtures that is 1 text node. Bitmaps `img.ltx_graphics`: 13 (5 papers). Conclusion: SVG figures carry no translatable DOM text in practice, v1 skips `svg` whole; the OCR route of §15 is meaningful for `img` only.
 
 [Correction 2026-09-12: superseded. Inline TikZ pictures do carry translatable text in `foreignObject` (199 word-bearing labels in the corpus); DESIGN §15.6 routes them through the image pipeline. The "skip `svg`" rule remains only for the text pipeline.]
 
-### 2.10 其他
+### 2.10 Other
 
-- `.ltx_p` 不一定是 `<p>`：`span.ltx_p` 57 个（2 篇，出现在表格与 inline-block 内）。§7.1 "标签名与原块相同"已覆盖；§7.2 的 grid 技巧只能用于 `.ltx_para > p.ltx_p`，其余降级为 stack。
-- 翻译根之外的文本只有 `.ltx_page_navbar` 内的目录（`ltx_ref_title`、`ltx_tag_ref`、目录标题里的 math / italic）与 arXiv 页头页脚，验证了"根外一律不提取"。
-- 转换失败页 `2608.30667`：4 个文本节点，2 个 unit，脚本无异常；扩展应能在这类页面上安静工作。
+- `.ltx_p` is not always a `<p>`: `span.ltx_p` 57 times (2 papers, inside tables and inline-blocks). §7.1 "same tag name as the original block" covers it already; the grid technique of §7.2 works only for `.ltx_para > p.ltx_p`, the rest degrade to stack.
+- The only text outside the translation root is the table of contents inside `.ltx_page_navbar` (`ltx_ref_title`, `ltx_tag_ref`, math / italic inside TOC titles) and arXiv's header and footer, which confirms "nothing outside the root is extracted".
+- The failed-conversion page `2608.30667`: 4 text nodes, 2 units, the script runs without incident; the extension should be able to work quietly on such a page.
 
-### 2.11 RULES_VERSION 0.2.0 复跑（Phase 1 `feat/rules`）
+### 2.11 Re-run at RULES_VERSION 0.2.0 (Phase 1 `feat/rules`)
 
-审计脚本改为直接调用规则模块的 `classify()`（优先级 skip > table > unit > protect，`.ltx_note` 作 protect-but-descend），报表已重生成到 `docs/phase0/rules-audit.md`： [2026-09-12: the committed report was removed; regenerate it with `pnpm fixtures:stats`.]
+The audit script now calls the rule module's `classify()` directly (priority skip > table > unit > protect, `.ltx_note` as protect-but-descend); the report was regenerated to `docs/phase0/rules-audit.md`: [2026-09-12: the committed report was removed; regenerate it with `pnpm fixtures:stats`.]
 
-- **漏网 0 / 112,268**：致谢、关键词、副标题进 unit；出版元数据、日期、SVG 进 skip；`.ltx_note_mark` 进 protect。
-- 无死规则；unit 规则两两互斥（`multi` 为空），"恰好一条"成立。
-- 归属变化：`.ltx_ref`（3,253 个文本节点）、`.ltx_cite`（1,872）、`.ltx_note_mark`（114）从段落正文转为受保护节点；表格单元格 4,632 个文本节点归到 `table`；脚注正文 166 个归到嵌套单元 `footnote`，`.ltx_note` 容器本身归属 0。
-- unit 占比因此下降（如 2401.00596 从 49.4% 到 26.6%），这是把引用与脚注标记从"待翻译文本"里剔除后的真实数字。
+- **Uncovered 0 / 112,268**: acknowledgements, keywords and subtitle enter unit; publication metadata, dates and SVG enter skip; `.ltx_note_mark` enters protect.
+- No dead rules; the unit rules are pairwise exclusive (`multi` is empty), so “exactly one” holds.
+- Attribution changes: `.ltx_ref` (3,253 text nodes), `.ltx_cite` (1,872), `.ltx_note_mark` (114) moved from paragraph body to protected nodes; 4,632 table-cell text nodes go to `table`; 166 footnote-body nodes go to the nested unit `footnote`, the `.ltx_note` container itself attributes 0.
+- The unit share therefore drops (e.g. 2401.00596 from 49.4% to 26.6%), the true figure once citation and footnote marks are taken out of the “text to translate”.
 
-### 2.12 用 CSS 类清单反查规则覆盖（2026-09-04）
+### 2.12 Checking rule coverage backwards from the CSS class list (2026-09-04)
 
-起点是一个假设：ar5iv 的 CSS 覆盖了所有区块，可以拿它把规则补全。**实测这个假设不成立。**
+The starting point was a hypothesis: ar5iv's CSS covers every block, so it can be used to complete the rules. **Measured, the hypothesis does not hold.**
 
-把 LaTeXML 仓库 `lib/LaTeXML/resources/CSS` 下全部 15 个样式表（含 `ltx-book.css`、`ltx-amsart.css`、`ltx-apj.css` 等模板专用）、ar5iv 仓库与 arXiv 实际服务的两份合起来，共 **322 个 `ltx_*` 类**。再从 8 个学科抓 20 篇新论文比对：
+Putting together all 15 style sheets under the LaTeXML repository's `lib/LaTeXML/resources/CSS` (template-specific ones such as `ltx-book.css`, `ltx-amsart.css`, `ltx-apj.css` included), the ar5iv repository's and the two arXiv actually serves gives **322 `ltx_*` classes**. Comparing against 20 new papers fetched from 8 subject areas:
 
-- **88 个类出现在页面里而所有 CSS 都没有**，且不是边角料：`ltx_Math` 20/20 篇、`ltx_ref_tag` 20/20、`ltx_tag_bibitem` 20/20、`ltx_math_unparsed` 18/20、`ltx_citemacro_cite` 17/20、`ltx_theorem_*` 与 `ltx_bib_*` 两个家族
-- 原因是**类名是开放集合**：`ltx_theorem_maintheoremA`、`ltx_theorem_manualconjectureinner`、`ltx_bib_<字段>`、`ltx_citemacro_<宏名>`、`ltx_colspan_8` 都由作者自己的 LaTeX 宏名生成，任何样式表都列不全
-- 反方向 **145 个类只在 CSS 里有**，是书稿 / CV / 索引 / 题记等模板专用结构，30 篇真实论文里一次没出现
+- **88 classes occur in the pages and in none of the CSS**, and they are no fringe: `ltx_Math` 20/20 papers, `ltx_ref_tag` 20/20, `ltx_tag_bibitem` 20/20, `ltx_math_unparsed` 18/20, `ltx_citemacro_cite` 17/20, and the two families `ltx_theorem_*` and `ltx_bib_*`
+- The reason is that **the class names are an open set**: `ltx_theorem_maintheoremA`, `ltx_theorem_manualconjectureinner`, `ltx_bib_<field>`, `ltx_citemacro_<macro>`, `ltx_colspan_8` are all generated from the authors' own LaTeX macro names, and no style sheet can list them all
+- In the other direction **145 classes exist only in the CSS**: template-specific structures for books / CVs / indexes / epigraphs that never occur once in the 30 real papers
 
-覆盖率检查（用 `classify()` 逐文本节点判定归属）：**20 篇新论文 + 10 篇 fixture 共 36348 个带文字的节点，未覆盖 1 个**，就是数学论文的 MSC 分类号（`.ltx_classification`），本来也不该翻。
+Coverage check (attributing every text node with `classify()`): **36348 text-bearing nodes across the 20 new papers + 10 fixtures, 1 uncovered** — the MSC classification code of a mathematics paper (`.ltx_classification`), which should not be translated anyway.
 
-结论：规则不是靠枚举类名做全的，而是靠"容器不需要规则、文本落在 `.ltx_p` 等少数单元里"这个结构性质。CSS 清单的价值在于第三条——那 145 个没见过的结构，已按 LaTeXML 的输出惯例写成 `tests/fixtures/arxiv/synthetic-structures.html`，一跑就暴露出 8 处真实缺口（`.ltx_date`、`.ltx_role_dedicatory`、description 术语的裸文本、`.ltx_marginpar`、`.ltx_indexentry`、CV 字段），已补进规则。
+Conclusion: the rules are not made complete by enumerating class names but by the structural property “containers need no rules; text lands in a few units such as `.ltx_p`”. The value of the CSS list is in the third point — those 145 unseen structures, written after LaTeXML's output conventions into `tests/fixtures/arxiv/synthetic-structures.html`, exposed 8 real gaps on the first run (`.ltx_date`, `.ltx_role_dedicatory`, the bare text of description terms, `.ltx_marginpar`, `.ltx_indexentry`, CV fields), now added to the rules.
 
-原先报告的漏翻（作者区的致谢性注释）与规则完整性无关，是 §5.2 里"作者区整块跳过"这条策略造成的，已在同一次修订里改为默认翻译。
+The missed translation reported earlier (acknowledgement-type notes in the author area) had nothing to do with rule completeness; it came from the §5.2 policy “skip the author area whole”, changed to translate by default in the same revision.
 
-**2026-09-12 追加：`\intertext`（issue #152）。** 这个合成 fixture 后来也用来装**真实论文里有、但抓的 13 篇里没有**的形状。第一个这样的条目是方程组里的 `\intertext` 说明行，整段从 `arxiv.org/html/2609.09360v1` 逐字节抄来（只截到第二个说明行为止，约 9 KB）。
+**Added 2026-09-12: `\intertext` (issue #152).** This synthetic fixture later came to hold shapes that **occur in real papers but not in the 13 fetched**. The first such entry is the `\intertext` explanatory row inside an equation group, copied byte for byte from `arxiv.org/html/2609.09360v1` (cut after the second explanatory row, about 9 KB).
 
-**为什么不把整篇收进 `tests/fixtures/arxiv/`**：实测加第 13 篇真实论文（688 KB）时，`protector/fixtures` 与 `renderer/fixtures` 两个 worker 双双 **heap OOM**——语料测试在一个 worker 里顺序跑完全部 fixture，每篇都要留住整篇 DOM 加一份 `outerHTML` 快照做「跑完之后 DOM 逐字节未变」的比对，12 篇已经贴着堆上限；单独跑那一篇没有任何问题。放进合成 fixture 只多 9 KB，而所有语料扫描（protector 往返、选择器边界、提取、side 布局）照样吃得到这个形状。语料继续长下去时，堆上限迟早要单独处理，那是另一件事。
+**Why the whole paper is not put into `tests/fixtures/arxiv/`**: measured, adding a 13th real paper (688 KB) made both workers `protector/fixtures` and `renderer/fixtures` **heap OOM** — a corpus test runs all fixtures sequentially in one worker, and each paper has to keep the whole DOM plus an `outerHTML` snapshot for the "DOM unchanged byte for byte afterwards" comparison; 12 papers already sit against the heap limit, and that one paper alone runs without any problem. Putting it into the synthetic fixture adds only 9 KB, and every corpus scan (protector round trip, selector boundary, extraction, side layout) still gets the shape. As the corpus keeps growing the heap limit will need handling of its own sooner or later; that is another matter.
 
 ---
 
-## 3. 容器与导航
+## 3. Containers and navigation
 
-### 3.1 页面骨架（oxide 0.7.6 + arXiv 主题 2026-08）
+### 3.1 Page skeleton (oxide 0.7.6 + arXiv theme 2026-08)
 
 ```
-body                                  ← ≥1280px 时 display:grid（见 3.2）
-├─ header.arxiv-html-header           ← arXiv 注入：logo、nav.html-header-nav
-├─ nav.ltx_page_navbar                ← LaTeXML 导航栏，内含 nav.ltx_TOC
+body                                  ← display:grid at ≥1280px (see 3.2)
+├─ header.arxiv-html-header           ← injected by arXiv: logo, nav.html-header-nav
+├─ nav.ltx_page_navbar                ← the LaTeXML navigation bar, holding nav.ltx_TOC
 ├─ div.ltx_page_main
 │  └─ div.ltx_page_content
-│     └─ article.ltx_document         ← 论文正文，max-width: var(--main-width)
-├─ footer.arxiv-html-footer           ← arXiv 注入
-├─ footer.ds-site-footer              ← arXiv 注入（站点页脚）
-└─ 其他 arXiv 注入：#infobox、#watermark-tr、.keyboard-glossary、#fixed-buttons-container、
-   报告问题 modal（.modal-header / .modal-body / .modal-footer，表单 #modal-form）、.ds-announcement
+│     └─ article.ltx_document         ← the paper body, max-width: var(--main-width)
+├─ footer.arxiv-html-footer           ← injected by arXiv
+├─ footer.ds-site-footer              ← injected by arXiv (site footer)
+└─ other arXiv injections: #infobox, #watermark-tr, .keyboard-glossary, #fixed-buttons-container,
+   the report-issue modal (.modal-header / .modal-body / .modal-footer, form #modal-form), .ds-announcement
 ```
 
-主容器判定：以 `article.ltx_document` 为翻译根，`.ltx_page_navbar` 与所有非 `ltx_` 前缀的注入元素一律不进入提取。
+Main container: `article.ltx_document` is the translation root; `.ltx_page_navbar` and every injected element without the `ltx_` prefix never enter extraction.
 
-### 3.2 宽度控制（决定 side 模式做法）
+### 3.2 Width control (decides how side mode is done)
 
-- 唯一的宽度来源是 CSS 变量 `--main-width`，在 ar5iv 样式的 `:root` 中定义为 `52rem`。
-- `.ltx_document { max-width: var(--main-width) }`；`.ltx_page_main { width: 100% }`（不限宽）。
-- arXiv 主题在 `@media (min-width: 1280px)` 下把 `body` 设为 `display: grid; grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr`，`--nav-width: minmax(14rem, 25rem)`；`div.ltx_page_main` 落在 `article` 区域，`nav.ltx_page_navbar` 落在 `nav` 区域。
-- 因此 **side 模式只需在 `html[data-axt-mode="side"]` 上覆盖 `--main-width`**（如 `min(1600px, 96vw)`），文章列与 `.ltx_document` 同时变宽，无需碰 `.ltx_page_main`。
-- 副作用：`--main-width` 还被图片（`.ltx_graphics`、`.ltx_img_*`）、代码块 `.ltx_listing`、单元格 `.ltx_td` 的 `max-width` 以及 ≥96rem 时脚注的绝对定位（`--main-width-margin`）引用，变量放大后这些也会跟着放大。图片变宽通常是可接受的；若不希望，可在 side 模式下把这些规则的 `max-width` 钉回 `52rem`。
-- 断点：arXiv 主题 1280px（导航栏/页头折叠，JS 里 `narrowViewport` 同值）；ar5iv 样式另有 46/52/96/109rem 断点，其中 96rem 决定脚注是弹出还是边注。DESIGN.md §7.2 的 1100px 自动降级阈值与这两套断点都不对齐，建议改为 1280px 与 arXiv 一致。
+- The one source of width is the CSS variable `--main-width`, defined as `52rem` in the ar5iv style's `:root`.
+- `.ltx_document { max-width: var(--main-width) }`; `.ltx_page_main { width: 100% }` (unbounded).
+- Under `@media (min-width: 1280px)` the arXiv theme sets `body` to `display: grid; grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr`, `--nav-width: minmax(14rem, 25rem)`; `div.ltx_page_main` lands in the `article` area, `nav.ltx_page_navbar` in the `nav` area.
+- Therefore **side mode need only override `--main-width` on `html[data-axt-mode="side"]`** (e.g. `min(1600px, 96vw)`); the article column and `.ltx_document` widen together, and `.ltx_page_main` is untouched.
+- Side effect: `--main-width` is also referenced by images (`.ltx_graphics`, `.ltx_img_*`), the code block `.ltx_listing`, the `max-width` of cells `.ltx_td`, and the absolute positioning of footnotes at ≥96rem (`--main-width-margin`); enlarging the variable enlarges these too. Wider images are usually acceptable; if not, pin those rules' `max-width` back to `52rem` in side mode.
+- Breakpoints: the arXiv theme's 1280px (navigation bar / header collapse; `narrowViewport` in the JS has the same value); the ar5iv style has its own 46/52/96/109rem breakpoints, of which 96rem decides whether footnotes pop up or sit in the margin. The 1100px auto-fallback threshold of DESIGN.md §7.2 aligns with neither set; suggested: 1280px, matching arXiv.
 
-### 3.3 arXiv 自带 JS 的行为（`/static/browse/0.3.4/js/arxiv-html-papers-*.js`，268 行）
+### 3.3 Behaviour of arXiv's own JS (`/static/browse/0.3.4/js/arxiv-html-papers-*.js`, 268 lines)
 
-- 只触碰三处 DOM：`html` 的 `data-theme` / `data-toc-display` / `data-reading-mode` 属性（偏好存 localStorage：`ar5iv_theme`、`arxiv_html_paper_toc_display`、`arxiv_html_paper_reading_mode`）；`.ltx_page_navbar > nav.ltx_TOC` 的显示切换；`.ltx_page_content` 上的 `mouseup` 监听，把选区 `innerHTML` 存起来供"报告问题"表单使用。
-- **没有** MutationObserver，**没有** MathJax（页面 0 次出现，公式是原生 MathML），**没有** 脚注 JS。
-- 脚注弹出纯 CSS：<96rem 时 `.ltx_note:focus-within > .ltx_note_outer` 弹出；≥96rem 时 `.ltx_note.ltx_role_footnotetext .ltx_note_outer` 绝对定位成边注。译文克隆脚注标记后，克隆体同样能触发弹出（结构相同即可），无需额外处理。
-- 冲突面：几乎没有。唯一交集是用户选中译文后点"报告问题"，选区 HTML 会带上 `.axt-t` 节点，无害。
-- 页头脚本 `arxiv-header.js` 只管站点横幅与公告，与正文无关。
-- 页面内联 `<script>` 只做上述偏好属性的早期恢复；内联 `<style>` 仅 535 字节。
+- It touches the DOM in three places only: the `data-theme` / `data-toc-display` / `data-reading-mode` attributes on `html` (preferences in localStorage: `ar5iv_theme`, `arxiv_html_paper_toc_display`, `arxiv_html_paper_reading_mode`); toggling the display of `.ltx_page_navbar > nav.ltx_TOC`; a `mouseup` listener on `.ltx_page_content` that stores the selection's `innerHTML` for the "report issue" form.
+- **No** MutationObserver, **no** MathJax (0 occurrences on the page; formulas are native MathML), **no** footnote JS.
+- Footnote pop-ups are pure CSS: below 96rem `.ltx_note:focus-within > .ltx_note_outer` pops up; at ≥96rem `.ltx_note.ltx_role_footnotetext .ltx_note_outer` is absolutely positioned as a margin note. Once the translation clones the footnote mark, the clone triggers the pop-up just the same (an identical structure suffices), no extra handling.
+- Conflict surface: almost none. The one intersection is a user selecting translated text and clicking "report issue": the selection HTML carries `.axt-t` nodes, harmless.
+- The header script `arxiv-header.js` only handles the site banner and announcements, nothing to do with the body.
+- The page's inline `<script>` only restores the preference attributes above early; the inline `<style>` is 535 bytes.
 
-### 3.4 阅读模式与我们的模式的关系
+### 3.4 Reading mode versus our modes
 
-arXiv 的 `data-reading-mode=enabled` 会隐藏 `header.arxiv-html-header` 与 `.ltx_page_navbar`。我们的 side 模式如需隐藏导航栏，直接设 `html[data-axt-mode="side"] .ltx_page_navbar { display:none }` 即可，不要写 arXiv 的属性（那会被它持久化到 localStorage）。
+arXiv's `data-reading-mode=enabled` hides `header.arxiv-html-header` and `.ltx_page_navbar`. If our side mode needs to hide the navigation bar, set `html[data-axt-mode="side"] .ltx_page_navbar { display:none }` directly and do not write arXiv's attribute (it would persist it to localStorage).
 
-### 3.5 列表与多面板图的站点规则（2026-09-05，`ar5iv.0.9.1.min.css`）
+### 3.5 The site's rules for lists and multi-panel figures (2026-09-05, `ar5iv.0.9.1.min.css`)
 
-样式入口 `/static/browse/0.3.4/css/arxiv-html-papers-20260823.css` 只有两行 `@import`：`ar5iv.0.9.1.min.css` 进 `layer(ar5iv)`，`arxiv-html-papers-theme-20260807.css` 进 `layer(arxiv-theme)`（抓取要 `curl -L`）。与 side 模式列表排版直接相关的：
+The style entry `/static/browse/0.3.4/css/arxiv-html-papers-20260823.css` is two `@import` lines only: `ar5iv.0.9.1.min.css` into `layer(ar5iv)`, `arxiv-html-papers-theme-20260807.css` into `layer(arxiv-theme)` (fetch with `curl -L`). Directly relevant to side-mode list layout:
 
-- `li.ltx_item > .ltx_tag { display: inline; margin-inline-start: -2.5rem; padding-inline-end: .5rem; text-align: end }`——itemize 的标记悬挂 2.5rem，modes.css 里标记槽的 2.5rem 由此而来
-- `.ltx_enumerate { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: .5em; padding-inline-start: 0 }`，`.ltx_enumerate > .ltx_item { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1 }`——enumerate 的编号列按**内容宽度**，长标签（"(Assumption 1)"）在原版式里不会溢出；我们固定 2.5rem 的绝对定位槽会（Codex #25），但站点**没有** `--ltx-enum-leftmargin` 之类的变量可取，按变量取宽的提议不成立
-- 嵌套列表的缩进只有 `.ltx_item > .ltx_para > :is(.ltx_enumerate, .ltx_itemize, .ltx_description) { margin-inline-start: var(--space-xs) }` 加内层自己的编号列；side 模式把标记改成绝对定位后这一层缩进丢了（Codex #25，2609.00245 的 (k.i) 列表），留给真实浏览器布局测试那批一起处理
+- `li.ltx_item > .ltx_tag { display: inline; margin-inline-start: -2.5rem; padding-inline-end: .5rem; text-align: end }` — itemize markers hang by 2.5rem; the 2.5rem marker slot in modes.css comes from this
+- `.ltx_enumerate { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: .5em; padding-inline-start: 0 }`, `.ltx_enumerate > .ltx_item { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1 }` — enumerate's number column is sized **by content**, so a long label ("(Assumption 1)") does not overflow in the original layout; our fixed 2.5rem absolutely positioned slot does (Codex #25), but the site has **no** variable such as `--ltx-enum-leftmargin` to read, so the proposal to size by a variable does not hold
+- The indentation of nested lists is only `.ltx_item > .ltx_para > :is(.ltx_enumerate, .ltx_itemize, .ltx_description) { margin-inline-start: var(--space-xs) }` plus the inner list's own number column; once side mode makes markers absolutely positioned that level of indentation is lost (Codex #25, the (k.i) list of 2609.00245), left for the batch of real-browser layout tests
 
-与 side 模式**宽度契约**直接相关的（2026-09-05 补，DESIGN §7.2）：
+Directly relevant to side mode's **width contract** (added 2026-09-05, DESIGN §7.2):
 
-- 主题 `body { grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr; grid-template-areas: "... . nav article . ." }`，`--nav-width: minmax(14rem, 25rem)`；第 4 列无命名区域。实测原生：1280px 时 `0 224 832 224 0`，≥ 1800px 时导航封顶 400
-- `.ltx_page_content { margin: 1rem }`（主题覆盖 ar5iv 的 `var(--space-xl) var(--space-sm)`）——文章列减 2rem 才是两栏可用宽
-- ar5iv 右侧沟槽：`.ltx_note_outer` 只在 `@media (width >= 96rem)` 显示（`float: inline-end; padding-inline-end: 3rem; position: relative`），宽度按断点写死：`96rem < width <= 109rem` 为 `width: 20rem; margin-inline-end: -24rem`，`> 109rem` 为 `27rem / -31rem`；`< 96rem` 时 `display: none`，`:focus-within` 弹出。`.ltx_note.ltx_role_footnotetext .ltx_note_outer { position: absolute; inset-inline-start: var(--main-width-margin) }`（`--main-width-margin: 54rem`，全站只有这一处用它）
-- `.ltx_pubnotes.ltx_pubnotes_meta .ltx_pubnotes_content { float: inline-end; width: min(27rem, calc((100vw - var(--main-width)) / 2 - 2rem)); margin-inline-end: calc(1rem - (100vw - var(--main-width)) / 2) }`；`.ltx_note.ltx_note_frontmatter.ltx_role_thanks` 同样的宽度，`position: absolute; inset-inline-end: calc(1rem - (100vw - var(--main-width)) / 2)`（参照文章盒子右缘）；作者区 `.ltx_authors ... :last-child.ltx_role_affiliation / .ltx_role_address { position: absolute; width: min(var(--main-width), 100dvw); inset-inline-start: max(0px, calc((100dvw - var(--main-width)) / 2)) }`。四组都假设文章居中、两侧沟槽等宽
-- 主题 `@media (max-width: 1279px)` 把导航栏改成 `position: fixed` 的抽屉（与 `responsive.ts` 切 stack 的断点一致）
-- `ltx_flex_size_N`：LaTeXML 给 flex 图格子标的份数，`size_1` 整栏、`size_2` 半栏、`size_3` 三分之一栏；fixture 里 21 个 size_1、13 个 size_2/3，单列 flex 图（所有格子都是 size_1）常见于表格加脚注（2609.03768v1 的 Table 1）
+- The theme's `body { grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr; grid-template-areas: "... . nav article . ." }`, `--nav-width: minmax(14rem, 25rem)`; the 4th column has no named area. Measured native: `0 224 832 224 0` at 1280px, the navigation capped at 400 at ≥ 1800px
+- `.ltx_page_content { margin: 1rem }` (the theme overrides ar5iv's `var(--space-xl) var(--space-sm)`) — the article column minus 2rem is the usable width of the two columns
+- ar5iv's right gutter: `.ltx_note_outer` shows only at `@media (width >= 96rem)` (`float: inline-end; padding-inline-end: 3rem; position: relative`), with widths hard-coded per breakpoint: `96rem < width <= 109rem` is `width: 20rem; margin-inline-end: -24rem`, `> 109rem` is `27rem / -31rem`; `< 96rem` is `display: none`, popping up on `:focus-within`. `.ltx_note.ltx_role_footnotetext .ltx_note_outer { position: absolute; inset-inline-start: var(--main-width-margin) }` (`--main-width-margin: 54rem`, used in this one place on the whole site)
+- `.ltx_pubnotes.ltx_pubnotes_meta .ltx_pubnotes_content { float: inline-end; width: min(27rem, calc((100vw - var(--main-width)) / 2 - 2rem)); margin-inline-end: calc(1rem - (100vw - var(--main-width)) / 2) }`; `.ltx_note.ltx_note_frontmatter.ltx_role_thanks` has the same width, `position: absolute; inset-inline-end: calc(1rem - (100vw - var(--main-width)) / 2)` (relative to the article box's right edge); the author area `.ltx_authors ... :last-child.ltx_role_affiliation / .ltx_role_address { position: absolute; width: min(var(--main-width), 100dvw); inset-inline-start: max(0px, calc((100dvw - var(--main-width)) / 2)) }`. All four groups assume a centred article with gutters of equal width on both sides
+- The theme's `@media (max-width: 1279px)` turns the navigation bar into a `position: fixed` drawer (the same breakpoint at which `responsive.ts` switches to stack)
+- `ltx_flex_size_N`: the share LaTeXML gives a flex figure's cell, `size_1` a full column, `size_2` half, `size_3` a third; the fixtures hold 21 size_1 and 13 size_2/3; a single-column flex figure (every cell size_1) is common for a table plus footnote (Table 1 of 2609.03768v1)
 
-## 4. 参考文件地图（DESIGN.md §4 各模块）
+## 4. Reference file map (the modules of DESIGN.md §4)
 
-仓库在 `reference/`（gitignore，只读）：kiss-translator@c95bd46、read-frog@9b44f82、FluentRead@536a819；2026-09-07 加 macos-vision-ocr@91a236a（MIT）、ImageTrans_chrome_extension@ef11ca7（GPL-3.0）。核心模块只借鉴设计思路。
+The repositories are in `reference/` (git-ignored, read-only): kiss-translator@c95bd46, read-frog@9b44f82, FluentRead@536a819; added 2026-09-07: macos-vision-ocr@91a236a (MIT), ImageTrans_chrome_extension@ef11ca7 (GPL-3.0). The core modules borrow design ideas only.
 
-| 模块 | 参考 |
+| Module | Reference |
 |---|---|
-| `rules` / `extractor` | Read Frog `src/utils/host/dom/filter.ts`（块/行内节点判定的一整套谓词）、`dom/traversal.ts`（`walkAndLabelElement`）、`translate/core/translation-walker.ts`。KISS `src/libs/rules.js` 是站点规则订阅体系，v1 不需要 |
-| `protector`（占位符） | KISS `src/apis/trans.js`（`genSystemPrompt` / `genUserPrompt`，placetag 思路）与 `src/libs/translator.js`；Read Frog `translate/html-attribute-markers.ts`（标记完整性校验，`assertHtmlAttributeMarkerIntegrity`）、`translate/translation-output-normalization.ts` |
-| `renderer` | Read Frog `translate/core/translation-modes.ts`（双语 / 仅译文两条路径）、`translate/dom/translation-text-swap.ts`（仅译文模式的原文快照与校验回滚）、`translate/dom/translation-insertion.ts`、`translate/dom/translation-cleanup.ts`；FluentRead `src/features/full-page-translation/content/renderer.ts`、`layout.ts` |
-| 译文样式预设 | KISS `src/config/styles.js`（18 种预设常量）、`src/libs/style.js`（`builtinStylesMap`）、`src/hooks/CustomStyles.js` |
-| `scheduler` | FluentRead `src/features/full-page-translation/content/runtime.ts`（IntersectionObserver 渐进翻译，含无布局盒目标的处理）、`content/viewportStability.ts`、`src/services/translation/requestScheduler.ts`、`queue.ts`；Read Frog `src/utils/request/request-queue.ts`、`batch-queue.ts`、`retry-policy.ts`（429 退避策略）、`src/entrypoints/background/translation-queues.ts` |
-| `providers`（LLM） | Read Frog `src/utils/providers/model.ts`（AI SDK 模型工厂）、`src/entrypoints/background/llm-generate-text.ts`、`translate/api/ai.ts`；KISS `src/apis/trans.js`（`genOpenAI` / `genClaude` / `genGemini` 的请求拼装） |
-| `google-gtx` / `translateHtml` | Read Frog `translate/api/google-legacy.ts`（gtx）、`translate/api/google.ts`（translateHtml）；KISS `src/apis/trans.js`（`genGoogle` / `genGoogle2`）、`src/config/api.js`（端点表） |
-| `chrome-builtin` | KISS `src/libs/builtinAI.js`（`Translator.availability` / `create` 的封装与降级） |
-| `image`（§15 图片翻译） | helper：`macos-vision-ocr/Sources/ocr.swift@91a236a`（`extractText` / `extractSubBounds`，Vision 调用与四角坐标）；叠加层：`ImageTrans_chrome_extension/ImageTrans/getImage.js@ef11ca7` 的 `renderTranslatedImageDOM`（:1607）、`fitBoxFontSize`（:1535）、`detectBackgroundColor`（:1405）、`wrapLines`（:1924）；视口调度 `startAutoTranslate` / `observeImage` / `processQueue`（:2780–2930）；`background.js` 的 `computeImageHash`（:115）。不看它替换 img src 的 `replaceImgSrc` |
-| `cache` | FluentRead `src/services/translation/cache.ts`（键规范化、TTL、容量上限、内存热层 + Dexie）、`src/app/background/handlers/translationCache.ts`；Read Frog `translate/in-memory-translation-cache.ts`；KISS `src/libs/cache.js`、`cacheDigest.js` |
-| `config` | Read Frog `src/utils/config/storage.ts`、`migration.ts`、`migration-scripts/`（带版本号的迁移函数） |
-| UI / Shadow DOM | Read Frog `src/entrypoints/side.content/index.tsx`、`selection.content/index.tsx`（WXT `createShadowRootUi`）；FluentRead `entrypoints/shadowBridge.content.ts` |
-| WXT 工程配置 | Read Frog `wxt.config.ts`、`vitest.config.ts` |
+| `rules` / `extractor` | Read Frog `src/utils/host/dom/filter.ts` (the full set of block / inline node predicates), `dom/traversal.ts` (`walkAndLabelElement`), `translate/core/translation-walker.ts`. KISS `src/libs/rules.js` is a site-rule subscription system, not needed for v1 |
+| `protector` (placeholders) | KISS `src/apis/trans.js` (`genSystemPrompt` / `genUserPrompt`, the placetag idea) and `src/libs/translator.js`; Read Frog `translate/html-attribute-markers.ts` (marker integrity check, `assertHtmlAttributeMarkerIntegrity`), `translate/translation-output-normalization.ts` |
+| `renderer` | Read Frog `translate/core/translation-modes.ts` (the bilingual and translation-only paths), `translate/dom/translation-text-swap.ts` (the translation-only mode's source snapshot and verified rollback), `translate/dom/translation-insertion.ts`, `translate/dom/translation-cleanup.ts`; FluentRead `src/features/full-page-translation/content/renderer.ts`, `layout.ts` |
+| Translation style presets | KISS `src/config/styles.js` (18 preset constants), `src/libs/style.js` (`builtinStylesMap`), `src/hooks/CustomStyles.js` |
+| `scheduler` | FluentRead `src/features/full-page-translation/content/runtime.ts` (IntersectionObserver progressive translation, including targets without a layout box), `content/viewportStability.ts`, `src/services/translation/requestScheduler.ts`, `queue.ts`; Read Frog `src/utils/request/request-queue.ts`, `batch-queue.ts`, `retry-policy.ts` (the 429 back-off policy), `src/entrypoints/background/translation-queues.ts` |
+| `providers` (LLM) | Read Frog `src/utils/providers/model.ts` (the AI SDK model factory), `src/entrypoints/background/llm-generate-text.ts`, `translate/api/ai.ts`; KISS `src/apis/trans.js` (the request assembly of `genOpenAI` / `genClaude` / `genGemini`) |
+| `google-gtx` / `translateHtml` | Read Frog `translate/api/google-legacy.ts` (gtx), `translate/api/google.ts` (translateHtml); KISS `src/apis/trans.js` (`genGoogle` / `genGoogle2`), `src/config/api.js` (the endpoint table) |
+| `chrome-builtin` | KISS `src/libs/builtinAI.js` (the wrapper and fallback around `Translator.availability` / `create`) |
+| `image` (§15 image translation) | helper: `macos-vision-ocr/Sources/ocr.swift@91a236a` (`extractText` / `extractSubBounds`, the Vision call and the four-corner coordinates); overlay: `ImageTrans_chrome_extension/ImageTrans/getImage.js@ef11ca7`'s `renderTranslatedImageDOM` (:1607), `fitBoxFontSize` (:1535), `detectBackgroundColor` (:1405), `wrapLines` (:1924); viewport scheduling `startAutoTranslate` / `observeImage` / `processQueue` (:2780–2930); `background.js`'s `computeImageHash` (:115). Its `replaceImgSrc`, which swaps the img src, is not followed |
+| `cache` | FluentRead `src/services/translation/cache.ts` (key normalisation, TTL, capacity cap, in-memory hot layer + Dexie), `src/app/background/handlers/translationCache.ts`; Read Frog `translate/in-memory-translation-cache.ts`; KISS `src/libs/cache.js`, `cacheDigest.js` |
+| `config` | Read Frog `src/utils/config/storage.ts`, `migration.ts`, `migration-scripts/` (versioned migration functions) |
+| UI / Shadow DOM | Read Frog `src/entrypoints/side.content/index.tsx`, `selection.content/index.tsx` (WXT `createShadowRootUi`); FluentRead `entrypoints/shadowBridge.content.ts` |
+| WXT project configuration | Read Frog `wxt.config.ts`, `vitest.config.ts` |
 
-## 5. 免费接口存活性（2026-09-03）
+## 5. Liveness of the free endpoints (2026-09-03)
 
-| 接口 | 状态 | 返回格式 | 标签保留 |
+| Endpoint | Status | Response format | Tags preserved |
 |---|---|---|---|
-| Google gtx `GET translate.googleapis.com/translate_a/single?client=gtx&dt=t&dj=1&sl=en&tl=zh-CN&q=…` | 200 | `{sentences:[{trans,orig,backend}], src, spell}`；多句时需拼接 `sentences[].trans` | **保留**。样本：5 个 void `<x id="n"/>`、paired `<t id="1">…<x id="2"/>…</t>` 嵌套，全部 id 无增无减、嵌套合法、位置合理 |
-| Google translateHtml `POST translate-pa.googleapis.com/v1/translateHtml` | 200 | 请求 `[[[texts…], from, to], "wt_lib"]`，header `Content-Type: application/json+protobuf` + `X-Goog-API-Key`（KISS 配置内置的公开 key，见 `reference/kiss-translator/src/config/api.js`）；返回 `[[trans…]]`，天然支持批量 | 保留，但语义位置差（首个样本把 `<x id="1"/>` 挪到句尾、`</em>` 吞掉句号），译文质量明显低于 gtx |
-| 微软 `edge.microsoft.com/translate/auth` → `translatetext` | auth 404，翻译 401 | — | **这条流程已废弃**，2026-09-08 复测见 §5.1 的无鉴权后继接口 |
+| Google gtx `GET translate.googleapis.com/translate_a/single?client=gtx&dt=t&dj=1&sl=en&tl=zh-CN&q=…` | 200 | `{sentences:[{trans,orig,backend}], src, spell}`; with several sentences `sentences[].trans` has to be joined | **Preserved**. Sample: 5 void `<x id="n"/>`, paired `<t id="1">…<x id="2"/>…</t>` nested; every id present with none added, nesting valid, positions sensible |
+| Google translateHtml `POST translate-pa.googleapis.com/v1/translateHtml` | 200 | Request `[[[texts…], from, to], "wt_lib"]`, headers `Content-Type: application/json+protobuf` + `X-Goog-API-Key` (the public key built into KISS's configuration, see `reference/kiss-translator/src/config/api.js`); returns `[[trans…]]`, batching by nature | Preserved, but the semantic positions are poor (the first sample moved `<x id="1"/>` to the end of the sentence and `</em>` swallowed the full stop); translation quality clearly below gtx |
+| Microsoft `edge.microsoft.com/translate/auth` → `translatetext` | auth 404, translation 401 | — | **This flow is gone**; re-measured 2026-09-08, see §5.1 for the unauthenticated successor |
 
-### 5.1 微软 Edge `translatetext`（2026-09-08 复测，issue #98）
+### 5.1 Microsoft Edge `translatetext` (re-measured 2026-09-08, issue #98)
 
-旧的 `translate/auth → translatetext` 鉴权流程没了，后继是一个**无鉴权**端点，Read Frog 现在用的也是它：
+The old `translate/auth → translatetext` authentication flow is gone; the successor is an **unauthenticated** endpoint, and it is what Read Frog uses today too:
 
 ```http
 POST https://edge.microsoft.com/translate/translatetext?from=en&to=zh-Hans&isEnterpriseClient=false
@@ -238,243 +240,243 @@ Content-Type: application/json
 ["Hello world", "Good morning"]
 ```
 
-返回与输入一一对应、顺序保留：
+The response corresponds one to one with the input, order preserved:
 
 ```json
 [{"translations":[{"text":"你好，世界","to":"zh-Hans","sentLen":{...}}]}, …]
 ```
 
-实测（curl，2026-09-08）：
+Measured (curl, 2026-09-08):
 
-| 项 | 结论 |
+| Item | Conclusion |
 |---|---|
-| 可用性 | HTTP 200，无需 key / header，单次约 290 ms |
-| **总大小上限** | **50,000 字符**（49,996 通过，50,982 被拒）。限的是**总字符数不是条数**：1000 条 / 32 KB 通过，100 条 / 52.6 KB 被拒 |
-| 超限响应 | HTTP 400，**body 是纯文本** `Request exceeds the maximum allowed translation size.`——不是 JSON，实现里不能直接 `JSON.parse` |
-| 单条长度 | 6000 字符单条通过 |
-| 语言代码 | BCP-47：`zh-Hans` / `zh-CN` / `ja` 可用；**ISO-639-3 的 `cmn` / `jpn` 一律 400**。仓库里已有 `toBcp47()`（`src/config/languages.ts`）负责这层转换，但**只够语法、不够支持范围**，见下 |
-| 自动检测 | 省略 `from` 即自动检测，响应多一个 `detectedLanguage` |
+| Availability | HTTP 200, no key / header needed, about 290 ms per call |
+| **Total size cap** | **50,000 characters** (49,996 passed, 50,982 refused). The cap is on **total characters, not items**: 1000 items / 32 KB passed, 100 items / 52.6 KB refused |
+| Over-cap response | HTTP 400, **the body is plain text** `Request exceeds the maximum allowed translation size.` — not JSON, so the implementation cannot `JSON.parse` it directly |
+| Single-item length | A single item of 6000 characters passed |
+| Language codes | BCP-47: `zh-Hans` / `zh-CN` / `ja` work; **ISO-639-3's `cmn` / `jpn` are always 400**. The repository already has `toBcp47()` (`src/config/languages.ts`) for this conversion, but **it covers the syntax only, not the supported range**, see below |
+| Auto-detection | Omitting `from` auto-detects; the response gains a `detectedLanguage` |
 
-**支持范围（决定 provider 能不能直接暴露给用户）**：`toBcp47()` 只保证语法合法，不保证这个端点支持。拿它的公开语言表（`api.cognitive.microsofttranslator.com/languages?api-version=3.0&scope=translation`，138 种）与我们的 179 个目标语言逐个比对：**108 个支持、71 个不支持**。
+**Supported range (decides whether the provider can be exposed to the user directly)**: `toBcp47()` only guarantees a syntactically valid tag, not that this endpoint supports it. Comparing its public language table (`api.cognitive.microsofttranslator.com/languages?api-version=3.0&scope=translation`, 138 languages) with our 179 target languages one by one: **108 supported, 71 not**.
 
-判定必须允许**按主语言回退**，否则会误判：表里只有 `zh-Hans` / `zh-Hant`、没有裸 `zh`，但 `to=zh` 实测返回 200 并归一成 `zh-Hans`——按精确匹配算的话中文（我们的默认目标）会被算成不支持。两个方向都实测过：`zh` / `zh-Hant` / `zh-TW` / `ja` → 200；`ckb` / `ceb` / `tl` / `nn` / `eo` → **400**（400 的响应体同样是纯文本）。
+The verdict must allow a **fallback to the primary language**, or it misjudges: the table has only `zh-Hans` / `zh-Hant` and no bare `zh`, yet `to=zh` measured 200 and normalised to `zh-Hans` — by exact match Chinese (our default target) would count as unsupported. Both directions measured: `zh` / `zh-Hant` / `zh-TW` / `ja` → 200; `ckb` / `ceb` / `tl` / `nn` / `eo` → **400** (the 400 body is plain text likewise).
 
-**2026-09-09 更正**：上面这个 108/71 是拿公开表 + 「按主语言回退」推出来的，**推多了一个**。把 `toBcp47` 产出的全部 179 个标签逐个打端点实测：**接受 107、拒绝 72**；公开表里的无一被拒，表外被接受的只有 4 个别名——`zh`→zh-Hans、`zh-TW`→zh-Hant、`mn`→mn-Cyrl、`sr`→sr-Latn。
+**Correction 2026-09-09**: the 108/71 above was derived from the public table + “fallback to the primary language”, and **derived one too many**. Probing the endpoint with every one of the 179 tags `toBcp47` produces: **107 accepted, 72 refused**; none in the public table was refused, and the only ones accepted outside the table are 4 aliases — `zh`→zh-Hans, `zh-TW`→zh-Hant, `mn`→mn-Cyrl, `sr`→sr-Latn.
 
-**2026-09-09 再补一条**：端点自己的默认归一**不一定等于我们的语言含义**。`toBcp47('srp')` 给出裸 `sr`，端点归一成 **`sr-Latn`（拉丁文）**，而 `languages.ts` 里 `srp` 写的是 **Serbian (Cyrillic)**——等于悄悄换文字，与 `ms-Arab` 同类。所以 provider 侧维护的是一张**重写表**（`zh→zh-Hans`、`zh-TW→zh-Hant`、`mn→mn-Cyrl`、`sr→sr-Cyrl`），把每个目标显式落到公开表的真实条目上，判定随之简化成「重写后在不在表里」，不做任何按主语言的推断。实测：`sr-Cyrl` → Неуронске…（西里尔）、`sr` → Neuronske…（拉丁）。
+**One more, 2026-09-09**: the endpoint's own default normalisation **does not necessarily match our language meaning**. `toBcp47('srp')` gives bare `sr`, the endpoint normalises it to **`sr-Latn` (Latin script)**, while `languages.ts` describes `srp` as **Serbian (Cyrillic)** — a silent change of script, of the same kind as `ms-Arab`. So the provider side keeps a **rewrite table** (`zh→zh-Hans`, `zh-TW→zh-Hant`, `mn→mn-Cyrl`, `sr→sr-Cyrl`) that pins every target explicitly onto a real entry of the public table, and the verdict simplifies to “is the rewritten tag in the table”, with no inference by primary language. Measured: `sr-Cyrl` → Неуронске… (Cyrillic), `sr` → Neuronske… (Latin).
 
-**CORS**：端点实测返回 `access-control-allow-origin: *`，所以没有 host 权限也能从 background 请求成功。但那是我们控制不了的依赖——`wxt.config.ts` 的 `host_permissions` 里已按其他联网引擎的惯例补上 `https://edge.microsoft.com/*`。
+**CORS**: the endpoint measured returns `access-control-allow-origin: *`, so a background request succeeds without a host permission. But that is a dependency beyond our control — `https://edge.microsoft.com/*` has been added to `host_permissions` in `wxt.config.ts`, as for every other network engine.
 
-差的那一个是 `zlm`：`toBcp47` 特意给出 `ms-Arab`（爪夷文），实测 **400**；而 `ms` 是 200 但返回拉丁文马来语，归一过去等于悄悄换文字。**所以判定只能是「公开表精确匹配 + 实测过的别名」，不能按主语言推**（Codex 在 #115 指出）。
+The one that differs is `zlm`: `toBcp47` deliberately gives `ms-Arab` (Jawi), measured **400**; `ms` is 200 but returns Latin-script Malay, and normalising to it would silently change the script. **So the verdict can only be “exact match in the public table + measured aliases”, never inference by primary language** (Codex on #115).
 
-**所以 provider 不能只做代码映射**：得带一份支持列表，在目标语言不受支持时提前退出（或在设置页把该引擎标灰），而不是等运行时 400 才发现。
+**So the provider cannot be a code mapping alone**: it has to carry a support list and bail out early when the target language is unsupported (or grey the engine out on the options page), rather than discover it at a runtime 400.
 
-**占位符**：纯文本记号 `@a#` 全部存活，且发生了语序移位——`The transform @a# is bounded by @b# in @c#.` → `变换@a#被@c#中的@b#界定。`，正是记号方案要的效果。标签格式在它上面全军覆没（400 个占位符全丢，见分支 `experiment/sentence-alignment` 的数据），所以它只能进 `markers` 链（DESIGN §8.5）。
+**Placeholders**: the plain-text markers `@a#` all survived, and reordering happened — `The transform @a# is bounded by @b# in @c#.` → `变换@a#被@c#中的@b#界定。`, exactly what the marker scheme is for. The tag format is wiped out on it (all 400 placeholders lost, see the data on branch `experiment/sentence-alignment`), so it can only join the `markers` chain (DESIGN §8.5).
 
-**实体**：`&lt;` / `&gt;` 原样返回；**`&amp;` 会被当成词义翻译掉**（`Springer science &amp; business media` → `施普林格科学与商业媒体`）。
+**Entities**: `&lt;` / `&gt;` come back as they were; **`&amp;` is translated as a word** (`Springer science &amp; business media` → `施普林格科学与商业媒体`).
 
-**这里我原本写错了一条**（2026-09-08 接入时更正，issue #98）：我发 `a < b & c > d` 拿回 `A < B 和 C > D`，据此写了「裸的 `<` 不会被它当 HTML 解析——它不是 HTML 端点」。**两个上游项目各自独立地说这是错的**：
+**One line here I originally got wrong** (corrected 2026-09-08 while integrating, issue #98): I sent `a < b & c > d`, got back `A < B 和 C > D`, and wrote from that “a bare `<` is not parsed as HTML by it — it is not an HTML endpoint”. **Two upstream projects independently say this is wrong**:
 
-> The endpoint runs Microsoft's HTML tag aligner on every request, so a bare `<` in page text fuses into a pseudo-tag（`a < b and c > d` 回来是 `<B和C> d`）—— Read Frog `api/microsoft.ts@9b44f82`
+> The endpoint runs Microsoft's HTML tag aligner on every request, so a bare `<` in page text fuses into a pseudo-tag (`a < b and c > d` comes back as `<B和C> d`) — Read Frog `api/microsoft.ts@9b44f82`
 
-> Google and Microsoft **both parse the request as HTML**, so their adapters escape plain source text before sending and the response stays HTML-encoded; **decode it exactly once** —— Read Frog `translation-output-normalization.ts@9b44f82`
+> Google and Microsoft **both parse the request as HTML**, so their adapters escape plain source text before sending and the response stays HTML-encoded; **decode it exactly once** — Read Frog `translation-output-normalization.ts@9b44f82`
 
-> endpoint 始终会运行 HTML 标签对齐器 —— FluentRead `providers/translation/microsoft.ts`
+> the endpoint always runs the HTML tag aligner — FluentRead `providers/translation/microsoft.ts`
 
-我那一次采样只是没触发（比较运算符两侧有空格）。结论方向不变但依据要换：`markers` 统一转义 `& < >`（DESIGN §6.2）在微软这边不是「安全」而是**必需**；`&lt;/&gt;` 无损往返，`&amp;` 变成「与」属于翻译质量而非损坏。
+My one sample simply did not trigger it (spaces on both sides of the comparison operators). The direction of the conclusion stands but its basis changes: `markers` escaping `& < >` uniformly (DESIGN §6.2) is not “safe” on the Microsoft side but **required**; `&lt;/&gt;` round-trip losslessly, `&amp;` becoming “与” is translation quality, not damage.
 
-**对 DESIGN.md 的含义**：`microsoft` 可以作为 `wireFormats: ['markers']` 的免费 provider 接入（#98）。`maxBatchChars` 应远低于 50,000（Google 用 8000），`maxBatchItems` 没有实际瓶颈。
+**What it means for DESIGN.md**: `microsoft` can be integrated as a free provider with `wireFormats: ['markers']` (#98). `maxBatchChars` should be far below 50,000 (Google uses 8000); `maxBatchItems` has no practical bottleneck.
 
-**对 DESIGN.md 的含义**：gtx 在样本中可靠保留了占位符，`google-gtx` 有条件声明 `preservesMarkup: true` 走 markup 路径，由 validator 兜底（失败再降级 runs）；translateHtml 不值得作为独立 provider。见 §7。
+**What it means for DESIGN.md**: gtx preserved the placeholders reliably in the samples, so `google-gtx` can conditionally declare `preservesMarkup: true` and take the markup path, with the validator as the safety net (falling back to runs on failure); translateHtml is not worth a provider of its own. See §7.
 
-## 6. Chrome 内置 Translator API（2026-09-03，Chrome 152，macOS）
+## 6. Chrome's built-in Translator API (2026-09-03, Chrome 152, macOS)
 
-探测脚本 `scripts/phase0/translator-probe.js`（本次通过 Claude in Chrome 在 `arxiv.org/html/2410.00260` 页面主世界执行，逻辑相同）。
+Probe script `scripts/phase0/translator-probe.js` (run this time through Claude in Chrome in the main world of the `arxiv.org/html/2410.00260` page, same logic).
 
-### 6.1 可用性与用户手势
+### 6.1 Availability and user gestures
 
-| 步骤 | 结果 |
+| Step | Result |
 |---|---|
-| `'Translator' in self` / `'LanguageDetector' in self` | 均为 `true`；`isSecureContext` true |
-| `Translator.availability({en→zh})` 初始 | `downloadable`（en→ja / de / fr / zh-Hant / ko 同样 `downloadable`，语言包按语言对独立下载） |
-| 无手势 `create()`（模型未下载） | 抛 `NotAllowedError: Requires a user gesture when availability is "downloading" or "downloadable"` |
-| 带手势 `create()`（模拟点击，`navigator.userActivation.isActive === true`） | 成功，耗时 **66.9 s**（即语言包下载）；**下载期间 `availability()` 一直返回 `downloadable` 而非 `downloading`** |
-| 下载完成后再次 `create()` | 8.6 s，`monitor` 收到 15 个 `downloadprogress` 事件（`loaded` 0→1，`total` 为 1，即归一化进度），说明二次 create 仍有一段本地加载 |
-| 模型就绪后无手势 `create()` | 成功，1 ms；`availability()` 为 `available` |
+| `'Translator' in self` / `'LanguageDetector' in self` | both `true`; `isSecureContext` true |
+| `Translator.availability({en→zh})` initially | `downloadable` (en→ja / de / fr / zh-Hant / ko `downloadable` likewise; language packs download per language pair) |
+| `create()` without a gesture (model not downloaded) | throws `NotAllowedError: Requires a user gesture when availability is "downloading" or "downloadable"` |
+| `create()` with a gesture (simulated click, `navigator.userActivation.isActive === true`) | succeeds, taking **66.9 s** (the language pack download); **during the download `availability()` kept returning `downloadable`, not `downloading`** |
+| `create()` again after the download | 8.6 s; `monitor` received 15 `downloadprogress` events (`loaded` 0→1, `total` 1, i.e. normalised progress), so a second create still has a stretch of local loading |
+| `create()` without a gesture once the model is ready | succeeds, 1 ms; `availability()` is `available` |
 | `LanguageDetector.availability()` | `available` |
 
-**结论**：用户手势只在需要下载语言包时才必需。扩展的 `isAvailable()` 应以 `availability()` 为准：`available` → 直接可用；`downloadable` → 需要在 popup 的点击处理函数里调用 `create()` 触发下载，并向用户展示进度（`monitor` 只在下载已完成后的 create 里给出进度事件，首次下载期间进度事件为空，需用"正在下载"的不确定态提示）。
+**Conclusion**: a user gesture is needed only when a language pack has to be downloaded. The extension's `isAvailable()` should go by `availability()`: `available` → usable directly; `downloadable` → `create()` has to be called inside the popup's click handler to start the download, with progress shown to the user (`monitor` gives progress events only in a create after the download is complete; during the first download the progress events are empty, so an indeterminate “downloading” hint is needed).
 
-### 6.2 翻译行为（模型就绪后）
+### 6.2 Translation behaviour (model ready)
 
-| 输入 | 耗时 | 输出 |
+| Input | Time | Output |
 |---|---|---|
-| 纯文本一句 | 9 ms | 「当图表连接时，定理 1 的证明是微不足道的。」 |
-| 含 `<a href="#x">`、`<em>`、`<x id="1"/>` | 15 ms | 三种标签全部保留，`href` 与 `id` 原样；标签内文字被翻译且小写化（"theorem 1"） |
-| 5 个 void 占位符 | 19 ms | 全部保留、顺序正确 |
-| paired 嵌套 void | 15 ms | 嵌套合法，id 无增无减 |
-| 四句整段（约 90 词） | 18 ms | 逐句翻译，质量可读；句间产生「。 」（句号后多一个空格），需归一化 |
-| `inputQuota` / `measureInputUsage()` | — | `null` / `0`，无配额限制信号 |
+| One plain-text sentence | 9 ms | 「当图表连接时，定理 1 的证明是微不足道的。」 |
+| With `<a href="#x">`, `<em>`, `<x id="1"/>` | 15 ms | All three tags preserved, `href` and `id` as they were; the text inside the tags translated and lower-cased ("theorem 1") |
+| 5 void placeholders | 19 ms | All preserved, order correct |
+| Paired nesting a void | 15 ms | Nesting valid, ids present with none added |
+| A four-sentence paragraph (about 90 words) | 18 ms | Translated sentence by sentence, readable quality; 「。 」 appears between sentences (a space after the full stop), needs normalising |
+| `inputQuota` / `measureInputUsage()` | — | `null` / `0`, no quota-limit signal |
 
-**对 DESIGN.md 的含义**：`chrome-builtin` 在所有样本中保留了占位符与 HTML 标签，与 gtx 一样有条件声明 `preservesMarkup: true`，runs 路径只作 validator 失败后的兜底；单句延迟 10–20 ms，远快于任何网络引擎，适合作为视口内首屏的即时引擎。
+**What it means for DESIGN.md**: `chrome-builtin` preserved placeholders and HTML tags in every sample, so like gtx it can conditionally declare `preservesMarkup: true`, with the runs path only as the safety net after a validator failure; single-sentence latency 10–20 ms, far faster than any network engine, suited as the instant engine for the first screen inside the viewport.
 
-### 6.3 未覆盖
+### 6.3 Not covered
 
-- ~~content script 的隔离世界是否同样暴露 `Translator`~~ **已实测（2026-09-05，Chrome 153）**：用一个只做探测的临时扩展（不改本项目源码）在 `arxiv.org/html/*` 注入 content script，隔离世界里 `'Translator' in self` 与 `'LanguageDetector' in self` 均为 `true`、`isSecureContext` 为 `true`、`Translator.availability({en→zh})` 与同页主世界同为 `downloadable`（en→ja 亦然）。Web API 确实不受 world 隔离影响，`chrome-builtin` 可以直接在 content script 里用。
-- 语言包大小未测（Chrome 不暴露字节数，`total` 恒为 1）；67 s 的下载时长对应本机网络，仅作量级参考。
+- ~~Whether the content script's isolated world exposes `Translator` likewise~~ **Measured (2026-09-05, Chrome 153)**: with a throwaway probe-only extension (no change to this project's sources) injecting a content script on `arxiv.org/html/*`, in the isolated world `'Translator' in self` and `'LanguageDetector' in self` are both `true`, `isSecureContext` is `true`, and `Translator.availability({en→zh})` is `downloadable` like the same page's main world (en→ja too). Web APIs really are unaffected by world isolation; `chrome-builtin` can be used directly in the content script.
+- Language pack size not measured (Chrome exposes no byte count; `total` is always 1); the 67 s download corresponds to this machine's network, an order of magnitude only.
 
-### 6.4 service worker 里也有 `Translator`（2026-09-05，Chrome 153，Playwright 装载当前构建）
+### 6.4 `Translator` exists in the service worker too (2026-09-05, Chrome 153, Playwright loading the current build)
 
-Codex 在 #50 断言 MV3 的 background service worker 不暴露 `Translator`，据此推论 background 侧的可用性判断永远报「不可用」。实测相反：
+Codex asserted on #50 that the MV3 background service worker does not expose `Translator`, and inferred that the background side's availability check always reports “unavailable”. Measured, the opposite:
 
-| 上下文 | `'Translator' in self` | `Translator.availability({ en → zh })` |
+| Context | `'Translator' in self` | `Translator.availability({ en → zh })` |
 |---|---|---|
-| background service worker | true（function） | `downloadable` |
-| popup 页面 | true（function） | `downloadable` |
+| background service worker | true (function) | `downloadable` |
+| popup page | true (function) | `downloadable` |
 
-worker 里的可用性结果与窗口上下文一致，`createStatusHandler` 在 background 判断 chrome-builtin 是否可用是准确的。仍然成立的边界：worker 里没有用户手势，语言包为 `downloadable` 时 `create()` 抛 `NotAllowedError`，所以下载入口只能放在 popup 的点击处理函数里（DESIGN §8.4）。
+The availability result in the worker agrees with the window contexts; `createStatusHandler` judging chrome-builtin's availability in the background is accurate. The boundary that still holds: there is no user gesture in the worker, so with the pack `downloadable` `create()` throws `NotAllowedError`, and the download entry can only live in the popup's click handler (DESIGN §8.4).
 
-## 6.5 ~~MV3 service worker 是当前延迟的根因~~（2026-09-04）——**结论已推翻，见 §6.7 / §6.8**
+## 6.5 ~~The MV3 service worker is the root cause of the current delay~~ (2026-09-04) — **conclusion overturned, see §6.7 / §6.8**
 
-> **本节的延迟结论不再成立**（2026-09-06）。6.7–77 s 在当前代码上重现不出来（§6.7），一次在飞的请求本身就让 worker 存活（§6.8），「Read Frog 在 content 发请求」是误读（§6.7）。方法与原始数据留档，**结论与由它推出的建议一律以 §6.7 / §6.8 为准**。
+> **This section's delay conclusion no longer holds** (2026-09-06). The 6.7–77 s cannot be reproduced on the current code (§6.7), a request in flight keeps the worker alive by itself (§6.8), and “Read Frog sends requests from the content side” was a misreading (§6.7). The method and the raw data stay on file; **the conclusions and the recommendations derived from them are superseded by §6.7 / §6.8 throughout**.
 
-页面加载后要等几十秒才开始翻译，逐层测下来结论如下（日志见 content 的 `[axt] start:`）：
+After a page load it takes tens of seconds before translation starts; measured layer by layer (logs in the content side's `[axt] start:`):
 
-| 现象 | 数据 |
+| Observation | Data |
 |---|---|
-| `axt:ping` 往返（background 只回一个常量） | 投递 0–51 ms，SW 年龄 0 s |
-| 紧接着的 `axt:provider-status`（无网络请求，只读配置 + 判断有没有 key） | 6.7 s / 13.5 s / 77 s（冷 worker），4 ms（热 worker） |
-| 其中 handler 内部 | 6663 ms（投递 0 ms，回程 13 ms） |
-| 翻译中途 | `Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received` |
+| `axt:ping` round trip (the background answers one constant) | delivery 0–51 ms, SW age 0 s |
+| The `axt:provider-status` right after (no network request; reads the configuration and checks for a key) | 6.7 s / 13.5 s / 77 s (cold worker), 4 ms (warm worker) |
+| Of which inside the handler | 6663 ms (delivery 0 ms, return 13 ms) |
+| Mid-translation | `Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received` |
 
-同一个刚启动的 worker 上，前一条消息 50 ms、后一条 6.7 秒，且 handler 内部没有任何 I/O。加上那条"通道在收到响应前关闭"的报错，指向 **MV3 的 service worker 在等待期间被挂起 / 回收**，与我们的代码无关。缓存写入扫全库（§9）确实是个真缺陷，也已修复，但不是这次延迟的根因，之前的判断作废。
+On the same freshly started worker the first message takes 50 ms and the next 6.7 seconds, with no I/O at all inside the handler. Together with the "channel closed before a response was received" error this points at **the MV3 service worker being suspended / reclaimed while waiting**, unrelated to our code. The cache write scanning the whole store (§9) is a real defect and has been fixed, but it is not the root cause of this delay; the earlier judgement is withdrawn.
 
-**参考项目怎么绕开**：Read Frog 把 provider 的 `fetch` 放在 **content script**（`utils/host/translate/api/*.ts` 由 host content 调用），service worker 完全不在请求链路上。FluentRead 有 `platform/http/runtime.ts` 抽象，可替换 transport。
+**How the reference projects get around it**: Read Frog puts the providers' `fetch` in the **content script** (`utils/host/translate/api/*.ts` called from the host content), with the service worker entirely off the request path. FluentRead has a `platform/http/runtime.ts` abstraction with a replaceable transport.
 
-## 6.6 Google translateHtml 免费接口实测（2026-09-04，页面上下文）
+## 6.6 Google translateHtml free endpoint measured (2026-09-04, page context)
 
-端点与参数照 Read Frog `utils/host/translate/api/google.ts`：`POST https://translate-pa.googleapis.com/v1/translateHtml`，`Content-Type: application/json+protobuf`，`X-Goog-API-Key`（公开常量），body `[[[items...], from, to], "wt_lib"]`。
+Endpoint and parameters as in Read Frog `utils/host/translate/api/google.ts`: `POST https://translate-pa.googleapis.com/v1/translateHtml`, `Content-Type: application/json+protobuf`, `X-Goog-API-Key` (a public constant), body `[[[items...], from, to], "wt_lib"]`.
 
-| 批量 | 耗时 | 结果 |
+| Batch | Time | Result |
 |---|---|---|
-| 2 条 | 307 ms | 全部返回 |
-| 20 条 | 183 ms | 全部返回 |
-| 60 条 | 250 ms | 全部返回 |
-| 150 条 | 556 ms | 全部返回 |
+| 2 items | 307 ms | all returned |
+| 20 items | 183 ms | all returned |
+| 60 items | 250 ms | all returned |
+| 150 items | 556 ms | all returned |
 
-两个关键结论：
+Two key conclusions:
 
-1. **可在页面 / content script 上下文直接调用**，响应带 CORS（`response.type === "cors"`），不需要经过 background。
-2. **原样保留我们的占位符**：`Let <x id="1"/> be a <t id="2">connected</t> graph` → `让<x id="1"/>成为<t id="2">连接</t>图表`。void 与 paired 占位符、id 全部完好，所以它走 **markup 路径**，`preservesMarkup: true`，不需要 runs 兜底。DESIGN §8 里把 `google-gtx` 预设为 `preservesMarkup: false` 需要修订。
+1. **Callable directly from the page / content-script context**; the response carries CORS (`response.type === "cors"`), no need to go through the background.
+2. **Our placeholders come back as they were**: `Let <x id="1"/> be a <t id="2">connected</t> graph` → `让<x id="1"/>成为<t id="2">连接</t>图表`. Void and paired placeholders and their ids all intact, so it takes the **markup path**, `preservesMarkup: true`, with no runs safety net needed. DESIGN §8's preset of `google-gtx` as `preservesMarkup: false` needs revising.
 
-对比：一篇 159 块的论文用 LLM 走了 190 s，用这个接口按 150 条一批只需约 1 s。译文质量是机器翻译水准（"weights" 译成"重量"），适合大批量回归测试与首屏即时显示，不适合替代 LLM 做最终译文。
+For comparison: a 159-block paper took 190 s through the LLM; through this endpoint at 150 items a batch it takes about 1 s. The quality is machine-translation grade ("weights" rendered as "重量"), suited to large-batch regression tests and instant first-screen display, not to replacing the LLM for the final translation.
 
 ---
 
-## 6.7 请求执行位置：content 侧 fetch 受 CORS 与本地网络门禁双重约束（2026-09-05；「混合内容」的归因于 2026-09-06 更正，见下）
+## 6.7 Where requests run: a content-side fetch is bound by CORS and by the local-network gate alike (2026-09-05; the “mixed content” attribution corrected 2026-09-06, see below)
 
-**方法**：本地起两个只有 CORS 头不同、其余完全一样的 OpenAI 兼容端点（`/v1/chat/completions` 带 `Access-Control-Allow-Origin: *` 并应答预检；`/nocors/...` 不带任何 CORS 头），用 Playwright 装载一个探针扩展（`host_permissions` 覆盖端点），分别从 **background service worker**、**content script 隔离世界**、**页面主世界** 发同一个带 `Authorization` 头的 POST，服务端记录 Origin、预检与状态。探针在会话临时目录，不进仓库。
+**Method**: two local OpenAI-compatible endpoints identical except for their CORS headers (`/v1/chat/completions` with `Access-Control-Allow-Origin: *` and answering preflights; `/nocors/...` with no CORS header at all); a probe extension loaded through Playwright (`host_permissions` covering the endpoints) sends the same POST with an `Authorization` header from the **background service worker**, the **content script's isolated world** and the **page's main world**, with the server logging Origin, preflight and status. The probe lives in the session's temporary directory, not in the repository.
 
-| 执行位置 | 端点带 CORS 头 | 端点不带 CORS 头 | 服务端看到的 Origin / 预检 |
+| Where it runs | Endpoint with CORS headers | Endpoint without CORS headers | Origin / preflight the server sees |
 |---|---|---|---|
-| background service worker | 200 | **200** | `chrome-extension://<id>`，**没有预检** |
-| content script（隔离世界） | 200（先发 `OPTIONS` 预检） | **`TypeError: Failed to fetch`** | 页面 origin（`http://localhost:8898`），预检发出、响应缺 CORS 头即失败 |
-| 页面主世界 | 同 content script | 同 content script | 同上 |
+| background service worker | 200 | **200** | `chrome-extension://<id>`, **no preflight** |
+| content script (isolated world) | 200 (an `OPTIONS` preflight first) | **`TypeError: Failed to fetch`** | the page origin (`http://localhost:8898`); the preflight goes out and fails on the missing CORS header |
+| page main world | as the content script | as the content script | as above |
 
-再把页面换成真实的 `https://arxiv.org/html/...`、端点保持 `http://127.0.0.1`：页面里的 fetch 直接 `Failed to fetch`，**请求根本没有离开浏览器**（服务端日志为空），background 照常 200。
+Then with the page swapped for a real `https://arxiv.org/html/...` and the endpoint kept at `http://127.0.0.1`: the page's fetch is `Failed to fetch` outright, **the request never left the browser** (the server log is empty), while the background is 200 as before.
 
-**这里原先写的是「混合内容拦截」，归因错了**（Codex 在 #57 指出，2026-09-06 补测更正）：loopback 是规范里的 *potentially trustworthy origin*，`https` 页面调 `http://127.0.0.1` **不属于**混合内容。补的对照实验——同一个 loopback 主机上同时起 `http:8901` 与 `https:8902`（自签证书，`--ignore-certificate-errors`），两个端点都带 `Access-Control-Allow-Origin: *`：
+**This was first written up as “mixed content blocking”, a wrong attribution** (Codex on #57; corrected with a follow-up measurement 2026-09-06): loopback is a *potentially trustworthy origin* in the spec, and an `https` page calling `http://127.0.0.1` **is not** mixed content. The control experiment added — `http:8901` and `https:8902` (self-signed certificate, `--ignore-certificate-errors`) on the same loopback host at once, both endpoints with `Access-Control-Allow-Origin: *`:
 
-| 发起页面 | → `http://127.0.0.1:8901` | → `https://127.0.0.1:8902` | 服务端收到 |
+| Originating page | → `http://127.0.0.1:8901` | → `https://127.0.0.1:8902` | Received by the server |
 |---|---|---|---|
-| `http://127.0.0.1:8901`（同为本地） | **200** | **200** | 预检 + POST 都到了 |
-| `https://arxiv.org/html/...` | `Failed to fetch` | **`Failed to fetch`** | **一条都没有** |
+| `http://127.0.0.1:8901` (local as well) | **200** | **200** | preflight + POST both arrived |
+| `https://arxiv.org/html/...` | `Failed to fetch` | **`Failed to fetch`** | **not one** |
 
-第一行排除了证书、端点与 CORS 三种解释；第二行里 `https` → `https` 不可能是混合内容，却同样被拦。**真正生效的是 Chrome 从公网站点访问本地地址的门禁（Local Network Access）**，与端点用什么 scheme 无关。
+The first row rules out the certificate, the endpoint and CORS as explanations; in the second row `https` → `https` cannot be mixed content, yet it is blocked all the same. **What really applies is Chrome's gate on a public site reaching local addresses (Local Network Access)**, regardless of the endpoint's scheme.
 
-实际影响：**给本地端点配一张 https 证书绕不过去**。想从页面侧直连 Ollama 这条路是堵死的，只有 background 走得通——扩展 origin 加 `host_permissions` 不受这道门禁约束（同一次实测里 background 两个端点都是 200）。
+Practical impact: **giving the local endpoint an https certificate does not get around it**. Reaching Ollama directly from the page side is a dead end; only the background gets through — an extension origin with `host_permissions` is not subject to this gate (in the same measurement the background was 200 on both endpoints).
 
-**结论**：
-1. MV3 下 `host_permissions` **不会**解除 content script 的 CORS 约束：content 的请求带页面 origin、走预检，与页面主世界完全一致（Chrome 85 起的行为，官方文档 developer.chrome.com/docs/extensions/develop/concepts/network-requests）。
-2. background 的请求带扩展 origin、不走预检，不带 CORS 头的端点也能用。
-3. 公网页面调不到本机端点（**本地网络门禁**，与端点用什么 scheme 无关，见上面的对照实验）：本地 Ollama（`http://localhost:11434`）从 content 侧**不可达**，从 background 可达。CLAUDE.md 列出的 Ollama 在当前架构下只有设置页的连接测试（走 background）能通过，正式翻译（走 content）必然失败——两条路径行为不一致，正是 issue #42 指出的问题。
-4. 对 OpenRouter / DeepSeek 这类公开 API，content 侧能否直连取决于对方是否长期给浏览器发 CORS 头，这是我们控制不了的外部条件；background 不依赖它。
+**Conclusions**:
+1. Under MV3 `host_permissions` does **not** lift the content script's CORS constraint: the content side's request carries the page origin and goes through a preflight, exactly like the page's main world (the behaviour since Chrome 85, official documentation at developer.chrome.com/docs/extensions/develop/concepts/network-requests).
+2. The background's request carries the extension origin, goes through no preflight, and an endpoint without CORS headers works.
+3. A public page cannot reach a local endpoint (**the local-network gate**, regardless of the endpoint's scheme, see the control experiment above): a local Ollama (`http://localhost:11434`) is **unreachable** from the content side and reachable from the background. The Ollama CLAUDE.md lists can, under the current architecture, only pass the options page's connection test (through the background), while the real translation (through content) is bound to fail — two paths behaving differently, exactly the problem issue #42 points out.
+4. For public APIs such as OpenRouter / DeepSeek, whether the content side can call them directly depends on the other side sending CORS headers to browsers for the long term, an external condition beyond our control; the background does not depend on it.
 
-**§6.5 的一处错误**：那节写「Read Frog 把 provider 的 fetch 放在 content script、service worker 完全不在请求链路上」。核对参考快照：`utils/host/translate/translate-text.ts:360` 通过 `sendMessage("enqueueTranslateRequest", …)` 把请求发给 background，`entrypoints/background/translation-queues.ts:490` 在 worker 里排队并真正调用模型——Read Frog 的请求**就是在 background 执行的**，只是把等待与队列也放在那里。§6.5 那次量到的 6.7–77 s **是当时观察到的延迟**，但它是不是「worker 冷启动」造成的，从来没有被验证过（worker 状态没记录，见下面重测那段的局限），而且在当前代码上重现不出来；「参考项目怎么绕开」那段的依据也不成立，DESIGN §8.0 引用它作为把请求移到 content 的理由之一随之失效。
+**An error in §6.5**: that section says “Read Frog puts the providers' fetch in the content script, with the service worker entirely off the request path”. Checking the reference snapshot: `utils/host/translate/translate-text.ts:360` sends the request to the background through `sendMessage("enqueueTranslateRequest", …)`, and `entrypoints/background/translation-queues.ts:490` queues it in the worker and really calls the model — Read Frog's requests **do run in the background**; only the waiting and the queue live there as well. The 6.7–77 s §6.5 measured **is the delay observed at the time**, but whether a “cold worker start” caused it was never verified (the worker state was not recorded, see the limitations of the re-measurement below), and it cannot be reproduced on the current code; the basis of the “how the reference projects get around it” passage does not hold either, and DESIGN §8.0's citing it as one of the reasons to move requests to content falls with it.
 
-**冷启动延迟的重测（2026-09-05，Playwright + 当前 main 构建）**：从 popup 页面计时 `axt:ping`、`axt:provider-status`（冷 / 热）与 `chrome.storage.local.get`，四轮（启动后 + 三次闲置 36 s 后）全部落在 **0–5 ms**：
+**Re-measuring the cold-start delay (2026-09-05, Playwright + the current main build)**: timing `axt:ping`, `axt:provider-status` (cold / warm) and `chrome.storage.local.get` from the popup page, four rounds (after start-up + three times after 36 s idle) all land in **0–5 ms**:
 
-| 轮次 | 测前 worker 存活 | ping | provider-status 冷 | 热 | storage |
+| Round | Workers alive before | ping | provider-status cold | warm | storage |
 |---|---|---|---|---|---|
-| 启动后 | 1 | 5 ms | 1 ms | 1 ms | 0 ms |
-| 闲置 36 s ×3 | 1 / 1 / 1 | 1 ms | 1 ms | 0–1 ms | 0 ms |
+| after start-up | 1 | 5 ms | 1 ms | 1 ms | 0 ms |
+| idle 36 s ×3 | 1 / 1 / 1 | 1 ms | 1 ms | 0–1 ms | 0 ms |
 
-两点结论：(1) `getConfig()` + `getProvider()` + `isAvailable()` 这条路径的**稳态成本约 1 ms**，§6.5 看到的 6.7–77 s 不是代码本身的开销；(2) **Playwright 环境里 worker 从不被回收**（三次闲置后存活数仍为 1——被调试器附着的 service worker 不受 MV3 空闲回收），CDP 的 `ServiceWorker` 域在浏览器级会话上也不可用，所以 §6.5 那种「冷 worker」在这里**造不出来**，三段拆分无法在自动化环境完成。**真实 Chrome 的冷启动重测（2026-09-06，Chrome 152，用户的浏览器，Claude in Chrome 驱动，构建 `c24ebbd`）**：关掉扩展的所有页面、闲置 40 s（超过 MV3 的 30 s 空闲回收），再重载论文页并读 content 日志。当前架构下 content 在启动路径上唯一发给 background 的消息是 `axt:cache-get`，所以「13 块全部命中缓存」的耗时就是**冷 worker 上一次消息往返 + IndexedDB 读**的上界：
+Two conclusions: (1) the path `getConfig()` + `getProvider()` + `isAvailable()` has a **steady-state cost of about 1 ms**; the 6.7–77 s §6.5 saw is not the code's own cost; (2) **in the Playwright environment the worker is never reclaimed** (after three idles the alive count is still 1 — a service worker with a debugger attached is exempt from MV3's idle reclamation), and CDP's `ServiceWorker` domain is unavailable on a browser-level session too, so §6.5's kind of “cold worker” **cannot be produced** here, and the three-way split cannot be completed in an automated environment. **Re-measuring the cold start in real Chrome (2026-09-06, Chrome 152, the user's browser, driven by Claude in Chrome, build `c24ebbd`)**: close every page of the extension, idle 40 s (beyond MV3's 30 s idle reclamation), reload the paper page and read the content log. Under the current architecture the only message content sends to the background on the start-up path is `axt:cache-get`, so the time for “all 13 blocks hit the cache” is the upper bound of **one message round trip on a cold worker + an IndexedDB read**:
 
-| 轮次 | `start: ready` | `session idle`（13 块全部缓存命中） | 读缓存超时警告 / channel closed |
+| Round | `start: ready` | `session idle` (all 13 blocks cache hits) | cache-read timeout warning / channel closed |
 |---|---|---|---|
-| 首次加载（热） | 33 ms | 1633 ms（13 请求，1 命中，走 google-web） | 无 |
-| 闲置 40 s #1 | 4 ms | 77 ms | 无 |
-| 闲置 40 s #2 | 22 ms | 81 ms | 无 |
-| 闲置 40 s #3 | 21 ms | 77 ms | 无 |
+| first load (warm) | 33 ms | 1633 ms (13 requests, 1 hit, through google-web) | none |
+| idle 40 s #1 | 4 ms | 77 ms | none |
+| idle 40 s #2 | 22 ms | 81 ms | none |
+| idle 40 s #3 | 21 ms | 77 ms | none |
 
-**这张表测的不是冷启动，别当冷启动用** [待验证]（Codex 在 #57 / #78 两轮指出）：它没有在每轮重载前直接观测 worker 是否真的已被回收——40 s 空闲**超过** MV3 的 30 s 阈值，但 Chrome 可以推迟回收，扩展 API 活动也会重置空闲计时，所以这几个 77–81 ms 完全可能是热 worker 的数字。§6.8 记的 worker 年龄（45 013 ms / 90 007 ms，等于请求时长）只证明**那台机器上回收确实在发生**：它用的是另一个 12 行探针，测的是慢 fetch 期间的存活，**不测本扩展的初始化、配置读取与建链路径**。
+**This table does not measure a cold start; do not use it as one** [to verify] (Codex on #57 / #78, two rounds): it did not observe directly before each reload whether the worker had really been reclaimed — 40 s idle **exceeds** MV3's 30 s threshold, but Chrome may postpone reclamation and extension API activity resets the idle timer too, so these 77–81 ms may well be warm-worker numbers. The worker ages §6.8 records (45 013 ms / 90 007 ms, equal to the request durations) only prove that **reclamation does happen on that machine**: that was another 12-line probe measuring survival during a slow fetch, **not this extension's initialisation, configuration read and chain-building path**.
 
-所以这张表能支持的只有一条：**稳态（热 worker）往返 80 ms**。「冷 worker 也只会慢一点」是推测，没有测量支持，本节不再作此断言——要坐实它，得在扩展自己的 background 里给 worker 创建打点，重启后量第一条消息的完整往返。
+So the only thing this table supports is: **a steady-state (warm worker) round trip of 80 ms**. “A cold worker is only a little slower” is a guess with no measurement behind it, and this section no longer asserts it — to establish it, the extension's own background would have to mark worker creation and measure the full round trip of the first message after a restart.
 
-三轮**闲置后重载**（worker 是冷是热未直接观测，见上）的 background 往返都在 80 ms 以内，1.5 s 的读缓存预算一次没触发。**§6.5 记录的 6.7–77 s 在当前代码上重现不出来**——那次测量发生在缓存写入还会扫全库的版本（§9 已修），而且当时 `provider-status` 走的是 background，现在启动路径根本不经过它。所以 §8.0「把请求移到 content」的**延迟**理由不成立（再强调一次：这是「重现不出来」，不等于「冷启动已被证明很快」）；它的 **CORS / 本地网络门禁**代价则已被本节实测坐实。popup 那条路径由用户手动确认（2026-09-06）：闲置后点扩展图标，「翻译」按钮**立刻可点**，没有出现灰几秒的情况——`axt:provider-status` 这条唯一还走 background 的启动期消息在这次观察里同样没有卡顿。**注意本节只量了「启动」往返**，没有回答「请求正在等待时 worker 会不会被回收」——那是另一种失效模式，DESIGN §8.2 给一批 1000 字预算 35 s、单次尝试上限 120 s，正落在这个问题上（Codex 在 #57 指出）。§6.8 专门测了它。
+Three **reloads after idling** (worker cold or warm not directly observed, see above) all had background round trips within 80 ms, and the 1.5 s cache-read budget never fired. **The 6.7–77 s §6.5 recorded cannot be reproduced on the current code** — that measurement was made on the version whose cache write still scanned the whole store (fixed, §9), and `provider-status` went through the background then, whereas the start-up path does not pass through it at all now. So the **latency** reason of §8.0's “move requests to content” does not hold (once more: this is “cannot be reproduced”, not “the cold start has been proven fast”); its **CORS / local-network gate** cost is confirmed by this section's measurements. The popup path was confirmed by hand by the user (2026-09-06): clicking the extension icon after idling, the “翻译” button is **clickable at once**, with no greyed-out seconds — `axt:provider-status`, the one start-up message still going through the background, did not stall in this observation either. **Note that this section measured the “start-up” round trip only**; it does not answer “is the worker reclaimed while a request is waiting” — another failure mode, and DESIGN §8.2's 35 s budget for a 1000-character batch and 120 s cap per attempt land exactly on that question (Codex on #57). §6.8 measures it specifically.
 
-**顺带发现（同一次实测）**：用户的 Chrome 里存着 v7 配置（之前试过设置页分支的构建），而加载的构建是 v6 的，`@wxt-dev/storage` 报 `Version downgrade detected (v7 -> v6)` 拒绝迁移，`getConfig()` 校验失败回退默认值——API key 被静默忽略，链落到 google-web，用户看不出区别。这是 Codex 在 #52 指出的「一条术语让整份配置回退」的同一类问题，只是触发条件换成了「装了旧构建」。值得在 DESIGN §9 记一条：回退默认值时至少要在 popup 上显式提示，不能静默。
+**Found along the way (the same measurement)**: the user's Chrome held a v7 configuration (from an earlier build of the settings-page branch) while the loaded build was v6; `@wxt-dev/storage` reported `Version downgrade detected (v7 -> v6)` and refused to migrate, `getConfig()` failed validation and fell back to the defaults — the API key silently ignored, the chain down to google-web, and nothing for the user to see. This is the same class of problem Codex pointed out on #52, “one term makes the whole configuration fall back”, with the trigger changed to “an older build installed”. Worth a line in DESIGN §9: a fallback to defaults must at least be announced in the popup, never silent.
 
-## 6.8 MV3 worker 扛得住长时间在飞的请求，不需要保活（2026-09-06，Chrome 153，用户的浏览器）
+## 6.8 The MV3 worker survives long requests in flight; no keep-alive needed (2026-09-06, Chrome 153, the user's browser)
 
-**为什么要单独测**：§6.7 只量了**启动**往返（77–81 ms），而 §6.5 记录的 `A listener indicated an asynchronous response by returning true, but the message channel closed` 是另一种失效模式——请求**已经发出、正在等**的时候 worker 被回收。两者不能互相作证，而把翻译搬回 background（issue #42）成不成立全看后者。Playwright 里 worker 被调试器钉住、永不回收（§6.7 已记），只能在真实 Chrome 里测。
+**Why measure it separately**: §6.7 only measured the **start-up** round trip (77–81 ms), while the `A listener indicated an asynchronous response by returning true, but the message channel closed` §6.5 records is another failure mode — the worker reclaimed while a request **has been sent and is waiting**. The two cannot vouch for each other, and whether moving translation back to the background (issue #42) holds rests entirely on the latter. In Playwright the worker is pinned by the debugger and never reclaimed (recorded in §6.7), so it can only be measured in real Chrome.
 
-**方法**：一个只有 12 行的探针扩展（会话临时目录，不进仓库），`host_permissions` 覆盖本机端点。本地起一个 `/slow?ms=N` 延迟 N 毫秒才应答的 HTTP 服务；content script 用一次性 `chrome.runtime.sendMessage` 请 background 去 fetch 它，**不做任何保活**，先静置让 worker 进入空闲再发。调试器只附在页面上，不附在 worker 上。
+**Method**: a probe extension of 12 lines (session temporary directory, not in the repository), `host_permissions` covering the local endpoint. A local HTTP service whose `/slow?ms=N` answers after N milliseconds; the content script asks the background with a one-shot `chrome.runtime.sendMessage` to fetch it, **with no keep-alive of any kind**, after first leaving the worker to go idle. The debugger is attached to the page only, not to the worker.
 
-| 延迟 | 结果 | 用时 | worker 年龄 |
+| Delay | Result | Duration | Worker age |
 |---|---|---|---|
 | 45 s | OK | 45 063 ms | 45 013 ms |
 | 90 s | OK | 90 052 ms | 90 007 ms |
 
-两轮都远超 MV3 的 30 s 空闲回收阈值，响应照常回到 content。**结论：一次在飞的请求本身就让 worker 保持存活，不需要 Port、不需要心跳**。
+Both rounds far exceed MV3's 30 s idle reclamation threshold, and the response came back to content as usual. **Conclusion: a request in flight keeps the worker alive by itself; no Port and no heartbeat needed**.
 
-**这条结论只覆盖「fetch 正在飞」这一种等待** [待验证]（Codex 在 #78 指出）：429 之后 `RequestQueue` 让那一发 fetch 正常结束，任务只挂在 `setTimeout` 上等退避（`Retry-After` 或指数退避）——那段窗口里**没有活跃请求**，而全流程预算最长到 180 s，远超 30 s 阈值。本探针也没有区分究竟是「content 还挂着的 sendMessage」还是「活跃的 fetch」在保活。要覆盖这一段，探针得改成「background 收到消息后先干等 N 秒再发 fetch」。眼下的兜底是：真出问题会表现为那一批超时失败，降级链与重试照常工作，不会整页卡死。预备的另外两个变体（会话期持 `chrome.runtime.connect`、每 20 s ping）没有必要启用。§6.5 那条报错的成因没有再现，可能来自当时缓存写入扫全库造成的长阻塞（§9 已修）。
+**This conclusion covers only one kind of waiting, “a fetch in flight”** [to verify] (Codex on #78): after a 429 `RequestQueue` lets that fetch end normally and the task hangs on a `setTimeout` waiting for the back-off (`Retry-After` or exponential) — in that window **there is no active request**, while the whole-flow budget runs up to 180 s, far beyond the 30 s threshold. Nor did this probe distinguish whether it is “the sendMessage content is still holding” or “the active fetch” that keeps the worker alive. To cover that stretch the probe would have to become “the background waits N seconds after receiving the message before it fetches”. The safety net for now: a real problem would show as that batch timing out and failing, with the fallback chain and retries working as usual, never the whole page stuck. The two prepared variants (a session-long `chrome.runtime.connect`, a ping every 20 s) need not be enabled. The cause of §6.5's error did not recur; it may have come from the long blocking of the cache write scanning the whole store at the time (fixed, §9).
 
-**顺带一测：background 里的 `Translator.create()`**。§6.4 已测得 worker 里有 `Translator` 且 `availability()` 与 popup 一致，`create()` 这步没测过。这次探针在 worker 里读到的是 `downloadable`（该 Chrome 配置里语言包未就绪），**因此 `create()` 没测成**，这一条仍是未知。不阻塞搬迁：`buildChain` 本来就会把 `isAvailable()` 为假的引擎剔出链，语言包没下载时 `chrome-builtin` 自动不参与；真要下载也只能由 popup 的点击手势发起（§6.1）。等哪次语言包就绪时补测。
+**Measured along the way: `Translator.create()` in the background**. §6.4 established that the worker has `Translator` and its `availability()` agrees with the popup; the `create()` step had not been tested. This time the probe read `downloadable` in the worker (the language pack was not ready in that Chrome configuration), **so `create()` could not be tested** and stays unknown. It does not block the move: `buildChain` drops engines whose `isAvailable()` is false from the chain anyway, so with the pack not downloaded `chrome-builtin` simply takes no part; a real download can only be started by the popup's click gesture (§6.1). To be measured when a language pack is ready some time.
 
-## 6.9 可选主机权限的授权弹窗在 Playwright 里点不到（2026-09-06）
+## 6.9 The optional host permission's prompt cannot be clicked in Playwright (2026-09-06)
 
-写 `pnpm e2e:local-endpoint` 时撞到：设置页保存自定义端点会调 `chrome.permissions.request({ origins })`，Chrome 弹的是**原生对话框**，Playwright 既看不到也点不了，`evaluate` 会一直挂住（实测两次，进程要手动杀）。加不加用户手势都一样。
+Hit while writing `pnpm e2e:local-endpoint`: saving a custom endpoint on the options page calls `chrome.permissions.request({ origins })`, Chrome shows a **native dialog**, Playwright can neither see nor click it, and `evaluate` hangs for good (measured twice; the process had to be killed by hand). With or without a user gesture alike.
 
-绕法：e2e **复制**一份 `.output/chrome-mv3`，只往副本的 `manifest.json` 里加 `http://127.0.0.1/*`，再 `--load-extension` 那份副本；仓库里的 `wxt.config.ts` 不动。授权流程不是那条 e2e 的被测对象。
+The way around: the e2e **copies** `.output/chrome-mv3`, adds `http://127.0.0.1/*` to the copy's `manifest.json` only, and `--load-extension`s the copy; the repository's `wxt.config.ts` is untouched. The permission flow is not what that e2e tests.
 
-顺带确认了两件与 Ollama 支持直接相关的事（探针在扩展页里调 `chrome.permissions.contains`）：
+Two things directly relevant to Ollama support were confirmed along the way (the probe calling `chrome.permissions.contains` in an extension page):
 
-| 模式 | manifest 里有 `http://127.0.0.1/*` 时 `contains` |
+| Pattern | `contains` with `http://127.0.0.1/*` in the manifest |
 |---|---|
 | `http://127.0.0.1/*` | true |
-| `http://127.0.0.1:8899/*` | **true**（带端口的模式合法，且被不带端口的覆盖）|
-| `http://localhost:11434/*` | false（`localhost` 与 `127.0.0.1` 是不同的主机）|
+| `http://127.0.0.1:8899/*` | **true** (a pattern with a port is valid and is covered by the one without)|
+| `http://localhost:11434/*` | false (`localhost` and `127.0.0.1` are different hosts)|
 
-所以设置页用 `${new URL(url).origin}/*` 生成的带端口模式是合法的，Chrome 能正确判定包含关系。
+So the port-carrying pattern the options page builds with `${new URL(url).origin}/*` is valid, and Chrome judges containment correctly.
 
-## 6.10 浏览器图片翻译的现成方案调查（2026-09-07，开工前）
+## 6.10 Survey of existing browser image-translation solutions (2026-09-07, before starting)
 
-DESIGN §15 只记了用上的两个（`macos-vision-ocr`、`ImageTrans_chrome_extension`）。没用上的也记下来，跨平台识别后端选型（issue #91）要用：
+DESIGN §15 records only the two used (`macos-vision-ocr`, `ImageTrans_chrome_extension`). The ones not used are recorded too; choosing a cross-platform recognition backend (issue #91) will need them:
 
-| 项目 | 许可证 | 识别 | 框从哪来 | 为什么这轮没用 |
+| Project | Licence | Recognition | Where the boxes come from | Why not this round |
 |---|---|---|---|---|
-| [bytefer/macos-vision-ocr](https://github.com/bytefer/macos-vision-ocr) | MIT | Apple Vision | 归一化四角 + 置信度 | **用了**：helper 核心（§15.4） |
-| [xulihang/ImageTrans_chrome_extension](https://github.com/xulihang/ImageTrans_chrome_extension) | GPL-3.0 | 浏览器内 PaddleOCR（onnxruntime-web）或本机 ImageTrans 服务 | 真 OCR 框 | 叠加层渲染与视口调度的思路**用了**；识别没用——Mac 上 Vision 更准更快、无需塞模型。**它的 "OpenAI" 路径不是发图给模型**：`ajaxOpenAI` 里 `boxes = await paddleOCR(dataURL, …)`，模型只翻识别出来的文字 |
-| [Kuju29/TextPhantomOCR_Overlay](https://github.com/Kuju29/TextPhantomOCR_Overlay) | 未标注 | Gemma 3（Hugging Face）/ Ollama 读图 | 文档里看不到它要坐标，叠加层怎么定位也没说 | 许可证未标、无可搬的坐标实现；只能当"有人这么做过"的旁证 |
-| [A9T9/Copyfish](https://github.com/A9T9/Copyfish)、SkyN9ne/CopyfishOCR | GPL | ocr.space 云 API | 真 OCR 框 | 论文图要传给第三方、另需 key，与"识别留在本机"的取舍相反 |
-| Honyaku Translation Overlay | — | Google Cloud Vision + DeepL | 真 OCR 框 | 同上，且两套 key |
-| [boysugi20/python-image-translator](https://github.com/boysugi20/python-image-translator)、Crivella/ocr_translate | — | EasyOCR / 本地模型，Python | 真 OCR 框 | 桌面 / 服务端程序，不是浏览器内方案；ocr_translate 要自己跑一个 Django 服务 |
+| [bytefer/macos-vision-ocr](https://github.com/bytefer/macos-vision-ocr) | MIT | Apple Vision | normalised corners + confidence | **Used**: the helper's core (§15.4) |
+| [xulihang/ImageTrans_chrome_extension](https://github.com/xulihang/ImageTrans_chrome_extension) | GPL-3.0 | in-browser PaddleOCR (onnxruntime-web) or a local ImageTrans service | real OCR boxes | The overlay rendering and viewport scheduling ideas **were used**; the recognition was not — on a Mac Vision is more accurate and faster with no model to bundle. **Its "OpenAI" path does not send the image to the model**: in `ajaxOpenAI`, `boxes = await paddleOCR(dataURL, …)`, and the model only translates the recognised text |
+| [Kuju29/TextPhantomOCR_Overlay](https://github.com/Kuju29/TextPhantomOCR_Overlay) | unspecified | Gemma 3 (Hugging Face) / Ollama reading the image | the docs never show it asking for coordinates, nor how the overlay is positioned | No licence, no coordinate implementation to port; only circumstantial evidence that "someone did this" |
+| [A9T9/Copyfish](https://github.com/A9T9/Copyfish), SkyN9ne/CopyfishOCR | GPL | the ocr.space cloud API | real OCR boxes | Paper figures would go to a third party and need another key, the opposite of the "recognition stays local" trade-off |
+| Honyaku Translation Overlay | — | Google Cloud Vision + DeepL | real OCR boxes | As above, and two sets of keys |
+| [boysugi20/python-image-translator](https://github.com/boysugi20/python-image-translator), Crivella/ocr_translate | — | EasyOCR / local models, Python | real OCR boxes | Desktop / server programs, not in-browser; ocr_translate needs its own Django service |
 
-**结论**：没有现成的"多模态 LLM 读图并回归一化框"的实现可移植，那条路要自己写（约一天，见 #91）；真正现成且框准的跨平台方案只有 ImageTrans 那套浏览器内 PaddleOCR，代价是约 65 MB 模型 / wasm 与每张图几秒 CPU。
+**Conclusion**: there is no ready implementation of "a multimodal LLM reads the image and returns normalised boxes" to port; that route has to be written (about a day, see #91); the only ready cross-platform solution with accurate boxes is ImageTrans's in-browser PaddleOCR, at the cost of about 65 MB of models / wasm and a few seconds of CPU per image.
 
-**浏览器内 PaddleOCR 的体积实测**（`reference/ImageTrans_chrome_extension/ImageTrans/paddleocr/`）：`rec.onnx` 20 M、`ort-wasm-simd-threaded.jsep.wasm` 25 M、`PP-OCRv6_det_small.onnx` 与 `opencv.js` 各 9.5 M、`model.onnx` 10 M；加载与推理胶水 `page-ocr.js` 779 行。
+**The in-browser PaddleOCR's size, measured** (`reference/ImageTrans_chrome_extension/ImageTrans/paddleocr/`): `rec.onnx` 20 M, `ort-wasm-simd-threaded.jsep.wasm` 25 M, `PP-OCRv6_det_small.onnx` and `opencv.js` 9.5 M each, `model.onnx` 10 M; the loading and inference glue `page-ocr.js` is 779 lines.
 
 ## 6.11 SVG figures drawn with `<use>` glyphs need no OCR; the rest still do (2026-09-09, survey before starting issue #121)
 
@@ -742,38 +744,38 @@ table stale would let later work follow the obsolete requirement, since DESIGN i
 
 ---
 
-## 7. DESIGN.md 修订清单
+## 7. DESIGN.md revision list
 
-按章节排列。每条只提建议，是否采纳由设计文档决定。
+Ordered by section. Each entry is a suggestion only; whether it is adopted is the design document's decision.
 
 Status as of 2026-09-12 (docs/rebuild/inventory/docs.md §5): **done** 1–5, 7–11, 13, 17–19, 22–27; **superseded by a better design** 6, 12, 14; **reversed by later evidence** 16 (translateHtml was adopted, row 23); **unimplemented, disposition unresolved** 21 (the instant engine was never built, yet DESIGN §8.3 lists it as decided — the rebuild has to either build it or strike the decision); **obsolete** 15, 20.
 
-| # | 条目 | 建议 | 依据 |
+| # | Entry | Suggestion | Basis |
 |---|---|---|---|
-| 1 | §5 整节 [待验证] | 选择器经 10 篇 fixture 校订，正文覆盖率 99.97%，可去掉 [待验证] 标记，按下列各条修订 | §2 |
-| 2 | §5.1 `.ltx_abstract .ltx_p`、`.ltx_item .ltx_p`、`.ltx_theorem .ltx_p, .ltx_proof .ltx_p` | 完全被 `.ltx_p` 覆盖，删除；如需给 prompt 提供"摘要/定理"上下文，改为上下文标记而非块规则 | §2.4 |
-| 3 | §5.1 新增翻译单元 | `.ltx_acknowledgements`、`.ltx_keywords`；`.ltx_subtitle` 并入标题规则 | §2.3 |
-| 4 | §5.1 `.ltx_p` 的标签名 | 注明 `.ltx_p` 可能是 `<span>`（表格、inline-block 内），提取与渲染按类名不按标签名 | §2.10 |
-| 5 | §5.1 / §6.1 脚注 | 脚注是嵌套块：`.ltx_note` 整体在段落内作 void 占位符，`.ltx_note_content` 单独成块；其内部的 `.ltx_note_mark`、`.ltx_note_type` 作 void | §2.5 |
-| 6 | §5.2 `.ltx_author`、`.ltx_date` | 真实页面不存在。替换为 `.ltx_creator, .ltx_personname, .ltx_author_notes, .ltx_role_affiliation, .ltx_dates`；保留 `.ltx_authors`、`.ltx_contact` | §2.2 |
-| 7 | §5.2 新增跳过规则 | `.ltx_pubnotes`（出版元数据）、`svg, .ltx_picture`（TikZ 图）、`.ltx_listing_data`（隐藏代码数据） | §2.3 / §2.7 / §2.9 |
-| 8 | §5.2 "arXiv 注入的页头/页脚" | 不列选择器，改为"`article.ltx_document` 之外一律不提取"；导航栏 `.ltx_page_navbar` 也在根外 | §3.1 / §2.10 |
-| 9 | §5.3 数值格正则 | 加 `(?=.*\d)` 修复 `ERROR` 类误判；加纯符号分支与 `N/A`。校准数据：59% 命中、31% 散文 | §2.6 |
-| 10 | §5.5 / §14 LaTeXML 版本分叉 | 线上只有 oxide 0.7.6（历史文章已重转），无法用真实页面覆盖多版本。保留探测函数与分叉机制；"fixture 覆盖多年份"改为"fixture 记录生成器版本，版本变化时重抓" | §1 |
-| 11 | §6.1 void 节点列表 | 确认 `.ltx_ref`（含 `.ltx_ref_tag`）、`.ltx_cite`、`.ltx_note_mark` 必须以规则形式写进 `latexml.ts`，否则会被当作段落正文（合计 3,500+ 个元素） | §2.5 |
-| 12 | §7.2 宽度：覆盖 `.ltx_page_main` 的 max-width | 改为在 `html[data-axt-mode="side"]` 上覆盖 CSS 变量 `--main-width`；注意变量放大对图片、代码块、单元格与 ≥96rem 边注定位的连带影响 | §3.2 |
-| 13 | §7.2 自动降级阈值 1100px | 改为 1280px，与 arXiv 主题断点对齐 | §3.2 |
-| 14 | §7.2 grid 技巧适用范围 | 只对 `.ltx_para > p.ltx_p` 生效；`span.ltx_p`、表格内、inline-block 内降级为 stack | §2.10 |
-| 15 | §8.1 `google-gtx` preservesMarkup: false [待验证] | 实测两组样本占位符全部保留、嵌套合法，建议改为 `true`，runs 路径退为 validator 失败后的兜底 | §5 |
-| 16 | §8.3 translateHtml 新增 provider 的设想 | 可用但译文质量与占位符位置差于 gtx，不建议新增 | §5 |
-| 17 | §8.1 `chrome-builtin` preservesMarkup: false | 实测保留 HTML 标签与 void / paired 占位符，建议同 gtx 改为 `true`；`isAvailable()` 以 `availability()` 为准，`downloadable` 时必须在用户手势（popup 点击）内调用 `create()` 触发下载，首次下载无进度事件、`availability()` 不变为 `downloading`，UI 用不确定态提示；译文需归一化「。 」 | §6 |
-| 21 | §8.3 fallback 链默认顺序 | `chrome-builtin` 单句 10–20 ms 且离线，建议在模型已就绪时把它排在用户选定的 LLM 之前作为视口首屏的即时引擎，LLM 结果到达后替换（缓存键含 provider，两者不冲突）；是否采纳取决于对译文质量的取舍 | §6.2 |
-| 18 | §11 fixture 覆盖多年份 | 改为"覆盖多领域与多结构"，年份不再是版本代理 | §1 |
-| 19 | §14 arXiv 自身 JS 冲突 | 实测无冲突面（无 MutationObserver / MathJax / 脚注 JS，脚注弹出纯 CSS），风险可降为低 | §3.3 |
-| 22 | ~~§8 / §10 provider 请求跑在 background~~ | ~~建议把 provider 的 fetch 移到 content script~~ **已废止（2026-09-06）**：依据的 §6.5 三条结论全部推翻（§6.7 / §6.8），且「Read Frog 在 content 发请求」是误读。**与第 24 行方向相反，以第 24 行为准**；实际实现是移到 background（issue #42，已合并） | ~~§6.5~~ → §6.7 / §6.8 |
-| 23 | §8 `google-gtx` 用 `translate_a/single`、`preservesMarkup: false` | 改用 Read Frog 的 `translate-pa.googleapis.com/v1/translateHtml`：实测保留占位符，`preservesMarkup: true`，批量 150 条 556 ms | §6.6 |
-| 20 | ~~§15.1 SVG 图文字按普通块翻译~~ **superseded by 27** | ~~实测 SVG 全是 TikZ `svg.ltx_picture`，无 `<text>`，foreignObject 文字极少。v1 整体跳过 SVG；OCR 路线只针对 `img.ltx_graphics`~~ That entry looked at **inline** SVG only — see 27 | §2.9 |
-| 24 | §8.0 请求跑在 content script | 实测 content 侧 fetch 受 CORS 与**本地网络门禁**约束（§6.7）：不带 CORS 头的端点、本机端点（Ollama；http 与 https 一样被拦）从 content 不可达，从 background 可达；连接测试走 background、正式翻译走 content，两条路径行为不一致。且 §8.0 引用的「Read Frog 在 content 发请求」核对为误读。建议：抽离 transport，默认在 background 执行请求（无 CORS 预检、不受本地网络门禁、key 不进页面世界），content 只保留调度；~~先按 issue #42 要求重测冷启动延迟，再定~~ **重测已完成**（§6.7 真实 Chrome 三轮 77–81 ms、§6.8 长请求 45 / 90 s 均存活），**已按本条实现并合并**（issue #42） | §6.7 / §6.8 |
-| 25 | §2「非目标 [延后]」把「微软免费通道」列为 v1 不做；§8.1 正文写「gtx 与微软 edge 通道不接（后者 auth 端点已 404）」 | **依据已失效**：那条 auth 流程确实没了，但它的**无鉴权后继**今天可用（§5.1）。#104 已经把 `markers` 线上格式与能力协商做进 main，微软正是它存在的理由。建议：把这两处改成「可接入，`wireFormats: ['markers']`」，并在 §8.1 的 provider 表里加一行 | §5.1 |
-| 26 | §8.1 provider 表没有「支持语言范围」这一列 | 免费引擎不是每种目标语言都支持：微软实测 179 个目标里 71 个 400。建议 provider 接口增加一个「这个目标语言能不能翻」的判定，`buildChain` 与设置页据此过滤，而不是等运行时报错 | §5.1 |
+| 1 | §5 whole section [to verify] | The selectors were corrected against 10 fixtures, body coverage 99.97%; the [to verify] mark can go, revised as in the entries below | §2 |
+| 2 | §5.1 `.ltx_abstract .ltx_p`, `.ltx_item .ltx_p`, `.ltx_theorem .ltx_p, .ltx_proof .ltx_p` | Entirely covered by `.ltx_p`, delete; if the prompt needs "abstract / theorem" context, make it a context mark rather than a block rule | §2.4 |
+| 3 | §5.1 new translation units | `.ltx_acknowledgements`, `.ltx_keywords`; `.ltx_subtitle` folded into the title rule | §2.3 |
+| 4 | §5.1 the tag name of `.ltx_p` | Note that `.ltx_p` may be a `<span>` (inside tables, inline-blocks); extraction and rendering go by class name, not tag name | §2.10 |
+| 5 | §5.1 / §6.1 footnotes | Footnotes are nested blocks: `.ltx_note` whole is a void placeholder inside the paragraph, `.ltx_note_content` a block of its own; the `.ltx_note_mark`, `.ltx_note_type` inside it are voids | §2.5 |
+| 6 | §5.2 `.ltx_author`, `.ltx_date` | Do not exist on real pages. Replace with `.ltx_creator, .ltx_personname, .ltx_author_notes, .ltx_role_affiliation, .ltx_dates`; keep `.ltx_authors`, `.ltx_contact` | §2.2 |
+| 7 | §5.2 new skip rules | `.ltx_pubnotes` (publication metadata), `svg, .ltx_picture` (TikZ pictures), `.ltx_listing_data` (hidden code data) | §2.3 / §2.7 / §2.9 |
+| 8 | §5.2 "the header / footer arXiv injects" | List no selectors; change to "nothing outside `article.ltx_document` is extracted"; the navigation bar `.ltx_page_navbar` is outside the root too | §3.1 / §2.10 |
+| 9 | §5.3 numeric-cell regex | Add `(?=.*\d)` to fix the `ERROR`-type false positives; add the pure-symbol branch and `N/A`. Calibration data: 59% matched, 31% prose | §2.6 |
+| 10 | §5.5 / §14 LaTeXML version branching | Only oxide 0.7.6 exists online (historical articles reconverted); several versions cannot be covered with real pages. Keep the probe function and the branching mechanism; change "fixtures cover several years" to "fixtures record the generator version, re-fetch when it changes" | §1 |
+| 11 | §6.1 void node list | Confirm that `.ltx_ref` (with `.ltx_ref_tag`), `.ltx_cite`, `.ltx_note_mark` must be written into `latexml.ts` as rules, or they are treated as paragraph body (3,500+ elements in all) | §2.5 |
+| 12 | §7.2 width: override the max-width of `.ltx_page_main` | Instead override the CSS variable `--main-width` on `html[data-axt-mode="side"]`; mind the knock-on effect of the enlarged variable on images, code blocks, cells and the ≥96rem margin-note positioning | §3.2 |
+| 13 | §7.2 auto-fallback threshold 1100px | Change to 1280px, aligned with the arXiv theme's breakpoint | §3.2 |
+| 14 | §7.2 scope of the grid technique | Works only for `.ltx_para > p.ltx_p`; `span.ltx_p`, inside tables and inside inline-blocks degrade to stack | §2.10 |
+| 15 | §8.1 `google-gtx` preservesMarkup: false [to verify] | Measured on two sample sets: every placeholder preserved, nesting valid; suggested `true`, the runs path demoted to the safety net after a validator failure | §5 |
+| 16 | §8.3 the idea of a new translateHtml provider | Usable, but translation quality and placeholder positions are worse than gtx; not recommended | §5 |
+| 17 | §8.1 `chrome-builtin` preservesMarkup: false | Measured to preserve HTML tags and void / paired placeholders; suggested `true` as for gtx; `isAvailable()` goes by `availability()`, and when `downloadable` `create()` must be called inside a user gesture (popup click) to start the download; the first download has no progress events and `availability()` does not become `downloading`, so the UI shows an indeterminate state; the translation needs 「。 」 normalised | §6 |
+| 21 | §8.3 default order of the fallback chain | `chrome-builtin` is 10–20 ms per sentence and offline; suggested: with the model ready, put it before the user's chosen LLM as the instant engine for the first screen of the viewport, replaced when the LLM result arrives (the cache key carries the provider, so the two do not clash); adoption depends on the trade-off against translation quality | §6.2 |
+| 18 | §11 fixtures cover several years | Change to "cover several fields and structures"; the year is no longer a proxy for the version | §1 |
+| 19 | §14 conflicts with arXiv's own JS | Measured: no conflict surface (no MutationObserver / MathJax / footnote JS; footnote pop-ups are pure CSS); the risk can be lowered to low | §3.3 |
+| 22 | ~~§8 / §10 provider requests run in the background~~ | ~~Suggested moving the providers' fetch to the content script~~ **Withdrawn (2026-09-06)**: the three §6.5 conclusions it rested on are all overturned (§6.7 / §6.8), and “Read Frog sends requests from content” was a misreading. **Opposite in direction to row 24; row 24 governs**; the actual implementation moved to the background (issue #42, merged) | ~~§6.5~~ → §6.7 / §6.8 |
+| 23 | §8 `google-gtx` uses `translate_a/single`, `preservesMarkup: false` | Use Read Frog's `translate-pa.googleapis.com/v1/translateHtml` instead: measured to preserve placeholders, `preservesMarkup: true`, a batch of 150 in 556 ms | §6.6 |
+| 20 | ~~§15.1 text in SVG figures translated as ordinary blocks~~ **superseded by 27** | ~~Measured: SVG is all TikZ `svg.ltx_picture`, no `<text>`, very little foreignObject text. v1 skips SVG whole; the OCR route targets `img.ltx_graphics` only~~ That entry looked at **inline** SVG only — see 27 | §2.9 |
+| 24 | §8.0 requests run in the content script | Measured: a content-side fetch is bound by CORS and by the **local-network gate** (§6.7): endpoints without CORS headers and local endpoints (Ollama; http and https blocked alike) are unreachable from content and reachable from the background; the connection test goes through the background and the real translation through content, two paths behaving differently. And the “Read Frog sends requests from content” §8.0 cites checks out as a misreading. Suggested: factor out the transport, run requests in the background by default (no CORS preflight, not subject to the local-network gate, the key never enters the page world), content keeps scheduling only; ~~re-measure the cold-start delay first as issue #42 asks, then decide~~ **re-measured** (§6.7 three rounds in real Chrome 77–81 ms, §6.8 long requests of 45 / 90 s both survived), **implemented as this entry says and merged** (issue #42) | §6.7 / §6.8 |
+| 25 | §2 “Non-goals [deferred]” lists “the Microsoft free channel” as not for v1; §8.1's text says “gtx and the Microsoft edge channel are not integrated (the latter's auth endpoint is 404)” | **The basis has lapsed**: that auth flow is indeed gone, but its **unauthenticated successor** works today (§5.1). #104 has put the `markers` wire format and capability negotiation into main, and Microsoft is exactly why it exists. Suggested: change both places to “can be integrated, `wireFormats: ['markers']`”, and add a row to the provider table of §8.1 | §5.1 |
+| 26 | §8.1's provider table has no “supported language range” column | The free engines do not support every target language: Microsoft measured 71 of 179 targets as 400. Suggested: the provider interface gains a “can this target language be translated” verdict, and `buildChain` and the options page filter by it rather than wait for a runtime error | §5.1 |
 | 27 | Narrow §15.1's "skip SVG" to "skip **inline** SVG" | Externally referenced `<object type="image/svg+xml">` figures are a separate population, 49.1% of the 1792 figures in the sample. Their text is drawn as `<use>` glyphs carrying `data-text`, so it is read exactly rather than recognised, and needs no OCR. The 10.1% that draw outlines straight into `<path>` still need an OCR fallback | §6.11 |
