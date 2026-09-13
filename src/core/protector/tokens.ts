@@ -1,11 +1,13 @@
-// DOM-free 分词器：把带占位符的字符串切成四种 token，validate / rehydrate / splitRuns 共用，可在 service worker 里跑。
-// 借鉴 Read Frog html-attribute-markers.ts 的思路（字符串级校验，不依赖 DOM），协议不同，未移植代码。
+// The DOM-free tokeniser: a string with placeholders cut into four kinds of token, shared by validate / rehydrate /
+// splitRuns and runnable in a service worker. After the idea of Read Frog's html-attribute-markers.ts (string-level
+// validation with no DOM); the protocol differs and no code was ported.
 //
-// 两种线上格式（DESIGN §6.1）：
-// - `tags`：`<x id="1"/>` / `<t id="1">…</t>`。表达力全，LLM 与 Google 都保得住内联样式。
-// - `markers`：`@a#`，纯文本、只有 void。给那些会把标签撕烂的免费引擎用——实测微软 Edge 端点
-//   在 tags 上 0%（400 个占位符全丢），在 markers 上 98% 块 / 99.3% 记号；Google 两种都 ~99%。
-//   成对记号实测只有 70.6%，不可用，所以这个格式下成对占位符一律拍平（丢内联样式，不丢内容）。
+// The two wire formats (DESIGN §6.1):
+// - `tags`: `<x id="1"/>` / `<t id="1">…</t>`. Fully expressive; LLMs and Google both keep inline styling.
+// - `markers`: `@a#`, plain text, voids only. For the free engines that tear tags apart — the Microsoft Edge endpoint
+//   measured 0% on tags (all 400 placeholders lost) and 98% of blocks / 99.3% of markers on markers; Google ~99% on
+//   both. Paired markers measured only 70.6%, unusable, so on this format every paired placeholder is flattened
+//   (inline styling lost, content kept).
 
 export type WireFormat = 'tags' | 'markers'
 
@@ -15,13 +17,13 @@ export type Token =
   | { kind: 'open'; id: number }
   | { kind: 'close' }
 
-// 容忍模型常见写法：<x id="1"/>、<x id="1" />、单引号 / 无引号、<x id="1"></x>；其余一律当文本
+// The model's common spellings are tolerated: <x id="1"/>, <x id="1" />, single or no quotes, <x id="1"></x>; anything else is text
 export const TAG_RE = /<x\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*(?:\/>|>\s*<\/x\s*>)|<t\s+id\s*=\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*>|<\/t\s*>/g
 
-// `@@` 是字面 `@` 的转义（见 text.ts 的 escapeText），必须排在记号之前匹配，否则 `@@a#` 会被读成记号
+// `@@` is the escape of a literal `@` (see escapeText in text.ts) and must be matched before a marker, or `@@a#` is read as a marker
 export const MARKER_RE = /@@|@([a-z]+)#/g
 
-/** id → 双射二十六进制字母（1→a、26→z、27→aa）。用字母而不是数字：MT 引擎会把数字重排、合并、加千分位 */
+/** id → bijective base-26 letters (1→a, 26→z, 27→aa). Letters, not digits: MT engines reorder, merge and thousands-separate digits */
 export function toAlpha(id: number): string {
   let n = id
   let out = ''
@@ -44,12 +46,13 @@ export function tokenize(s: string, format: WireFormat = 'tags'): Token[] {
 }
 
 /**
- * tags 与 markers 走两条显式的循环，而不是一条带回调的通用循环。
+ * tags and markers are two explicit loops, not one generic loop with callbacks.
  *
- * 这里是最热的一段：`validate` / `rehydrate` / `splitRuns` 每个块都要跑一遍。第一版把两种格式合成
- * 一条循环、用一个 push 闭包统一处理「合并相邻文本」，实测最重的 fixture（2609.04056）上整篇往返
- * 从 1645 ms 涨到 1833 ms（+11%），而这条往返有 10 s 的预算断言——CI 上直接撞线。
- * 相邻文本只有 markers 会切出来（`@@` 的反转义），tags 每次匹配前最多推一个文本 token，永远不相邻。
+ * This is the hottest stretch: `validate` / `rehydrate` / `splitRuns` run it for every block. The first version
+ * merged the two formats into one loop with a push closure that handled “merge adjacent text”, and the whole-paper
+ * round trip on the heaviest fixture (2609.04056) measured 1645 → 1833 ms (+11%), against a 10 s budget assertion
+ * on that round trip — straight into the limit on CI. Adjacent text arises only in markers (the unescape of `@@`);
+ * tags pushes at most one text token before each match and never has adjacent ones.
  */
 function tokenizeTags(s: string): Token[] {
   const out: Token[] = []
@@ -70,7 +73,7 @@ function tokenizeTags(s: string): Token[] {
 function tokenizeMarkers(s: string): Token[] {
   const out: Token[] = []
   let last = 0
-  // `@@` 的反转义会在真文本中间切出碎片；合并起来，下游按节点比对时不该看出差别
+  // The unescape of `@@` cuts fragments in the middle of real text; merged, so a node-by-node comparison downstream sees no difference
   const text = (t: string) => {
     const prev = out[out.length - 1]
     if (prev?.kind === 'text') prev.text += t
@@ -88,7 +91,7 @@ function tokenizeMarkers(s: string): Token[] {
   return out
 }
 
-/** 写出一个 void 占位符 */
+/** Write out a void placeholder */
 export function writeVoid(id: number, format: WireFormat): string {
   return format === 'markers' ? `@${toAlpha(id)}#` : `<x id="${id}"/>`
 }

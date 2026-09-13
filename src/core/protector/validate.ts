@@ -1,9 +1,10 @@
-// 占位符完整性校验（DESIGN §6.3）。DOM-free，可在 background 里跑。
+// Placeholder integrity validation (DESIGN §6.3). DOM-free, runnable in the background.
 import { type WireFormat, tokenize, writeVoid } from './tokens'
 
 /**
- * 校验只需要知道「原文有哪些槽位、其中哪些是成对的」，不需要 DOM 节点。
- * `ProtectedBlock` 天然满足这个形状；跨消息边界的调用方用 `expectationsFromText` 从请求文本反推。
+ * Validation needs to know only “which slots the source has, and which of them are paired”, no DOM nodes.
+ * `ProtectedBlock` has that shape of itself; a caller across a message boundary derives it from the request text
+ * with `expectationsFromText`.
  */
 export interface PlaceholderExpectations {
   format: WireFormat
@@ -12,12 +13,12 @@ export interface PlaceholderExpectations {
 }
 
 /**
- * 从请求文本反推期望。两种格式的转义都保证「线上出现的占位符必然是我们写进去的」（见 text.ts 的
- * 不可伪造性论证），扫一遍就能还原两个集合。有了它，background 不必跨消息接收 `accept` 回调
- * 也能把坏译文挡在缓存之外（issue #42）。
+ * Derive the expectations from the request text. Both formats' escaping guarantees “a placeholder on the wire was
+ * written by us” (the unforgeability argument of text.ts), so one scan recovers both sets. With it the background
+ * keeps a broken translation out of the cache without receiving an `accept` callback across a message (issue #42).
  *
- * **格式必须传对**：拿 tags 的分词器去扫 markers 文本会一个占位符都认不出来，
- * `slots` 为空 → `validate` 恒真 → 被打烂的译文静默进缓存。
+ * **The format must be the right one**: the tags tokeniser over markers text recognises not one placeholder,
+ * `slots` is empty → `validate` always passes → a torn translation enters the cache silently.
  */
 export function expectationsFromText(text: string, format: WireFormat = 'tags'): PlaceholderExpectations {
   const slots = new Map<number, null>()
@@ -36,14 +37,14 @@ export type ValidationResult = { ok: true } | { ok: false; reason: IntegrityReas
 
 export class PlaceholderIntegrityError extends Error {
   constructor(readonly reason: IntegrityReason, readonly detail: string) {
-    super(`占位符校验失败（${reason}）：${detail}`)
+    super(`placeholder validation failed (${reason}): ${detail}`)
     this.name = 'PlaceholderIntegrityError'
   }
 }
 
 /**
- * 通过条件：void id 集合与原文一致且各出现一次；paired 成对、嵌套合法、各出现一次；
- * 没有原文里不存在的 id；void / paired 种类不能互换。占位符顺序可以与原文不同。
+ * Passes when: the void ids equal the source's and each appears once; paired ones are paired, nest legally and each
+ * appears once; no id absent from the source; void and paired kinds never swap. The placeholder order may differ from the source's.
  */
 export function validate(translated: string, block: PlaceholderExpectations): ValidationResult {
   const fail = (reason: IntegrityReason, detail: string): ValidationResult => ({ ok: false, reason, detail })
@@ -53,21 +54,21 @@ export function validate(translated: string, block: PlaceholderExpectations): Va
   for (const t of tokenize(translated, block.format)) {
     if (t.kind === 'text') continue
     if (t.kind === 'close') {
-      if (stack.length === 0) return fail('unbalanced', '多余的 </t>')
+      if (stack.length === 0) return fail('unbalanced', 'stray </t>')
       stack.pop()
       continue
     }
-    if (!block.slots.has(t.id)) return fail('unknown', `id ${t.id} 不存在于原文`)
+    if (!block.slots.has(t.id)) return fail('unknown', `id ${t.id} is not in the source`)
     const isPaired = block.paired.has(t.id)
-    if (t.kind === 'void' && isPaired) return fail('kind-mismatch', `id ${t.id} 应为 <t id="${t.id}">…</t>`)
-    if (t.kind === 'open' && !isPaired) return fail('kind-mismatch', `id ${t.id} 应为 ${writeVoid(t.id, block.format)}`)
-    if (seen.has(t.id)) return fail('duplicate', `id ${t.id} 出现多次`)
+    if (t.kind === 'void' && isPaired) return fail('kind-mismatch', `id ${t.id} should be <t id="${t.id}">…</t>`)
+    if (t.kind === 'open' && !isPaired) return fail('kind-mismatch', `id ${t.id} should be ${writeVoid(t.id, block.format)}`)
+    if (seen.has(t.id)) return fail('duplicate', `id ${t.id} appears more than once`)
     seen.add(t.id)
     if (t.kind === 'open') stack.push(t.id)
   }
 
-  if (stack.length > 0) return fail('unbalanced', `<t id="${stack[stack.length - 1]}"> 未闭合`)
+  if (stack.length > 0) return fail('unbalanced', `<t id="${stack[stack.length - 1]}"> is not closed`)
   const missing = [...block.slots.keys()].filter(id => !seen.has(id))
-  if (missing.length > 0) return fail('missing', `缺少 ${missing.map(id => writeVoid(id, block.format)).join(', ')}`)
+  if (missing.length > 0) return fail('missing', `missing ${missing.map(id => writeVoid(id, block.format)).join(', ')}`)
   return { ok: true }
 }

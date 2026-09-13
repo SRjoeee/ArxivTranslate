@@ -1,10 +1,11 @@
-// 论文级上下文（DESIGN §8.2）：标题与摘要，页面加载时抽一次（那时 DOM 里还没有译文；翻译过再抽会把上一轮的译文也算进摘要），每批 prompt 都带上。
-// Read Frog 是多调一次 LLM 给网页生成摘要；论文自带 abstract，直接用。
+// Paper-level context (DESIGN §8.2): the title and the abstract, taken once at page load (no translations in the DOM
+// yet; taken after a translation, the previous round's translations would count into the abstract) and carried by
+// every batch's prompt. Read Frog calls the LLM once more to summarise a web page; a paper brings its abstract, used directly.
 import { AXT_CLASS_PREFIX } from '@/core/marks'
 import { collectText, squash } from '@/core/text'
 import { ABSTRACT, DOCUMENT_ROOT, DOCUMENT_TITLE, classify } from '@/core/rules/latexml'
 
-/** 摘要截断长度：每批都要带，太长就是白花 token */
+/** Where the abstract is cut: it travels with every batch, and a long one is wasted tokens */
 export const ABSTRACT_MAX_CHARS = 1200
 
 export interface PaperContext {
@@ -12,14 +13,16 @@ export interface PaperContext {
   abstract?: string
 }
 
-/** LaTeXML 的 <math> 里带 <annotation> 存着 TeX 源码，textContent 会把公式读两遍；只取呈现层文字 */
+/** LaTeXML's <math> carries an <annotation> with the TeX source, and textContent would read every formula twice; the presentation text only */
 const HIDDEN_MATH_META = new Set(['annotation', 'annotation-xml'])
 
 /**
- * 不该进上下文的元素：
- * - 规则里的跳过项（出版元数据、转换错误……）：2507.00150 把 .ltx_pubnotes 嵌在文档标题里，
- *   不跳过的话整段致谢会被当成标题、随每批发出并进缓存键（Codex 在 #28 指出）
- * - 我们自己注入的节点（class 以 axt- 开头，硬规则 5）：翻译过再抽，上一轮的译文会混进摘要
+ * Elements that must not enter the context:
+ * - the rules' skip items (publication metadata, conversion errors …): 2507.00150 nests .ltx_pubnotes inside the
+ *   document title, and unskipped the whole acknowledgement would pass for the title, sent with every batch and
+ *   entering the cache key (Codex on #28)
+ * - our own injected nodes (class starting with axt-, hard rule 5): taken after a translation, the previous round's
+ *   translations would mix into the abstract
  */
 function excluded(el: Element): boolean {
   if (HIDDEN_MATH_META.has(el.localName)) return true
