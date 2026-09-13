@@ -205,3 +205,19 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(runnable({ ...c, provider: svc.id, services: [{ ...svc, apiKey: '', baseURL: 'http://127.0.0.1:11434/v1' }] }, null)).toBe(true)
   })
 })
+
+describe('actionErrorText (S-P-90)', () => {
+  it('names a missing active tab in the interface language and passes any other error through as thrown', async () => {
+    const { actionErrorText } = await import('@/entrypoints/popup/view-model')
+    const { NoActiveTabError } = await import('@/shared/messages')
+    const strings = await import('@/ui/strings')
+    setLocale('zh-CN')
+    expect(actionErrorText(new NoActiveTabError())).toBe(strings.S.noActiveTab)
+    expect(actionErrorText(new NoActiveTabError())).toMatch(/标签页/)
+    setLocale('en')
+    expect(actionErrorText(new NoActiveTabError())).toBe('No active tab')
+    setLocale('zh-CN')
+    expect(actionErrorText(new Error('the page did not answer'))).toBe('the page did not answer')
+    expect(actionErrorText('plain')).toBe('plain')
+  })
+})

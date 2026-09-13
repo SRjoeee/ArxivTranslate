@@ -21,6 +21,7 @@ import type { HelperStatus } from '@/shared/ocr'
 import type { PackState } from '@/shared/pack'
 import type { MenuItem } from '@/ui/Menu'
 import { styleTile } from '@/ui/appearance/tiles'
+import { NoActiveTabError } from '@/shared/messages'
 import { PREVIEW_TARGET, S, languageLabel, languageName, parseFatal, profileName, reasonText, serviceName } from '@/ui/strings'
 
 export type { PackState }
@@ -307,3 +308,8 @@ function serviceItems(config: Config, pack: PackState | null): MenuItem[] {
   ]
 }
 
+/** What a failed popup action says (S-P-90): a known failure in the interface language, anything else as it was thrown */
+export function actionErrorText(e: unknown): string {
+  if (e instanceof NoActiveTabError) return S.noActiveTab
+  return e instanceof Error ? e.message : String(e)
+}

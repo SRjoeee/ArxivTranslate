@@ -289,7 +289,7 @@ describe('page session', () => {
     expect(await harness({ paper: null }).session.start()).toEqual({ started: false, reason: S.page.notPaper })
     expect(await harness({ page: '<div class="ltx_para"></div>' }).session.start()).toEqual({ started: false, reason: S.page.nothingToTranslate })
     const silent = harness({ status: () => Promise.reject(new Error('gone')) })
-    expect(await silent.session.start()).toEqual({ started: false, reason: `${S.page.backendSilent}：gone` })
+    expect(await silent.session.start()).toEqual({ started: false, reason: S.page.backendSilentWith('gone') })
     const none = harness({ status: () => providerStatus({ available: false }) })
     expect(await none.session.start()).toEqual({ started: false, reason: S.page.noService })
     // a fallback on the chain is enough to start: the requests land on the free engine (§8.5)

@@ -70,7 +70,7 @@ export function ServiceDrawer({ service, patch, onClose }: {
       const saving = id ?? newServiceId()
       const next: Service = { ...form, id: saving, name: form.name.trim() || defaultServiceName(form.model), apiKey: keyToSave() }
       const parsed = serviceSchema.safeParse(next)
-      if (!parsed.success) throw new Error(parsed.error.issues.map(i => `${i.path.join('.')}：${i.message}`).join('；'))
+      if (!parsed.success) throw new Error(parsed.error.issues.map(i => O.services.issue(i.path.join('.'), i.message)).join(O.services.issueSeparator))
       const value = parsed.data
       // Validate before asking for the permission: with a field wrong, the host permission must not be taken first (Codex on #6)
       granted = await ensureHostPermission(value.baseURL)

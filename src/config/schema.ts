@@ -42,9 +42,8 @@ export function normalizeGlossary(value: unknown): { term: string; translation: 
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
   /** A built-in id or the id of one of `services` (spec §2, v12) */
-  // The zod messages below reach the reader verbatim through the settings page's fallback notice (ui/strings.ts fallbackText),
-  // so they are product copy in the interface's default language, not developer text; mapping them onto the locale pack is an open item
-  provider: z.string().refine(v => (BUILT_IN_SERVICES as readonly string[]).includes(v) || SERVICE_ID_RE.test(v), '不是有效的翻译服务'),
+  // The zod messages are diagnostics: the settings page's fallback notice shows the locale pack's sentence for the field (ui/strings.ts fallbackText)
+  provider: z.string().refine(v => (BUILT_IN_SERVICES as readonly string[]).includes(v) || SERVICE_ID_RE.test(v), 'not a valid translation service'),
   /** The reader's own services (v12); keys stay local (CLAUDE.md rule 7) */
   services: z.array(serviceSchema).max(20).default([]),
   /** ISO 639-3 (since v4; languages.ts); an LLM gets the English name, Google a BCP-47 conversion */
@@ -66,7 +65,7 @@ export const configSchema = z.object({
     translation: z.string().min(1).max(GLOSSARY_LIMITS.translation),
   })).max(GLOSSARY_LIMITS.entries).refine(
     entries => glossaryChars(entries) <= GLOSSARY_LIMITS.totalChars,
-    { message: `术语表总长超过 ${GLOSSARY_LIMITS.totalChars} 字，会显著增加每一批的 token` },
+    { message: `the glossary exceeds ${GLOSSARY_LIMITS.totalChars} characters in all` },
   ).default([]),
   /** Appearance profiles (§7.5, v12): the reader's style list and band list, and which of each is active */
   appearance: appearanceSchema.default(DEFAULT_APPEARANCE),

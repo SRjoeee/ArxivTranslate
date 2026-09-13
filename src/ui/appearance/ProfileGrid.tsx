@@ -40,7 +40,7 @@ export function ProfileGrid<T extends { id: string; name: string }>({ kind, titl
                 <span className="mt-1.5 block truncate text-[12px] font-semibold">{profileName(item, kind)}</span>
               </button>
               {active && (
-                <button type="button" aria-label={`${O.reading.editTitle}：${profileName(item, kind)}`} onClick={() => onEdit(item.id)} className="absolute right-2 top-2 cursor-pointer text-fg-2 hover:text-fg">
+                <button type="button" aria-label={O.reading.editAria(profileName(item, kind))} onClick={() => onEdit(item.id)} className="absolute right-2 top-2 cursor-pointer text-fg-2 hover:text-fg">
                   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
                 </button>
               )}

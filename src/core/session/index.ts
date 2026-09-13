@@ -231,7 +231,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     try {
       status = await backend.status(session, { fresh: true })
     } catch (e) {
-      return { started: false, reason: `${S.page.backendSilent}：${e instanceof Error ? e.message : String(e)}` }
+      return { started: false, reason: S.page.backendSilentWith(e instanceof Error ? e.message : String(e)) }
     }
     // The status request bound this session to a chain provisionally (provider-status.ts). A start refused from here
     // on never makes the request that would settle that binding, and the abandoned scope would keep its chain and

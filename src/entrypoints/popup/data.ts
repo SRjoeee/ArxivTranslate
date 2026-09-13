@@ -16,7 +16,7 @@ import { isBuiltInService, isLlmChosen } from '@/config/services'
 import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
 import { type PackState, createPackLookup, downloadPack } from '@/shared/pack'
-import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, pollsBackground, runnable } from './view-model'
+import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, actionErrorText, pollsBackground, runnable } from './view-model'
 import { chainRevision } from '@/config/revision'
 import { localeInUse, S } from '@/ui/strings'
 import { pickLocale } from '@/locales'
@@ -227,7 +227,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     try {
       await run()
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(actionErrorText(e))
     }
     refresh()
   }

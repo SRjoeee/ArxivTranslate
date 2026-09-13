@@ -172,11 +172,17 @@ export function sendMessage<T extends AxtMessageType>(message: AxtMessage<T>): P
   return (browser.runtime.sendMessage(message) as Promise<AxtResponse<T> | FailureReply>).then(decodeReply)
 }
 
+/** Thrown by sendToActiveTab when tabs.query finds no active tab; the popup names it in the interface language (S.noActiveTab) */
+export class NoActiveTabError extends Error {
+  constructor() {
+    super('no active tab')
+    this.name = 'NoActiveTabError'
+  }
+}
+
 /** Send to the active tab's content script; the Promise rejects when the tab has no receiver. Reads no url, so no tabs permission */
 export async function sendToActiveTab<T extends AxtMessageType>(message: AxtMessage<T>): Promise<AxtResponse<T>> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
-  // Reader-visible: the popup's action guard shows this message verbatim through S.actionFailed, so it is product copy in the
-  // interface's default language, not developer text — mapping it onto the locale pack is an open item (like the zod messages of config/schema.ts)
-  if (tab?.id == null) throw new Error('没有活动标签页')
+  if (tab?.id == null) throw new NoActiveTabError()
   return browser.tabs.sendMessage(tab.id, message) as Promise<AxtResponse<T>>
 }
