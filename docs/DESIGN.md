@@ -748,6 +748,8 @@ Hard rule 4 demands that “a failure must be recoverable and trigger the fallba
 - **Once the user fixes the configuration the chain has to return to the preferred engine**: when the popup finishes downloading a language pack it sends `axt:engine-ready`, and the background **rebuilds the whole chain**. That is more thorough than “revoke the degradation record” — an engine whose `isAvailable()` was false when the chain was built and never joined cannot be rescued by revoking a record, and with the chain resident that case is in fact more common (the chain may have been built long before the user downloaded the pack). Hence `FallbackService` has no `reset()`
 - **The switch**: configuration v5's `fallback.enabled`, on by default; off, the chain holds the configured engine alone, and the behaviour is exactly as before the implementation. Two e2e assertions guard the two behaviours
 
+> §8.6, cited from the code, was never written here; the sentence-alignment design is recorded in ADR-0007 (2026-09-13).
+
 ## 9. Cache and configuration
 
 - Translation cache: IndexedDB, **Dexie**, ported from FluentRead `services/translation/cache.ts` (key normalisation, TTL, capacity cap, in-memory hot layer), crypto-js swapped for Web Crypto SHA-256 (revised in v0.4; idb-keyval was planned originally)
