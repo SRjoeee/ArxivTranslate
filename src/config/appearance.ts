@@ -9,8 +9,8 @@ export type Underline = (typeof UNDERLINES)[number]
 export const HL_OPACITY_MIN = 0.05
 export const HL_OPACITY_MAX = 0.6
 
-// The two zod messages here are product copy (shown by the settings page's fallback notice), like those of schema.ts
-const colorField = z.string().max(COLOR_MAX).refine(v => sanitizeColor(v).ok, '不是有效的颜色值')
+// The zod messages are diagnostics; the reader sees the locale pack's sentence for the field (ui/strings.ts fallbackText)
+const colorField = z.string().max(COLOR_MAX).refine(v => sanitizeColor(v).ok, 'not a valid colour value')
 const idField = z.string().min(1).max(40)
 
 export const styleProfileSchema = z.object({
@@ -24,7 +24,7 @@ export const styleProfileSchema = z.object({
   /** Blurred until hovered */
   blur: z.boolean(),
   /** Advanced: declarations only; the selector is the extension's */
-  css: z.string().max(2000).refine(v => sanitizeCustomCss(v).ok, '只填声明，不写选择器和花括号'),
+  css: z.string().max(2000).refine(v => sanitizeCustomCss(v).ok, 'declarations only, no selector and no braces'),
 })
 export type StyleProfile = z.infer<typeof styleProfileSchema>
 
