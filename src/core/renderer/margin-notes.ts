@@ -45,8 +45,8 @@ const applied = new WeakMap<HTMLElement, number>()
 
 /**
  * Pure arithmetic: a downward offset for every margin note in document order, none overlapping another.
- * The original's copy cannot be moved (`ours: false`); it stays where it is and only counts as an obstacle the
- * later ones make way for.
+ * The original's own note cannot be moved (`ours: false`); it stays where it is and only counts as an obstacle
+ * the later ones make way for.
  */
 export function stackShifts(boxes: readonly NoteBox[], gap: number): number[] {
   // The immovable ones are **obstacles without order**: a long copy would paint over the next block's original, and
