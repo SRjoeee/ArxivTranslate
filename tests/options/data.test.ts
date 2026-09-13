@@ -11,6 +11,8 @@ const store = vi.hoisted(() => ({
   watchers: [] as ((config: Config) => void)[],
   /** When set, every write waits for it: the test decides when a save lands */
   gate: null as Promise<void> | null,
+  /** Writes and reloads in the order they happened */
+  log: [] as string[],
 }))
 
 vi.mock('wxt/browser', () => ({
@@ -21,7 +23,7 @@ vi.mock('wxt/browser', () => ({
 }))
 vi.mock('@/config/storage', () => ({
   getConfig: async () => { if (!store.config) throw new Error('no config'); return store.config },
-  setConfig: async (config: Config) => { if (store.gate) await store.gate; store.config = config },
+  setConfig: async (config: Config) => { if (store.gate) await store.gate; store.config = config; store.log.push(`set:${config.targetLanguage}`) },
   watchConfig: (callback: (config: Config) => void) => { store.watchers.push(callback); return () => { store.watchers = store.watchers.filter(w => w !== callback) } },
   configFallbackReason: () => null,
 }))
@@ -49,8 +51,9 @@ describe('useOptionsData', () => {
     store.config = { ...DEFAULT_CONFIG, uiLanguage: 'en' }
     store.watchers = []
     store.gate = null
+    store.log = []
     applyLocaleFrom('en')
-    reload = vi.fn()
+    reload = vi.fn(() => { store.log.push('reload') })
     vi.spyOn(location, 'reload').mockImplementation(reload as () => void)
   })
 
@@ -104,6 +107,44 @@ describe('useOptionsData', () => {
     await hook.flush()
     expect(store.config?.targetLanguage).toBe('kor')
     expect(reload).toHaveBeenCalledTimes(1)
+    await hook.unmount()
+  })
+
+  it('a draft opened while the reload waits for a write holds it again', async () => {
+    // The fifth local pass of S1: the wait for the write ended in an unconditional reload, over a prompt opened meanwhile
+    const hook = await mountHook(useOptionsData)
+    const releaseFirst = drafts.hold()
+    await hook.run(() => saveElsewhere({ ...DEFAULT_CONFIG, uiLanguage: 'zh-CN' }))
+    let land!: () => void
+    store.gate = new Promise<void>(resolve => { land = resolve })
+    const saved = hook.current().patch(latest => ({ ...latest, targetLanguage: 'kor' }))
+    releaseFirst()
+    await hook.flush()
+    const releaseSecond = drafts.hold()
+    land()
+    await saved
+    await hook.flush()
+    expect(reload).not.toHaveBeenCalled()
+    releaseSecond()
+    await hook.flush()
+    expect(reload).toHaveBeenCalledTimes(1)
+    await hook.unmount()
+  })
+
+  it('a save queued while the reload waits for an earlier one lands before the reload', async () => {
+    const hook = await mountHook(useOptionsData)
+    const release = drafts.hold()
+    await hook.run(() => saveElsewhere({ ...DEFAULT_CONFIG, uiLanguage: 'zh-CN' }))
+    let land!: () => void
+    store.gate = new Promise<void>(resolve => { land = resolve })
+    const first = hook.current().patch(latest => ({ ...latest, targetLanguage: 'kor' }))
+    release()
+    await hook.flush()
+    const second = hook.current().patch(latest => ({ ...latest, targetLanguage: 'fra' }))
+    land()
+    await Promise.all([first, second])
+    await hook.flush()
+    expect(store.log).toEqual(['set:kor', 'set:fra', 'reload'])
     await hook.unmount()
   })
 

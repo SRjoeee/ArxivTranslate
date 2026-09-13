@@ -61,14 +61,19 @@ export function useOptionsData(): OptionsData {
    * service being edited, a profile, a prompt is local until its own save, and the reload would discard it (the
    * local review of S1, fourth pass). It waits for the last draft to close, then for the page's own writes: a draft's
    * save is queued on the chain in the same breath as its editor closes, and a reload issued at once would cut it off
-   * before its read of the store came back (fifth pass). A second change meanwhile adds nothing
+   * before its read of the store came back — and it looks again after the wait, since a draft opened or a save queued
+   * meanwhile is owed the same (fifth pass). A second change while it waits adds nothing
    */
   const reloadDue = useRef(false)
   const reload = useCallback(() => {
     if (reloadDue.current) return
     reloadDue.current = true
-    const go = () => location.reload()
-    drafts.whenNone(() => void writes.current.then(go, go))
+    const settle = () => drafts.whenNone(() => {
+      const chain = writes.current
+      const after = () => { if (drafts.any() || writes.current !== chain) settle(); else location.reload() }
+      void chain.then(after, after)
+    })
+    settle()
   }, [])
 
   const loadCache = useCallback(async () => {
