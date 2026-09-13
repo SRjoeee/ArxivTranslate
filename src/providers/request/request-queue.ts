@@ -29,11 +29,6 @@ export const SATURATED_DISPATCH_ETA_MS = 1000
  */
 export const ABORT_GRACE_MS = 5_000
 
-/** Object spread instead of deepmerge: a field explicitly passed as undefined must not wipe the existing value */
-function withoutUndefined<T extends object>(value: T): Partial<T> {
-  return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined)) as Partial<T>
-}
-
 export interface RequestTask {
   id: string
   thunk: (signal?: AbortSignal) => Promise<any>
@@ -41,7 +36,6 @@ export interface RequestTask {
   resolve: (value: any) => void
   reject: (error: any) => void
   scheduleAt: number
-  createdAt: number
   retryCount: number
   // 429 retries spent on this task; a separate budget from retryCount (see
   // RequestRetryContext.rateLimitRetryCount).
@@ -120,7 +114,7 @@ export class RequestQueue {
   private consecutiveRateLimits = 0
 
   constructor(private options: QueueOptions) {
-    // Validated at construction too: setQueueOptions goes through the same schema, and two entrances cannot guard one side only
+    // Validated at construction, the one entrance since the hot-update setter went (ADR-0001 §9)
     const { retryPolicy: _policy, ...validated } = options
     const parsed = requestQueueConfigSchema.safeParse(validated)
     if (parsed.error) {
@@ -166,7 +160,6 @@ export class RequestQueue {
       reject,
       scheduleAt,
       enqueuedAt: Date.now(),
-      createdAt: Date.now(),
       retryCount: 0,
       rateLimitRetryCount: 0,
       drained: false,
@@ -182,28 +175,6 @@ export class RequestQueue {
 
     this.schedule()
     return promise
-  }
-
-  setQueueOptions(options: Partial<QueueOptions>) {
-    const { retryPolicy, ...queueOptions } = options
-    const parseConfigStatus = requestQueueConfigSchema.partial().safeParse(queueOptions)
-    if (parseConfigStatus.error) {
-      throw new Error(parseConfigStatus.error.issues[0]!.message)
-    }
-    // Settle token accrual under the OLD rate before switching.
-    this.refillTokens()
-    this.options = { ...this.options, ...withoutUndefined(queueOptions) }
-    if (retryPolicy) {
-      this.retryPolicy = retryPolicy
-    }
-    // Added in this project (issue #43): maxConcurrent / maxTotalMs bind only dispatches and decisions **from here on**;
-    // an attempt in flight finishes on the budget it had. A shortened budget reschedules at once, and a queued task already expired is reclaimed right away (Codex on #56)
-    this.schedule()
-    // Clamp, never refill-to-full: a capacity edit must not grant a free
-    // burst, and repeated identical calls (config sync) must be no-ops.
-    this.bucketTokens = Math.min(this.bucketTokens, this.options.capacity)
-    // The pending timer's delay was computed under the old rate — recompute.
-    this.schedule()
   }
 
   /**

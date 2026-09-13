@@ -40,7 +40,7 @@ export interface RequestRetryPolicy {
   decide: (error: unknown, context: RequestRetryContext) => RetryDecision
 }
 
-export const REQUEST_ERROR_META = Symbol("requestErrorMeta")
+const REQUEST_ERROR_META = Symbol("requestErrorMeta")
 
 export const MAX_RETRY_AFTER_MS = 5 * 60_000
 // Base queue pause after a 429 with no Retry-After header. Doubles per
@@ -120,7 +120,7 @@ export function getRequestErrorMeta(error: unknown): RequestErrorMeta {
   })
 }
 
-export function getRetryAfterMs(meta: RequestErrorMeta, now = Date.now()): number | undefined {
+function getRetryAfterMs(meta: RequestErrorMeta, now = Date.now()): number | undefined {
   const directRetryAfterMs = normalizeNonNegativeNumber(meta.retryAfterMs)
   if (directRetryAfterMs !== undefined) {
     return directRetryAfterMs
@@ -129,7 +129,7 @@ export function getRetryAfterMs(meta: RequestErrorMeta, now = Date.now()): numbe
   return getRetryAfterMsFromHeaders(meta.responseHeaders, now)
 }
 
-export function getHeaderValue(headers: unknown, key: string): string | undefined {
+function getHeaderValue(headers: unknown, key: string): string | undefined {
   if (!headers) {
     return undefined
   }
@@ -161,11 +161,6 @@ export function getHeaderValue(headers: unknown, key: string): string | undefine
   }
 
   return undefined
-}
-
-export function isRateLimitRequestError(error: unknown): boolean {
-  const meta = getRequestErrorMeta(error)
-  return meta.kind === "rate-limit" || meta.statusCode === 429
 }
 
 export const defaultRequestRetryPolicy: RequestRetryPolicy = {

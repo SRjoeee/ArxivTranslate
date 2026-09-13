@@ -1,12 +1,10 @@
 // Ported from reference/read-frog/src/types/config/translate.ts@9b44f82 (GPL-3.0), 2026-09-05, modified: only the
-// four fields and lower bounds request-queue / batch-queue read, not the whole config module. Also used by the
-// setQueueOptions / setBatchConfig hot-update entry points.
+// request-queue fields and their lower bounds, not the whole config module; the batch-queue schema went with the
+// hot-update setters (ADR-0001 §9), the batch limits are the provider's to set.
 import { z } from 'zod'
 
 export const MIN_TRANSLATE_RATE = 0.01
 export const MIN_TRANSLATE_CAPACITY = 1
-export const MIN_BATCH_CHARACTERS = 1
-export const MIN_BATCH_ITEMS = 1
 
 export const requestQueueConfigSchema = z.object({
   capacity: z.number().gte(MIN_TRANSLATE_CAPACITY),
@@ -16,11 +14,3 @@ export const requestQueueConfigSchema = z.object({
   maxConcurrent: z.number().int().positive().optional(),
   maxTotalMs: z.number().positive().optional(),
 })
-
-export const batchQueueConfigSchema = z.object({
-  maxCharactersPerBatch: z.number().gte(MIN_BATCH_CHARACTERS),
-  maxItemsPerBatch: z.number().gte(MIN_BATCH_ITEMS),
-})
-
-export type RequestQueueConfig = z.infer<typeof requestQueueConfigSchema>
-export type BatchQueueConfig = z.infer<typeof batchQueueConfigSchema>

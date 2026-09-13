@@ -328,22 +328,6 @@ describe('the deadline counts from batch creation, and the backoff is bound by t
     expect(individual).toBe(1)
     vi.useRealTimers()
   })
-
-  it('setQueueOptions shortening the total budget reclaims already expired queued tasks at once; in-flight ones run out on the original budget', async () => {
-    vi.useFakeTimers()
-    const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, timeoutMs: 10_000, maxRetries: 0, maxTotalMs: 60_000 }))
-    let released!: () => void
-    const head = queue.enqueue(() => new Promise<string>(r => { released = () => r('head') }), Date.now(), 'head')
-    const tail = queue.enqueue(async () => 'tail', Date.now(), 'tail')
-    const tailSettled = expect(tail).rejects.toThrow(/total budget/)
-    await vi.advanceTimersByTimeAsync(2_000)
-    queue.setQueueOptions({ maxTotalMs: 1_000 }) // the tail queued for 2 seconds is over budget at once
-    await vi.advanceTimersByTimeAsync(10)
-    await tailSettled
-    released()
-    expect(await head).toBe('head') // the in-flight one is unaffected
-    vi.useRealTimers()
-  })
 })
 
 describe('a batch held by the gate is released at its deadline (Codex on #56, sixth round)', () => {
