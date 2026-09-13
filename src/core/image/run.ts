@@ -175,8 +175,8 @@ export function sameText(a: string, b: string): boolean {
 
 /**
  * The caption text as context (§15.1: Safari's line-by-line translation without context is why its quality is poor).
- * The caption of the **nearest** figure's own level (`:scope > figcaption`), no outer one when there is none: in a
- * multi-panel figure every panel has its own caption, and `querySelector('figcaption')` from the outermost would
+ * The **nearest** figure's own caption (`:scope > figcaption`), and only when it has none the search goes on outward:
+ * in a multi-panel figure every panel has its own caption, and `querySelector('figcaption')` from the outermost would
  * give the first panel's caption to all of them (A2.F4 of 2410.00260: (b) would get (a)'s "Classifier confusion
  * matrix"; Codex on #89)
  */
