@@ -1,48 +1,56 @@
-# axt-helper：图片翻译的本机 OCR 助手
+# axt-helper: the local OCR helper for image translation
 
-扩展在 Mac 上翻译位图里的文字时（DESIGN §15），OCR 由这个 Swift 小程序用 Apple Vision 完成；
-翻译与叠加层都在扩展里。它通过 Chrome 的 Native Messaging 与扩展通信（stdio、长度前缀 JSON），
-协议见 `docs/DESIGN.md` §15.3。核心移植自 [bytefer/macos-vision-ocr](https://github.com/bytefer/macos-vision-ocr)（MIT）。
+When the extension translates the text inside bitmaps on a Mac (DESIGN §15), the OCR is done by this small Swift program
+with Apple Vision; the translation and the overlay stay in the extension. It talks to the extension through Chrome's
+Native Messaging (stdio, length-prefixed JSON); the protocol is in `docs/DESIGN.md` §15.3. The core is ported from
+[bytefer/macos-vision-ocr](https://github.com/bytefer/macos-vision-ocr) (MIT).
 
-## 一键安装（macOS）
+## One-click install (macOS)
 
-在 popup 的「图片翻译」下点「安装」，按引导把命令粘到终端里执行即可；命令已经带上了你的扩展 id：
+Under “Images” in the popup click “Install”, then paste the command the guide gives you into a terminal and run it; the
+command already carries your extension id:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/SRjoeee/ReadarXiv/main/helper/install-remote.sh | bash -s -- <扩展 id>
+curl -fsSL https://raw.githubusercontent.com/SRjoeee/ReadarXiv/main/helper/install-remote.sh | bash -s -- <extension id>
 ```
 
-第二个参数可以指定分支（默认 main），引导里复制的命令会带上它自己所在的分支。
+A second argument names a branch (default main); the command copied from the guide carries the branch it came from.
 
-脚本会把 helper 的源码放到 `~/Library/Application Support/Readarxiv/helper`，用 Xcode Command Line Tools 编译（首次约 1 分钟；没装的话先运行 `xcode-select --install`），并注册 Chrome / Chromium 的 Native Messaging host。**执行完成后扩展会自动检测到，无需重新加载扩展、也无需回到引导确认**（DESIGN §15.4）。不需要 sudo。
+The script puts the helper's sources under `~/Library/Application Support/Readarxiv/helper`, builds them with the Xcode
+Command Line Tools (about a minute the first time; without them, run `xcode-select --install` first) and registers the
+Native Messaging host for Chrome / Chromium. **Once it finishes the extension detects the helper by itself: no reload of the
+extension, no going back to the guide to confirm** (DESIGN §15.4). No sudo needed.
 
-## 要求
+## Requirements
 
-- macOS 13+，Xcode Command Line Tools（`swift build` 能跑即可，不需要 Xcode）
-- Chrome / Chromium 里已加载本扩展（未打包也行）
+- macOS 13+, Xcode Command Line Tools (`swift build` has to run; Xcode itself is not needed)
+- The extension loaded in Chrome / Chromium (unpacked is fine)
 
-## 安装（开发者方式）
+## Install (developer way)
 
 ```sh
 helper/install.sh <extension-id>
 ```
 
-扩展 id 在 `chrome://extensions` 打开开发者模式后，扩展卡片上的「ID」。脚本会：
+The extension id is the “ID” on the extension's card in `chrome://extensions` with developer mode on. The script:
 
-1. `swift build -c release`，二进制在 `helper/.build/release/axt-helper`
-2. 把 host manifest 写进 Chrome 与 Chromium 默认用户数据目录下的 `NativeMessagingHosts/io.github.srjoeee.arxivtranslate.json`
-   （`~/Library/Application Support/Google/Chrome/…` 与 `…/Chromium/…`）。Chrome 找的是 **`<用户数据目录>/NativeMessagingHosts/`**，
-   所以用 `--user-data-dir` 起的浏览器（Playwright 的 e2e）要把 manifest 复制进它自己的 profile 目录；e2e 脚本会自己做
+1. runs `swift build -c release`; the binary is `helper/.build/release/axt-helper`
+2. writes the host manifest as `NativeMessagingHosts/io.github.srjoeee.arxivtranslate.json` under the default user data
+   directories of Chrome and Chromium (`~/Library/Application Support/Google/Chrome/…` and `…/Chromium/…`). Chrome looks in
+   **`<user data directory>/NativeMessagingHosts/`**, so a browser started with `--user-data-dir` (Playwright's e2e) has to
+   copy the manifest into its own profile directory; the e2e scripts do that themselves
 
-装完扩展会自动检测到；设置页「图片翻译」一节随即显示 helper 版本。签名、公证与 pkg 分发暂不做（§15.4）。
+Once installed the extension detects it by itself; the “Images” section of the settings page then shows the helper's
+version. Signing, notarisation and pkg distribution are not done yet (§15.4).
 
-## 冒烟测试
+## Smoke test
 
 ```sh
 pnpm helper:build    # swift build -c release
-pnpm helper:smoke    # 按原生协议喂一张参考图，检查识别行与坐标
+pnpm helper:smoke    # feeds a reference image over the native protocol and checks the recognised lines and coordinates
 ```
 
-## 卸载
+## Uninstall
 
-删掉上面两个 manifest 文件即可；二进制在仓库目录里，随 `git clean` 或 `rm -rf helper/.build` 走。
+Delete the two manifest files above; the binary lives in the repository directory and goes with `git clean` or
+`rm -rf helper/.build`.
