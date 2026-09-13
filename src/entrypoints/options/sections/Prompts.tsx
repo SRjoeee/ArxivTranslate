@@ -1,6 +1,6 @@
 // 提示词与术语: how an LLM service translates. The free services read neither, so the section says
 // so rather than hiding itself — a reader looking for the glossary should find it either way.
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { configSchema } from '@/config/schema'
 import { isLlmChosen } from '@/config/services'
 import { formatGlossaryText, parseGlossary } from '@/providers/glossary'
@@ -13,17 +13,28 @@ export function Prompts({ data }: { data: OptionsData }) {
   const { config, patch } = data
   // The glossary is text on the page and entries in storage: pasting a batch beats editing rows
   const [text, setText] = useState<string | null>(null)
-  // The text follows the stored glossary: the first read, and a change saved elsewhere (Codex on #185) — except while
-  // it is the reader's own. Text that parses to the stored entries stays under their cursor however it is laid out,
-  // and a draft that does not parse or fit yet is theirs to finish; the entries it saves later are their later word
+  /** The glossary this text last came from or last wrote, in the text's own form: a stored value equal to it is not news */
+  const own = useRef<string | null>(null)
+  /** Writes of this box not seen landing yet. While one is out the store is behind the reader, not ahead of them */
+  const pending = useRef(0)
+  // The text follows the stored glossary: the first read, and a change saved elsewhere (Codex on #185) — never the
+  // reader's own typing coming back to them. What this box wrote is not news when it lands; while a write is still
+  // out, whatever the store says is older than the text (the local review of S1, seventh pass: the earlier version
+  // took every difference for a change made elsewhere and put back, mid-word, the letter the reader had just typed).
+  // A draft that does not parse or fit yet is the reader's to finish; the entries it saves later are their later word
   useEffect(() => {
     if (!config) return
-    if (text !== null) {
-      const local = parseGlossary(text)
-      const fits = local.issues.length === 0 && configSchema.shape.glossary.safeParse(local.entries).success
-      if (!fits || formatGlossaryText(local.entries) === formatGlossaryText(config.glossary)) return
+    const stored = formatGlossaryText(config.glossary)
+    if (text === null) {
+      own.current = stored
+      setText(stored)
+      return
     }
-    setText(formatGlossaryText(config.glossary))
+    if (stored === own.current || pending.current > 0) return
+    const local = parseGlossary(text)
+    if (local.issues.length > 0 || !configSchema.shape.glossary.safeParse(local.entries).success) return
+    own.current = stored
+    setText(stored)
   }, [config, text])
   const parsed = text === null ? null : parseGlossary(text)
   // A table can parse line by line and still break the schema's limits (200 entries, per-field
@@ -62,7 +73,9 @@ export function Prompts({ data }: { data: OptionsData }) {
           // with its reason
           const next = parseGlossary(e.target.value)
           if (next.issues.length === 0 && configSchema.shape.glossary.safeParse(next.entries).success) {
-            void patch(latest => ({ ...latest, glossary: next.entries }))
+            own.current = formatGlossaryText(next.entries)
+            pending.current++
+            void patch(latest => ({ ...latest, glossary: next.entries })).finally(() => { pending.current-- })
           }
         }}
         className="w-full rounded-control border border-line bg-card px-3 py-2 font-mono text-[12px] text-fg outline-none focus:border-fg-2"
