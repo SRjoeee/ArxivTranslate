@@ -1,4 +1,4 @@
-// 并发上限与总时限（issue #43）。移植来的队列只有令牌桶，本项目在其上加了这两道闸。
+// The concurrency cap and the total time limit (issue #43). The ported queue has only the token bucket; this project added these two gates on top.
 import { describe, expect, it, vi } from 'vitest'
 import { ABORT_GRACE_MS, RequestQueue, SATURATED_DISPATCH_ETA_MS } from '@/providers/request/request-queue'
 import { attachRequestErrorMeta } from '@/providers/request/retry-policy'
@@ -8,8 +8,8 @@ const opts = (o: Partial<ConstructorParameters<typeof RequestQueue>[0]> = {}) =>
   rate: 1, capacity: 1, timeoutMs: 60_000, maxRetries: 0, baseRetryDelayMs: 10, ...o,
 })
 
-describe('并发上限', () => {
-  it('令牌桶不是并发上限：不设 maxConcurrent 时三个慢请求会同时在飞（issue #43 的实验）', async () => {
+describe('the concurrency cap', () => {
+  it('the token bucket is no concurrency cap: without maxConcurrent three slow requests are in flight at once (the experiment of issue #43)', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts())
     let inFlight = 0
@@ -21,7 +21,7 @@ describe('并发上限', () => {
     vi.useRealTimers()
   })
 
-  it('设了 maxConcurrent 之后，慢响应下在飞数不超过上限', async () => {
+  it('with maxConcurrent set, under slow responses the in-flight count stays within the cap', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ maxConcurrent: 1 }))
     let inFlight = 0
@@ -33,7 +33,7 @@ describe('并发上限', () => {
     vi.useRealTimers()
   })
 
-  it('前一个完成后后面的接着走，不会卡死', async () => {
+  it('once the previous one completes the next goes on, without deadlock', async () => {
     let release!: (v: string) => void
     const queue = new RequestQueue(opts({ rate: 100, capacity: 10, maxConcurrent: 1 }))
     const order: string[] = []
@@ -46,24 +46,24 @@ describe('并发上限', () => {
     expect(order).toEqual(['a', 'b'])
   })
 
-  it('翻译服务的默认值：并发 8、总时限 180 秒', () => {
+  it('the translation service\'s defaults: concurrency 8, total limit 180 seconds', () => {
     expect(DEFAULT_MAX_CONCURRENT).toBe(8)
     expect(DEFAULT_MAX_TOTAL_MS).toBe(180_000)
   })
 })
 
-describe('单个任务的总时限', () => {
-  it('持续失败时到点就不再重试，把错误交回调用方', async () => {
+describe('the total time limit of one task', () => {
+  it('under persistent failure it stops retrying once the limit is reached and hands the error back to the caller', async () => {
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxRetries: 50, baseRetryDelayMs: 5, maxTotalMs: 60 }))
     let calls = 0
     const failing = async () => { calls++; throw Object.assign(new Error('boom'), { name: 'TypeError' }) }
     await expect(queue.enqueue(failing, Date.now(), 'x')).rejects.toThrow('boom')
-    // 没有总时限的话 maxRetries=50 会跑满 51 次；有了之后按时间截断
+    // Without a total limit maxRetries=50 would run the full 51 attempts; with it the cut is by time
     expect(calls).toBeLessThan(51)
     expect(calls).toBeGreaterThan(1)
   })
 
-  it('不设总时限时行为不变：跑满重试次数', async () => {
+  it('without a total limit the behaviour is unchanged: the retries run to the count', async () => {
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxRetries: 3, baseRetryDelayMs: 1 }))
     let calls = 0
     const failing = async () => { calls++; throw Object.assign(new Error('boom'), { name: 'TypeError' }) }
@@ -72,41 +72,41 @@ describe('单个任务的总时限', () => {
   })
 })
 
-describe('并发满载时不空转（Codex 在 #56 指出）', () => {
-  it('槽位被占着时不武装 0 毫秒定时器：在飞请求返回前不该有定时器风暴', async () => {
+describe('no idle spinning at full concurrency (Codex on #56)', () => {
+  it('with the slots occupied no 0 ms timer is armed: there must be no timer storm before an in-flight request returns', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1 }))
     const hang = () => new Promise<string>(() => undefined)
     for (let i = 0; i < 5; i++) queue.enqueue(hang, Date.now(), `t${i}`).catch(() => undefined)
 
-    // 计时从「已经满载」之后开始，只数这段时间里队列自己安排了多少次唤醒
+    // Timing starts once “already full”, counting only how many wake-ups the queue arranged for itself in that period
     const spy = vi.spyOn(globalThis, 'setTimeout')
     await vi.advanceTimersByTimeAsync(5_000)
-    // 修复前：每次 schedule() 都以 delay=0 再武装一次，5 秒内上万次
+    // Before the fix: every schedule() re-armed with delay=0, tens of thousands of times in 5 seconds
     expect(spy.mock.calls.length).toBeLessThan(5)
     spy.mockRestore()
     vi.useRealTimers()
   })
 
-  it('nextDispatchEtaMs 把并发满载算进去：门闸据此继续攒批而不是冲小批', async () => {
+  it('nextDispatchEtaMs counts full concurrency in: the gate keeps accumulating by it rather than rushing small batches', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1 }))
     expect(queue.nextDispatchEtaMs()).toBe(0)
     queue.enqueue(() => new Promise<string>(() => undefined), Date.now(), 'a').catch(() => undefined)
     await vi.advanceTimersByTimeAsync(10)
-    // 令牌管够、没有暂停，唯一的阻塞是并发满载
+    // Tokens aplenty, no pause; the only block is full concurrency
     expect(queue.nextDispatchEtaMs()).toBe(SATURATED_DISPATCH_ETA_MS)
     vi.useRealTimers()
   })
 })
 
-describe('总时限真的兜住了时长（Codex 在 #56 指出）', () => {
+describe('the total limit really bounds the duration (Codex on #56)', () => {
   const rateLimited = () => {
     const error = new Error('429 Too Many Requests')
     return attachRequestErrorMeta(error, { statusCode: 429, retryAfterMs: 300_000 })
   }
 
-  it('Retry-After 比剩余预算还长时立刻放弃，不排进队列干等', async () => {
+  it('a Retry-After longer than the remaining budget gives up at once rather than queueing to wait for nothing', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxRetries: 5, maxTotalMs: 1_000 }))
     let calls = 0
@@ -115,12 +115,12 @@ describe('总时限真的兜住了时长（Codex 在 #56 指出）', () => {
     const settled = expect(task).rejects.toThrow('429')
     await vi.advanceTimersByTimeAsync(50)
     await settled
-    // 修复前：只看「此刻是否已超时」，几毫秒没超，于是排进 300 秒后的重试
+    // Before the fix: it only checked “timed out right now”, a few milliseconds short, and queued a retry 300 seconds out
     expect(calls).toBe(1)
     vi.useRealTimers()
   })
 
-  it('单次尝试的超时被剩余预算截断：不会在预算只剩一点时开跑满程尝试', async () => {
+  it('a single attempt\'s timeout is cut by the remaining budget: no full-length attempt starts with little budget left', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, timeoutMs: 120_000, maxRetries: 0, maxTotalMs: 2_000 }))
     const task = queue.enqueue(() => new Promise<string>(() => undefined), Date.now(), 'x')
@@ -130,7 +130,7 @@ describe('总时限真的兜住了时长（Codex 在 #56 指出）', () => {
     vi.useRealTimers()
   })
 
-  it('排在并发上限后面等超了的任务不再发请求，直接以超时告终', async () => {
+  it('a task that timed out waiting behind the concurrency cap sends no request and ends as a timeout outright', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, timeoutMs: 10_000, maxRetries: 0, maxTotalMs: 1_000 }))
     let calls = 0
@@ -144,11 +144,11 @@ describe('总时限真的兜住了时长（Codex 在 #56 指出）', () => {
   })
 })
 
-describe('期限与并发的边界（Codex 在 #56 的第二轮）', () => {
-  it('deadlineAt 覆盖「入队时刻 + 预算」：批级重试再入队也不会重新拿一份预算', async () => {
+describe('the boundary of deadline and concurrency (Codex on #56, second round)', () => {
+  it('deadlineAt overrides “enqueue time + budget”: a batch-level retry re-enqueued gets no fresh budget', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxRetries: 0, timeoutMs: 60_000, maxTotalMs: 60_000 }))
-    // 这批 500 毫秒前就开跑了，期限只剩 500 毫秒——不是一入队重算 60 秒
+    // This batch started 500 milliseconds ago and has 500 milliseconds of deadline left — not 60 seconds recomputed on enqueue
     const task = queue.enqueue(() => new Promise<string>(() => undefined), Date.now(), 'x', undefined, { deadlineAt: Date.now() + 500 })
     const settled = expect(task).rejects.toThrow(/timed out after 500ms/)
     await vi.advanceTimersByTimeAsync(600)
@@ -156,7 +156,7 @@ describe('期限与并发的边界（Codex 在 #56 的第二轮）', () => {
     vi.useRealTimers()
   })
 
-  it('攒批的 meta 带着首次派发时刻，批级重试拿到的是同一个值', async () => {
+  it('the batch\'s meta carries the first dispatch time, and a batch-level retry gets the same value', async () => {
     const { BatchQueue } = await import('@/providers/request/batch-queue')
     const seen: number[] = []
     let attempt = 0
@@ -165,7 +165,7 @@ describe('期限与并发的边界（Codex 在 #56 的第二轮）', () => {
       getBatchKey: () => 'k', getCharacters: i => i.text.length,
       executeBatch: async (items, meta) => {
         seen.push(meta.startedAt)
-        // 第一次少返一条，逼出批级重试
+        // Returns one short the first time, forcing a batch-level retry
         return attempt++ === 0 ? [] : items.map(i => `译:${i.text}`)
       },
     })
@@ -174,7 +174,7 @@ describe('期限与并发的边界（Codex 在 #56 的第二轮）', () => {
     expect(seen[0]).toBe(seen[1])
   })
 
-  it('超预算的 429 仍然给队列记上冷却：不能让积压立刻再撞上去', async () => {
+  it('a 429 over budget still records the cooldown on the queue: the backlog must not hit it again at once', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxRetries: 5, maxTotalMs: 1_000 }))
     const limited = async () => { throw attachRequestErrorMeta(new Error('429 Too Many Requests'), { statusCode: 429, retryAfterMs: 300_000 }) }
@@ -182,16 +182,16 @@ describe('期限与并发的边界（Codex 在 #56 的第二轮）', () => {
     const settled = expect(expired).rejects.toThrow('429')
     await vi.advanceTimersByTimeAsync(50)
     await settled
-    // 冷却已记账：下一批的派发预估不为零
+    // The cooldown is booked: the next batch's dispatch estimate is not zero
     expect(queue.nextDispatchEtaMs()).toBeGreaterThan(0)
     vi.useRealTimers()
   })
 
-  it('取消后还没结束的尝试仍占并发额度：不能一边取消一边把上限冲破', async () => {
+  it('an attempt not yet finished after cancellation still holds its concurrency slot: cancelling must not break the cap', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1 }))
     let started = 0
-    // 无视 signal 的 thunk：取消只是把它从表里摘掉，连接还占着
+    // A thunk ignoring the signal: cancelling only takes it off the table, the connection stays occupied
     const stubborn = () => { started++; return new Promise<string>(() => undefined) }
     queue.enqueue(stubborn, Date.now(), 'a', ['s1']).catch(() => undefined)
     await vi.advanceTimersByTimeAsync(10)
@@ -203,7 +203,7 @@ describe('期限与并发的边界（Codex 在 #56 的第二轮）', () => {
     vi.useRealTimers()
   })
 
-  it('并发上限必须是正整数：0 / 负数 / NaN 会让队列永远派不出任务', () => {
+  it('the concurrency cap must be a positive integer: 0 / negative / NaN would leave the queue never dispatching', () => {
     expect(() => new RequestQueue(opts({ maxConcurrent: 0 }))).toThrow()
     expect(() => new RequestQueue(opts({ maxConcurrent: -1 }))).toThrow()
     expect(() => new RequestQueue(opts({ maxConcurrent: Number.NaN }))).toThrow()
@@ -212,32 +212,32 @@ describe('期限与并发的边界（Codex 在 #56 的第二轮）', () => {
   })
 })
 
-describe('期限是时间事件，暂停与满载都拦不住（Codex 在 #56 的第三轮）', () => {
-  it('限流暂停比预算还长时，排队任务到点就被回收，不在暂停里一直挂着', async () => {
+describe('the deadline is a time event that neither a pause nor full load can stop (Codex on #56, third round)', () => {
+  it('a rate-limit pause longer than the budget: queued tasks are reclaimed at the deadline rather than hanging through the pause', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, maxRetries: 5, maxTotalMs: 1_000 }))
     const limited = async () => { throw attachRequestErrorMeta(new Error('429 Too Many Requests'), { statusCode: 429, retryAfterMs: 300_000 }) }
     queue.enqueue(limited, Date.now(), 'head').catch(() => undefined)
     const queued = queue.enqueue(async () => 'never', Date.now(), 'tail')
     const settled = expect(queued).rejects.toThrow(/total budget/)
-    // 修复前：schedule() 只在 pausedUntil（300 秒后）醒来，排队任务在暂停里挂满 5 分钟
+    // Before the fix: schedule() woke only at pausedUntil (300 seconds out), and the queued task hung the full 5 minutes of the pause
     await vi.advanceTimersByTimeAsync(2_000)
     await settled
     vi.useRealTimers()
   })
 
-  it('超时之后并发额度要等 thunk 真的结束再还', async () => {
+  it('after a timeout the concurrency slot is returned only once the thunk really ends', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, timeoutMs: 50, maxRetries: 0 }))
     let started = 0
     let release!: () => void
-    // 无视 signal 的 thunk：超时竞速赢了，它自己还在跑
+    // A thunk ignoring the signal: the timeout won the race, and it is still running
     const stubborn = () => { started++; return new Promise<string>((_, rej) => { release = () => rej(new Error('late')) }) }
     queue.enqueue(stubborn, Date.now(), 'a').catch(() => undefined)
     await vi.advanceTimersByTimeAsync(10)
     expect(started).toBe(1)
     queue.enqueue(stubborn, Date.now(), 'b').catch(() => undefined)
-    await vi.advanceTimersByTimeAsync(200) // 第一个早就超时了
+    await vi.advanceTimersByTimeAsync(200) // the first timed out long ago
     expect(started).toBe(1)
     release()
     await vi.advanceTimersByTimeAsync(10)
@@ -245,7 +245,7 @@ describe('期限是时间事件，暂停与满载都拦不住（Codex 在 #56 �
     vi.useRealTimers()
   })
 
-  it('thunk 永远不结束时宽限期到点也要还额度：不能让队列被锁死', async () => {
+  it('when the thunk never ends the slot is returned at the end of the grace period: the queue must not lock up', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, timeoutMs: 50, maxRetries: 0 }))
     let started = 0
@@ -260,7 +260,7 @@ describe('期限是时间事件，暂停与满载都拦不住（Codex 在 #56 �
     vi.useRealTimers()
   })
 
-  it('逐条兜底与批级重试用同一个批次期限', async () => {
+  it('the per-item fallback and the batch-level retry use the same batch deadline', async () => {
     const { BatchQueue } = await import('@/providers/request/batch-queue')
     const seen: number[] = []
     const batch = new BatchQueue<{ text: string }, string>({
@@ -276,22 +276,22 @@ describe('期限是时间事件，暂停与满载都拦不住（Codex 在 #56 �
   })
 })
 
-describe('同步抛出的 thunk（Codex 在 #56 的第四轮）', () => {
-  it('thunk 同步抛出时额度立刻归还，后面的任务照常派发', async () => {
+describe('a thunk that throws synchronously (Codex on #56, fourth round)', () => {
+  it('when the thunk throws synchronously the slot is returned at once and later tasks dispatch as usual', async () => {
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, maxRetries: 0 }))
-    // 不返回 Promise、直接抛：executeTask 的 catch 里 thunkPromise 还是 null
+    // Throws outright without returning a Promise: in executeTask's catch, thunkPromise is still null
     const boom = (() => { throw Object.assign(new Error('sync boom'), { name: 'TypeError' }) }) as unknown as () => Promise<string>
     await expect(queue.enqueue(boom, Date.now(), 'a')).rejects.toThrow('sync boom')
-    // 修复前这里会因为 ReferenceError 把额度记死，第二个任务永远排不上
+    // Before the fix a ReferenceError here booked the slot for good, and the second task never got its turn
     expect(await queue.enqueue(async () => 'b', Date.now(), 'b')).toBe('b')
   })
 })
 
-describe('期限从批次创建算起、退避受预算约束（Codex 在 #56 的第五轮）', () => {
-  it('派发闸按住的时间也算进总时限：meta.startedAt 是批次创建时刻，不是派发时刻', async () => {
+describe('the deadline counts from batch creation, and the backoff is bound by the budget (Codex on #56, fifth round)', () => {
+  it('the time the dispatch gate holds a batch counts into the total limit: meta.startedAt is the batch\'s creation time, not its dispatch time', async () => {
     vi.useFakeTimers()
     const { BatchQueue } = await import('@/providers/request/batch-queue')
-    let eta = 5_000 // 先说「没空位」，让欠满的批次被按住
+    let eta = 5_000 // say “no slot” first, so the underfull batch is held
     const seen: number[] = []
     const batch = new BatchQueue<{ text: string }, string>({
       maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 10, maxRetries: 0,
@@ -301,16 +301,16 @@ describe('期限从批次创建算起、退避受预算约束（Codex 在 #56 �
     })
     const created = Date.now()
     const result = batch.enqueue({ text: 'A' })
-    await vi.advanceTimersByTimeAsync(3_000) // 被按住 3 秒
+    await vi.advanceTimersByTimeAsync(3_000) // held for 3 seconds
     eta = 0
     await vi.advanceTimersByTimeAsync(1_500)
     expect(await result).toBe('译:A')
-    // 修复前 startedAt 是派发时刻（≈ created + 3000），期限会把按住的 3 秒漏掉
+    // Before the fix startedAt was the dispatch time (≈ created + 3000), and the deadline missed the 3 seconds held
     expect(seen[0]! - created).toBeLessThan(100)
     vi.useRealTimers()
   })
 
-  it('临近截止时不再先睡退避再入队：直接走逐条兜底', async () => {
+  it('near the deadline it no longer sleeps the backoff before re-enqueueing: straight to the per-item fallback', async () => {
     vi.useFakeTimers()
     const { BatchQueue } = await import('@/providers/request/batch-queue')
     let individual = 0
@@ -318,18 +318,18 @@ describe('期限从批次创建算起、退避受预算约束（Codex 在 #56 �
       maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 1, maxRetries: 3, maxTotalMs: 200,
       enableFallbackToIndividual: true,
       getBatchKey: () => 'k', getCharacters: i => i.text.length,
-      executeBatch: async () => [], // 条数对不上
+      executeBatch: async () => [], // count mismatch
       executeIndividual: async item => { individual++; return `译:${item.text}` },
     })
     const result = batch.enqueue({ text: 'A' })
-    // 退避最少 1 秒，超出 200 ms 的预算；修复前这里要睡满再说
+    // The backoff is at least 1 second, over the 200 ms budget; before the fix it slept it out first
     await vi.advanceTimersByTimeAsync(50)
     expect(await result).toBe('译:A')
     expect(individual).toBe(1)
     vi.useRealTimers()
   })
 
-  it('setQueueOptions 缩短总预算后立刻回收已过期的排队任务；在飞的按原预算跑完', async () => {
+  it('setQueueOptions shortening the total budget reclaims already expired queued tasks at once; in-flight ones run out on the original budget', async () => {
     vi.useFakeTimers()
     const queue = new RequestQueue(opts({ rate: 1000, capacity: 100, maxConcurrent: 1, timeoutMs: 10_000, maxRetries: 0, maxTotalMs: 60_000 }))
     let released!: () => void
@@ -337,31 +337,31 @@ describe('期限从批次创建算起、退避受预算约束（Codex 在 #56 �
     const tail = queue.enqueue(async () => 'tail', Date.now(), 'tail')
     const tailSettled = expect(tail).rejects.toThrow(/total budget/)
     await vi.advanceTimersByTimeAsync(2_000)
-    queue.setQueueOptions({ maxTotalMs: 1_000 }) // 排队 2 秒的 tail 立刻超预算
+    queue.setQueueOptions({ maxTotalMs: 1_000 }) // the tail queued for 2 seconds is over budget at once
     await vi.advanceTimersByTimeAsync(10)
     await tailSettled
     released()
-    expect(await head).toBe('head') // 在飞的不受影响
+    expect(await head).toBe('head') // the in-flight one is unaffected
     vi.useRealTimers()
   })
 })
 
-describe('门闸按住的批次到期就放行（Codex 在 #56 的第六轮）', () => {
-  it('maxTotalMs 短于持批上限时，期限一到就派发，不再等 60 秒', async () => {
+describe('a batch held by the gate is released at its deadline (Codex on #56, sixth round)', () => {
+  it('with maxTotalMs shorter than the batch-holding cap it dispatches at the deadline, no longer waiting 60 seconds', async () => {
     vi.useFakeTimers()
     const { BatchQueue } = await import('@/providers/request/batch-queue')
     let executed = 0
     const batch = new BatchQueue<{ text: string }, string>({
       maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 10, maxRetries: 0, maxTotalMs: 200,
-      dispatchGate: { nextDispatchEtaMs: () => 5_000 }, // 一直说没空位
+      dispatchGate: { nextDispatchEtaMs: () => 5_000 }, // always says no slot
       getBatchKey: () => 'k', getCharacters: i => i.text.length,
       executeBatch: async items => { executed++; return items.map(i => `译:${i.text}`) },
     })
     const result = batch.enqueue({ text: 'A' })
     await vi.advanceTimersByTimeAsync(150)
-    expect(executed).toBe(0) // 还在预算内，继续攒
+    expect(executed).toBe(0) // still within budget, keeps accumulating
     await vi.advanceTimersByTimeAsync(100)
-    expect(executed).toBe(1) // 到期放行（下游会按 deadlineAt 处理）
+    expect(executed).toBe(1) // released at the deadline (downstream handles it by deadlineAt)
     expect(await result).toBe('译:A')
     vi.useRealTimers()
   })

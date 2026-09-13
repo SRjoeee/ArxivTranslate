@@ -1,14 +1,14 @@
-// 脚注两栏归位（DESIGN §7.2）。译文段落由占位符协议回填，脚注是受保护节点，
-// 于是译文里会重建一份**原文**脚注；这里把该脚注的译文复制进去，页面右缘只挂一份边注。
+// Footnotes going back to their column (DESIGN §7.2). A translated paragraph is rehydrated by the placeholder protocol, and the footnote is a protected node,
+// so the translation rebuilds a copy of the **source** footnote; here the footnote's translation is copied into it, and the page edge carries one margin note.
 import { describe, expect, it } from 'vitest'
 import { T_CLASS } from '@/core/marks'
 import { delocalizeNotes, localizeNotes } from '@/core/renderer/notes'
 import { docOf } from './helpers'
 
 /**
- * 一段带脚注的正文：原文段落（内含脚注与脚注译文）+ 段落译文（内含回填出来的脚注副本）。
- * 脚注正文带 data-axt-id：它是提取器登记过的块（`.ltx_note_content` 是一条翻译单元），
- * 译文早晚会到——没有这个标记的脚注是另一回事，见"没登记过的脚注"那几条
+ * A body paragraph with a footnote: the source paragraph (with the footnote and the footnote's translation) + the paragraph's translation (with the rehydrated footnote copy).
+ * The footnote body carries data-axt-id: it is a block the extractor registered (`.ltx_note_content` is a translation unit),
+ * and its translation will arrive sooner or later — a footnote without that mark is another matter, see the “unregistered footnote” cases
  */
 const withNote = (translated = true, zh = '中文脚注') => docOf(`
   <p class="ltx_p">body<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup
@@ -23,7 +23,7 @@ const copy = (doc: Document) => doc.querySelector(`.${T_CLASS} .ltx_note_content
 const sourceNote = (doc: Document) => doc.querySelector(`.ltx_p:not(.${T_CLASS}) .ltx_note`)!
 
 describe('localizeNotes', () => {
-  it('译文复制进副本：一份边注里原文在上、译文在下', () => {
+  it('the translation is copied into the copy: one margin note with the source above and the translation below', () => {
     const doc = withNote()
     expect(localizeNotes(doc)).toBe(1)
     const box = copy(doc).closest('.ltx_note_outer')!
@@ -32,8 +32,8 @@ describe('localizeNotes', () => {
     expect(box.textContent!.indexOf('English')).toBeLessThan(box.textContent!.indexOf('中文'))
   })
 
-  it('放进去的译文要脱掉脚注框外壳，且不带标号与块标记', () => {
-    // .ltx_note_content 带 double 顶边线与缩进，自带的标号还是绝对定位的（实测会飞进正文）
+  it('the translation put in sheds the footnote frame and carries neither the number nor the block mark', () => {
+    // .ltx_note_content has a double top rule and an indent, and its own number is absolutely positioned (measured: it flies into the body text)
     const doc = withNote()
     localizeNotes(doc)
     const placed = doc.querySelector('.axt-note-t')!
@@ -58,7 +58,7 @@ describe('localizeNotes', () => {
     // Idempotent: a second run adds no second wrapper
     localizeNotes(doc)
     expect(c.querySelectorAll('.axt-note-s')).toHaveLength(1)
-    // 放进去的译文里，标号藏着而不是删掉（镜像句子登记要两棵树同构），所以 textContent 里有第二个 1
+    // Inside the translation put in, the number is hidden rather than deleted (mirror sentence registration needs the two trees isomorphic), hence the second 1 in textContent
     expect(c.querySelector<HTMLElement>('.axt-note-t sup')?.hidden).toBe(true)
     expect(c.textContent).toBe('1English note1中文脚注')
   })
@@ -100,22 +100,22 @@ describe('localizeNotes', () => {
     expect(copy(doc).querySelector('.axt-note-s')).toBeNull()
   })
 
-  it('原件那份标上 data-axt-note 由样式整框隐藏；副本那份不标', () => {
+  it('the original copy is marked data-axt-note and hidden whole by the style; the copy is not marked', () => {
     const doc = withNote()
     localizeNotes(doc)
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(true)
     expect(doc.querySelector(`.${T_CLASS} .ltx_note`)!.hasAttribute('data-axt-note')).toBe(false)
   })
 
-  it('是复制不是移动：原件里的译文留在原处，二次翻译时 renderText 才找得到旧译文去替换', () => {
-    // 搬走的话，旧副本会随段落译文一起被删，脚注译文就丢了（Codex 在 #26 指出）
+  it('copied, not moved: the translation in the original stays where it is, so on a retranslation renderText finds the old translation to replace', () => {
+    // Moved, the old copy would be deleted with the paragraph translation and the footnote translation lost (Codex on #26)
     const doc = withNote()
     localizeNotes(doc)
     expect(doc.querySelectorAll(`.ltx_note_content.${T_CLASS}`)).toHaveLength(1)
     expect(sourceNote(doc).querySelector(`.${T_CLASS}`)!.textContent).toContain('中文脚注')
   })
 
-  it('删段落译文前撤销归位：原件不再被隐藏，脚注不会在所有模式下消失（Codex 在 #30 指出）', () => {
+  it('undo the placement before deleting the paragraph translation: the original is no longer hidden, and the footnote does not vanish in every mode (Codex on #30)', () => {
     const doc = withNote()
     localizeNotes(doc)
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(true)
@@ -124,7 +124,7 @@ describe('localizeNotes', () => {
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
   })
 
-  it('删脚注译文前撤销归位：外层段落译文里的副本译文一并删掉，原件露出来', () => {
+  it('undo the placement before deleting the footnote translation: the copy\'s translation inside the outer paragraph translation goes too, and the original shows', () => {
     const doc = withNote()
     localizeNotes(doc)
     doc.querySelector(`.ltx_p:not(.${T_CLASS})`)!.setAttribute('data-axt-id', 'p1')
@@ -132,14 +132,14 @@ describe('localizeNotes', () => {
     expect(delocalizeNotes(noteBlock)).toBe(1)
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
     expect(doc.querySelector('.axt-note-t')).toBeNull()
-    // 没归位过的块：什么都不做
+    // A block never placed: nothing happens
     expect(delocalizeNotes(noteBlock)).toBe(0)
   })
 
-  it('二次翻译：段落译文被整个换掉后，新副本再次归位', () => {
+  it('retranslation: once the paragraph translation is replaced whole, the new copy is placed again', () => {
     const doc = withNote()
     localizeNotes(doc)
-    // renderText 换掉段落译文：旧的（含已归位副本）删掉，插一个新的、副本又是原文
+    // renderText replaces the paragraph translation: the old one (with the placed copy) is deleted, a new one inserted, its copy source text again
     const old = doc.querySelector(`.ltx_p.${T_CLASS}`)!
     const fresh = old.cloneNode(true) as Element
     fresh.querySelector('.axt-note-t')!.remove()
@@ -148,7 +148,7 @@ describe('localizeNotes', () => {
     expect(copy(doc).querySelector('.axt-note-t')!.textContent).toContain('中文脚注')
   })
 
-  it('译文内容变了（换目标语言重翻）就换新的，不会一直用旧副本', () => {
+  it('when the translation\'s content changed (retranslated into another target) the new one replaces it rather than keeping the old copy for good', () => {
     const doc = withNote()
     localizeNotes(doc)
     sourceNote(doc).querySelector(`.${T_CLASS}`)!.append('（修订）')
@@ -157,7 +157,7 @@ describe('localizeNotes', () => {
     expect(copy(doc).querySelector('.axt-note-t')!.textContent).toContain('修订')
   })
 
-  it('没跑这一趟也不丢内容：原件里仍是原文 + 译文', () => {
+  it('skipping this pass loses no content either: the original still holds source + translation', () => {
     const doc = withNote()
     const source = doc.querySelector(`.ltx_p:not(.${T_CLASS})`)!
     expect(source.textContent).toContain('English note')
@@ -165,14 +165,14 @@ describe('localizeNotes', () => {
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
   })
 
-  it('脚注还没翻到就先不动，等下一轮', () => {
+  it('a footnote not yet translated is left alone until the next round', () => {
     const doc = withNote(false)
     expect(localizeNotes(doc)).toBe(0)
     expect(copy(doc).textContent).toContain('English note')
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
   })
 
-  /** 一条没被提取器登记的脚注：正文全是 URL，没有字母可翻，所以永远不会有译文（2509.10652v3 的 1–6 号） */
+  /** A footnote the extractor did not register: the body is all URL, no letter to translate, so no translation will ever come (numbers 1–6 of 2509.10652v3) */
   const unregistered = (copyText = 'https://chat.openai.com') => docOf(`
     <p class="ltx_p" data-axt-id="p1">body<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup
       ><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup> <span class="ltx_tag ltx_tag_note">1</span> <a class="ltx_ref ltx_url">https://chat.openai.com</a></span
@@ -181,41 +181,41 @@ describe('localizeNotes', () => {
       ><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup> <span class="ltx_tag ltx_tag_note">1</span> <a class="ltx_ref ltx_url">${copyText}</a></span
       ></span></span></p>`)
 
-  it('没登记过的脚注（正文全是 URL）：副本逐字相同，原件标记隐藏，页面右缘只剩一份', () => {
-    // 译文永远不会到，等下去的结果是同一条边注画两遍（用户 2026-09-11 在 2509.10652v3 上反馈）
+  it('an unregistered footnote (body all URL): the copy is identical byte for byte, the original is marked hidden, and the page edge keeps one', () => {
+    // The translation will never come, and waiting draws the same margin note twice (the owner's report on 2509.10652v3, 2026-09-11)
     const doc = unregistered()
     expect(localizeNotes(doc)).toBe(1)
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(true)
-    // 副本没有译文可放，原样留着（不包 .axt-note-s：只有 only 模式要藏原文时才需要）
+    // The copy has no translation to hold and stays as it is (not wrapped in .axt-note-s: only only mode, hiding the source, needs that)
     expect(copy(doc).querySelector('.axt-note-t')).toBeNull()
     expect(copy(doc).textContent).toContain('https://chat.openai.com')
-    expect(localizeNotes(doc)).toBe(0) // 幂等
+    expect(localizeNotes(doc)).toBe(0) // idempotent
   })
 
-  // Codex 在 #163 指出：译文与原文逐字相同的块在 stack 模式下整份 .axt-t 被藏起来
-  //（modes.css 的 data-axt-identity 规则）。那份副本是这条脚注唯一剩下的一份，
-  // 再把原件也标成隐藏，整条脚注就从页面上没了
-  it('译文整块与原文相同（stack 会藏掉副本）时不动原件：一份总比没有好', () => {
+  // Codex on #163: a block whose translation equals its source byte for byte has its whole .axt-t hidden in stack mode
+  // (the data-axt-identity rule of modes.css). That copy is the only one of this footnote left,
+  // and marking the original hidden too takes the whole footnote off the page
+  it('when the translation equals the source whole (stack hides the copy) the original is left alone: one is better than none', () => {
     const doc = unregistered()
     doc.querySelector(`.${T_CLASS}`)!.setAttribute('data-axt-identity', '')
     expect(localizeNotes(doc)).toBe(0)
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
   })
 
-  // 第四轮：守卫原来只长在"没登记过的脚注"那条分支上。登记过、译文也到了的脚注同样会没——
-  // 原件那个边注框里装的正是原文 + 译文，藏了它，译文跟着一起没
-  it('译文已到的脚注，副本会被藏起来时也不藏原件', () => {
+  // Fourth round: the guard grew only on the “unregistered footnote” branch. A registered footnote whose translation arrived vanishes the same way —
+  // that margin box in the original holds exactly source + translation, and hiding it hides the translation with it
+  it('a footnote whose translation arrived: when the copy will be hidden the original is not hidden either', () => {
     const doc = withNote()
     doc.querySelector(`.ltx_p.${T_CLASS}`)!.setAttribute('data-axt-identity', '')
     expect(localizeNotes(doc)).toBe(0)
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
-    // 副本里照样放了译文：那个模式显示它的时候要有
+    // The translation is still put into the copy: it has to be there when a mode shows it
     expect(copy(doc).querySelector('.axt-note-t')?.textContent).toContain('中文脚注')
   })
 
-  // 同一个洞的另外两种副本（Codex 在 #163 第三轮指出）：拆图副本在 stack 被整块藏起来，
-  // 镜像在 side 以外被藏起来（modes.css）。里面那份脚注都不能算"唯一留下的一份"
-  it('拆图副本与镜像同样不算：它们也会被某个模式整块藏掉', () => {
+  // Two more copies with the same hole (Codex on #163, third round): the split-figure copy is hidden whole in stack,
+  // the mirror is hidden outside side (modes.css). A footnote inside either cannot count as “the only one left”
+  it('split-figure copies and mirrors do not count either: some mode hides them whole too', () => {
     for (const cls of ['axt-split', 'axt-mirror']) {
       const doc = unregistered()
       doc.querySelector(`.${T_CLASS}`)!.classList.add(cls)
@@ -224,20 +224,20 @@ describe('localizeNotes', () => {
     }
   })
 
-  it('副本被引擎改过字就两份都留着：宁可重复也不丢内容', () => {
+  it('a copy whose text the engine changed keeps both: better a duplicate than lost content', () => {
     const doc = unregistered('https://chat.openai.com/zh')
     expect(localizeNotes(doc)).toBe(0)
     expect(sourceNote(doc).hasAttribute('data-axt-note')).toBe(false)
   })
 
-  it('幂等：内容没变第二遍什么都不做', () => {
+  it('idempotent: with the content unchanged the second pass does nothing', () => {
     const doc = withNote()
     expect(localizeNotes(doc)).toBe(1)
     expect(localizeNotes(doc)).toBe(0)
     expect(copy(doc).querySelectorAll('.axt-note-t')).toHaveLength(1)
   })
 
-  it('数量对不上就整段跳过，宁可留原文也不张冠李戴', () => {
+  it('when the counts do not match the whole passage is skipped: better the source kept than a mismatch', () => {
     const doc = withNote()
     const t = doc.querySelector(`.ltx_p.${T_CLASS}`)!
     const extra = doc.createElement('span')

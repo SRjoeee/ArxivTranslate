@@ -1,15 +1,15 @@
-// 安装引导的等待（DESIGN §15.4）。这里是全部的新增后台逻辑，所以每条分支都要有断言：
-// 探到、没探到、到点、探测抛错、worker 被回收之后接上。
+// The wait of the guided install (DESIGN §15.4). This is all of the new background logic, so every branch needs an assertion:
+// detected, not detected, deadline reached, the probe throwing, and picking up after the worker was reclaimed.
 //
-// 时间与定时器全部注入：真跑 2 秒一轮的话这个文件要跑三分钟。
+// Time and timers are all injected: run for real at one round per 2 seconds this file would take three minutes.
 import { describe, expect, it, vi } from 'vitest'
 import { createHelperWaiter, type HelperWaitDeps } from '@/entrypoints/background/helper-await'
 import type { HelperStatus } from '@/shared/ocr'
 
-/** 真实的微任务抽干：探测那条 await 链有好几跳，数固定的 `Promise.resolve()` 数不准 */
+/** A real microtask drain: the probe's await chain has several hops, and a fixed number of `Promise.resolve()` does not count right */
 const flush = () => new Promise(resolve => setTimeout(resolve, 0))
 
-/** 受控的时钟与定时器：`tick(ms)` 把时间推进并跑完期间到期的那些 */
+/** A controlled clock and timers: `tick(ms)` advances time and runs those that fell due meanwhile */
 function harness(options: { probe?: () => Promise<HelperStatus>; stored?: number; holdLoad?: boolean } = {}) {
   let releaseLoad: (() => void) | null = null
   let now = 1_000_000
@@ -29,10 +29,10 @@ function harness(options: { probe?: () => Promise<HelperStatus>; stored?: number
     schedule: (run, ms) => { const id = next++; timers.set(id, { at: now + ms, run }); return id },
     cancel: id => { timers.delete(id) },
     load: async () => {
-      // **取值在读发出的那一刻**，与真实的 `storage.session.get` 一致：读发出之后的写
-      // 不影响这一次读回来的结果。夹具若读实时变量，下面那条竞态用例就永远抓不到
+      // **The value is taken the moment the read goes out**, as with the real `storage.session.get`: a write after the read went out
+      // does not affect what this read returns. Were the fixture to read the live variable, the race case below could never catch it
       const snapshot = saved
-      // holdLoad：把读挂住，好在它回来之前插进别的动作
+      // holdLoad: holds the read, so another action can be slipped in before it returns
       if (options.holdLoad) await new Promise<void>(resolve => { releaseLoad = resolve })
       return snapshot
     },
@@ -60,7 +60,7 @@ function harness(options: { probe?: () => Promise<HelperStatus>; stored?: number
 const ready: HelperStatus = { state: 'ready', version: '0.1.0' }
 
 describe('createHelperWaiter', () => {
-  it('探到就广播一次，然后停下——不再继续探', async () => {
+  it('once detected it broadcasts once and stops — no further probing', async () => {
     let installed = false
     const h = harness({ probe: async () => (installed ? ready : { state: 'not-installed' }) })
     const waiter = createHelperWaiter(h.deps)
@@ -73,19 +73,19 @@ describe('createHelperWaiter', () => {
     installed = true
     await h.tick(2_000)
     expect(h.announced).toHaveLength(1)
-    // 探到才是真的结束：截止时间清掉，重开的界面看到的是「没在等」
+    // Only a detection is a real end: the deadline is cleared, and a reopened interface sees “not waiting”
     expect(waiter.until()).toBeNull()
     expect(h.savedAt()).toBeUndefined()
-    // 广播之后不再排新的一轮
+    // No new round is scheduled after the broadcast
     expect(h.armed()).toBe(0)
     const after = h.probes.length
     await h.tick(20_000)
     expect(h.probes.length).toBe(after)
   })
 
-  // 到点之后**留着**那个过期的截止时间：读者多半这时还在终端里，等他回来重开 popup，
-  // 界面要能分辨「等过、没等到」与「压根没开始」——清掉的话两者都是 null（Codex 在 #166 指出）
-  it('一窗走完停掉轮次，但留着过期的截止时间给界面读', async () => {
+  // After the deadline the expired deadline is **kept**: the reader is most likely still in the terminal, and when they come back and reopen the popup
+  // the interface has to tell “waited, nothing detected” from “never started” — cleared, both would be null (Codex on #166)
+  it('once a window runs out the rounds stop, but the expired deadline is kept for the interface to read', async () => {
     const h = harness()
     const waiter = createHelperWaiter(h.deps)
     await waiter.start()
@@ -97,14 +97,14 @@ describe('createHelperWaiter', () => {
     expect(waiter.until()).toBe(deadline)
     expect(h.savedAt()).toBe(deadline)
     expect(h.announced).toHaveLength(0)
-    // 不再探、也不留定时器：worker 才有机会被回收
+    // No more probing and no timer left: only then can the worker be reclaimed
     expect(h.armed()).toBe(0)
     const probed = h.probes.length
     await h.tick(20_000)
     expect(h.probes.length).toBe(probed)
   })
 
-  it('超时之后重新开始一次，覆盖掉那个过期的', async () => {
+  it('starting again after the timeout overrides the expired one', async () => {
     const h = harness()
     const waiter = createHelperWaiter(h.deps)
     await waiter.start()
@@ -117,12 +117,12 @@ describe('createHelperWaiter', () => {
     expect(h.armed()).toBe(1)
   })
 
-  it('探测抛错不打断等待：下一轮照常', async () => {
+  it('a probe that throws does not interrupt the wait: the next round runs as usual', async () => {
     let calls = 0
     const h = harness({
       probe: async () => {
         calls += 1
-        if (calls <= 2) throw new Error('端口刚断')
+        if (calls <= 2) throw new Error('port just disconnected')
         return ready
       },
     })
@@ -137,7 +137,7 @@ describe('createHelperWaiter', () => {
     expect(waiter.until()).toBeNull()
   })
 
-  it('再点一次复制：截止时间推回满窗，而不是沿用快到期的那个', async () => {
+  it('clicking copy again pushes the deadline back to a full window instead of keeping the nearly expired one', async () => {
     const h = harness()
     const waiter = createHelperWaiter(h.deps)
     await waiter.start()
@@ -149,11 +149,11 @@ describe('createHelperWaiter', () => {
     await flush()
     expect(waiter.until()).toBe(h.at() + 180_000)
     expect(waiter.until()! - before).toBe(170_000)
-    // 只有一个定时器在跑：重复 start 不该把轮次叠起来
+    // Only one timer runs: a repeated start must not stack rounds
     expect(h.armed()).toBe(1)
   })
 
-  it('worker 被回收之后接上没到期的那次等待', async () => {
+  it('after the worker was reclaimed it picks up the wait that has not expired', async () => {
     const h = harness({ stored: 1_000_000 + 60_000 })
     const waiter = createHelperWaiter(h.deps)
     await waiter.resume()
@@ -163,7 +163,7 @@ describe('createHelperWaiter', () => {
     expect(h.probes.length).toBe(2)
   })
 
-  it('过期的记录认下来但不再探：界面靠它说出「尚未检测到」', async () => {
+  it('an expired record is acknowledged but not probed: the interface says “not detected yet” by it', async () => {
     const h = harness({ stored: 1_000_000 - 1 })
     const waiter = createHelperWaiter(h.deps)
     await waiter.resume()
@@ -174,7 +174,7 @@ describe('createHelperWaiter', () => {
     expect(h.probes).toHaveLength(0)
   })
 
-  it('没存过就什么都不做：绝大多数 worker 启动都走这条', async () => {
+  it('with nothing stored nothing happens: most worker starts take this path', async () => {
     const h = harness()
     const waiter = createHelperWaiter(h.deps)
     await waiter.resume()
@@ -184,15 +184,15 @@ describe('createHelperWaiter', () => {
     expect(h.probes).toHaveLength(0)
   })
 
-  // resume 的守卫写在 await 之前，而读 storage 期间读者可能已经点了复制：
-  // 那一次是更新的、明确的动作，不许被读回来的旧值盖掉（Codex 在 #166 指出）
-  it('读 storage 期间开始了新的一次：旧值不许盖回去', async () => {
+  // resume's guard is written before the await, and while storage is being read the reader may have clicked copy already:
+  // that is the newer, explicit action, and the stale value read back must not overwrite it (Codex on #166)
+  it('a new wait started while storage was being read: the old value must not be written back over it', async () => {
     const h = harness({ stored: 1_000_000 - 5_000, holdLoad: true })
     const waiter = createHelperWaiter(h.deps)
     const restoring = waiter.resume()
     await flush()
 
-    // 读还挂着的时候读者点了复制
+    // The reader clicks copy while the read is still pending
     await waiter.start()
     await flush()
     const fresh = h.at() + 180_000
@@ -201,13 +201,13 @@ describe('createHelperWaiter', () => {
     h.releaseLoad()
     await restoring
     await flush()
-    // 那个过期的旧值没有盖掉新的一窗
+    // The expired old value did not overwrite the new window
     expect(waiter.until()).toBe(fresh)
     expect(h.savedAt()).toBe(fresh)
     expect(h.armed()).toBe(1)
   })
 
-  it('正在等的时候 resume 不重复武装', async () => {
+  it('while waiting, resume does not arm again', async () => {
     const h = harness()
     const waiter = createHelperWaiter(h.deps)
     await waiter.start()
@@ -217,7 +217,7 @@ describe('createHelperWaiter', () => {
     expect(h.armed()).toBe(1)
   })
 
-  it('stop 之后不再探，存着的也清了', async () => {
+  it('after stop there is no more probing, and what was stored is cleared', async () => {
     const h = harness()
     const waiter = createHelperWaiter(h.deps)
     await waiter.start()
@@ -228,7 +228,7 @@ describe('createHelperWaiter', () => {
     expect(h.probes).toHaveLength(0)
   })
 
-  it('一轮探测还没回来时不开第二轮', async () => {
+  it('no second round starts while one probe is still out', async () => {
     let release: (() => void) | null = null
     const h = harness({
       probe: () => new Promise<HelperStatus>(resolve => { release = () => resolve({ state: 'not-installed' }) }),
@@ -237,7 +237,7 @@ describe('createHelperWaiter', () => {
     await waiter.start()
     await flush()
     await h.tick(10_000)
-    // 第一轮还挂着：后面几次到期只是重新排队，没有再发探测
+    // The first round is still pending: the later deadlines only re-queue, no further probe is sent
     expect(h.probes).toHaveLength(1)
     release!()
     await flush()
@@ -245,13 +245,13 @@ describe('createHelperWaiter', () => {
     expect(h.probes.length).toBeGreaterThan(1)
   })
 
-  it('探测挂住也不会把等待卡死：到点照样收摊', async () => {
+  it('a hung probe does not jam the wait: at the deadline it still packs up', async () => {
     const h = harness({ probe: () => new Promise<HelperStatus>(() => {}) })
     const waiter = createHelperWaiter(h.deps)
     await waiter.start()
     await flush()
     await h.tick(181_000)
-    // 一直没回来的那一次还挂着，但轮次自己走到了截止时间
+    // The one that never came back is still pending, but the rounds themselves reached the deadline
     expect(h.probes).toHaveLength(1)
     expect(waiter.until()).not.toBeNull()
     expect(h.armed()).toBe(0)

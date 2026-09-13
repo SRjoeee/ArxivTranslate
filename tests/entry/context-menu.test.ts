@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { COMMAND_ID, MENU_CONTEXTS, MENU_ID, MENU_PATTERNS, installContextMenu, installToggleCommand, menuTitle } from '@/entrypoints/background/context-menu'
 import type { Progress } from '@/core/pipeline/run'
 
-/** 真实形状的进度：第一版这里写的是随手编的 `{ state: 'off' }`，而 `Progress` 根本没有这个值，
- *  于是「菜单永远发恢复、一次都开始不了翻译」这个 bug 被测试盖住了（Codex 在 #147 指出） */
+/** Progress in its real shape: the first version wrote an improvised `{ state: 'off' }` here, a value `Progress` does not have at all,
+ *  so the bug “the menu always sends restore and never once starts a translation” was covered up by the test (Codex on #147) */
 const progress = (state: Progress['state']): { progress: Progress } =>
   ({ progress: { state, total: 10, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 } })
 
-// 右键菜单的开关（issue #146）。原生右键菜单在 Playwright 里驱动不了，所以「点了之后做什么」
-// 只能在这一层钉住
+// The context-menu toggle (issue #146). The native context menu cannot be driven in Playwright, so “what happens after the click”
+// can only be pinned at this layer
 function fakeMenu(status?: { progress: Progress; running?: { provider: string; target: string; engine: string; revision: string }; epoch?: string }, saved: { revision: string | null; canRun: boolean; fallback: boolean } | null = { revision: 'r1', canRun: true, fallback: false }) {
   const sent: { tabId: number; type: string; restart?: boolean; epoch?: string }[] = []
   const created: unknown[] = []
@@ -31,10 +31,10 @@ function fakeMenu(status?: { progress: Progress; running?: { provider: string; t
   return { sent, created, click: (tabId?: number) => click?.({ menuItemId: MENU_ID }, tabId === undefined ? undefined : { id: tabId }) }
 }
 
-describe('右键菜单的翻译开关（#146）', () => {
-  it('只在 arXiv 的 HTML 全文页上出现，但页面里点在什么上都有', async () => {
-    // Chrome 按点中的目标给 context：点在引用链接上给 `link`、点在插图上给 `image`。论文页里
-    // 这两样到处都是，只注册 `page` 的话最容易点到的地方反而没有菜单（Codex 在 #147 指出）
+describe('the context menu\'s translation toggle (#146)', () => {
+  it('appears only on arXiv\'s HTML full-text pages, but wherever on the page the click lands', async () => {
+    // Chrome gives the context by what was clicked: `link` on a citation link, `image` on a figure. A paper page is full of
+    // both, and with `page` alone registered the places most likely to be clicked would have no menu (Codex on #147)
     const menu = fakeMenu()
     await Promise.resolve()
     expect(menu.created).toEqual([{ id: MENU_ID, title: menuTitle(), contexts: MENU_CONTEXTS, documentUrlPatterns: MENU_PATTERNS }])
@@ -42,18 +42,18 @@ describe('右键菜单的翻译开关（#146）', () => {
     for (const ctx of ['link', 'image', 'selection', 'page']) expect(MENU_CONTEXTS).toContain(ctx)
   })
 
-  it('点击处理同步注册：worker 被这次点击唤醒时，监听器必须已经在了（Codex 在 #161 指出）', () => {
+  it('the click handler is registered synchronously: when this click wakes the worker, the listener must already be there (Codex on #161)', () => {
     let removed: () => void = () => undefined
     const menu: { created: unknown[]; clicked: ((info: { menuItemId: string | number }, tab?: { id?: number }) => void) | null } = { created: [], clicked: null }
     installContextMenu({
-      // removeAll 挂着不结算，模拟「读配置还没回来」
+      // removeAll hangs unsettled, imitating “the configuration read has not returned yet”
       create: options => menu.created.push(options),
       removeAll: () => new Promise(resolve => { removed = resolve }),
       onClicked: handler => { menu.clicked = handler },
       send: <T>() => Promise.resolve({} as T),
       saved: async () => null,
     })
-    // 菜单还没建出来，但监听器已经在：这一次唤醒的点击不会掉地上
+    // The menu is not built yet, but the listener is there: the click that woke the worker does not fall on the floor
     expect(menu.created).toHaveLength(0)
     expect(menu.clicked).not.toBeNull()
     removed()
@@ -115,14 +115,14 @@ describe('右键菜单的翻译开关（#146）', () => {
     expect(idle.sent).toEqual([{ tabId: 8, type: 'axt:page-status' }])
   })
 
-  it('点一下：先问状态，再发与 popup 同一条消息', async () => {
+  it('one click: asks for the status first, then sends the same message as the popup', async () => {
     const menu = fakeMenu(progress('idle'))
     menu.click(7)
     await vi.waitFor(() => expect(menu.sent).toHaveLength(2))
     expect(menu.sent).toEqual([{ tabId: 7, type: 'axt:page-status' }, { tabId: 7, type: 'axt:translate-page' }])
   })
 
-  it('页面还没装上 content script：问不到就算了，不抛出去', async () => {
+  it('the page has no content script yet: with no answer it lets it go, nothing thrown', async () => {
     const menu = fakeMenu(undefined)
     menu.click(7)
     await vi.waitFor(() => expect(menu.sent).toHaveLength(1))

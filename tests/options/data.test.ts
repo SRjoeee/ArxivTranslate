@@ -76,7 +76,7 @@ describe('useOptionsData', () => {
   })
 
   it('under a draft the reload waits for the draft to close, and the other settings follow meanwhile', async () => {
-    // The fourth local pass of S1: a service being edited in another tab's drawer is local until 连接; the reload the
+    // The fourth local pass of S1: a service being edited in another tab's drawer is local until “Connect”; the reload the
     // watcher asked for would have discarded it
     const hook = await mountHook(useOptionsData)
     await hook.until(() => hook.current().config !== null || reload.mock.calls.length > 0)

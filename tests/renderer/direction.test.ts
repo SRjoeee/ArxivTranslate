@@ -1,6 +1,6 @@
-// 从右往左的目标语言（§7.1）：`lang` 说的是"哪种语言"，段落的基方向由 `dir` 定。
-// 不写 `dir` 的话译文继承 arXiv 的 ltr，句末标点、数字、拉丁词、公式全排在错的一侧
-// （实测 2509.10652v3 译成阿拉伯语：「مساهمات متساوية.」渲染成「مساهمات .متساوية」）。
+// Right-to-left target languages (§7.1): `lang` says which language, the paragraph's base direction is set by `dir`.
+// Without `dir` the translation inherits arXiv's ltr, and final punctuation, digits, Latin words and formulas all sit on the wrong side
+// (measured on 2509.10652v3 translated into Arabic: “مساهمات متساوية.” rendered as “مساهمات .متساوية”).
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -12,14 +12,14 @@ import { renderTable, renderText } from '@/core/renderer/translation'
 import { TABLE_RULES } from '@/core/rules/latexml'
 import { docOf, frag } from './helpers'
 
-describe('RTL 语言表', () => {
-  it('13 种从右往左的语言，两种写法都认', () => {
+describe('the RTL language table', () => {
+  it('13 right-to-left languages, recognised in both spellings', () => {
     expect(RTL_LANGUAGES.size).toBe(13)
     for (const code of ['arb', 'heb', 'pes', 'urd', 'uig', 'ckb']) {
       expect([code, isRtl(code)]).toEqual([code, true])
       expect([code, isRtlTag(toBcp47(code))]).toEqual([code, true])
     }
-    // 三个没有两字母码的（回落成 639-3 发给引擎）同样要认出来
+    // The three without a two-letter code (sent to the engine as 639-3) must be recognised too
     for (const code of ['prs', 'pbu', 'skr']) expect([code, isRtlTag(toBcp47(code))]).toEqual([code, true])
     for (const code of ['cmn', 'eng', 'jpn', 'rus', 'kmr']) {
       expect([code, isRtl(code)]).toEqual([code, false])
@@ -27,15 +27,15 @@ describe('RTL 语言表', () => {
     }
   })
 
-  it('大小写与地区子标签都不影响判定', () => {
+  it('case and region subtags do not affect the verdict', () => {
     expect(isRtlTag('AR')).toBe(true)
     expect(isRtlTag('ar-EG')).toBe(true)
     expect(isRtlTag('zh-Hans')).toBe(false)
   })
 
-  // Codex 在 #163 指出：zlm 发出去的标签是 ms-Arab（爪夷文），按主子标签判会漏成 ltr；
-  // 而把 ms 直接当成 RTL 主子标签又会把拉丁字母的马来语误判成 rtl。文字子标签在场就由它说话
-  it('文字子标签比主语言更能定方向：ms-Arab 是 rtl，ms 不是', () => {
+  // Codex on #163: the tag sent for zlm is ms-Arab (Jawi), which a check on the primary subtag would miss as ltr;
+  // treating ms itself as an RTL primary subtag would misjudge Latin-script Malay as rtl. With a script subtag present it decides
+  it('the script subtag decides direction over the primary language: ms-Arab is rtl, ms is not', () => {
     expect(toBcp47('zlm')).toBe('ms-Arab')
     expect(isRtl('zlm')).toBe(true)
     expect(isRtlTag('ms-Arab')).toBe(true)
@@ -44,37 +44,37 @@ describe('RTL 语言表', () => {
     expect(isRtlTag('ms-MY')).toBe(false)
   })
 
-  it('RTL 语言配上拉丁文字就是 ltr，反向也成立', () => {
+  it('an RTL language in Latin script is ltr, and the reverse holds too', () => {
     expect(isRtlTag('ur-Latn')).toBe(false)
     expect(isRtlTag('ar-Latn-EG')).toBe(false)
     expect(isRtlTag('he-Hebr')).toBe(true)
-    // 四位但以数字开头的是变体子标签，不是文字：别拿它当 script 判
+    // A four-character subtag starting with a digit is a variant, not a script: do not take it for one
     expect(isRtlTag('ar-1901')).toBe(true)
   })
 })
 
-describe('译文节点的 dir', () => {
+describe('the dir of translation nodes', () => {
   const blockOf = (doc: Document) => (extract(doc) as TextBlock[])[0]!
 
-  it('RTL 目标：<html> 记一次，译文节点逐个抄', () => {
+  it('an RTL target: recorded once on <html>, copied onto every translation node', () => {
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">Equal contributions.</p></div>')
     enable(doc, 'stack', undefined, 'ar')
     expect(doc.documentElement.getAttribute(DIR_ATTR)).toBe('rtl')
     const node = renderText(blockOf(doc), frag(doc, 'مساهمات متساوية.'))
     expect(node.getAttribute('dir')).toBe('rtl')
     expect(node.getAttribute('lang')).toBe('ar')
-    // 原节点一个属性都不多（§7.1 只允许 data-axt-*）
+    // Not one attribute more on the original node (§7.1 allows data-axt-* only)
     expect(blockOf(doc).el.hasAttribute('dir')).toBe(false)
   })
 
-  it('从左往右的目标：一个 dir 都不写', () => {
+  it('a left-to-right target: no dir written at all', () => {
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p></div>')
     enable(doc, 'stack', undefined, 'zh')
     expect(doc.documentElement.hasAttribute(DIR_ATTR)).toBe(false)
     expect(renderText(blockOf(doc), frag(doc, '文本。')).hasAttribute('dir')).toBe(false)
   })
 
-  it('换目标语言时标记要跟着走，否则中文译文还挂着上一轮的 rtl', () => {
+  it('a change of target language moves the mark with it, or a Chinese translation still wears the previous round\'s rtl', () => {
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p></div>')
     enable(doc, 'stack', undefined, 'he')
     expect(doc.documentElement.getAttribute(DIR_ATTR)).toBe('rtl')
@@ -84,16 +84,16 @@ describe('译文节点的 dir', () => {
   })
 })
 
-// 表格走 renderTable，不经 renderText——这条路上 `lang` 与 `dir` 原本都漏了
-// （Codex 在 #163 指出 `dir`；`lang` 是同一处的同一个洞，屏幕阅读器会用英文语音念表里的中文）
-describe('译文表格单元格的 lang / dir', () => {
+// Tables go through renderTable, not renderText — on that path both `lang` and `dir` were missing
+// (Codex on #163 pointed out `dir`; `lang` is the same hole in the same place: a screen reader would read the table's Chinese in an English voice)
+describe('lang / dir of translated table cells', () => {
   const table =
     '<figure class="ltx_table" id="F1"><table class="ltx_tabular" id="T1"><tbody>'
     + '<tr><th class="ltx_td ltx_th" id="h1">Model</th><td class="ltx_td">91.2</td></tr>'
     + '</tbody></table><figcaption class="ltx_caption">Table 1</figcaption></figure>'
   const tableOf = (doc: Document) => extract(doc).find(b => b.kind === 'table') as TableBlock
 
-  it('RTL 目标：换过内容的格带 dir 与 lang，表本身不带——带了会连列序一起翻转', () => {
+  it('an RTL target: replaced cells carry dir and lang, the table itself does not — it would flip the column order too', () => {
     const doc = docOf(table)
     enable(doc, 'stack', undefined, 'ar')
     const t = tableOf(doc)
@@ -102,15 +102,15 @@ describe('译文表格单元格的 lang / dir', () => {
     const cells = Array.from(node.querySelectorAll(TABLE_RULES.cell))
     expect(cells[0]!.getAttribute('dir')).toBe('rtl')
     expect(cells[0]!.getAttribute('lang')).toBe('ar')
-    // 没换内容的数值格保持原样：那里装的还是原文
+    // Numeric cells not replaced stay as they were: they still hold the original
     expect(cells[1]!.hasAttribute('dir')).toBe(false)
     expect(cells[1]!.hasAttribute('lang')).toBe(false)
-    // 原表一个属性都不多（§7.1）
+    // Not one attribute more on the original table (§7.1)
     expect(t.cells[0]!.el.hasAttribute('dir')).toBe(false)
     expect(t.cells[0]!.el.hasAttribute('lang')).toBe(false)
   })
 
-  it('LTR 目标：只写 lang，不写 dir', () => {
+  it('an LTR target: lang only, no dir', () => {
     const doc = docOf(table)
     enable(doc, 'stack', undefined, 'zh')
     const t = tableOf(doc)
@@ -121,20 +121,20 @@ describe('译文表格单元格的 lang / dir', () => {
   })
 })
 
-// happy-dom 没有双向算法，这里守规则本身（§7.1）
-describe('modes.css 的 RTL 规则', () => {
+// happy-dom has no bidi algorithm; the rule itself is guarded here (§7.1)
+describe('the RTL rules of modes.css', () => {
   const RULES = readFileSync(join(import.meta.dirname, '../../src/styles/modes.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
 
-  it('受保护的原文原子在 rtl 译文里都按 ltr 排，并且互相隔离', () => {
+  it('protected source atoms inside an rtl translation are all laid out ltr and isolated from each other', () => {
     const rule = /html\[data-axt-dir="rtl"\] \.axt-t :is\(([^)]*)\) \{([^}]*)\}/.exec(RULES)
     expect(rule).not.toBeNull()
-    // 公式之外，占位符回填进来的原文原子同样要管：行内代码、打字机体、引用、URL，
-    // 以及边注副本里那段英文原文（Codex 在 #163 指出原来只管了公式）
+    // Beyond formulas, the source atoms placeholders bring back need it too: inline code, typewriter text, citations, URLs,
+    // and the English original inside a margin-note copy (Codex on #163: only formulas were covered before)
     for (const sel of ['math', '.ltx_Math', '.ltx_ref', '.ltx_url', '.ltx_listing', 'code', '.ltx_font_typewriter', '.axt-note-s']) {
       expect([sel, rule![1]!.includes(sel)]).toEqual([sel, true])
     }
     expect(rule![2]).toMatch(/direction:\s*ltr/)
-    // isolate 才能让 `f(x)` 末尾的中性字符不被周围的 rtl 拉走
+    // Only isolate keeps the neutral characters at the end of `f(x)` from being pulled along by the surrounding rtl
     expect(rule![2]).toMatch(/unicode-bidi:\s*isolate/)
   })
 })

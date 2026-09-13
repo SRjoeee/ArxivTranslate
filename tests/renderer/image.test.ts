@@ -6,7 +6,7 @@ import { enable, restore } from '@/core/renderer/page'
 import { splitFigures } from '@/core/renderer/split-figures'
 import { docOf } from './helpers'
 
-// 图片叠加层（DESIGN §15.2）：<img> 的下一个兄弟、不带 axt-t、<img> 一个属性都不加、恢复原文整层删掉
+// The image overlay (DESIGN §15.2): the <img>'s next sibling, without axt-t, not one attribute added to the <img>, and the whole layer removed on restore
 
 const FIGURE = '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1" width="476" height="357"><figcaption class="ltx_caption">Figure 1.</figcaption></figure>'
 const label = (text: string, source = text, extra: Partial<ImageLabel> = {}): ImageLabel => ({ x: 0.1, y: 0.2, w: 0.3, h: 0.05, lines: 1, source, text, ...extra })
@@ -18,7 +18,7 @@ function setup(html = FIGURE) {
 }
 
 describe('renderImage', () => {
-  it('叠加层是 <img> 的下一个兄弟，带 data-axt-for，不带 axt-t；<img> 本身一个属性都不多', () => {
+  it('the overlay is the <img>\'s next sibling with data-axt-for and without axt-t; the <img> itself gains not one attribute', () => {
     const { doc, target } = setup()
     const before = target.el.outerHTML
     const node = renderImage(target, [label('静态电荷', 'Static charge')])
@@ -30,7 +30,7 @@ describe('renderImage', () => {
     expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(1)
   })
 
-  it('标签：译文做内容、原文做 title、lang 取 <html data-axt-lang>；内联样式只用百分比与容器单位', () => {
+  it('a label: the translation as content, the source as title, lang from <html data-axt-lang>; the inline style uses percentages and container units only', () => {
     const { doc, target } = setup()
     doc.documentElement.setAttribute(LANG_ATTR, 'zh-CN')
     const node = renderImage(target, [label('静态电荷', 'Static charge'), label('过程', 'Processes', { x: 0.6, y: 0.03, w: 0.26, h: 0.035 })])
@@ -46,7 +46,7 @@ describe('renderImage', () => {
     }
   })
 
-  it('紧跟在图后面的镜像先删掉：叠加层必须是图的下一个兄弟（锚点定位靠这个结构）', () => {
+  it('a mirror right after the image is removed first: the overlay has to be the image\'s next sibling (anchor positioning relies on that structure)', () => {
     const { doc, target } = setup()
     const mirror = doc.createElement('img')
     mirror.className = `ltx_graphics ${T_CLASS} ${MIRROR_CLASS}`
@@ -56,7 +56,7 @@ describe('renderImage', () => {
     expect(doc.querySelector(`.${MIRROR_CLASS}`)).toBeNull()
   })
 
-  it('重复渲染替换不叠加；clearImage 删掉它', () => {
+  it('rendering again replaces rather than stacks; clearImage removes it', () => {
     const { doc, target } = setup()
     renderImage(target, [label('一')])
     renderImage(target, [label('二')])
@@ -67,7 +67,7 @@ describe('renderImage', () => {
     expect(clearImage(target)).toBe(false)
   })
 
-  it('恢复原文：叠加层与 <html> 上的模式闸一起清掉，DOM 逐字相等（§7.1）', () => {
+  it('restoring the original: the overlay and the mode gate on <html> are cleared together, the DOM equal byte for byte (§7.1)', () => {
     const { doc, target } = setup()
     const before = doc.documentElement.outerHTML
     enable(doc, 'stack')
@@ -79,7 +79,7 @@ describe('renderImage', () => {
     expect(result.removedNodes).toBe(1)
   })
 
-  it('setImageModes 空集合就摘掉属性', () => {
+  it('setImageModes with an empty set removes the attribute', () => {
     const { doc } = setup()
     setImageModes(doc, ['only'])
     setImageModes(doc, [])
@@ -88,16 +88,16 @@ describe('renderImage', () => {
 })
 
 describe('labelStyle', () => {
-  it('字号按框高：一行占框高的 72%，两行各占一半；宽度上限按字数均摊', () => {
+  it('font size by box height: one line takes 72% of the box height, two lines half each; the width cap is shared by character count', () => {
     const one = labelStyle(label('静态电荷', 'Static charge', { h: 0.05, w: 0.3, lines: 1 }))
     const two = labelStyle(label('动态 电荷', 'Dynamical charge', { h: 0.05, w: 0.3, lines: 2 }))
     expect(one).toContain('font-size:min(3.60cqh,')
     expect(two).toContain('font-size:min(1.80cqh,')
-    // 4 个 CJK 字 = 4 em：宽度上限 92 × 0.3 / 4 = 6.9cqw
+    // 4 CJK characters = 4 em: width cap 92 × 0.3 / 4 = 6.9cqw
     expect(one).toContain('6.90cqw)')
   })
 
-  it('emWidth：CJK 一字一 em，拉丁 0.55，空格 0.3', () => {
+  it('emWidth: one em per CJK character, 0.55 for Latin, 0.3 for a space', () => {
     expect(emWidth('静态')).toBeCloseTo(2)
     expect(emWidth('ab')).toBeCloseTo(1.1)
     expect(emWidth('a b')).toBeCloseTo(1.4)
@@ -105,37 +105,37 @@ describe('labelStyle', () => {
 })
 
 describe('rotated labels (§15.5)', () => {
-  // 斜标签自带长与厚（都按图**宽**的比例）：轴对齐外接框只在 90° 的倍数上与文字重合，
-  // 5° 时比文字大一圈，照着画会把白框斜铺到图上
+  // A tilted label carries its own length and thickness (both as fractions of the image **width**): the axis-aligned bounding box coincides with the text only at multiples of 90°,
+  // at 5° it is a ring larger than the text, and drawing by it would spread the white box diagonally over the image
   const label = (over: Partial<ImageLabel> = {}): ImageLabel => ({ x: 0.1, y: 0.2, w: 0.05, h: 0.4, lines: 1, source: 'wall time', text: '每轮耗时', ...over })
   const rotated = (degrees: number, over: Partial<ImageLabel> = {}) =>
     labelStyle(label({ angle: (degrees * Math.PI) / 180, len: 0.4, thick: 0.05, ...over }))
 
-  it('沿文字自己的轴摆：长与厚都用同一个单位，绕中心转过去', () => {
-    // `width: X%` 是容器**宽**的百分比，转 90° 之后那条边在屏幕上是竖的，容器不是正方形时长度就错了。
-    // cqw 是长度单位（图宽的 1%），一个数在哪个方向上都是同一段实际长度
+  it('laid along the text\'s own axis: length and thickness in the same unit, rotated about the centre', () => {
+    // `width: X%` is a percentage of the container **width**; rotated 90° that edge is vertical on screen, and with a non-square container the length is wrong.
+    // cqw is a length unit (1% of the image width); one number is the same real length in every direction
     const style = rotated(-90)
     expect(style).toContain('width:40.000cqw')
     expect(style).toContain('height:5.000cqw')
     expect(style).toContain('transform:translate(-50%,-50%) rotate(-90.00deg)')
-    // 位置是中心，尺寸不带百分比（那会悄悄变成「宽的百分比」）
+    // The position is the centre; the size carries no percentage (that would quietly become “percent of the width”)
     expect(style).toContain('left:12.500%;top:40.000%')
     expect(style).not.toMatch(/(width|height):[\d.]+%/)
   })
 
-  it('任意角度都摆得下（2609.10326v1 的 reheating 是 6°）', () => {
+  it('any angle fits (the reheating label of 2609.10326v1 is at 6°)', () => {
     const style = rotated(6)
     expect(style).toContain('transform:translate(-50%,-50%) rotate(6.00deg)')
     expect(style).toContain('width:40.000cqw')
   })
 
-  it('字号按厚度算，不按长度', () => {
-    // 72 * thick 是一行的高度上限
+  it('font size is computed from the thickness, not the length', () => {
+    // 72 * thick is the cap on one line's height
     expect(rotated(-90)).toContain('font-size:min(3.60cqw,')
   })
 
-  it('没有自己的盒子就退回轴对齐那一支，不会照着错的尺寸画', () => {
-    // OCR 后端不会给 len / thick；真出现带角度却没有盒子的行时，按外接框画总好过乱转
+  it('without a box of its own it falls back to the axis-aligned branch and does not draw by wrong dimensions', () => {
+    // The OCR backend gives no len / thick; should a line with an angle but no box appear, drawing by the bounding box beats a wild rotation
     const style = labelStyle(label({ angle: -Math.PI / 2 }))
     expect(style).not.toContain('rotate')
     expect(style).toContain('left:10.000%;top:20.000%')
@@ -148,23 +148,23 @@ describe('rotated labels (§15.5)', () => {
   })
 })
 
-describe('clearImageEverywhere（§15.5）', () => {
-  it('连 side 模式拆图副本里的那一份也摘掉', () => {
-    // `clearImage` 只看图自己的兄弟位置。副本里那份在 only 模式下是**唯一可见的**——
-    // 原件被藏起来了——所以「不再翻这张图」时它必须一起走，否则读者看到的是上一轮的译文
+describe('clearImageEverywhere (§15.5)', () => {
+  it('removes even the copy inside the side-mode split clone', () => {
+    // `clearImage` looks only at the image's own sibling position. The copy inside the clone is **the only visible one** in only mode —
+    // the original is hidden — so “no longer translating this image” has to take it too, or the reader sees the previous round's translation
     const doc = docOf('<figure class="ltx_figure"><img class="ltx_graphics" id="g1"><figcaption class="ltx_caption" data-axt-id="c1">Fig 1.</figcaption><figcaption class="axt-t" data-axt-for="c1">图 1。</figcaption></figure>')
     const img = doc.getElementById('g1') as HTMLImageElement
     const target = { id: 'g1', el: img, kind: 'raster' as const }
     renderImage(target, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static', text: '静态' }])
-    // 副本必须由 `splitFigures` 真的拆出来：手搓一个 clone 会把 `data-axt-for` 留在叠加层上，
-    // 而真的拆图会被 `stripIds` 抹掉——按 `data-axt-for` 找副本的写法在手搓的副本上照样通过
-    //（Codex 在 #134 指出）
+    // The copy must really come from `splitFigures`: a hand-made clone would leave `data-axt-for` on the overlay,
+    // while a real split wipes it through `stripIds` — code that finds the copy by `data-axt-for` would pass on a hand-made copy all the same
+    // (Codex on #134)
     expect(splitFigures(doc)).toBe(1)
     expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(2)
     expect(doc.querySelector(`.axt-split .${IMG_CLASS}`)?.getAttribute(FOR_ATTR)).toBeNull()
 
     expect(clearImage(target)).toBe(true)
-    expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(1) // 副本里那份还在
+    expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(1) // the copy inside the clone is still there
 
     renderImage(target, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static', text: '静态' }])
     expect(clearImageEverywhere(target)).toBe(2)

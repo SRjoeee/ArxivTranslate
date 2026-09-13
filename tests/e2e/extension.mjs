@@ -1,9 +1,9 @@
-// 真实浏览器端到端检查（DESIGN §11）：用 Playwright 起一个装着 .output/chrome-mv3 的 Chromium（新 headless 支持扩展），
-// 驱动设置页与 popup、读控制台与网络，用免费的 google-web 引擎在真实 arXiv 页面上跑一遍主流程。
-// 不碰用户自己的浏览器与 API key；走 LLM 的路径只测"错 key → 降级到免费引擎 / 关掉降级后整队停下"，不花钱。
+// The end-to-end check in a real browser (DESIGN §11): Playwright launches a Chromium with .output/chrome-mv3 loaded (the new headless supports extensions),
+// drives the settings page and the popup, reads the console and the network, and runs the main flow on a real arXiv page with the free google-web engine.
+// The reader's own browser and API key are not touched; the LLM path is tested only as “wrong key → fallback to the free engine / with the fallback off the whole queue stops”, which costs nothing.
 //
-// 用法：pnpm build && pnpm e2e        （首次先 npx playwright install chromium）
-// 环境变量：AXT_PAPER / AXT_PAPER2 换论文；AXT_HEADED=1 看着跑。
+// Usage: pnpm build && pnpm e2e        (first time: npx playwright install chromium)
+// Environment: AXT_PAPER / AXT_PAPER2 pick the papers; AXT_HEADED=1 watches it run.
 import { mkdirSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
@@ -15,25 +15,25 @@ const EXT = process.env.AXT_EXT_DIR ?? fileURLToPath(new URL('../../.output/chro
 const PROFILE = `${HERE}.profile`
 const SHOTS = `${HERE}.shots`
 const PAPER = process.env.AXT_PAPER ?? '2410.00260'
-/** popup 里那一行的名字（S-P-82）；与设置页「译文样式」同名 */
+/** The name of that row in the popup (S-P-82); the same name as the settings page's “Translation style” */
 const S_STYLE = '译文样式'
 /**
- * 「真正的译文」：加载骨架屏、失败控件，以及 side 模式的镜像与拆图副本都带 .axt-t，
- * 但外观不装饰它们、几何也另有一套。默认模式是 side（2026-09-11），所以每一处按译文取样的
- * 断言都要带上这个排除条件，否则取到的可能是结构性副本
+ * “The real translation”: the loading skeleton, the failure widget, and side mode's mirrors and split copies all carry .axt-t,
+ * but the appearance does not decorate them and their geometry is another matter. The default mode is side (2026-09-11), so every assertion
+ * that samples translations has to carry this exclusion, or it may pick a structural copy
  */
 const REAL = ':not(.axt-pending, .axt-error, .axt-mirror, .axt-split)'
 const PAPER2 = process.env.AXT_PAPER2 ?? '2312.17527'
-/** 第三篇：前面的用例都没碰过它，缓存是冷的——导航那条要靠真实积压才测得出东西 */
+/** The third paper: none of the earlier cases touched it, so the cache is cold — the navigation case needs a real backlog to measure anything */
 const PAPER3 = process.env.AXT_PAPER3 ?? '2312.17141'
-/** 第四篇：12 篇 fixture 里指向翻译块的锚点最多的一篇（64 个），只译文模式的锚点用例靠它 */
+/** The fourth paper: of the 12 fixtures the one with the most anchors pointing at translated blocks (64); the only-mode anchor case relies on it */
 const PAPER4 = process.env.AXT_PAPER4 ?? '2609.00246'
-/** 6 张外部 SVG 图，其中 fig_closure 有竖排轴标签（§15.5） */
+/** 6 external SVG figures, fig_closure among them with vertical axis labels (§15.5) */
 const SVG_PAPER = process.env.AXT_SVG_PAPER ?? '2609.03768'
 const GOOGLE = 'translate-pa.googleapis.com'
-/** 请求收尾的两个事件：成功与失败都要把 end 记上，否则它会一直算在飞 */
+/** The two events that close a request: success and failure both have to record end, or it counts as in flight for good */
 const SETTLED_EVENTS = ['requestfinished', 'requestfailed']
-/** google-web 声明的 maxConcurrent：截住端点后能同时挂住几发，也就是"槽位占满"的判据 */
+/** The maxConcurrent google-web declares: how many can hang at once with the endpoint stalled, i.e. the criterion for “slots full” */
 const GOOGLE_SLOTS = 2
 
 const results = []
@@ -54,8 +54,8 @@ const context = await chromium.launchPersistentContext(PROFILE, {
   args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, '--js-flags=--expose-gc'],
   viewport: { width: 1440, height: 900 },
 })
-// 真实论文的导航给足时间：Playwright 默认 30 s，而 arXiv 在连着跑几十轮之后会明显变慢
-// （实测同一篇 curl 要 26 s）。断言各自的等待没有放宽，放宽的只是「把页面拿到手」这一步
+// Navigation to a real paper gets ample time: Playwright's default is 30 s, and arXiv slows down markedly after dozens of consecutive runs
+// (measured: curl on the same paper took 26 s). No assertion's own wait is loosened; only the “get the page” step is
 context.setDefaultNavigationTimeout(90_000)
 let [worker] = context.serviceWorkers()
 if (!worker) worker = await context.waitForEvent('serviceworker')
@@ -63,11 +63,11 @@ const extId = worker.url().split('/')[2]
 console.log(`extension ${extId} loaded from ${EXT}`)
 
 /**
- * 打开一篇论文并自动开始翻译（#axt-translate），收集 [axt] 日志与发往 host 的请求。
+ * Open a paper and start translating of itself (#axt-translate), collecting the [axt] log and the requests sent to the host.
  *
- * 请求听在 **context** 上而不是 page 上：2026-09-06 起翻译的 fetch 由 background service worker 发出
- *（DESIGN §8.0），page 级事件一个都看不到。圆环同理不能靠轮询——首屏全命中缓存时 38 ms 就结束了，
- * 200 ms 的轮询必然扑空；改成页面里挂一个 MutationObserver 记录峰值。
+ * Requests are listened for on the **context**, not the page: since 2026-09-06 the translation fetches leave from the background service worker
+ * (DESIGN §8.0), and page-level events see none of them. The rings cannot be polled either — with the first screen all cached it is over in 38 ms,
+ * and a 200 ms poll is bound to miss; a MutationObserver in the page records the peak instead.
  */
 async function openPaper(id, host) {
   const page = await context.newPage()
@@ -78,17 +78,17 @@ async function openPaper(id, host) {
     if (text.includes('[axt]')) logs.push({ t: Date.now(), text })
   })
   const inFlight = new Map()
-  // 监听挂在 **context** 上：2026-09-06 起翻译的 fetch 由 background service worker 发出（DESIGN §8.0），
-  // page 级事件一个都看不到。页面关闭时摘掉，免得多篇论文互相串
+  // The listener hangs on the **context**: since 2026-09-06 the translation fetches leave from the background service worker (DESIGN §8.0),
+  // and page-level events see none of them. Removed when the page closes, so several papers do not bleed into each other
   const onRequest = request => {
     if (!request.url().includes(host)) return
-    // translateHtml 的请求体是 [[items, from, to], client]：数出这一发装了多少段（攒批的直接证据）
+    // translateHtml's request body is [[items, from, to], client]: count how many passages this request carries (direct evidence of batching)
     let items = 0
     try {
       const body = JSON.parse(request.postData() ?? 'null')
       if (Array.isArray(body?.[0]?.[0])) items = body[0][0].length
     } catch {
-      // 不是 JSON（或 LLM 端点，段落在 prompt 里数不出来）就记 0
+      // Not JSON (or an LLM endpoint, where the passages inside the prompt cannot be counted): record 0
     }
     const entry = { t: Date.now(), url: request.url(), items, end: Number.POSITIVE_INFINITY }
     inFlight.set(request, entry)
@@ -104,10 +104,10 @@ async function openPaper(id, host) {
     context.off('request', onRequest)
     for (const event of SETTLED_EVENTS) context.off(event, onSettled)
   })
-  // 圆环不能靠轮询：首屏全命中缓存时 36 ms 就结束了，200 ms 的轮询必然扑空。挂个 MutationObserver。
-  // **数插入次数，不采样实时数量**（issue #82）：MutationObserver 的回调在微任务检查点批量触发，
-  // 插入与移除落在同一批里时，回调里 querySelectorAll 数到的已经是 0——峰值就永远是 0。
-  // 记录被插入过的圆环节点数与时序无关
+  // The rings cannot be polled: with the first screen all cached it is over in 36 ms, and a 200 ms poll is bound to miss. A MutationObserver instead.
+  // **Count insertions, do not sample the live count** (issue #82): MutationObserver callbacks fire in batches at microtask checkpoints,
+  // and when an insertion and a removal land in the same batch, querySelectorAll in the callback already counts 0 — the peak is forever 0.
+  // Recording how many ring nodes were ever inserted is independent of timing
   await page.addInitScript(() => {
     window.__axtSkeletonsSeen = 0
     const count = node => {
@@ -129,7 +129,7 @@ async function openPaper(id, host) {
 async function waitForLog(logs, pattern, timeoutMs, predicate = () => true) {
   const t0 = Date.now()
   while (Date.now() - t0 < timeoutMs) {
-    // 带谓词是为了等「**这一条**之后的那条」：日志是累积的，find 默认会把早先那条交回来
+    // The predicate is there to wait for “the one after **this** one”: the log accumulates, and find would hand back the earlier one
     const hit = logs.find(entry => { const m = pattern.exec(entry.text); return m && predicate(m) })
     if (hit) return hit
     await sleep(250)
@@ -138,40 +138,40 @@ async function waitForLog(logs, pattern, timeoutMs, predicate = () => true) {
 }
 
 /**
- * 截住发往 host 的请求：route 处理器只登记、不放行，请求就一直挂着占着一个并发槽。
+ * Stall the requests sent to the host: the route handler only records and never releases, so the request hangs and holds a concurrency slot.
  *
- * 为什么要截（issue #82，Codex 在 #95 追加）：撤销类断言必须在"队列里确实还有没发出去的活"
- * 那一刻动手，否则"撤掉之后零新请求"是空断言。这件事从 DOM 反推是推不出来的——命中缓存的块在
- * 查缓存**之前**就挂上了 pending 节点、根本不会产生请求，刚收尾还没渲染的请求也会被算漏，
- * 而且一个块不一定只对应一段（实测 215 个块发出 249 段），减法在大页上能算成负数。
- * 截住之后就不用推：**有多少发真的打出去了，直接数 route 命中次数**；
- * 也没有任何东西会完成，所以 pending 数一旦稳住，就说明查缓存那一轮已经跑完。
+ * Why stall (issue #82, Codex adding on #95): a cancellation assertion must act at the moment “the queue really still holds work not yet sent”,
+ * or “zero new requests after cancelling” is an empty assertion. That cannot be deduced from the DOM — a cached block hangs its pending node
+ * **before** the cache lookup and never produces a request, a request just finished but not yet rendered gets missed,
+ * and a block need not map to one passage (measured: 215 blocks sent 249 passages), so the subtraction can go negative on a large page.
+ * Stalled, nothing needs deducing: **how many requests really went out is the route's hit count**;
+ * and nothing completes, so once the pending count settles, the cache lookup round has finished.
  */
 async function stallEndpoint(host) {
   const held = []
   const pattern = `**://${host}/**`
   const handler = route => {
-    // 原样留着请求体：下面靠它把"队列补上的新批次"和"同一批被重发"区分开
+    // The request body is kept as it is: below it tells “a new batch the queue filled in” from “the same batch resent”
     const body = route.request().postData() ?? ''
     let items = 0
     try {
       const parsed = JSON.parse(body || 'null')
       if (Array.isArray(parsed?.[0]?.[0])) items = parsed[0][0].length
     } catch {
-      // 不是 JSON 就记 0
+      // Not JSON: record 0
     }
-    // 不 continue / fulfill / abort：请求停在这里不动，占着一个并发槽
+    // No continue / fulfill / abort: the request stays here, holding a concurrency slot
     held.push({ t: Date.now(), items, body, route })
   }
   await context.route(pattern, handler)
   return {
     held,
-    /** 放开截住的请求，把并发槽腾出来。队列还活着的话，下一批马上就会补上 */
+    /** Release the stalled requests and free the concurrency slots. If the queue is still alive the next batch fills in at once */
     release: async () => { for (const h of held.slice()) await h.route.abort().catch(() => undefined) },
     /**
-     * 先摘处理器再把**所有**截住过的请求结掉（Codex 在 #95 指出）：撤销真出了回归时，release
-     * 之后还会有请求进到处理器里被挂住，`unroute` 只是摘掉处理器、不会结掉它已经挂住的那些。
-     * 留着不结就一直占着 google 那对队列的并发槽，后面的导航 / 降级 / only 模式几段会莫名其妙地挂住
+     * Remove the handler first, then finish **every** request ever stalled (Codex on #95): with a real cancellation regression, requests
+     * still enter the handler after release and hang there, and `unroute` only removes the handler without finishing the ones it already holds.
+     * Left unfinished they keep holding google's queue pair's concurrency slots, and the navigation / fallback / only-mode parts later hang for no visible reason
      */
     off: async () => {
       await context.unroute(pattern, handler)
@@ -181,17 +181,17 @@ async function stallEndpoint(host) {
 }
 
 /**
- * 把页面推到"并发槽占满、队列里堆着一大批没发出去的活"，再做一次**正向验证**：
- * 放开一个槽位，看队列会不会补上一个**新的**批次——补上了才算真的观察到了未发出的批次，
- * 这条断言的前置条件才成立（Codex 在 #95 要的就是"直接观察到或造出未发出的批次"）。
+ * Push the page to “concurrency slots full, a big batch of unsent work piled up in the queue”, then run a **positive check**:
+ * release one slot and see whether the queue fills in a **new** batch — only then was an unsent batch really observed,
+ * and only then does this assertion's precondition hold (what Codex asked for on #95 was “observe or produce an unsent batch directly”).
  *
- * 判"新"要看请求体，不能只看请求数（Codex 在 #95 追加）：abort 掉截住的那一发时，provider 自己的
- * AbortSignal 并没有 abort，`google-web` 会把这次 fetch 失败归成可重试的 `network`，队列照默认
- * 退避重发同一批。只数请求数的话，那次重试会被当成"队列里还有活"，正向验证反而变成空的。
- * 同一批重发的请求体是逐字一样的，所以**出现没见过的请求体**才是新批次。
+ * “New” is judged by the request body, not the request count (Codex adding on #95): aborting a stalled request does not abort the provider's own
+ * AbortSignal, `google-web` classes that failed fetch as a retryable `network`, and the queue resends the same batch after the default
+ * backoff. Counting requests alone, that retry passes for “the queue still has work”, and the positive check turns empty.
+ * A resent batch's body is identical byte for byte, so **a body never seen before** is what marks a new batch.
  */
 async function fillQueue(page, stall, { slots = GOOGLE_SLOTS, timeoutMs = 40_000 } = {}) {
-  await scrollThrough(page) // 端点截着，什么都完成不了，整篇的块都会停在 pending
+  await scrollThrough(page) // with the endpoint stalled nothing can complete, and the whole paper's blocks stay pending
   const t0 = Date.now()
   let samples = []
   let pending = 0
@@ -210,17 +210,17 @@ async function fillQueue(page, stall, { slots = GOOGLE_SLOTS, timeoutMs = 40_000
   return { requests, items, pending, confirmed: isNew(), extra: stall.held.length - requests }
 }
 
-/** 任一 1 秒窗口内的最多请求数 */
+/** The most requests in any 1-second window */
 function peakPerSecond(requests) {
   let peak = 0
   for (const a of requests) peak = Math.max(peak, requests.filter(b => b.t >= a.t && b.t < a.t + 1000).length)
   return peak
 }
 
-/** 按视口翻译（§10）没有"翻完"：每次从忙到闲打一条 session idle */
+/** Translating by viewport (§10) has no “finished”: every busy-to-idle transition prints one session idle line */
 const IDLE = /session idle: (\d+)\/(\d+) requested of (\d+), (\d+) failed, (\d+) cached/
 const idleOf = log => { const m = IDLE.exec(log?.text ?? ''); return m ? { done: +m[1], requested: +m[2], total: +m[3], failed: +m[4], cached: +m[5], text: log.text } : null }
-/** 逐屏往下滚：一次跳到底只会让最后一屏进入观察器 */
+/** Scroll down screen by screen: jumping to the bottom at once only lets the last screen enter the observer */
 async function scrollThrough(page) {
   const step = 800
   const height = await page.evaluate(() => document.documentElement.scrollHeight)
@@ -235,9 +235,9 @@ const countDom = page => page.evaluate(() => ({
   pendingNodes: document.querySelectorAll('.axt-pending').length,
   failed: document.querySelectorAll('[data-axt-state="failed"]').length,
   pending: document.querySelectorAll('[data-axt-state="pending"]').length,
-  // 恢复原文那条断言靠这个数字。**不能只列举几个属性**：渲染层还会注入 data-axt-mode /
-  // -inline / -partial / -note / -fit / -split / -for / -on，漏掉任何一个，残留就检查不出来
-  // （Codex 在 #34 指出）。这里扫每个元素的属性名前缀，连 <html> 一起数
+  // The restore assertion relies on this number. **Listing a few attributes is not enough**: the renderer also injects data-axt-mode /
+  // -inline / -partial / -note / -fit / -split / -for / -on, and with any one missed a leftover goes undetected
+  // (Codex on #34). Every element's attribute name prefixes are scanned here, <html> included
   marked: [document.documentElement, ...document.querySelectorAll('*')]
     .reduce((n, el) => n + el.getAttributeNames().filter(a => a.startsWith('data-axt-')).length, 0),
   markedNames: [...new Set([document.documentElement, ...document.querySelectorAll('*')]
@@ -245,22 +245,22 @@ const countDom = page => page.evaluate(() => ({
   on: document.documentElement.hasAttribute('data-axt-on'),
 }))
 
-// ── 设置页：选 Google 翻译，关掉图片翻译（改动即时生效，没有保存按钮）──────────
+// ── The settings page: choose Google translation, switch image translation off (changes apply at once, there is no save button) ──────────
 const options = await openOptions(context, extId)
 await chooseBuiltIn(options, 'Google 翻译')
-// 图片翻译（DESIGN §15）默认开着；这台机器装了 helper 的话叠加层与拆图会扰动下面的布局 / 计数断言，
-// 这里关掉，专门的 e2e:image 再开（AXT_E2E_IMAGES=1 时保留）
+// Image translation (DESIGN §15) is on by default; with the helper installed on this machine the overlays and the split would disturb the layout / count assertions below,
+// so it is switched off here, and the dedicated e2e:image switches it back on (kept when AXT_E2E_IMAGES=1)
 if (!process.env.AXT_E2E_IMAGES) await setSwitch(options, '图片翻译', false)
 await options.screenshot({ path: `${SHOTS}/options.png` })
 
-// ── 设置页：改动即时生效且重载仍在（v12 起没有保存按钮，配置在控件变化时就写） ─────────────
+// ── The settings page: changes apply at once and survive a reload (no save button since v12; the configuration is written as the control changes) ─────────────
 await setPreload(options, { range: '半屏' })
 await options.reload({ waitUntil: 'domcontentloaded' })
 await openSection(options, 'reading')
 const rangeBack = await options.getByRole('button', { name: '半屏', exact: true }).getAttribute('aria-pressed')
-check('设置页：提前翻译的范围改成半屏，重载后仍是半屏', rangeBack === 'true', `读回 aria-pressed=${rangeBack}`)
+check('the settings page: the preload range set to half a screen is still half a screen after a reload', rangeBack === 'true', `read back aria-pressed=${rangeBack}`)
 
-// ── 设置页：悬停对照高亮的开关真的能改（#130：加了配置字段却没有 UI，用户关不掉） ────────
+// ── The settings page: the hover highlight switch really changes (#130: a configuration field was added without a UI, and the reader could not turn it off) ────────
 {
   const stateOf = async () => options.getByRole('switch', { name: '对照高亮', exact: true }).getAttribute('aria-checked')
   await openSection(options, 'reading')
@@ -269,20 +269,20 @@ check('设置页：提前翻译的范围改成半屏，重载后仍是半屏', r
   await options.reload({ waitUntil: 'domcontentloaded' })
   await openSection(options, 'reading')
   const back = await stateOf()
-  check('设置页：悬停对照高亮开关默认开、关掉后重载仍是关（§7.7）', wasOn === 'true' && back === 'false', `默认 ${wasOn}，关掉重载读回 ${back}`)
-  // 后面的检查要它开着
+  check('the settings page: the hover highlight switch is on by default, and switched off it stays off after a reload (§7.7)', wasOn === 'true' && back === 'false', `default ${wasOn}, switched off and reloaded reads back ${back}`)
+  // The checks after this need it on
   await setSwitch(options, '对照高亮', true)
 }
 await setPreload(options, { range: '一屏' })
 
-// ── 设置页：图片翻译的模式闸（DESIGN §15）即时生效、重载仍在；**不因为没装助手而灰掉** ──────
+// ── The settings page: the image translation mode gate (DESIGN §15) applies at once and survives a reload; **not greyed out for a missing helper** ──────
 {
   const names = ['上下', '左右', '仅译文']
   const boxOf = name => options.getByRole('checkbox', { name, exact: true })
   await openSection(options, 'services')
-  // §15.5：识别助手只决定位图，SVG 图不需要它，所以复选框任何时候都该可用
+  // §15.5: the recognition helper decides bitmaps only, SVG figures do not need it, so the checkboxes must be usable at all times
   const enabled = await boxOf('上下').isEnabled()
-  check('设置页：图片翻译不因为没装识别助手而整节灰掉（§15.5）', enabled === true, `可用 ${enabled}`)
+  check('the settings page: image translation is not greyed out whole for a missing recognition helper (§15.5)', enabled === true, `enabled ${enabled}`)
 
   if (!process.env.AXT_E2E_IMAGES) {
     await setImageMode(options, '上下', true)
@@ -292,14 +292,14 @@ await setPreload(options, { range: '一屏' })
     await openSection(options, 'services')
     await boxOf('上下').waitFor({ timeout: 5_000 })
     const states = await Promise.all(names.map(n => boxOf(n).isChecked()))
-    check('设置页：图片翻译只勾「上下」，重载后仍是这一种', JSON.stringify(states) === JSON.stringify([true, false, false]), `读回 ${states.join(',')}`)
+    check('the settings page: image translation with only “Stacked” ticked is still that one after a reload', JSON.stringify(states) === JSON.stringify([true, false, false]), `read back ${states.join(',')}`)
     await setImageMode(options, '上下', false)
   }
 }
 
-// ── 设置页改了目标语言，开着的 popup 不重开就跟着变（INVENTORY S1）──────────────────────
-// popup 与设置页各持一份配置，原来只回显自己的写入。论文标签页留在前台（popup 查的是活动标签页），
-// 设置页在后台由 Playwright 驱动
+// ── The target language changed on the settings page follows into an open popup without reopening it (INVENTORY S1) ──────────────────────
+// The popup and the settings page each hold a copy of the configuration and used to echo only their own writes. The paper tab stays in front (the popup looks at the active tab),
+// the settings page is driven by Playwright in the background
 {
   const paperTab = await context.newPage()
   await paperTab.goto(`https://arxiv.org/html/${PAPER}`, { waitUntil: 'domcontentloaded' })
@@ -312,12 +312,12 @@ await setPreload(options, { range: '一屏' })
   await chooseLanguage(options, '日语', '日语')
   await popup.waitForTimeout(1_200)
   const after = (await languageRow.textContent()) ?? ''
-  check('设置页改了目标语言，开着的 popup 不重开就跟着变（S1）', /简体中文/.test(before) && /日语/.test(after), `${before.trim()} → ${after.trim()}`)
+  check('the target language changed on the settings page follows into the open popup without reopening it (S1)', /简体中文/.test(before) && /日语/.test(after), `${before.trim()} → ${after.trim()}`)
   await popup.close()
   await paperTab.close()
 }
 
-// ── 设置页：目标语言（配置 v4 的 ISO 639-3 码）与自定义提示词即时生效、重载仍在 ──────
+// ── The settings page: the target language (the ISO 639-3 code of configuration v4) and a custom prompt apply at once and survive a reload ──────
 await openSection(options, 'prompts')
 await options.getByRole('button', { name: '新建', exact: true }).click()
 await options.getByLabel('名称').fill('e2e 提示词')
@@ -331,25 +331,25 @@ const langBack = await options.getByRole('button', { name: '目标语言' }).tex
 await openSection(options, 'prompts')
 const promptRow = options.getByRole('radio').last()
 const promptBack = (await options.getByText('e2e 提示词').count()) === 1 && (await promptRow.isChecked())
-check('设置页：目标语言与自定义提示词改完重载仍在且被选中', /日语/.test(langBack ?? '') && promptBack, `语言 ${langBack}，提示词 ${promptBack}`)
-// 删掉再选回默认：后面的错 key 段要走默认提示词
+check('the settings page: the target language and the custom prompt survive a reload and stay selected', /日语/.test(langBack ?? '') && promptBack, `language ${langBack}, prompt ${promptBack}`)
+// Delete it and choose the default again: the wrong-key part later must go through the default prompt
 options.once('dialog', d => d.accept())
 await options.getByRole('button', { name: '删除', exact: true }).click()
 await chooseLanguage(options, '简体中文', '简体中文')
 await openSection(options, 'prompts')
 const promptGone = (await options.getByText('e2e 提示词').count()) === 0
-check('设置页：删除自定义提示词后选回默认', promptGone, `残留 ${promptGone ? 0 : 1}`)
+check('the settings page: after deleting the custom prompt the default is chosen again', promptGone, `left over ${promptGone ? 0 : 1}`)
 
-// ── 设置页：译文外观与缓存管理（§7.5 / §9）──────────────────────────
+// ── The settings page: translation appearance and cache management (§7.5 / §9) ──────────────────────────
 {
-  // 内置的「淡一档」只调透明度：值走变量、由注入表写在真译文上，不碰任何节点
+  // The built-in “Muted” only changes the opacity: the value goes through a variable written by the injected sheet on real translations, touching no node
   await options.bringToFront()
   await chooseStyle(options, '淡一档')
 
   const page = await context.newPage()
   await page.goto(`https://arxiv.org/html/${PAPER}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  // 只认真正的译文：加载圆环 / 失败控件 / 镜像与拆分克隆也带 .axt-t，但外观刻意不装饰它们，
-  // 轮询撞上 pending 节点会把「透明度没生效」误报成配置坏了（Codex 在 #52 指出）
+  // Only real translations count: the loading ring / failure widget / mirrors and split clones carry .axt-t too, but the appearance deliberately does not decorate them,
+  // and a poll landing on a pending node would misreport “the opacity did not apply” as a broken configuration (Codex on #52)
   await page.waitForFunction(sel => document.querySelector(sel) !== null, `.axt-t:not([data-axt-inline])${REAL}`, { timeout: 60_000 }).catch(() => undefined)
   await page.waitForFunction(() => Number(getComputedStyle(document.querySelector('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')).opacity) < 1, null, { timeout: 30_000 }).catch(() => undefined)
   const styled = await page.evaluate(real => {
@@ -357,15 +357,15 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     const source = document.querySelector('.ltx_p:not(.axt-t)')
     return {
       opacity: el ? Number(getComputedStyle(el).opacity) : -1,
-      // 原文不受影响：外观只落在译文上
+      // The source is unaffected: the appearance lands on translations only
       sourceOpacity: source ? Number(getComputedStyle(source).opacity) : null,
     }
   }, REAL)
-  check('译文外观「淡一档」：译文透明度降下来，原文不受影响', styled.opacity > 0 && styled.opacity < 1 && styled.sourceOpacity === 1, JSON.stringify(styled))
+  check('translation appearance “Muted”: the translation\'s opacity drops, the source is unaffected', styled.opacity > 0 && styled.opacity < 1 && styled.sourceOpacity === 1, JSON.stringify(styled))
   await page.screenshot({ path: `${SHOTS}/style-muted.png` })
 
-  // popup 也能换样式（S-P-82）：走的是「popup 写配置 → 页面的配置监听重画」，与设置页那条不同，
-  // 而且**页面正开着**，所以它同时证明了换样式不需要重开会话
+  // The popup can change the style too (S-P-82): it goes “the popup writes the configuration → the page's configuration watcher repaints”, a different path from the settings page's,
+  // and **the page is open**, so it also proves changing the style needs no new session
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)
   await page.bringToFront()
@@ -377,18 +377,18 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     const el = () => document.querySelector(`.axt-t:not([data-axt-inline])${real}`)
     for (let i = 0; i < 40; i++) {
       const color = el() ? getComputedStyle(el()).color : ''
-      // 与原文相同时译文用页面的正文色；绿色预设把它换掉
+      // With “Same as the original” the translation uses the page's body colour; the green preset replaces it
       if (color && color !== getComputedStyle(document.querySelector('.ltx_p:not(.axt-t)')).color) return color
       await new Promise(r => setTimeout(r, 250))
     }
     return el() ? getComputedStyle(el()).color : 'no translation'
   }, REAL)
   const sourceColor = await page.evaluate(() => getComputedStyle(document.querySelector('.ltx_p:not(.axt-t)')).color)
-  check('popup 的译文样式：选「绿色」后开着的页面立刻换色，不重开会话', green !== sourceColor && green !== 'no translation', `译文 ${green}，原文 ${sourceColor}`)
+  check('the popup\'s style: choosing “Green” recolours the open page at once, without a new session', green !== sourceColor && green !== 'no translation', `translation ${green}, source ${sourceColor}`)
   await page.close()
 
-  // 下划线要画到公式上：text-decoration 不传播到 math 这类原子行内盒，用户反馈过公式处虚线断掉。
-  // v12 起线型是配置里的一个字段，不是一个预设 id：新建一份带虚线的配置
+  // The underline has to be drawn on formulas: text-decoration does not propagate into atomic inline boxes like math, and a reader reported the dotted line breaking at formulas.
+  // Since v12 the line style is a field of the configuration, not a preset id: create a configuration with a dashed line
   await options.bringToFront()
   await openSection(options, 'reading')
   await options.getByRole('button', { name: '添加配置', exact: true }).first().click()
@@ -396,17 +396,17 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await editor.waitFor({ timeout: 5_000 })
   await editor.getByRole('button', { name: '虚线', exact: true }).click()
   await editor.getByRole('button', { name: '完成', exact: true }).click()
-  // 换一篇数学密集的：PAPER 首屏没有行内公式，检查会空跑
+  // Switch to a math-heavy paper: PAPER's first screen has no inline formula, and the check would run empty
   const dashedPage = await context.newPage()
   await dashedPage.goto('https://arxiv.org/html/2609.04056v1#axt-translate', { waitUntil: 'domcontentloaded' })
-  // 两个条件都要等到（issue #82）：只等"出现第一个带公式的译文"的话，`<html>` 上的 data-axt-style
-  // 可能还没写上——enable() 在 startTranslation 里写它，而 #axt-translate 触发的会话与设置页刚存的预设
-  // 之间隔着一次配置读取。一次实测就撞到过：量到 22 个公式、块级 none/solid，重跑同一构建是 51 个 underline/dashed
+  // Both conditions have to be met (issue #82): waiting only for “the first translation with a formula appears”, the data-axt-style on `<html>`
+  // may not be written yet — enable() writes it inside startTranslation, and between the session #axt-translate starts and the preset the settings page just saved
+  // lies one configuration read. One run hit exactly that: 22 formulas measured, block-level none/solid; the same build rerun gave 51 underline/dashed
   await dashedPage.waitForFunction(
     real => document.documentElement.dataset.axtUnderline === 'dashed' && document.querySelectorAll(`.axt-t${real} math`).length > 0,
     REAL, { timeout: 60_000 },
   ).catch(() => undefined)
-  // 再等公式数稳定：翻译还在进行时读到的是半截状态
+  // Then wait for the formula count to settle: read while translation is still going, it is a half state
   let stableMaths = -1
   for (let i = 0; i < 40; i++) {
     await sleep(500)
@@ -416,33 +416,33 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   }
   const dashed = await dashedPage.evaluate(real => {
     const deco = el => { const cs = getComputedStyle(el); return `${cs.textDecorationLine}/${cs.textDecorationStyle}` }
-    // 只认真正的译文：side 模式的镜像与拆图副本也带 .axt-t，外观刻意不装饰它们（同 §7.5 的排除条件）
+    // Only real translations count: side mode's mirrors and split copies carry .axt-t too, and the appearance deliberately does not decorate them (the same exclusion as §7.5)
     const maths = [...document.querySelectorAll(`.axt-t${real} math`)]
     const block = document.querySelector(`.axt-t:not([data-axt-inline])${real}`)
     return { count: maths.length, math: maths.slice(0, 3).map(deco), block: block ? deco(block) : null }
   }, REAL)
-  check('译文外观 · 虚线：线画到译文里的公式上（text-decoration 不传播到原子行内盒）',
+  check('translation appearance · dashed: the line is drawn on the formulas inside the translation (text-decoration does not propagate into atomic inline boxes)',
     dashed.count > 0 && dashed.block === 'underline/dashed' && dashed.math.every(d => d === 'underline/dashed'),
-    `${dashed.count} 个公式，块级 ${dashed.block}，公式 ${dashed.math.join(' ')}`)
+    `${dashed.count} formulas, block-level ${dashed.block}, formulas ${dashed.math.join(' ')}`)
   await dashedPage.screenshot({ path: `${SHOTS}/style-dashed.png` })
   await dashedPage.close()
 
 }
 
-// ── 论文 1：看到哪翻到哪（§10）：不滚动只翻首屏附近；逐屏滚到底其余跟上；标题翻译；速率 ────
+// ── Paper 1: translate what is seen (§10): without scrolling only the first screen's surroundings; scrolled to the bottom the rest follows; the title translation; the rate ────
 {
   const { page, logs, requests, originalTitle, skeletonsSeen } = await openPaper(PAPER, GOOGLE)
   const first = idleOf(await waitForLog(logs, IDLE, 120_000))
-  check(`论文 ${PAPER}：不滚动只翻首屏附近（google-web）`, !!first && first.requested > 0 && first.requested < first.total && first.done === first.requested && first.failed === 0, first?.text ?? '(no idle line)')
+  check(`paper ${PAPER}: without scrolling only the first screen's surroundings translate (google-web)`, !!first && first.requested > 0 && first.requested < first.total && first.done === first.requested && first.failed === 0, first?.text ?? '(no idle line)')
   const skeletons = await skeletonsSeen()
-  check('请求期间插入过骨架屏（§7.6）', skeletons > 0, `插入过 ${skeletons} 块骨架屏`)
+  check('skeletons were inserted while requests were out (§7.6)', skeletons > 0, `${skeletons} skeletons inserted`)
   const translated = await page.title()
-  check('标签页标题被翻译', translated !== originalTitle && /[\u4e00-\u9fff]/.test(translated), `${originalTitle} → ${translated}`)
+  check('the tab title is translated', translated !== originalTitle && /[\u4e00-\u9fff]/.test(translated), `${originalTitle} → ${translated}`)
   await page.screenshot({ path: `${SHOTS}/paper-first-screen.png` })
 
   logs.length = 0
   await scrollThrough(page)
-  // 静止的判定：最后一条 idle 行连续 3 秒没变，且页面上没有 pending 节点
+  // The settled check: the last idle line unchanged for 3 seconds in a row, and no pending node on the page
   let last = null
   let stable = 0
   for (let i = 0; i < 90 && stable < 3; i++) {
@@ -453,10 +453,10 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     last = idle
   }
   const dom = await countDom(page)
-  // 光信管线自己的计数不行：渲染层空转、或者译文节点被谁删掉了，这条照样会通过（Codex 在 #34 指出）。
-  // 也不能只比总数——`localizeNotes` 的脚注副本保留了 axt-t（只剥了 data-axt-*），
-  // 于是译文总数会超过完成数，一个丢失的普通译文正好被一个无关的脚注副本抵消掉（Codex 在 #77 指出）。
-  // 改成**逐块**验证：每个标成 translated 的原块，都要能按它的 id 找到一个真译文
+  // Trusting the pipeline's own counts is not enough: with the renderer idling, or the translation nodes deleted by somebody, this would still pass (Codex on #34).
+  // Nor can totals alone be compared — `localizeNotes`'s footnote copies keep axt-t (only data-axt-* stripped),
+  // so the translation total exceeds the done count, and a lost ordinary translation is offset exactly by an unrelated footnote copy (Codex on #77).
+  // Verified **block by block** instead: every original block marked translated must find a real translation by its id
   const orphans = await page.evaluate(() => [...document.querySelectorAll('[data-axt-state="translated"]')]
     .filter(el => {
       const id = el.getAttribute('data-axt-id')
@@ -464,54 +464,54 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     })
     .map(el => `${el.tagName}.${[...el.classList].filter(c => c.startsWith('ltx_'))[0] ?? ''}`)
     .slice(0, 5))
-  check('逐屏滚到底：每个翻完的块都能找到自己的译文节点，没滚到的不请求',
+  check('scrolled to the bottom screen by screen: every finished block finds its own translation node, and the unscrolled make no request',
     !!last && last.requested > first.requested && last.done === last.requested && last.failed === 0
     && dom.pendingNodes === 0 && orphans.length === 0,
-    `${last?.text ?? '(no idle after scroll)'}; 没有译文的已完成块 ${JSON.stringify(orphans)}; DOM ${JSON.stringify(dom)}`)
+    `${last?.text ?? '(no idle after scroll)'}; finished blocks without a translation ${JSON.stringify(orphans)}; DOM ${JSON.stringify(dom)}`)
   const peak = peakPerSecond(requests)
-  // 攒批（§8.3）：整篇的段落要攒成大请求。2026-09-06 之前只有 LLM 攒批，google-web 一次调用一个请求，
-  // 实测 213 块发了 65 个请求、平均 4.2 段/请求；修好后 190 块只用 21 个、平均 11.2 段
+  // Batching (§8.3): the whole paper's passages have to be gathered into big requests. Before 2026-09-06 only the LLM batched; google-web made one request per call,
+  // measured 213 blocks sending 65 requests, 4.2 passages per request on average; fixed, 190 blocks take only 21, 11.2 passages on average
   const items = requests.reduce((n, r) => n + r.items, 0)
   const perRequest = requests.length ? items / requests.length : 0
-  check('google-web 攒批：整篇的段落攒成大请求，不是一段一个', requests.length > 0 && perRequest >= 5, `${requests.length} 个请求带 ${items} 段，平均 ${perRequest.toFixed(1)} 段/请求`)
-  // 并发闸（§8.3）：google-web 声明 maxConcurrent 2，同时在飞不能超过它。速率 20/s、突发 8 只兜病态情况
+  check('google-web batching: the whole paper\'s passages gather into big requests, not one per passage', requests.length > 0 && perRequest >= 5, `${requests.length} requests carrying ${items} passages, ${perRequest.toFixed(1)} passages per request on average`)
+  // The concurrency gate (§8.3): google-web declares maxConcurrent 2, and no more may be in flight at once. The rate of 20/s and burst of 8 only catch pathological cases
   const concurrent = requests.reduce((p, a) => Math.max(p, requests.filter(b => b.t <= a.t && b.end > a.t).length), 0)
-  check('google-web 并发：同时在飞 ≤ 2（provider 声明的 maxConcurrent）', requests.length > 0 && concurrent <= 2, `同时在飞峰值 ${concurrent}，1 秒窗口峰值 ${peak}`)
+  check('google-web concurrency: in flight at once ≤ 2 (the maxConcurrent the provider declares)', requests.length > 0 && concurrent <= 2, `in-flight peak ${concurrent}, 1-second window peak ${peak}`)
   await page.screenshot({ path: `${SHOTS}/paper.png` })
 
-  // ── 刷新再翻：首屏附近全部命中缓存，不再请求端点 ────────────────────
+  // ── Reload and translate again: everything near the first screen hits the cache, no more endpoint requests ────────────────────
   logs.length = 0
   requests.length = 0
-  // Chrome 刷新会恢复滚动位置：先回到顶部，让刷新后的首屏与第一次的首屏是同一批块
+  // Chrome restores the scroll position on reload: go back to the top first, so the first screen after the reload is the same batch of blocks as the first time
   await page.evaluate(() => window.scrollTo(0, 0))
   await sleep(300)
   await page.reload({ waitUntil: 'domcontentloaded' })
   const again = idleOf(await waitForLog(logs, IDLE, 60_000))
-  // cached 按段计（表格的格各算一段）、done 按块计，两者不等是正常的；看点是没有端点请求
-  check('刷新再翻：首屏附近全部命中缓存、不再请求端点', !!again && again.done === again.requested && again.cached >= again.done && requests.length === 0, `${again?.text ?? '(no idle line)'}; 端点请求 ${requests.length}`)
+  // cached counts passages (each table cell one), done counts blocks, so the two differing is normal; the point is no endpoint request
+  check('reload and translate again: everything near the first screen hits the cache, no more endpoint requests', !!again && again.done === again.requested && again.cached >= again.done && requests.length === 0, `${again?.text ?? '(no idle line)'}; endpoint requests ${requests.length}`)
   await page.close()
 }
 
-// ── 微软引擎（#98）：markers 线上格式在**真实论文**上的唯一一次端到端验证 ──────────
-// #104 只在 fixture 上验过恒等译文的往返；记号能不能扛住真的机器翻译（语序移位、
-// 引擎自作主张改标点）只有这里能证。标签格式在这个端点上是 0%，所以它必须走 markers。
+// ── The Microsoft engine (#98): the only end-to-end verification of the markers wire format on a **real paper** ──────────
+// #104 verified only the round trip of identity translations on fixtures; whether the markers survive real machine translation (word order moved,
+// the engine changing punctuation of its own accord) can only be proved here. The tags format is 0% on this endpoint, so it has to go through markers.
 {
   await options.bringToFront()
   await chooseBuiltIn(options, 'Microsoft 翻译')
 
   const { page, logs, requests } = await openPaper(PAPER, 'edge.microsoft.com')
   const idle = idleOf(await waitForLog(logs, IDLE, 120_000))
-  // **必须验证请求真的打到了微软**（Codex 在 #115 指出）：微软坏掉、Google 兜底成功时，
-  // 下面那些「翻完了 / 节点数对得上 / 没有记号残留」全都照样成立——Google 也保得住 markers。
-  // 不数请求的话这一轮验的就不是它声称要验的那个端点
-  check('微软引擎：请求确实打到了微软端点，不是 Google 兜底顶上的（#98）',
-    requests.length > 0, `edge.microsoft.com 请求 ${requests.length} 个`)
-  check('微软引擎：首屏翻完、没有致命错误（#98）',
+  // **It must be verified that the requests really reached Microsoft** (Codex on #115): with Microsoft broken and the Google fallback succeeding,
+  // the “finished / node counts match / no marker leftovers” checks below all hold anyway — Google keeps the markers too.
+  // Without counting requests this round would not be verifying the endpoint it claims to verify
+  check('the Microsoft engine: the requests really reached the Microsoft endpoint, not the Google fallback standing in (#98)',
+    requests.length > 0, `${requests.length} edge.microsoft.com requests`)
+  check('the Microsoft engine: the first screen translated, no fatal error (#98)',
     !!idle && idle.requested > 0 && idle.done === idle.requested && idle.failed === 0 && !/fatal/.test(idle.text),
     idle?.text ?? '(no idle line)')
 
-  // 记号方案的两条硬承诺：受保护节点一个不少，且没有记号漏进可见文字。
-  // 先往下滚两屏再取样：左右对照下首屏是标题与作者，一个公式都没有，取到的样本证明不了什么
+  // The two hard promises of the marker scheme: not one protected node missing, and no marker leaking into visible text.
+  // Scroll down two screens before sampling: under side by side the first screen is title and authors without a single formula, and that sample proves nothing
   for (let i = 0; i < 6; i++) {
     const withMath = await page.evaluate(real => [...document.querySelectorAll(`.axt-t${real}`)]
       .some(t => t.querySelector('math, .ltx_Math, img, a.ltx_ref') !== null), REAL)
@@ -530,14 +530,14 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     const text = [...document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')].map(t => t.textContent ?? '').join('')
     return { pairs: pairs.length, mismatched: pairs.filter(p => p.src !== p.out).length, protectedNodes: pairs.reduce((n, p) => n + p.src, 0), markerLeak: (text.match(/@[a-z]+#/g) ?? []).length }
   })
-  check('微软引擎：每个块的受保护节点数与原文一致（记号没丢公式 / 链接）',
+  check('the Microsoft engine: every block\'s protected node count equals the source (the markers lost no formula / link)',
     shape.pairs > 0 && shape.mismatched === 0 && shape.protectedNodes > 0,
-    `${shape.pairs} 对配对，${shape.protectedNodes} 个受保护节点，对不上的 ${shape.mismatched} 个`)
-  check('微软引擎：译文里没有记号残留', shape.markerLeak === 0, `残留 ${shape.markerLeak} 处`)
+    `${shape.pairs} pairs, ${shape.protectedNodes} protected nodes, ${shape.mismatched} mismatched`)
+  check('the Microsoft engine: no marker left in the translation', shape.markerLeak === 0, `${shape.markerLeak} leftovers`)
 
-  // ── 悬停对照高亮（§7.7，#105）：只有这条路径能证 ─────────────────────────────
-  // 单元测试把浏览器那半边全打了桩（happy-dom 量不出任何几何），而对齐只有微软会报，
-  // 所以「底色真的画在了两侧对应的那一句上、每行一条」只能在这里验
+  // ── The hover highlight (§7.7, #105): only this path can prove it ─────────────────────────────
+  // The unit tests stub the browser half entirely (happy-dom measures no geometry), and only Microsoft reports alignment,
+  // so “the band is really drawn on the matching sentence on both sides, one per line” can only be verified here
   const hover = await page.evaluate(async () => {
     const pairs = [...document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')]
       .map(t => ({ t, s: document.querySelector(`[data-axt-id="${t.getAttribute('data-axt-for')}"]`) }))
@@ -547,8 +547,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     if (!at || !src) return { reason: 'no translated block' }
     src.scrollIntoView({ block: 'center' })
     const before = src.outerHTML + at.outerHTML
-    // 必须瞄准一个真实字形的中心：命中判定现在是「指针在不在这个字的框里」，
-    // 块的几何中心可能落在行间空白上，那正是要被拒的情况（用户 2026-09-09 反馈的第 1 条）
+    // Aim at the centre of a real glyph: the hit test is now “is the pointer inside this character's box”,
+    // and the block's geometric centre may fall on the blank between lines, exactly the case to be rejected (item 1 of the reader's 2026-09-09 report)
     const tail = host => {
       const w = document.createTreeWalker(host, NodeFilter.SHOW_TEXT)
       let out = null
@@ -580,7 +580,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     const bands = [...document.querySelectorAll('.axt-hl > div')]
     const boxOf = el => { const b = el.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom } }
     const sides = { source: bands.filter(b => b.getAttribute('data-axt-hl-side') === 'source'), target: bands.filter(b => b.getAttribute('data-axt-hl-side') === 'target') }
-    // 每行只能有一条：按纵向重叠分组，组数应当等于条数
+    // Only one per line: grouped by vertical overlap, the group count should equal the band count
     const lines = new Set(bands.map(b => Math.round(boxOf(b).t / 4)))
     const within = (el, host) => { const a = boxOf(el), h = host.getBoundingClientRect(); return a.l >= h.left - 2 && a.r <= h.right + 2 && a.t >= h.top - 2 && a.b <= h.bottom + 2 }
     return {
@@ -590,17 +590,17 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       onePerLine: lines.size === bands.length,
       inSource: sides.source.every(b => within(b, src)),
       inTarget: sides.target.every(b => within(b, at)),
-      // 高亮一个正文节点都不许碰（§7.1）：底色层挂在 body 上
+      // The highlight may touch not one body node (§7.1): the band layer hangs on body
       domUnchanged: before === src.outerHTML + at.outerHTML,
       layerOnBody: document.querySelector('.axt-hl')?.parentElement?.tagName.toLowerCase(),
       point,
-      // 指针挪到同一行的右侧空白（页面边缘）：caretPositionFromPoint 仍会答出那行的最后一个字，
-      // 只有真正的命中判定才能把它拒掉（用户 2026-09-09 反馈的第 1 条）
+    // The pointer moves to the blank on the right of the same line (the page edge): caretPositionFromPoint still answers that line's last character,
+    // and only the real hit test can reject it (item 1 of the reader's 2026-09-09 report)
       gutter: await (async () => {
-        // 末行行尾之后、但仍在块的框内：caretPositionFromPoint 在这里会答出末行最后一个字，
-        // 块也确实映射得到句子，所以只有真正的命中判定能拒掉它——正是用户看到的那个位置。
-        // **在所有配对里挑空白最宽的那个块**：只看第一块的话，译文换行恰好排满时这一条就没得测了，
-        // 而排版随论文、视口与字体变（Codex 在 #138 指出）
+      // Past the end of the last line yet still inside the block's box: caretPositionFromPoint answers the last line's last character here,
+      // and the block really maps to a sentence, so only the real hit test can reject it — exactly the position the reader saw.
+      // **Of all pairs pick the block with the widest blank**: looking at the first block only, this case has nothing to test when the translation happens to wrap full,
+      // and the typesetting varies with paper, viewport and font (Codex on #138)
         const gaps = pairs
           .map(p => { const r = tail(p.t); return r ? { block: p.t, r, gap: p.t.getBoundingClientRect().right - r.right } : null })
           .filter(Boolean)
@@ -616,56 +616,56 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       })(),
     }
   })
-  check('悬停对照高亮：原文与译文两侧同时亮起（§7.7 / #105）',
+  check('the hover highlight: the source and translation sides light up together (§7.7 / #105)',
     hover.source > 0 && hover.target > 0,
-    `原文 ${hover.source} 条底、译文 ${hover.target} 条底${hover.reason ? ` (${hover.reason})` : ''}`)
-  check('悬停对照高亮：每行恰好一条底，不按字形碎（用户 2026-09-09 反馈）',
-    hover.onePerLine === true, `${hover.bands} 条底，落在 ${hover.bands} 行上`)
-  check('悬停对照高亮：底色都落在各自的块内，没有跨块',
-    hover.inSource === true && hover.inTarget === true, `原文 ${hover.inSource}、译文 ${hover.inTarget}`)
-  check('悬停对照高亮：指针在右侧空白处不触发（用户 2026-09-09 反馈）',
+    `source ${hover.source} bands, translation ${hover.target} bands${hover.reason ? ` (${hover.reason})` : ''}`)
+  check('the hover highlight: exactly one band per line, not fragmented by glyph (the reader\'s 2026-09-09 report)',
+    hover.onePerLine === true, `${hover.bands} bands on ${hover.bands} lines`)
+  check('the hover highlight: every band falls inside its own block, none crossing blocks',
+    hover.inSource === true && hover.inTarget === true, `source ${hover.inSource}, translation ${hover.inTarget}`)
+  check('the hover highlight: the pointer in the blank on the right does not trigger it (the reader\'s 2026-09-09 report)',
     hover.gutter?.bands === 0 || hover.gutter?.skipped === true,
     hover.gutter?.skipped
-      ? `跳过：所有块的末行右侧空白最宽只有 ${hover.gutter.gap.toFixed(0)}px，够不着 40px 的判据`
-      : `末行行尾右侧 ${hover.gutter?.gap?.toFixed(0)}px 空白处画了 ${hover.gutter?.bands} 条底`)
-  check('悬停对照高亮：正文一个节点都没动，底色层挂在 body 上（§7.1）',
-    hover.domUnchanged === true && hover.layerOnBody === 'body', `DOM ${hover.domUnchanged ? '未变' : '变了'}，层挂在 ${hover.layerOnBody}`)
+      ? `skipped: the widest blank right of any block's last line is only ${hover.gutter.gap.toFixed(0)}px, short of the 40px criterion`
+      : `${hover.gutter?.bands} bands drawn in the ${hover.gutter?.gap?.toFixed(0)}px blank right of the last line's end`)
+  check('the hover highlight: not one body node moved, the band layer hangs on body (§7.1)',
+    hover.domUnchanged === true && hover.layerOnBody === 'body', `DOM ${hover.domUnchanged ? 'unchanged' : 'changed'}, layer on ${hover.layerOnBody}`)
 
-  // 悬停高亮的注册表不能因为原块还在文档里就把摘掉的译文永远留住（Codex 在 #130 指出）。
-  // happy-dom 不释放任何已摘除的节点——对照实验里连什么都不引用的 <p> 都收不掉——所以这条只有
-  // 在真浏览器里才测得了。
+  // The hover highlight's registry must not keep a removed translation forever because its original block is still in the document (Codex on #130).
+  // happy-dom releases no removed node whatever — in a control experiment even a <p> nothing referenced was not collected — so this
+  // can only be tested in a real browser.
   //
-  // 判据是「残留数不随译文数增长」，不是「一个都不剩」：实测有 1 个块（S1.p2.1）被页面里别的
-  // 东西吊着，从头到尾不悬停也一样，与注册表无关。用旧写法量过对照——**14 个全部留住**，
-  // 所以这条阈值分得开修好与没修。
+  // The criterion is “the leftovers do not grow with the translation count”, not “none left”: measured, 1 block (S1.p2.1) is kept by something else
+  // on the page, the same without hovering at all, unrelated to the registry. Measured with the old code as the control — **all 14 kept**,
+  // so this threshold separates fixed from unfixed.
   const retained = await page.evaluate(async () => {
     if (typeof gc !== 'function') return { skipped: true }
     const nodes = [...document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)')]
-    if (nodes.length < 8) return { reason: `只有 ${nodes.length} 个译文，样本太小` }
+    if (nodes.length < 8) return { reason: `only ${nodes.length} translations, too small a sample` }
     const watch = nodes.map(n => new WeakRef(n))
     const before = watch.length
     nodes.length = 0
-    // 译文节点全部摘掉、原块留在文档里，正是会把注册表条目吊住的那种情形
+    // Every translation node removed, the original blocks left in the document: exactly the situation that keeps registry entries alive
     for (const n of [...document.querySelectorAll('[data-axt-for]')]) n.remove()
     document.querySelector('.axt-hl')?.remove()
     for (let i = 0; i < 8; i++) { gc(); await new Promise(r => setTimeout(r, 30)) }
     return { before, alive: watch.filter(w => w.deref() !== undefined).length }
   })
-  check('悬停对照高亮：摘掉译文后注册表不再吊住它们（#130 的内存回归）',
+  check('the hover highlight: once translations are removed the registry no longer keeps them (the memory regression of #130)',
     retained.skipped === true || (retained.alive !== undefined && retained.alive <= 2),
-    retained.skipped ? '跳过（没有 gc）' : retained.reason ?? `摘掉 ${retained.before} 个译文节点后仍存活 ${retained.alive} 个（旧写法是 ${retained.before} 个全留）`)
+    retained.skipped ? 'skipped (no gc)' : retained.reason ?? `after removing ${retained.before} translation nodes ${retained.alive} still alive (the old code kept all ${retained.before})`)
 
   await page.screenshot({ path: `${SHOTS}/microsoft.png` })
   await page.close()
 
-  // 切回 google-web，后面的检查沿用原来的引擎
+  // Back to google-web; the checks after this keep the original engine
   await options.bringToFront()
   await chooseBuiltIn(options, 'Google 翻译')
 }
 
-// ── SVG 图翻译（§15.5，#121）：不需要 helper，所以这里跑而不是在 e2e:image 里 ────────────
-// 唯一能证明整条几何链路成立的地方：viewBox 坐标 → 归一化 → 主文档里的百分比 / 容器单位。
-// 单元测试把 <object> 的 contentDocument 打了桩，真实的嵌套文档只有真浏览器里有
+// ── SVG figure translation (§15.5, #121): needs no helper, so it runs here rather than in e2e:image ────────────
+// The only place that can prove the whole geometry chain holds: viewBox coordinates → normalised → percentages / container units in the main document.
+// The unit tests stub the <object>'s contentDocument; the real nested document exists only in a real browser
 {
   await options.bringToFront()
   await setSwitch(options, '图片翻译', true)
@@ -673,17 +673,17 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
 
   const { page, logs } = await openPaper(SVG_PAPER, GOOGLE)
   await waitForLog(logs, IDLE, 120_000)
-  // 图是按视口调度的，滚一遍把它们都放出来，然后**等图片这一轮自己报完**——
-  // 上面那条 `session idle` 只说明正文翻完了，图是滚动之后才排进去的。
-  // 固定睡 3 秒在慢一点或被限流的端点上会让合法的叠加层晚于断言到达，测试就间歇性失败
-  //（Codex 在 #134 指出）
+  // Images are scheduled by viewport: scroll once to release them all, then **wait for the image round to report itself** —
+  // the `session idle` above only says the body text is done, and the images are queued only after the scroll.
+  // A fixed 3-second sleep, on a slower or rate-limited endpoint, lets legitimate overlays arrive after the assertion, and the test fails intermittently
+  // (Codex on #134)
   await scrollThrough(page)
   /**
-   * 等到**每一张有字的 SVG 图都拿到叠加层**，而不是等一个日志或者等计数「看起来稳了」。
+   * Wait until **every SVG figure with text has its overlay**, rather than for a log line or a count that “looks settled”.
    *
-   * 前一版等 `images idle` 再看计数连着两次不变：图是分批放出来的，`waitForLog` 用 `find` 扫全表、
-   * 会匹配到更早的那次部分完成（实测跑出过 `1/1 of 9`），而两次采样之间如果完成间隔超过 500ms
-   * 也会提前退出（Codex 在 #134 指出）。应有的数量能在页内按图自己算出来，就不必猜
+   * The previous version waited for `images idle` and then two unchanged counts: images are released in batches, `waitForLog` scans the whole table with `find`
+   * and matches an earlier partial completion (measured: a run gave `1/1 of 9`), and two samples more than 500ms apart
+   * also exit early (Codex on #134). The count due can be computed in the page from the figures themselves, so there is no need to guess
    */
   const expected = await page.evaluate(() => {
     const CODE = /->|=>|==|!=|::|>>|<<|&&|\|\||\w_\w|[;{}]\s*$|^\d+\s{2,}/
@@ -696,9 +696,9 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     }
     return n
   })
-  // 两个条件都要：**至少**达到这个下界，**并且**连着两次采样不再变。
-  // 页内那个判断是把整张图的 data-text 拼起来一把过的粗判，会少数（实测 5 张图它只算出 4 张），
-  // 所以它只是下界；而单靠「稳定」在完成间隔大于采样间隔时会提前退出。两条一起才夹得住
+  // Both conditions: **at least** this lower bound, **and** two consecutive samples unchanged.
+  // The in-page verdict is a coarse one that joins the whole figure's data-text and tests it at once, and it undercounts (measured: of 5 figures it counted 4),
+  // so it is a lower bound only; while “stable” alone exits early when completions are further apart than the sampling interval. Only both together pin it down
   let overlays = -1
   let stable = 0
   for (let i = 0; i < 80; i++) {
@@ -708,8 +708,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     if (overlays >= expected && stable >= 2) break
     await sleep(800)
   }
-  check('SVG 图：每张有字的图都拿到了叠加层（下面的断言以它为前提）',
-    expected > 0 && overlays >= expected && stable >= 2, `${overlays} 个叠加层，下界 ${expected}，稳定 ${stable} 次`)
+  check('SVG figures: every figure with text has its overlay (the assertions below presume it)',
+    expected > 0 && overlays >= expected && stable >= 2, `${overlays} overlays, lower bound ${expected}, stable ${stable} times`)
 
   const svg = await page.evaluate(() => {
     const objs = [...document.querySelectorAll('object[type="image/svg+xml"]')]
@@ -720,21 +720,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       if (!next?.classList.contains('axt-img')) continue
       out.overlays++
       out.sibling++
-      // side 下插图拆成两份，叠加层只显示在「只有译文」的那份上，原件那份 display:none
-      //（styles/image.css §7.2）。量看得见的那一份：藏起来的没有几何可言
+      // Under side the figure is split in two, and the overlay shows only on the “translation only” copy, the original's display:none
+      // (styles/image.css §7.2). Measure the visible one: the hidden one has no geometry to speak of
       if (getComputedStyle(next).display === 'none') { out.overlays--; out.sibling--; continue }
       const a = o.getBoundingClientRect()
       const b = next.getBoundingClientRect()
-      // 锚点定位：叠加层的矩形应当与 <object> 的矩形重合
+      // Anchor positioning: the overlay's rectangle should coincide with the <object>'s
       if (Math.abs(a.left - b.left) < 2 && Math.abs(a.top - b.top) < 2 && Math.abs(a.width - b.width) < 2 && Math.abs(a.height - b.height) < 2) out.aligned++
       for (const span of next.querySelectorAll('span')) {
         const style = span.getAttribute('style') ?? ''
         if (style.includes('rotate(')) out.rotated++
         if (out.labels.length < 8) out.labels.push(span.getAttribute('title'))
-        // **整条几何链路的端到端检查**：白框应当正好盖住它译的那段原文字。
-        // 把叠加层的框换成图的归一化坐标，与内文档里那几个字形的实际范围比——
-        // 两者都归一化到 <object> 的框，所以 viewBox → 归一化 → 主文档百分比 / 容器单位
-        // 这一整串只要有一处错，差值就会露出来
+        // **The end-to-end check of the whole geometry chain**: the white box should cover exactly the source text it translates.
+        // Convert the overlay's box into the figure's normalised coordinates and compare with the real extent of those glyphs in the inner document —
+        // both are normalised to the <object>'s box, so if any link of viewBox → normalised → main-document percentages / container units
+        // is wrong, the difference shows
         const title = span.getAttribute('title') ?? ''
         const d = o.contentDocument
         const chars = [...(d?.querySelectorAll('use[data-text]') ?? [])]
@@ -742,8 +742,8 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
           const iw = d.defaultView.innerWidth, ih = d.defaultView.innerHeight
           const s = span.getBoundingClientRect()
           const box = { l: (s.left - a.left) / a.width, r: (s.right - a.left) / a.width, t: (s.top - a.top) / a.height, b: (s.bottom - a.top) / a.height }
-          // 同一串文字可能在图里出现多次（`epoch` 也是 `wall time per epoch [ms]` 的一部分），
-          // 取**最贴合的那一处**：找错了实例会报出一个与产品无关的巨大差值
+          // The same text may appear several times in the figure (`epoch` is also part of `wall time per epoch [ms]`);
+          // take **the best-fitting occurrence**: the wrong instance reports a huge difference that has nothing to do with the product
           let best = null
           for (let i = 0; i + title.length <= chars.length; i++) {
             if (chars.slice(i, i + title.length).map(c => c.getAttribute('data-text')).join('') !== title) continue
@@ -758,22 +758,22 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     }
     return out
   })
-  check('SVG 图：嵌套文档全部可达（§15.5）',
-    svg.objects > 0 && svg.reachable === svg.objects, `${svg.reachable}/${svg.objects} 张可读`)
-  check('SVG 图：叠加层作为 <object> 的下一个兄弟插入，没装 helper 也照翻',
-    svg.overlays > 0 && svg.sibling === svg.overlays, `${svg.overlays} 个叠加层，全部是下一个兄弟`)
-  check('SVG 图：叠加层的矩形与图重合（锚点定位对 <object> 成立）',
-    svg.overlays > 0 && svg.aligned === svg.overlays, `${svg.aligned}/${svg.overlays} 张对齐`)
-  check('SVG 图：标签来自图里真实的文字，不是 OCR 认出来的',
+  check('SVG figures: every nested document reachable (§15.5)',
+    svg.objects > 0 && svg.reachable === svg.objects, `${svg.reachable}/${svg.objects} readable`)
+  check('SVG figures: the overlay is inserted as the <object>\'s next sibling, translated without the helper too',
+    svg.overlays > 0 && svg.sibling === svg.overlays, `${svg.overlays} overlays, all next siblings`)
+  check('SVG figures: the overlay\'s rectangle coincides with the figure (anchor positioning holds for <object>)',
+    svg.overlays > 0 && svg.aligned === svg.overlays, `${svg.aligned}/${svg.overlays} aligned`)
+  check('SVG figures: the labels come from the figure\'s real text, not OCR',
     svg.labels.some(t => /[A-Za-z]{3,}/.test(t ?? '')), JSON.stringify(svg.labels.slice(0, 4)))
-  check('SVG 图：竖排的轴标签被转过来了（§15.5）',
-    svg.rotated > 0, `${svg.rotated} 个竖排标签`)
-  // 每个白框都要盖住它译的那段原文字：正的 slack 表示某一边露了出来
-  // 0.002 是亚像素：实测最大 0.0009，抗锯齿与四舍五入的量级
+  check('SVG figures: the vertical axis labels are rotated (§15.5)',
+    svg.rotated > 0, `${svg.rotated} vertical labels`)
+  // Every white box has to cover the source text it translates: a positive slack means one side shows
+  // 0.002 is sub-pixel: measured at most 0.0009, the order of anti-aliasing and rounding
   const uncovered = svg.covered.filter(c => c.slack > 0.002)
-  check('SVG 图：白框盖住它译的那段原文字（viewBox → 屏幕的整条几何链路）',
+  check('SVG figures: the white box covers the source text it translates (the whole geometry chain from viewBox to screen)',
     svg.covered.length > 0 && uncovered.length === 0,
-    `${svg.covered.length} 个标签比对，最大露出 ${Math.max(0, ...svg.covered.map(c => c.slack)).toFixed(4)}；${JSON.stringify(uncovered.slice(0, 3))}`)
+    `${svg.covered.length} labels compared, the most showing ${Math.max(0, ...svg.covered.map(c => c.slack)).toFixed(4)}; ${JSON.stringify(uncovered.slice(0, 3))}`)
 
   await page.screenshot({ path: `${SHOTS}/svg-figures.png`, fullPage: false })
 
@@ -781,14 +781,14 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     const r = { before: document.querySelectorAll('.axt-img').length }
     return r
   })
-  check('SVG 图：确实插了叠加层（恢复检查的前置）', after.before > 0, `${after.before} 个`)
+  check('SVG figures: overlays were really inserted (the precondition of the restore check)', after.before > 0, `${after.before} overlays`)
   await page.close()
 
   await options.bringToFront()
   await setSwitch(options, '图片翻译', false)
 }
 
-// ── 论文 2：翻译中途"恢复原文"，排队与在飞的请求一起撤 ────────────────
+// ── Paper 2: “Show original” midway through translation withdraws the queued and in-flight requests together ────────────────
 {
   const { page, logs, requests, originalTitle } = await openPaper(PAPER2, GOOGLE)
   const t0 = Date.now()
@@ -799,7 +799,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   }
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)
-  await page.bringToFront() // popup 查的是当前窗口的活动标签页
+  await page.bringToFront() // the popup looks at the active tab of the current window
   await popup.getByRole('button', { name: '显示原文' }).waitFor({ timeout: 10_000 })
   const requestsBefore = requests.length
   const tCancel = Date.now()
@@ -807,21 +807,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await sleep(4_000)
   const after = await countDom(page)
   const late = requests.filter(r => r.t > tCancel + 500).length
-  check('恢复原文后没有译文残留、没有 data-axt-*（扫全部属性名，不是只查两个）',
+  check('after restoring the original no translation is left and no data-axt-* (every attribute name scanned, not just two)',
     after.translations === 0 && after.marked === 0 && !after.on,
-    `${JSON.stringify(after)}；恢复前已有 ${partial} 段译文`)
-  check('恢复原文后不再发新请求（排队的批次被撤）', late === 0, `恢复前 ${requestsBefore} 个请求，恢复 0.5 s 后新增 ${late} 个`)
-  check('恢复原文后标签页标题变回原文', (await page.title()) === originalTitle, `${await page.title()}；日志：${logs.find(l => /translation stopped/.test(l.text))?.text ?? '(no stopped line)'}`)
+    `${JSON.stringify(after)}; ${partial} translations before the restore`)
+  check('after restoring the original no new request is sent (the queued batches withdrawn)', late === 0, `${requestsBefore} requests before the restore, ${late} more 0.5 s after`)
+  check('after restoring the original the tab title returns to the original', (await page.title()) === originalTitle, `${await page.title()}; log: ${logs.find(l => /translation stopped/.test(l.text))?.text ?? '(no stopped line)'}`)
   await popup.screenshot({ path: `${SHOTS}/popup-after-restore.png` })
   await popup.close()
   await page.close()
 }
 
-// ── service worker 重启后 popup 不把页面误报成「落后于设置」（INVENTORY S8，开放问题 2）──────
-// 链的 revision 原是 worker 里的构建计数器：worker 被回收再起来，计数从 1 重来，而页面记着旧 worker
-// 的数字，popup 就把它当成「设置改了」——主按钮变成「重新翻译」。现在 revision 是设置的摘要，同一套
-// 设置在哪个 worker 上建出来都一样。Playwright 挂着调试器、worker 不会自然闲置回收，所以从浏览器级
-// CDP 关掉它的 target（实测下一条消息就起新 worker），代替「闲置 30 秒」
+// ── After a service worker restart the popup does not misreport the page as “behind the settings” (INVENTORY S8, open question 2) ──────
+// The chain's revision used to be a build counter inside the worker: with the worker reclaimed and restarted the counter began at 1 again, while the page remembered the old
+// worker's number, and the popup took it for “the settings changed” — the main button became “Translate again”. Now the revision is a digest of the settings, the same
+// on whichever worker the settings are built. With Playwright's debugger attached the worker never idles into reclamation, so its target is closed from browser-level
+// CDP (measured: the next message starts a new worker) in place of “idle for 30 seconds”
 {
   const { page } = await openPaper(PAPER2, GOOGLE)
   const t0 = Date.now()
@@ -835,7 +835,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.bringToFront()
   await popup.getByRole('button', { name: '显示原文' }).waitFor({ timeout: 10_000 })
   const before = await popup.locator('main').innerText()
-  check('worker 重启前：页面在翻，主按钮是「显示原文」', !/重新翻译/.test(before), before.replace(/\n+/g, ' | ').slice(0, 100))
+  check('before the worker restart: the page is translating and the main button is “Show original”', !/重新翻译/.test(before), before.replace(/\n+/g, ' | ').slice(0, 100))
   await popup.close()
 
   const [oldWorker] = context.serviceWorkers()
@@ -853,63 +853,63 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await sleep(1_500)
   const [freshWorker] = context.serviceWorkers()
   const bornAgain = freshWorker ? await freshWorker.evaluate(() => { globalThis.__axtBorn ??= Date.now(); return globalThis.__axtBorn }).catch(() => born) : born
-  check('前置：CDP 关掉 target 之后起的是新 worker', bornAgain !== born, `${born} → ${bornAgain}`)
+  check('precondition: after CDP closes the target a new worker starts', bornAgain !== born, `${born} → ${bornAgain}`)
   const after = await again.locator('main').innerText()
-  check('worker 重启后：同一套设置，popup 仍说「显示原文」，不把页面误报成落后于设置（S8）',
+  check('after the worker restart: same settings, the popup still says “Show original” and does not misreport the page as behind the settings (S8)',
     bornAgain !== born && /显示原文/.test(after) && !/重新翻译/.test(after), after.replace(/\n+/g, ' | ').slice(0, 120))
   await again.close()
   await page.close()
 }
 
-// ── 关掉标签页：background 的队列跟着撤（Codex 在 #59 指出）──────────────
-// 请求搬回 background 之后，销毁 content script 不再销毁这些工作。不撤的话，关掉的标签页还会
-// 继续发付费请求，直到批次耗尽预算（单批最长 180 秒）。
+// ── Closing the tab: the background's queue is withdrawn with it (Codex on #59) ──────────────
+// With requests moved back into the background, destroying the content script no longer destroys this work. Unwithdrawn, a closed tab would
+// keep sending paid requests until the batch exhausts its budget (a single batch up to 180 seconds).
 {
   const stall = await stallEndpoint(GOOGLE)
   const page = await context.newPage()
   await page.goto(`https://arxiv.org/html/${PAPER2}#axt-translate`, { waitUntil: 'domcontentloaded' })
-  // 队列里得真有还没发出去的活，关掉之后才谈得上"还会不会发请求"；不这么做断言等于空转
-  // （首次写这条时首屏正好全命中缓存，只发出 2 个请求，测不出任何东西）
+  // The queue must really hold work not yet sent; only then is “will it still send requests” after closing a question at all; otherwise the assertion idles
+  // (when this was first written the first screen happened to be all cached, only 2 requests went out, and nothing was measured)
   const q = await fillQueue(page, stall)
   const before = stall.held.length
   await page.close()
   await sleep(500)
-  await stall.release() // 把槽位腾出来：队列还活着的话，下一批立刻就会打出来
+  await stall.release() // free the slots: if the queue is still alive the next batch goes out at once
   await sleep(6_000)
   const late = stall.held.length - before
   await stall.off()
-  check('关掉标签页后 background 不再发新请求（会话随标签页撤掉）',
+  check('after closing the tab the background sends no new request (the session withdrawn with the tab)',
     q.confirmed && q.requests === GOOGLE_SLOTS && late === 0,
-    `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列补上 ${q.extra} 发、其中${q.confirmed ? '有没见过的请求体（确有排队的新批次，不是同一批重发）' : '全是同一批重发——队列里没有排队的活，这条断言无效'}；关掉标签页再放开全部槽位后新增 ${late} 个`)
+    `${q.pending} blocks pending, only ${q.requests} requests (${q.items} passages) ever reached the endpoint; after freeing one slot the queue filled in ${q.extra}, ${q.confirmed ? 'among them a body never seen (a queued new batch for certain, not the same batch resent)' : 'all the same batch resent — no queued work, this assertion is void'}; after closing the tab and freeing every slot ${late} more`)
 }
 
-// ── 导航离开：tabs.onRemoved 不覆盖这种情况（Codex 在 #59 指出）──────────
+// ── Navigating away: tabs.onRemoved does not cover this case (Codex on #59) ──────────
 {
   const stall = await stallEndpoint(GOOGLE)
   const page = await context.newPage()
   await page.goto(`https://arxiv.org/html/${PAPER3}#axt-translate`, { waitUntil: 'domcontentloaded' })
   const q = await fillQueue(page, stall)
   const before = stall.held.length
-  // 跳到非 arXiv 页面：content script 没了，也永远不会再发新的 scope 过来
+  // Jump to a non-arXiv page: the content script is gone and will never send a new scope again
   await page.goto('https://example.com/', { waitUntil: 'domcontentloaded' })
-  // 撤销不再是当场发生：`tabs.onUpdated` 的 loading 分不出同文档换 hash 与真的跳走，所以按住
-  // NAVIGATION_GRACE_MS（3 秒）等这个标签页有没有新请求，没有才撤。等过这段再放开槽位——
-  // 保住的性质没变（跳走之后队列会停），只是晚 3 秒（用户 2026-09-09 报的页内跳转全失败）
+  // The withdrawal no longer happens on the spot: `tabs.onUpdated`'s loading cannot tell a same-document hash change from a real departure, so it holds
+  // NAVIGATION_GRACE_MS (3 seconds) waiting for a new request from the tab, and withdraws only if none comes. Release the slots after that —
+  // the property kept is unchanged (after leaving the queue stops), only 3 seconds later (the in-page jumps the reader reported on 2026-09-09 all failed)
   await sleep(4_500)
   await stall.release()
   await sleep(6_000)
   const late = stall.held.length - before
   await stall.off()
   await page.close()
-  check('导航离开后 background 不再发新请求（会话随导航撤掉）',
+  check('after navigating away the background sends no new request (the session withdrawn with the navigation)',
     q.confirmed && q.requests === GOOGLE_SLOTS && late === 0,
-    `${q.pending} 个块待译，只有 ${q.requests} 发（${q.items} 段）打到过端点；放开一个槽位后队列补上 ${q.extra} 发、其中${q.confirmed ? '有没见过的请求体（确有排队的新批次，不是同一批重发）' : '全是同一批重发——队列里没有排队的活，这条断言无效'}；导航离开再放开全部槽位后新增 ${late} 个`)
+    `${q.pending} blocks pending, only ${q.requests} requests (${q.items} passages) ever reached the endpoint; after freeing one slot the queue filled in ${q.extra}, ${q.confirmed ? 'among them a body never seen (a queued new batch for certain, not the same batch resent)' : 'all the same batch resent — no queued work, this assertion is void'}; after navigating away and freeing every slot ${late} more`)
 }
 
-// ── side 模式下图注的对照高亮（issue #139）：屏幕上那份是克隆件 ──────────────
+// ── The hover highlight of a caption under side mode (issue #139): the one on screen is the clone ──────────────
 {
-  // 只有真实浏览器能证：判据是「哪一份有盒子」，而 happy-dom 量不出任何几何。
-  // 引擎用当前配置的那个（此处是 google-web）：#137 之后谷歌也有句对齐了，图注这类块照样登记
+  // Only a real browser can prove it: the criterion is “which copy has a box”, and happy-dom measures no geometry.
+  // The engine is the one configured (google-web here): since #137 Google has sentence alignment too, and blocks like captions are registered as usual
   const { page, logs } = await openPaper(PAPER, GOOGLE)
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)
@@ -919,16 +919,16 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await popup.close()
   await scrollThrough(page)
   await waitForLog(logs, IDLE, 120_000)
-  // **先选中要测的那个图注，再滚它**：翻译落地会把版面顶下去，先滚一个「第一个图注」等翻完，
-  // 它未必还在视口里，而 `getClientRects()` 与 `top > 0` 对视口下方的元素照样成立（Codex 在 #148 指出）
+  // **Select the caption to test first, then scroll it**: translations landing push the layout down; scrolling to “the first caption” first and waiting for its translation,
+  // it need not still be in the viewport, and `getClientRects()` with `top > 0` holds for elements below the viewport all the same (Codex on #148)
   await page.evaluate(() => document.querySelector('[data-axt-split] .ltx_caption[data-axt-id]')?.scrollIntoView({ block: 'center' }))
   await sleep(1500)
   const caption = await page.evaluate(async () => {
     const mode = document.documentElement.getAttribute('data-axt-mode')
-    // **必须是真被拆过的那张图里的图注**：表格 / 算法的图注不走拆图这条路，它们的译文本来就不在
-    // 克隆件里，拿它来断言 `inSplit` 会得到一个假失败（换 AXT_PAPER 时尤其容易撞上，Codex 在 #148 指出）
+    // **It must be a caption inside a figure really split**: the captions of tables / algorithms do not take the split path, their translations are never
+    // in the clone, and asserting `inSplit` on them gives a false failure (easy to hit when AXT_PAPER changes, Codex on #148)
     const src = [...document.querySelectorAll('[data-axt-split] .ltx_caption[data-axt-id]')].find(c => c.getClientRects().length)
-    if (!src) return { mode, reason: '没有可见的、属于拆图的原文图注' }
+    if (!src) return { mode, reason: 'no visible source caption belonging to a split figure' }
     const walk = document.createTreeWalker(src, NodeFilter.SHOW_TEXT)
     let point = null
     for (let t = walk.nextNode(); t && !point; t = walk.nextNode()) {
@@ -939,7 +939,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
         if (b.width > 0 && b.height > 0 && b.top > 0 && b.bottom < innerHeight) point = { x: b.left + b.width / 2, y: b.top + b.height / 2 }
       }
     }
-    if (!point) return { mode, reason: '图注上找不到可瞄准的字' }
+    if (!point) return { mode, reason: 'no character to aim at in the caption' }
     document.dispatchEvent(new PointerEvent('pointermove', { clientX: point.x, clientY: point.y, bubbles: true }))
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
     const bands = [...document.querySelectorAll('.axt-hl > div')]
@@ -952,21 +952,21 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     return { mode, source: side('source').length, target: side('target').length, inSplit }
   })
   await page.close()
-  check('side 模式：图注的对照高亮画在右栏那份克隆件上（issue #139）',
+  check('side mode: the caption\'s hover highlight is drawn on the clone in the right column (issue #139)',
     caption.mode === 'side' && caption.source > 0 && caption.target > 0 && caption.inSplit === true,
-    `模式 ${caption.mode}，原文 ${caption.source} 条底、译文 ${caption.target} 条底${caption.inSplit ? '（都落在克隆件里）' : ''}${caption.reason ? ` (${caption.reason})` : ''}`)
+    `mode ${caption.mode}, source ${caption.source} bands, translation ${caption.target} bands${caption.inSplit ? ' (both inside the clone)' : ''}${caption.reason ? ` (${caption.reason})` : ''}`)
 }
 
-// ── 摘要页的双语入口（issue #146）：点一下就进到「已经在翻」的全文页 ──────────
+// ── The bilingual entry on the abstract page (issue #146): one click lands on the full-text page “already translating” ──────────
 {
-  // 这条只有真实浏览器能证：插入点靠的是 arXiv 自己渲染的标记，而「点进去自动开始翻译」
-  // 跨了一次真实导航——两头都不是 happy-dom 里演得出来的
+  // Only a real browser can prove this: the insertion point relies on the markup arXiv itself renders, and “click through and translation starts of itself”
+  // crosses a real navigation — neither end can be acted out in happy-dom
   const page = await context.newPage()
   const logs = []
   page.on('console', m => { const t = m.text(); if (t.includes('[axt]')) logs.push({ t: Date.now(), text: t }) })
   await page.goto(`https://arxiv.org/abs/${PAPER}`, { waitUntil: 'domcontentloaded' })
-  // content script 是 `document_idle`，`domcontentloaded` 之后它未必已经跑过：立刻读 DOM 会读到空的，
-  // 而下一步的 click 因为自动等待反而会过——一条假失败加一条假通过
+  // The content script is `document_idle`, and after `domcontentloaded` it need not have run yet: reading the DOM at once reads nothing,
+  // while the click in the next step would pass anyway thanks to auto-waiting — one false failure plus one false pass
   await page.waitForSelector('.axt-abs-link', { timeout: 20_000 }).catch(() => {})
   const link = await page.evaluate(() => {
     const ours = document.querySelector('.axt-abs-link')
@@ -980,28 +980,28 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       count: document.querySelectorAll('.axt-abs-link').length,
     }
   })
-  check('摘要页：双语入口插在 arXiv 的 HTML 链接后面，只有一条（#146）',
+  check('the abstract page: the bilingual entry is inserted after arXiv\'s HTML link, exactly one (#146)',
     link.exists && link.afterHtmlLink && link.inSameList && link.count === 1 && /\/html\/.*#axt-translate$/.test(link.href ?? ''),
-    `「${link.text}」→ ${link.href}；紧跟 HTML 链接 ${link.afterHtmlLink}，同一个列表 ${link.inSameList}，共 ${link.count} 条`)
+    `“${link.text}” → ${link.href}; right after the HTML link ${link.afterHtmlLink}, same list ${link.inSameList}, ${link.count} in all`)
 
   await page.click('.axt-abs-link')
   await page.waitForURL(/\/html\/.*#axt-translate/, { timeout: 30_000 })
   const idle = idleOf(await waitForLog(logs, IDLE, 120_000))
   const rendered = await page.evaluate(() => document.querySelectorAll('.axt-t:not(.axt-pending, .axt-error)').length)
   await page.close()
-  check('摘要页：点进去不碰 popup 就已经在翻了（#146）',
+  check('the abstract page: clicked through, it is translating without touching the popup (#146)',
     !!idle && idle.requested > 0 && rendered > 0,
-    `${idle?.text ?? '(没等到 idle)'}；页面上 ${rendered} 个译文节点`)
+    `${idle?.text ?? '(no idle)'}; ${rendered} translation nodes on the page`)
 }
 
-// ── 页内跳转不是导航离开（用户 2026-09-09 报的：点引用跳到参考文献，那一整块全失败）──
+// ── An in-page jump is not navigating away (the reader's 2026-09-09 report: clicking a citation jumps to the references, and that whole block fails) ──
 {
-  // `tabs.onUpdated` 的 loading 分不出同文档换 hash 与真的跳走（实测两种情况 changeInfo 都只有
-  // {status:'loading'}），当场撤会话就把一个还活着的页面判死。只有真实浏览器能验：那个事件在
-  // 单元测试里不存在，而失败是「请求根本没发出去」，DOM 上只看得到 .axt-error
+  // `tabs.onUpdated`'s loading cannot tell a same-document hash change from a real departure (measured: in both cases changeInfo is only
+  // {status:'loading'}), and withdrawing the session on the spot pronounces a living page dead. Only a real browser can verify it: the event does not exist
+  // in the unit tests, and the failure is “the request was never sent”, of which the DOM shows only .axt-error
   const { page, logs } = await openPaper(PAPER3, GOOGLE)
   const first = idleOf(await waitForLog(logs, IDLE, 120_000))
-  // 不滚动，直接跳到参考文献区——正文里的引用链接就是这么跳的
+  // No scrolling, jump straight to the references — that is how a citation link in the body jumps
   const jumped = await page.evaluate(() => {
     const item = document.querySelector('.ltx_bibitem')
     if (!item?.id) return null
@@ -1015,18 +1015,18 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
     bib: document.querySelectorAll('.ltx_bibitem').length,
   }))
   await page.close()
-  check('页内跳转不撤会话：跳到参考文献后那一区照常翻完（用户 2026-09-09 反馈）',
+  check('an in-page jump does not withdraw the session: after jumping to the references that area translates as usual (the reader\'s 2026-09-09 report)',
     !!jumped && !!after && after.failed === 0 && dom.aborted === 0,
-    `跳到 #${jumped}，${dom.bib} 条参考文献；${after?.text ?? '(没等到第二条 idle)'}；页面上 ${dom.errors} 个错误块、其中 ${dom.aborted} 个是 aborted`)
+    `jumped to #${jumped}, ${dom.bib} references; ${after?.text ?? '(no second idle)'}; ${dom.errors} error blocks on the page, ${dom.aborted} of them aborted`)
 }
 
-// ── 设置页：样式切回默认；缓存统计与清空（§9）──────────────────────────
+// ── The settings page: the style back to the default; cache statistics and clearing (§9) ──────────────────────────
 {
   await options.bringToFront()
   await options.reload({ waitUntil: 'domcontentloaded' })
   await chooseStyle(options, '与原文相同')
 
-  // 前面两篇论文翻过，缓存里应当有条目；重载保证读到的是最新统计
+  // The two papers before translated, so the cache should hold entries; the reload guarantees the latest statistics are read
   await openSection(options, 'data')
   await options.getByText(/^[1-9]\d* 条 · /).waitFor({ timeout: 15_000 }).catch(() => undefined)
   const before = await options.getByText(/^\d+ 条 · /).textContent()
@@ -1034,32 +1034,32 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await options.getByRole('button', { name: '确认清空', exact: true }).click()
   await options.getByText('已清空', { exact: true }).waitFor({ timeout: 10_000 })
   const after = await options.getByText(/^\d+ 条 · /).textContent()
-  check('缓存管理：显示条数，清空后归零', /^[1-9]/.test(before ?? '') && /^0 条/.test(after ?? ''), `清空前「${before}」，清空后「${after}」`)
+  check('cache management: shows the entry count, zero after clearing', /^[1-9]/.test(before ?? '') && /^0 条/.test(after ?? ''), `before clearing “${before}”, after “${after}”`)
 }
 
-// ── 错 key + 降级链开启（§8.5）：LLM 报 auth 后自动切到 google-web，整页照常翻完 ──
+// ── A wrong key + the fallback chain on (§8.5): after the LLM reports auth it switches to google-web of itself, and the whole page translates as usual ──
 {
   await options.bringToFront()
-  // 「连接」问的是这个服务的端点通不通，必须如实报 auth：走备用服务的话免费服务会把它显示成成功，
-  // 用户以为 key 没问题、整页却都在用 Google 翻（issue #42 的同一类不一致，方向相反）
+  // “Connect” asks whether this service's endpoint works and must report auth truthfully: going through the fallback service, the free service would show it as a success,
+  // the reader would think the key fine while the whole page is translated by Google (the same kind of inconsistency as issue #42, the other way round)
   const bogusTest = await addService(options, { name: 'bogus key', baseURL: 'https://openrouter.ai/api/v1', model: 'deepseek/deepseek-v4-flash', apiKey: 'sk-or-v1-bogus-key-for-auth-test' })
-  check('错 key 时设置页的连接如实报失败，不被备用服务掩盖', /API Key/.test(bogusTest ?? '') && !/已连接/.test(bogusTest ?? ''), bogusTest)
+  check('with a wrong key the settings page\'s connection reports the failure truthfully, not masked by the fallback service', /API Key/.test(bogusTest ?? '') && !/已连接/.test(bogusTest ?? ''), bogusTest)
 
   const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
   const done = await waitForLog(logs, IDLE, 90_000)
   await sleep(2_000)
   const idle = idleOf(done)
-  // 降级那条 console.warn 现在打在 background 的控制台里，页面上看不到（§8.0）；
-  // 「确实试过首选引擎」改由 OpenRouter 的请求数作证，「用户看得见」由下面的 popup 检查作证
-  check('错 key + 降级开启：切到免费引擎，整页照常翻完、没有致命错误',
+  // The fallback's console.warn now prints in the background's console, invisible on the page (§8.0);
+  // “the preferred engine was really tried” is attested by OpenRouter's request count instead, “the reader can see it” by the popup check below
+  check('a wrong key + the fallback on: switched to the free engine, the whole page translated as usual, no fatal error',
     !!idle && idle.failed === 0 && idle.done > 0 && !/fatal:/.test(done?.text ?? '') && requests.length > 0,
-    `${done?.text ?? '(no idle line)'}；OpenRouter 请求 ${requests.length} 个`)
+    `${done?.text ?? '(no idle line)'}; ${requests.length} OpenRouter requests`)
 
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)
   await page.bringToFront()
-  // The rebuilt popup says it in the reader's words (UI.md S-P-14 pill "已改用", S-P-30 note
-  // "...后面的段落改用 Google 翻译..."); no developer word like 降级 appears anywhere in it
+  // The rebuilt popup says it in the reader's words (UI.md S-P-14 pill “switched”, S-P-30 note
+  // "…this page switched to Google Translate…"); no developer word like “fallback” appears anywhere in it
   await popup.getByText(/改用 Google 翻译/).waitFor({ timeout: 10_000 }).catch(() => undefined)
   const notice = await popup.getByText(/改用 Google 翻译/).count()
   check('popup says the page is now on the free service (the note under the card)', notice > 0, `note ${notice}`)
@@ -1068,20 +1068,20 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   await page.close()
 }
 
-// ── 错 key + 降级链关闭：恢复"401 → auth → 整队排空"的行为 ──
+// ── A wrong key + the fallback chain off: the “401 → auth → the whole queue drains” behaviour is back ──
 {
   await options.bringToFront()
   await setSwitch(options, '出问题时自动改用免费服务', false)
 
-  // 401 回来的时刻要记下来：断言"这之后不再有新请求"，而不是数首波有几个——
-  // 首波个数取决于令牌桶的突发节奏，快一点慢一点都会让 ≤ 20 这条落空（issue #82）
+  // The moment the 401 came back has to be recorded: the assertion is “no new request after this”, not how many the first wave had —
+  // the first wave's count depends on the token bucket's burst rhythm, and a little faster or slower breaks the ≤ 20 (issue #82)
   let firstAuthFailure = Number.POSITIVE_INFINITY
-  // 401 到达的**那一刻已经发出过几个请求**。用序号切、不用时间切（Codex 在 #95 指出）：
-  // 时间上留任何容差，都会把"槽位一腾出就立刻补发"的那些划到 401 之前、两个判据都管不到。
-  // 已经在飞的请求，它们的 `request` 事件必然早于这个 401 的 `response` 事件，序号就是精确的分界
+  // **A few requests were out already at the moment** the 401 arrived. Cut by sequence number, not by time (Codex on #95):
+  // any tolerance in time puts the ones “resent the moment a slot frees” before the 401, out of reach of both criteria.
+  // The requests already in flight had their `request` event necessarily before this 401's `response` event, so the sequence number is the exact boundary
   let sentAtAuth = -1
-  // 401 与 403 都算（Codex 在 #95 指出）：网关用 403 拒掉假 key 时，`openai-compat` 一样归成 auth、
-  // retry-policy 一样按整队排空处理，只听 401 会让这条断言在产品行为正确时反而红
+  // 401 and 403 both count (Codex on #95): when the gateway rejects a fake key with 403, `openai-compat` classes it as auth all the same,
+  // and retry-policy drains the whole queue all the same; listening for 401 alone would turn this assertion red while the product behaves correctly
   const onAuthResponse = response => {
     if (!response.url().includes('openrouter.ai')) return
     if (response.status() !== 401 && response.status() !== 403) return
@@ -1092,49 +1092,49 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   context.on('response', onAuthResponse)
   const { page, logs, requests } = await openPaper(PAPER, 'openrouter.ai')
   const done = await waitForLog(logs, IDLE, 60_000)
-  // 报 fatal 之后**把整篇滚一遍**：这才是能证伪的做法（Codex 在 #95 指出旧写法的 1 秒窗口太宽）。
-  // 旧写法只看首个 401 之后 1 秒内有没有新请求，可那一秒里本来就还有同一波在飞的批次要收尾，
-  // 数字是几都说明不了问题；实测那一秒里正好还有第二波 7 个请求，被窗口整个盖住。
+  // After fatal is reported **scroll the whole paper**: that is the falsifiable way (Codex on #95: the old 1-second window was too loose).
+  // The old code only looked for new requests within 1 second after the first 401, but in that second the same wave's in-flight batches were still finishing,
+  // and whatever the number it proved nothing; measured, that second held exactly a second wave of 7 requests, covered by the window whole.
   //
-  // 第二波本身不是重试：8 个批次占满并发槽同时挨 401，剩下的块是**之后**才攒成批入队的，
-  // 队列的 failQueue 只排空当下排着的那些。真正要守的承诺是**会话整个停下**——
-  // 292 个块里只碰了首屏那一小撮，剩下 200 多个再也不发。滚一遍就是对这条承诺的证伪试验：
-  // fatal 没把观察器摘掉的话，剩下的块会逐屏进入视口继续烧配额。
-  // idle 那行的时刻取自 console 监听器、请求时刻取自 request 监听器，各自 Date.now()，先后可能差几毫秒。
-  // 这点容差在这里遮不住任何东西：401 之后的请求已经由下面按序号切出来的 afterAuth 全数管着，
-  // 这一条只负责"滚一遍之后还有没有"，那种请求会落在 idle 之后好几秒
+  // The second wave itself is no retry: 8 batches filled the concurrency slots and hit 401 together, and the remaining blocks were batched and enqueued **afterwards**,
+  // while the queue's failQueue only drains what is queued at the time. The promise really to be kept is **the session stops whole** —
+  // of 292 blocks only the first screen's handful was touched, the remaining 200-odd never sent. Scrolling once is the falsification trial of that promise:
+  // if fatal did not detach the observer, the remaining blocks would enter the viewport screen by screen and keep burning quota.
+  // The idle line's time comes from the console listener, the request times from the request listener, each its own Date.now(), and the order may differ by a few milliseconds.
+  // That tolerance hides nothing here: the requests after the 401 are all covered by afterAuth, cut by sequence number below,
+  // and this one is only responsible for “any more after scrolling once”, which would land seconds after idle
   const EVENT_JITTER_MS = 50
   const idle = idleOf(done)
   await scrollThrough(page)
   await sleep(3_000)
   context.off('response', onAuthResponse)
-  // 首个 401 到 idle 之间那一段（Codex 在 #95 追加）。#96 修好之后这里是**零**：
-  // 那之前 `failQueue` 只排空当下排在 RequestQueue 里的任务，剩下的块还在 BatchQueue 里攒批、不在场，
-  // 攒完照常派发，于是必然还有一波（实测 +75~279 ms、7 个请求）。现在致命状态黏在引擎的队列对上，
-  // 后到的批次在 executeBatch 里当场拒掉，一个端点请求都不发。
-  // 这条同时卡住两种回归：队列没排空的话批次会随槽位腾出陆续摊开；批次被重试的话退避至少 1 秒。
-  // 两种都会让 afterAuth 非空。
+  // The stretch between the first 401 and idle (Codex adding on #95). Since #96 this is **zero**:
+  // before it `failQueue` drained only the tasks queued in the RequestQueue at the time, and the remaining blocks were still batching in the BatchQueue, absent,
+  // dispatched as usual once batched, so one more wave was certain (measured +75~279 ms, 7 requests). Now the fatal state sticks to the engine's queue pair,
+  // and a batch arriving later is refused on the spot in executeBatch, without one endpoint request.
+  // This one catches two regressions at once: with the queue undrained the batches spread out as slots free; with a batch retried the backoff is at least 1 second.
+  // Either makes afterAuth non-empty.
   const beforeAuth = requests.slice(0, Math.max(sentAtAuth, 0))
   const afterAuth = requests.slice(Math.max(sentAtAuth, 0))
   const afterIdle = requests.filter(r => r.t > (done?.t ?? 0) + EVENT_JITTER_MS)
   const offsets = requests.map(r => Math.round(r.t - firstAuthFailure)).sort((a, b) => a - b)
-  check('错 key + 降级关闭：401 之后整个会话停下，滚到底也不再发请求',
+  check('a wrong key + the fallback off: after the 401 the whole session stops, and scrolling to the bottom sends no more requests',
     Number.isFinite(firstAuthFailure) && sentAtAuth >= 0 && /fatal: auth/.test(done?.text ?? '')
-      && (idle?.requested ?? 0) < (idle?.total ?? 0) // 还有没请求过的块，滚一遍才证伪得了
-      && afterAuth.length === 0 // 401 之后一个请求都不再发（#96）
+      && (idle?.requested ?? 0) < (idle?.total ?? 0) // blocks not yet requested remain; only a scroll can falsify it
+      && afterAuth.length === 0 // not one request more after the 401 (#96)
       && afterIdle.length === 0,
-    `${idle?.requested}/${idle?.total} 个块请求过，共 ${requests.length} 个请求（相对首个 401 的时刻 ${offsets.join('/')} ms）；401 之前 ${beforeAuth.length} 个、之后 ${afterAuth.length} 个（应为 0，#96）；报 fatal 后整篇滚一遍新增 ${afterIdle.length} 个；${done?.text ?? '(no idle line)'}；DOM ${JSON.stringify(await countDom(page))}`)
+    `${idle?.requested}/${idle?.total} blocks requested, ${requests.length} requests in all (${offsets.join('/')} ms relative to the first 401); ${beforeAuth.length} before the 401, ${afterAuth.length} after (should be 0, #96); ${afterIdle.length} more after scrolling the whole paper once fatal was reported; ${done?.text ?? '(no idle line)'}; DOM ${JSON.stringify(await countDom(page))}`)
   const widgets = await page.evaluate(() => document.querySelectorAll('.axt-error').length)
-  check('失败块旁有重试 / 原因小部件（§7.6）', !!idle && widgets > 0 && widgets === idle.failed, `${widgets} 个小部件，${idle?.failed ?? '?'} 个失败块`)
+  check('failed blocks have a retry / reason widget beside them (§7.6)', !!idle && widgets > 0 && widgets === idle.failed, `${widgets} widgets, ${idle?.failed ?? '?'} failed blocks`)
   await page.close()
 }
 
-// ── only 模式的页内锚点（issue #44）─────────────────────────────────
-// only 把有译文的原块 display:none，指向它们的交叉引用就没了落点。实测修复前
-// 点「§7」（目标是隐藏的 p.ltx_p）scrollY 从 0 到 0，一动不动。12 篇 fixture 里
-// 3374 个页内锚点有 118 个（3.5%）的目标落在翻译块内
+// ── In-page anchors under only mode (issue #44) ─────────────────────────────────
+// only sets the original blocks with translations to display:none, and the cross-references pointing at them lose their landing spot. Measured before the fix:
+// clicking “§7” (the target a hidden p.ltx_p) took scrollY from 0 to 0, not moving at all. Of the 3374 in-page anchors in the 12 fixtures,
+// 118 (3.5%) have their target inside a translated block
 {
-  // 前面的错 key 段选了一个带假 key 的服务且关了自动改用：先切回免费服务
+  // The wrong-key parts before this chose a service with a fake key and switched the automatic fallback off: back to the free service first
   await options.bringToFront()
   await setSwitch(options, '出问题时自动改用免费服务', true)
   await chooseBuiltIn(options, 'Google 翻译')
@@ -1143,7 +1143,7 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
   const popup = await context.newPage()
   await popup.goto(`chrome-extension://${extId}/popup.html`)
   await page.bringToFront()
-  // openPaper 用 #axt-translate 自动开翻，这里只切模式——切换只改 <html> 上的属性，不重翻
+  // openPaper starts translating of itself with #axt-translate; only the mode is switched here — the switch changes the attribute on <html> only, no retranslation
   await popup.getByRole('button', { name: '仅译文', exact: true }).waitFor({ timeout: 10_000 })
   await popup.getByRole('button', { name: '仅译文', exact: true }).click()
   await sleep(500)
@@ -1170,10 +1170,10 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       candidates: hidden.length,
       href: a.getAttribute('href'),
       moved: scrollY - before,
-      // 落点必须是那条译文，且落在视口里——只看"滚动了"会把滚到任意位置也算通过
+      // The landing spot must be that translation, and inside the viewport — “it scrolled” alone would pass a scroll to any position
       landedOnTranslation: !!rect && rect.top >= -2 && rect.top < innerHeight,
       hash: location.hash,
-      // 克隆节点剥了 id：整页不该出现重复 id（issue #44 的第四条验收）
+      // The clone nodes are stripped of ids: no duplicate id may appear on the whole page (the fourth acceptance criterion of issue #44)
       duplicateIds: (() => {
         const seen = new Set(); const dupes = new Set()
         for (const el of document.querySelectorAll('[id]')) { if (seen.has(el.id)) dupes.add(el.id); seen.add(el.id) }
@@ -1181,16 +1181,16 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       })(),
     }
   })
-  check('only 模式下指向隐藏块的锚点落到它的译文上（issue #44）',
+  check('under only mode an anchor pointing at a hidden block lands on its translation (issue #44)',
     r.candidates > 0 && r.moved > 0 && r.landedOnTranslation && r.hash === r.href,
-    `${r.candidates} 个目标不可见的锚点；点 ${r.href} 滚了 ${r.moved}px，落在译文上 ${r.landedOnTranslation}，hash ${r.hash}`)
-  check('译文克隆没有制造重复 id（issue #44）', Array.isArray(r.duplicateIds) && r.duplicateIds.length === 0, `重复 id: ${JSON.stringify(r.duplicateIds)}`)
+    `${r.candidates} anchors with an invisible target; clicking ${r.href} scrolled ${r.moved}px, landed on the translation ${r.landedOnTranslation}, hash ${r.hash}`)
+  check('the translation clones made no duplicate id (issue #44)', Array.isArray(r.duplicateIds) && r.duplicateIds.length === 0, `duplicate ids: ${JSON.stringify(r.duplicateIds)}`)
 
-  // ── only 模式的原文悬浮对照（issue #141）────────────────────────────────
-  // only 把原块藏了，悬停时原文侧没有盒子可染色；停够 600 ms 后原文那一句会克隆进一块面板：
-  // 边距放得下就在边距里，否则贴句浮出。单元测试把几何全打了桩，「面板真的出现在该在的位置、
-  // 内容真是那一句原文、正文一个节点都没碰」只能在这里验。
-  // 页面还在 only 模式；先在前几段里找一段悬停能出色带的（有色带 = 登记了句边界），再看面板
+  // ── The source peek under only mode (issue #141) ────────────────────────────────
+  // only hides the original block, so on hover the source side has no box to tint; after a 600 ms dwell the source sentence is cloned into a panel:
+  // in the margin when the margin has room, otherwise floated by the sentence. The unit tests stub all the geometry, and “the panel really appears where it should,
+  // its content really is that source sentence, and not one body node is touched” can only be verified here.
+  // The page is still in only mode; first find, among the first few paragraphs, one whose hover shows bands (bands = sentence boundaries registered), then look at the panel
   const peekAt = async (forId, width) => {
     await page.setViewportSize({ width, height: 900 })
     await sleep(300)
@@ -1225,22 +1225,22 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       for (const t of candidates) {
         tried++
         t.scrollIntoView({ block: 'center' })
-        await sleep(250) // 页面滚动会关面板、120 ms 后再问一次指针在哪；等它静下来
+        await sleep(250) // a page scroll closes the panel and asks where the pointer is again 120 ms later; let it settle
         if (!(await hover(t))) continue
         if (document.querySelectorAll('.axt-hl > div').length > 0) { target = t; break }
       }
-      if (!target) return { reason: `${tried} 段里没有一段登记了句边界（悬停没有色带）` }
+      if (!target) return { reason: `none of ${tried} paragraphs registered sentence boundaries (no band on hover)` }
       const src = document.querySelector(`[data-axt-id="${target.getAttribute('data-axt-for')}"]`)
-      // §7.1 的对照只看这一对：整篇 article 在等驻留的这段时间里还在陆续插进懒加载的译文，
-      // 拿整篇做前后快照量到的是翻译进度，不是面板
+      // The §7.1 comparison looks at this pair only: while the dwell is awaited, the whole article keeps receiving lazily loaded translations,
+      // and a before/after snapshot of the whole article measures translation progress, not the panel
       const before = src.outerHTML + target.outerHTML
       const ids = document.querySelectorAll('[id]').length
-      // 色带立刻有，面板要等驻留
+      // The band is there at once; the panel waits for the dwell
       const early = document.querySelector('.axt-peek')
       const earlyShown = !!early && !early.hidden
       await sleep(900)
       const panel = document.querySelector('.axt-peek')
-      if (!panel || panel.hidden) return { reason: '停了 900 ms 面板没出现' }
+      if (!panel || panel.hidden) return { reason: 'no panel after a 900 ms dwell' }
       const text = norm(panel.textContent)
       const box = panel.getBoundingClientRect()
       const lines = [...document.querySelectorAll('.axt-hl > div')].map(b => b.getBoundingClientRect())
@@ -1249,13 +1249,13 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       const art = article.getBoundingClientRect()
       const at = panel.getAttribute('data-axt-peek-at')
       const placed = at === 'margin' ? box.left >= art.right - 1 : at === 'below' ? box.top >= bottom - 1 : at === 'above' ? box.bottom <= top + 1 : false
-      // 克隆成本：整段原文（比一句只多不少）克隆 20 次取均值
+      // The cloning cost: the whole source paragraph (never less than one sentence) cloned 20 times, averaged
       const range = document.createRange()
       range.selectNodeContents(src)
       const t0 = performance.now()
       for (let i = 0; i < 20; i++) range.cloneContents()
       const cloneMs = (performance.now() - t0) / 20
-      // 页面一滚面板立即关
+      // A page scroll closes the panel at once
       scrollBy(0, 40)
       await sleep(50)
       const afterScroll = document.querySelector('.axt-peek')?.hidden === true
@@ -1271,68 +1271,68 @@ check('设置页：删除自定义提示词后选回默认', promptGone, `残留
       }
     }, forId)
   }
-  // 1600 宽：文章 52rem 居中，两侧各 ≈ 384px，面板该在边距里
+  // 1600 wide: the article is 52rem centred, ≈ 384px each side, and the panel should be in the margin
   const wide = await peekAt(null, 1600)
-  check('only 模式：停 600 ms 后原文那一句浮出，内容是原块的子串、挂在 body 上（issue #141）',
+  check('only mode: after a 600 ms dwell the source sentence floats out, its content a substring of the original block, hanging on body (issue #141)',
     !!wide.at && wide.srcHas && wide.onBody && wide.visible && !wide.earlyShown,
-    wide.reason ?? `档位 ${wide.at}，${wide.textLen} 字，是原文子串 ${wide.srcHas}，在 body 上 ${wide.onBody}，可见 ${wide.visible}，未到驻留就出现 ${wide.earlyShown}`)
-  check('only 模式：宽窗口下面板在文章右侧边距里，且不碰正文（§7.1）',
+    wide.reason ?? `placement ${wide.at}, ${wide.textLen} characters, substring of the source ${wide.srcHas}, on body ${wide.onBody}, visible ${wide.visible}, shown before the dwell ${wide.earlyShown}`)
+  check('only mode: on a wide window the panel sits in the article\'s right margin and touches no body text (§7.1)',
     wide.at === 'margin' && wide.placed && wide.domUnchanged && wide.idsUnchanged,
-    wide.reason ?? `视口 ${wide.viewport}，边距 ${wide.margin}px，档位 ${wide.at}，位置对 ${wide.placed}，正文未变 ${wide.domUnchanged}，id 数未变 ${wide.idsUnchanged}`)
-  check('only 模式：页面一滚面板立即关', wide.afterScroll === true, wide.reason ?? `滚动后 hidden=${wide.afterScroll}`)
-  check('only 模式：整段原文克隆一次不到 10 ms', typeof wide.cloneMs === 'number' && wide.cloneMs < 10, wide.reason ?? `${wide.cloneMs?.toFixed(3)} ms / 次`)
-  // 1100 宽：边距只剩 ≈ 134px，面板贴句浮出、与所在块同宽
+    wide.reason ?? `viewport ${wide.viewport}, margin ${wide.margin}px, placement ${wide.at}, placed right ${wide.placed}, body unchanged ${wide.domUnchanged}, id count unchanged ${wide.idsUnchanged}`)
+  check('only mode: a page scroll closes the panel at once', wide.afterScroll === true, wide.reason ?? `after the scroll hidden=${wide.afterScroll}`)
+  check('only mode: cloning the whole source paragraph once takes under 10 ms', typeof wide.cloneMs === 'number' && wide.cloneMs < 10, wide.reason ?? `${wide.cloneMs?.toFixed(3)} ms per clone`)
+  // 1100 wide: only ≈ 134px of margin left, the panel floats by the sentence, as wide as its block
   const narrow = await peekAt(wide.forId ?? null, 1100)
-  check('only 模式：窄窗口下面板贴句浮出，与所在块同宽（issue #141）',
+  check('only mode: on a narrow window the panel floats by the sentence, as wide as its block (issue #141)',
     (narrow.at === 'below' || narrow.at === 'above') && narrow.placed && Math.abs(narrow.width - narrow.blockWidth) <= 2 && narrow.srcHas,
-    narrow.reason ?? `视口 ${narrow.viewport}，边距 ${narrow.margin}px，档位 ${narrow.at}，位置对 ${narrow.placed}，宽 ${narrow.width} vs 块 ${narrow.blockWidth}`)
+    narrow.reason ?? `viewport ${narrow.viewport}, margin ${narrow.margin}px, placement ${narrow.at}, placed right ${narrow.placed}, width ${narrow.width} vs block ${narrow.blockWidth}`)
   await page.close()
 }
 
-// ── 设置页：「清除 API Key」必须真的清掉 ────────────────────────────────────
-// 抽屉打开时表单里带着已存的 key，保存时读回那个 prop 就会把旧 key 原样写回（实测过的缺陷）。
-// 没有 key 时端点报的是「尚未配置」，与「无效或已过期」正好区分得开。
-// 放在最后：它多写两次服务配置、多发一次样本请求，不必夹进错 key 那两段之间。
+// ── The settings page: “Clear” on the API key must really clear it ────────────────────────────────────
+// The drawer opens with the stored key in its form, and a save that reads that prop back writes the old key back as it was (a measured defect).
+// With no key the endpoint reports “not configured”, which is distinct from “invalid or expired”.
+// Last on purpose: it writes the service configuration twice more and sends one more sample request, and need not sit between the two wrong-key parts.
 //
-// 那两段之间曾经出现过 7 个请求（应为 3），一度被当成本条守卫的干扰；实际根因是**过期的自动重开**
-// （Codex 在 #157 指出）：永久性换服务触发的 `start()` 在两次 await 之后不再校验会话，页面已经
-// 结束时仍会再开一轮，多出来的一波正是那 4 个请求。修好之后这里稳定回到 3 个
+// 7 requests (3 expected) once appeared between those two parts and were taken for interference with this guard; the real root cause was a **stale automatic restart**
+// (Codex on #157): the `start()` a permanent service change triggers no longer validated the session after two awaits, and with the page already
+// finished it opened one more round, the extra wave being exactly those 4 requests. Fixed, this is back at a stable 3
 {
   await options.bringToFront()
   const cleared = await clearKeyAndReconnect(options)
-  check('设置页：清除 API Key 后连接报「尚未配置」，不是把旧 key 写回去', /尚未配置/.test(cleared ?? ''), cleared)
+  check('the settings page: after clearing the API key the connection reports “not configured” rather than writing the old key back', /尚未配置/.test(cleared ?? ''), cleared)
 }
 
-// ── 界面语言（UI.md §6）─────────────────────────────────────────────
-// 最后一段：它把设置页整页重载，也把配置里的 uiLanguage 留在英文，别的用例不必受这个影响
+// ── The interface language (UI.md §6) ─────────────────────────────────────────────
+// The last part: it reloads the whole settings page and leaves uiLanguage in the configuration at English, and no other case need be affected
 {
   await options.bringToFront()
   await options.reload({ waitUntil: 'domcontentloaded' })
   await chooseUiLanguage(options, '界面语言', 'English')
   const nav = (await options.locator('nav').innerText()).replace(/\n+/g, ' ')
-  check('设置页跟着界面语言换成英文', /Services/.test(nav) && !/翻译服务/.test(nav), nav.slice(0, 60))
+  check('the settings page follows the interface language into English', /Services/.test(nav) && !/翻译服务/.test(nav), nav.slice(0, 60))
 
-  // popup 与论文页读的是同一份配置：三处都要跟着换，不是只有设置页
+  // The popup and the paper page read the same configuration: all three have to follow, not the settings page alone
   const enPopup = await context.newPage()
   await enPopup.goto(`chrome-extension://${extId}/popup.html`)
   await enPopup.waitForTimeout(600)
   const popupText = await enPopup.locator('main').innerText()
-  check('popup 跟着界面语言换成英文', /Open the HTML version|Translate this page/.test(popupText) && !/翻译本页|打开 arXiv/.test(popupText), popupText.split('\n')[0] ?? '')
+  check('the popup follows the interface language into English', /Open the HTML version|Translate this page/.test(popupText) && !/翻译本页|打开 arXiv/.test(popupText), popupText.split('\n')[0] ?? '')
   await enPopup.close()
 
-  // 换回中文，把配置留在这套测试的其余部分预期的样子
+  // Back to Chinese, leaving the configuration as the rest of this suite expects
   await options.bringToFront()
   await chooseUiLanguage(options, 'Interface language', '简体中文')
   const back = await options.locator('nav').innerText()
-  check('换回中文之后设置页也跟着回来', /翻译服务/.test(back), back.replace(/\n+/g, ' ').slice(0, 40))
+  check('switched back to Chinese, the settings page follows back too', /翻译服务/.test(back), back.replace(/\n+/g, ' ').slice(0, 40))
 }
 
-// ── 识别助手的安装引导（DESIGN §15.4，issue #102）与它前面的授权一步（ADR-0002）───────────────
-// 只在 macOS 上跑：别的平台安装脚本会立刻退出，那张卡只有一行「仅支持 macOS」。
-// `nativeMessaging` 是可选权限：Playwright 的全新 profile 里没有授予，所以主 context 里这张卡是**授权**那一步
-// （S-P-86b/c、S-O-86），而 Chrome 的授权提示是原生对话框、点不到。引导本身（两步、等待）在第二个 context 里跑：
-// 那份构建副本把权限写回 manifest 预先授予（ext-copy.mjs）；装好的 host manifest 又不在那个 profile 里，
-// 所以那边**必然**是「未安装」
+// ── The recognition helper's guided install (DESIGN §15.4, issue #102) and the permission step before it (ADR-0002) ───────────────
+// macOS only: on other platforms the install script exits at once, and the card is a single “macOS only” line.
+// `nativeMessaging` is an optional permission: Playwright's fresh profile has not granted it, so in the main context the card is the **permission** step
+// (S-P-86b/c, S-O-86), and Chrome's permission prompt is a native dialog that cannot be clicked. The guide itself (two steps, the wait) runs in a second context:
+// that build copy writes the permission back into the manifest, pre-granted (ext-copy.mjs); and the installed host manifest is not in that profile either,
+// so there it is **necessarily** “not installed”
 if (process.platform === 'darwin') {
   const paper = await openPaper(PAPER, GOOGLE)
   const popup = await context.newPage()
@@ -1340,7 +1340,7 @@ if (process.platform === 'darwin') {
   await paper.page.bringToFront()
   await popup.waitForTimeout(800)
 
-  // 前面的用例把图片翻译关掉了，而这张卡只在它开着时出现——先打开（顺带证明卡片跟着开关走）
+  // The earlier cases switched image translation off, and this card appears only with it on — switch it on first (and prove in passing that the card follows the switch)
   const imagesSwitch = popup.getByRole('switch', { name: '图片翻译', exact: true })
   if ((await imagesSwitch.getAttribute('aria-checked')) !== 'true') {
     await imagesSwitch.click()
@@ -1348,7 +1348,7 @@ if (process.platform === 'darwin') {
   }
   const allow = popup.getByRole('button', { name: '允许', exact: true })
   const shown = (await popup.locator('main').innerText()).replace(/\n+/g, ' | ')
-  check('授权：权限未授予时 popup 上是一行说明与「允许」，还没有安装引导（S-P-86b/c）',
+  check('permission: with the permission not granted the popup shows one line and “Allow”, and no install guide yet (S-P-86b/c)',
     await allow.isVisible() && shown.includes('图片翻译需要允许扩展与识别助手通信') && !shown.includes('图片翻译需要安装识别助手'), shown.slice(0, 120))
   await popup.screenshot({ path: `${SHOTS}/helper-permission.png` })
   await popup.close()
@@ -1356,11 +1356,11 @@ if (process.platform === 'darwin') {
   const optionsPage = await openOptions(context, extId)
   // The helper state arrives asynchronously (the page asks the background on mount): wait for the button, do not sample it
   const allowOnOptions = await optionsPage.getByRole('button', { name: '允许', exact: true }).waitFor({ timeout: 5_000 }).then(() => true, () => false)
-  check('授权：设置页图片翻译一节给的是「允许」按钮（S-O-86）', allowOnOptions, allowOnOptions ? '' : (await optionsPage.getByText(/识别助手/).first().textContent().catch(() => '')) ?? '')
+  check('permission: the image translation section of the settings page offers the “Allow” button (S-O-86)', allowOnOptions, allowOnOptions ? '' : (await optionsPage.getByText(/识别助手/).first().textContent().catch(() => '')) ?? '')
   await optionsPage.close()
   await paper.page.close()
 
-  // ── 第二个 context：权限预先授予的副本 → 未安装 → 两步引导 ──
+  // ── The second context: the copy with the permission pre-granted → not installed → the two-step guide ──
   const grantedExt = copyWithGrants(EXT, `${HERE}.ext-granted`, { permissions: ['nativeMessaging'] })
   const GRANTED_PROFILE = `${HERE}.profile-granted`
   rmSync(GRANTED_PROFILE, { recursive: true, force: true })
@@ -1374,7 +1374,7 @@ if (process.platform === 'darwin') {
   let [grantedWorker] = granted.serviceWorkers()
   if (!grantedWorker) grantedWorker = await granted.waitForEvent('serviceworker')
   const grantedId = grantedWorker.url().split('/')[2]
-  // popup 要站在一篇论文旁边（它查的是活动标签页）；这一页只打开，不翻译
+  // The popup has to stand beside a paper (it looks at the active tab); this page is only opened, not translated
   const paperTab = await granted.newPage()
   await paperTab.goto(`https://arxiv.org/html/${PAPER}`, { waitUntil: 'domcontentloaded' })
 
@@ -1389,39 +1389,39 @@ if (process.platform === 'darwin') {
   }
   const install = guide.getByRole('button', { name: '安装', exact: true })
   const card = (await guide.locator('main').innerText()).replace(/\n+/g, ' | ')
-  check('引导：权限已授予、未装助手时 popup 上只有一行提示与「安装」', await install.isVisible() && card.includes('图片翻译需要安装识别助手'), card.slice(0, 120))
+  check('the guide: with the permission granted and no helper the popup shows one hint line and “Install” only', await install.isVisible() && card.includes('图片翻译需要安装识别助手'), card.slice(0, 120))
 
   await install.click()
   await guide.waitForTimeout(300)
   const opened = (await guide.locator('main').innerText()).replace(/\n+/g, ' ')
-  // 两步，没有第三步：原来的「我已经装好了」按钮已经去掉
-  check('引导：就地展开成两步，没有「我已经装好了」',
+  // Two steps, no third: the old “I have installed it” button is gone
+  check('the guide: unfolds in place into two steps, without “I have installed it”',
     /打开「终端」/.test(opened) && /在终端中执行以下命令/.test(opened) && !/我已经装好了/.test(opened),
     opened.slice(0, 70))
 
   const command = guide.locator('button[title]').filter({ hasText: 'curl -fsSL' })
-  check('引导：命令块带着本扩展的 id', (await command.innerText()).includes(grantedId), grantedId)
+  check('the guide: the command block carries this extension\'s id', (await command.innerText()).includes(grantedId), grantedId)
 
   await command.click()
   await guide.waitForTimeout(500)
-  check('引导：复制之后说的是「无需返回此处」，不是让读者回来点确认',
+  check('the guide: after the copy it says “no need to come back here” rather than asking the reader to return and confirm',
     (await guide.locator('main').innerText()).includes('执行完成后自动生效，无需返回此处'), '')
 
-  // 关键的一条：等待在 background 里，popup 关了再开也接得上（§15.4）
+  // The crucial one: the wait lives in the background, and a popup closed and reopened picks it up (§15.4)
   await guide.goto('about:blank')
   await guide.goto(`chrome-extension://${grantedId}/popup.html`)
   await paperTab.bringToFront()
   await guide.waitForTimeout(800)
   await guide.getByRole('button', { name: '安装', exact: true }).click()
   await guide.waitForTimeout(400)
-  check('引导：重开 popup 之后同一次等待还在（状态在 background，不在组件里）',
+  check('the guide: after reopening the popup the same wait is still there (the state is in the background, not the component)',
     (await guide.locator('main').innerText()).includes('执行完成后自动生效'), '')
 
   await guide.screenshot({ path: `${SHOTS}/helper-onboarding.png` })
 
-  // service worker 闲置 30 秒会被回收，而**唤醒它的往往正是 popup 那条查询**：
-  // 查询必须等 `resume()` 读完 storage 才能回答，否则拿到的是还没恢复的 null（Codex 在 #166 指出）。
-  // worker 没被回收时这一条走的是内存那条路，同样该通过——两条路都不许把等待弄丢
+  // The service worker is reclaimed after 30 seconds idle, and **what wakes it is often exactly the popup's query**:
+  // the query must wait for `resume()` to finish reading storage before answering, or it gets the unrestored null (Codex on #166).
+  // With the worker not reclaimed this one takes the in-memory path and should pass just the same — neither path may lose the wait
   await guide.waitForTimeout(35_000)
   await guide.goto('about:blank')
   await guide.goto(`chrome-extension://${grantedId}/popup.html`)
@@ -1429,12 +1429,12 @@ if (process.platform === 'darwin') {
   await guide.waitForTimeout(1_000)
   await guide.getByRole('button', { name: '安装', exact: true }).click()
   await guide.waitForTimeout(400)
-  check('引导：service worker 被回收之后，等待仍然接得上',
+  check('the guide: after the service worker is reclaimed the wait is still picked up',
     (await guide.locator('main').innerText()).includes('执行完成后自动生效'), '')
   await guide.close()
 
-  // 剪贴板被挡住时走的是「请手动选中命令后复制」那条路——读者照做、装成了，
-  // 检测也必须已经在跑，否则页面上停着的图就一直停着（确认按钮已经没有了）
+  // With the clipboard blocked the path taken is “select the command and copy it by hand” — the reader does, installs,
+  // and the detection must be running already, or the figures waiting on the page wait forever (the confirm button is gone)
   const denied = await granted.newPage()
   await denied.addInitScript(() => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.reject(new Error('denied')) }, configurable: true })
@@ -1447,7 +1447,7 @@ if (process.platform === 'darwin') {
   await denied.locator('button[title]').filter({ hasText: 'curl -fsSL' }).click()
   await denied.waitForTimeout(600)
   const fallback = (await denied.locator('main').innerText()).replace(/\n+/g, ' | ')
-  check('引导：复制失败时给出手动办法，并且照样开始检测',
+  check('the guide: when the copy fails it offers the manual way and starts the detection all the same',
     fallback.includes('无法复制') && fallback.includes('执行完成后自动生效'), fallback.slice(-60))
   await denied.close()
 

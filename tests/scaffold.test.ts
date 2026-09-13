@@ -5,19 +5,19 @@ import { DOCUMENT_ROOT, RULES_VERSION } from '@/core/rules/latexml'
 import { isAxtMessage } from '@/shared/messages'
 import { handlePing } from '@/shared/ping'
 
-// 脚手架冒烟：同时证明 Vitest + WxtVitest 跑通、@/ 别名可用、happy-dom 能解析 fixture
-describe('脚手架', () => {
-  it('@/ 别名与规则模块可用', () => {
+// Scaffold smoke test: proves at once that Vitest + WxtVitest run, the @/ alias works, and happy-dom parses a fixture
+describe('scaffold', () => {
+  it('the @/ alias and the rule module are usable', () => {
     expect(typeof RULES_VERSION).toBe('string')
   })
 
-  it('happy-dom 能解析 fixture 并找到翻译根', () => {
+  it('happy-dom parses a fixture and finds the translation root', () => {
     const html = readFileSync(join(import.meta.dirname, 'fixtures/arxiv/2608.30667.html'), 'utf8')
     const doc = new DOMParser().parseFromString(html, 'text/html')
     expect(doc.querySelector(DOCUMENT_ROOT)).not.toBeNull()
   })
 
-  it('axt:ping 消息判定与处理', () => {
+  it('axt:ping message detection and handling', () => {
     expect(isAxtMessage({ type: 'axt:ping' })).toBe(true)
     expect(isAxtMessage({ type: 'axt:stats' })).toBe(true)
     expect(isAxtMessage({ type: 'other' })).toBe(false)

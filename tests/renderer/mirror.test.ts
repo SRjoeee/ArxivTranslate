@@ -9,7 +9,7 @@ import { renderText } from '@/core/renderer/translation'
 import { IMG_CLASS } from '@/core/marks'
 import { docOf, frag } from './helpers'
 
-/** 造出"某个容器里已有译文"的形状，容器判定才会生效 */
+/** Build the shape “some container already holds a translation”, so the container check applies */
 const withTranslation = (body: string) => {
   const doc = docOf(body)
   const blocks = extract(doc)
@@ -20,7 +20,7 @@ const withTranslation = (body: string) => {
 }
 
 describe('createMirrors', () => {
-  it('翻译开始前调用什么都不做——顶层元素那时既没有译文也没有块标记，会被整块复制（实测事故）', () => {
+  it('called before translation starts it does nothing — the top-level element has neither a translation nor a block mark then, and would be copied whole (a measured accident)', () => {
     const doc = docOf('<div class="ltx_abstract"><h6 class="ltx_title ltx_title_abstract">Abstract</h6>'
       + '<p class="ltx_p" id="a1">Long English abstract.</p></div>'
       + '<section class="ltx_section"><h2 class="ltx_title ltx_title_section">Intro</h2>'
@@ -28,7 +28,7 @@ describe('createMirrors', () => {
     expect(createMirrors(doc)).toBe(0)
   })
 
-  it('翻译进行中：还没轮到的章节不镜像，否则译文到达后会既有副本又有译文', () => {
+  it('translation in progress: sections not yet reached are not mirrored, or the translation would arrive next to a copy', () => {
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">One.</p></div>'
       + '<section class="ltx_section"><div class="ltx_para"><p class="ltx_p" id="p2">Two.</p></div></section>')
     const blocks = extract(doc)
@@ -40,18 +40,18 @@ describe('createMirrors', () => {
     expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
   })
 
-  it('块一标记就镜像公式，不等译文到达：公式本来就没有译文，等只是白等', () => {
-    // 实测 2312.17141：413 个镜像全部在翻译结束那一刻才出现，之前公式一直居中横跨两栏
+  it('formulas are mirrored as soon as the block is marked, without waiting for the translation: a formula has none to wait for', () => {
+    // Measured on 2312.17141: all 413 mirrors appeared the moment translation ended; until then the formulas stayed centred across both columns
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p>'
       + '<table class="ltx_equation" id="E1"><tbody><tr><td class="ltx_eqn_cell">x=1</td></tr></tbody></table></div>')
     markBlocks(extract(doc))
     expect(createMirrors(doc)).toBe(1)
     expect(doc.querySelector(`.ltx_equation.${MIRROR_CLASS}`)).not.toBeNull()
-    // 段落本身带块标记，绝不能被复制
+    // The paragraph itself carries a block mark and must never be copied
     expect(doc.querySelectorAll('.ltx_p')).toHaveLength(1)
   })
 
-  it('容器里没有译文的内容各补一份副本，标成 axt-t + axt-mirror', () => {
+  it('content without a translation inside the container gets a copy each, marked axt-t + axt-mirror', () => {
     const doc = withTranslation('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p>'
       + '<table class="ltx_equation" id="E1"><tbody><tr><td class="ltx_eqn_cell">x=1</td></tr></tbody></table></div>')
     expect(createMirrors(doc)).toBe(1)
@@ -63,36 +63,36 @@ describe('createMirrors', () => {
     expect(mirror.getAttribute(FOR_ATTR)).toMatch(/^mirror:/)
   })
 
-  it('参考文献只镜像序号：作者段 2026-09-06 起自己会翻，不再需要副本（§5.4）', () => {
+  it('references mirror the number only: since 2026-09-06 the author paragraph translates itself and needs no copy (§5.4)', () => {
     const doc = docOf('<ul class="ltx_biblist"><li class="ltx_bibitem" id="b1">'
       + '<span class="ltx_tag ltx_tag_bibitem">[1]</span>'
       + '<span class="ltx_bibblock">A. Author, B. Author.</span>'
       + '<span class="ltx_bibblock">Some title.</span></li></ul>')
     const blocks = extract(doc)
     markBlocks(blocks)
-    // 两段都是翻译单元，都拿到译文——作者段还被跳过时，它没有译文、要靠副本占住左栏
+    // Both paragraphs are translation units and get translations — while the author paragraph was still skipped, it had none and needed a copy to hold the left column
     expect(blocks.filter(b => b.kind === 'text')).toHaveLength(2)
     for (const b of blocks) renderText(b as TextBlock, frag(doc, '译文'))
     createMirrors(doc)
     const kinds = Array.from(doc.getElementById('b1')!.children)
-      .map(c => `${Array.from(c.classList).filter(x => x.startsWith('ltx_'))[0]}${c.classList.contains(MIRROR_CLASS) ? '(镜像)' : c.classList.contains(T_CLASS) ? '(译文)' : ''}`)
-    expect(kinds).toContain('ltx_tag(镜像)')
-    expect(kinds.filter(k => k === 'ltx_bibblock(镜像)')).toHaveLength(0)
-    expect(kinds.filter(k => k === 'ltx_bibblock(译文)')).toHaveLength(2)
+      .map(c => `${Array.from(c.classList).filter(x => x.startsWith('ltx_'))[0]}${c.classList.contains(MIRROR_CLASS) ? '(mirror)' : c.classList.contains(T_CLASS) ? '(translation)' : ''}`)
+    expect(kinds).toContain('ltx_tag(mirror)')
+    expect(kinds.filter(k => k === 'ltx_bibblock(mirror)')).toHaveLength(0)
+    expect(kinds.filter(k => k === 'ltx_bibblock(translation)')).toHaveLength(2)
   })
 
-  it('等待翻译的块不镜像：否则译文到达后会同时存在副本与译文', () => {
+  it('a block waiting for translation is not mirrored: or the translation would arrive next to a copy', () => {
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="p1">One.</p><p class="ltx_p" id="p2">Two.</p></div>')
     const blocks = extract(doc)
     markBlocks(blocks)
     renderText(blocks[0] as TextBlock, frag(doc, '译文'))
     createMirrors(doc)
-    // p2 还没翻译，但它是块，不能被镜像
+    // p2 is not translated yet, but it is a block and must not be mirrored
     expect(doc.getElementById('p2')!.nextElementSibling).toBeNull()
     expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
   })
 
-  it('已经有译文的块不镜像；内部含译文的容器自己不镜像，交给它的子元素', () => {
+  it('a block that has a translation is not mirrored; a container holding translations is not mirrored itself but leaves it to its children', () => {
     const doc = withTranslation('<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png">'
       + '<figcaption class="ltx_caption" id="c1">Cap.</figcaption></figure>')
     createMirrors(doc)
@@ -101,7 +101,7 @@ describe('createMirrors', () => {
     expect(figure.querySelector(`.${MIRROR_CLASS}`)?.tagName).toBe('IMG')
   })
 
-  it('幂等：重复调用不会叠加', () => {
+  it('idempotent: repeated calls do not stack', () => {
     const doc = withTranslation('<div class="ltx_para"><p class="ltx_p" id="p1">Text.</p>'
       + '<table class="ltx_equation" id="E1"><tbody><tr><td>x</td></tr></tbody></table></div>')
     expect(createMirrors(doc)).toBe(1)
@@ -109,7 +109,7 @@ describe('createMirrors', () => {
     expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(1)
   })
 
-  it('恢复原文时镜像一并删除，DOM 逐字回到原样', () => {
+  it('restoring the original removes the mirrors too, the DOM back byte for byte', () => {
     document.head.innerHTML = ''
     document.body.innerHTML = '<article class="ltx_document"><div class="ltx_para">'
       + '<p class="ltx_p" id="p1">Text.</p><table class="ltx_equation" id="E1"><tbody><tr><td>x</td></tr></tbody></table>'
@@ -123,8 +123,8 @@ describe('createMirrors', () => {
     expect(document.documentElement.outerHTML).toBe(before)
   })
 
-  it('堆叠区里不生成镜像：那里没有右栏，镜像只会变成同一列里的重复', () => {
-    // 多面板插图的分格（实测 2312.17141：每个面板的公式被复制了一份，页面上内容重复两遍）
+  it('no mirrors inside a stacked area: there is no right column there, and a mirror would only duplicate within the same column', () => {
+    // The panels of a multi-panel figure (measured on 2312.17141: every panel's formula was copied, the content twice on the page)
     const doc = docOf(`
       <div class="ltx_para"><p class="ltx_p">x</p><p class="ltx_p ${T_CLASS}" data-axt-for="1">译</p></div>
       <figure class="ltx_figure"><div class="ltx_flex_figure"><div class="ltx_flex_cell">
@@ -138,8 +138,8 @@ describe('createMirrors', () => {
     expect(doc.querySelectorAll('.ltx_flex_cell .axt-mirror')).toHaveLength(0)
   })
 
-  it('浮到页面外缘的边注与出版元数据不镜像：只会多一份重复', () => {
-    // 实测 2312.17141：DOI / 期刊 / CCS 那块被镜像成两份，左栏那份的浮动内容还压在右栏上
+  it('margin notes floated to the page edge and publication metadata are not mirrored: only a duplicate would come of it', () => {
+    // Measured on 2312.17141: the DOI / journal / CCS block was mirrored in two, and the floated content of the left copy pressed on the right column
     const doc = docOf(`
       <span class="ltx_pubnotes ltx_pubnotes_meta"><span class="ltx_pubnotes_content">DOI: x</span></span>
       <div class="ltx_para"><p class="ltx_p">x</p><p class="ltx_p ${T_CLASS}" data-axt-for="1">译</p></div>`)
@@ -147,15 +147,15 @@ describe('createMirrors', () => {
     expect(doc.querySelectorAll('.ltx_pubnotes')).toHaveLength(1)
   })
 
-  describe('图片叠加层（DESIGN §15.2）', () => {
-    /** 有图注块的插图：figure 是容器，img 是它的直接子元素 */
+  describe('the image overlay (DESIGN §15.2)', () => {
+    /** A figure with a caption block: figure is the container, img its direct child */
     const FIG = '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1"><figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption></figure>'
     const overlayOn = (doc: Document) => {
       const el = doc.querySelector('img') as HTMLImageElement
       renderImage({ id: el.id, el, kind: 'raster' as const }, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text: '静态电荷' }])
     }
 
-    it('图后面紧跟叠加层：已配对，不再镜像；叠加层自己也不镜像', () => {
+    it('the overlay right after the image: paired, no longer mirrored; the overlay itself is not mirrored either', () => {
       const doc = docOf(FIG)
       const blocks = extract(doc)
       markBlocks(blocks)
@@ -165,14 +165,14 @@ describe('createMirrors', () => {
       expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(1)
     })
 
-    it('没有叠加层时图照常镜像（回归：改动没有把普通镜像一起关掉）', () => {
+    it('without an overlay the image is mirrored as usual (regression: the change did not switch ordinary mirroring off)', () => {
       const doc = docOf(FIG)
       markBlocks(extract(doc))
       createMirrors(doc)
       expect(doc.querySelector(`.${MIRROR_CLASS}`)!.tagName).toBe('IMG')
     })
 
-    it('容器里装着图 + 叠加层的包裹层不整块镜像', () => {
+    it('a wrapper holding image + overlay inside the container is not mirrored whole', () => {
       const doc = docOf('<figure class="ltx_figure" id="F1"><div class="ltx_flex_cell ltx_flex_size_1"><img class="ltx_graphics" src="a.png" id="F1.g1"></div><figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption></figure>')
       markBlocks(extract(doc))
       overlayOn(doc)

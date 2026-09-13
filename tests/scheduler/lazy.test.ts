@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { extract, markBlocks, type Block } from '@/core/extractor'
 import { DEFAULT_PRELOAD, THRESHOLD_STEP, createLazyScheduler, observerThresholds, quantizeThreshold } from '@/core/scheduler/lazy'
 
-/** happy-dom 没有 IntersectionObserver：用假的记录 observe / unobserve，测试里手动 emit */
+/** happy-dom has no IntersectionObserver: a fake records observe / unobserve, and the tests emit by hand */
 class FakeIntersectionObserver {
   static instances: FakeIntersectionObserver[] = []
   observed = new Set<Element>()
@@ -13,7 +13,7 @@ class FakeIntersectionObserver {
   unobserve(el: Element) { this.observed.delete(el) }
   disconnect() { this.observed.clear() }
   takeRecords() { return [] }
-  /** 照真实 entry 的形状给字段：调度器要读 intersectionRatio / rootBounds / boundingClientRect */
+  /** Fields shaped after a real entry: the scheduler reads intersectionRatio / rootBounds / boundingClientRect */
   emit(targets: Element[], ratio = 1, rootHeight = 900 + 2 * DEFAULT_PRELOAD.margin) {
     this.callback(targets.map(target => ({
       target,
@@ -30,7 +30,7 @@ const PAGE = '<article class="ltx_document">'
   + '<p class="ltx_p" id="c">C<span class="ltx_note"><span class="ltx_note_outer"><span class="ltx_note_content" id="n">Note.</span></span></span></p>'
   + '<p class="ltx_p" id="d">D.</p></article>'
 
-/** 给元素一个布局盒：happy-dom 的 getBoundingClientRect 全是 0 */
+/** Give an element a layout box: happy-dom's getBoundingClientRect is all zeros */
 function layout(el: Element, top: number, height = 20) {
   el.getBoundingClientRect = () => ({ top, bottom: top + height, left: 0, right: 100, width: 100, height, x: 0, y: top, toJSON: () => ({}) })
 }
@@ -40,7 +40,7 @@ function setup(): { blocks: Block[]; entered: Block[][]; io: FakeIntersectionObs
   const blocks = extract(document)
   markBlocks(blocks)
   const by = Object.fromEntries(blocks.map(b => [b.id, b]))
-  // a 在首屏，b 在边距内，c / d 在很远处；脚注 n 没有布局盒
+  // a in the first screen, b within the margin, c / d far away; footnote n has no layout box
   layout(by.a!.el, 100)
   layout(by.b!.el, 900 + 500)
   layout(by.c!.el, 5000)
@@ -62,12 +62,12 @@ describe('createLazyScheduler', () => {
     document.body.innerHTML = ''
   })
 
-  it('参数照 Read Frog：rootMargin 取预翻译距离、threshold 取可见阈值', () => {
+  it('parameters as in Read Frog: rootMargin takes the preload distance, threshold the visibility threshold', () => {
     const { io } = setup()
     expect(io.options).toEqual({ rootMargin: '1000px 0px', threshold: 0 })
   })
 
-  it('播种：首屏与预翻译距离内的块同步进入、作一批；远处的交给观察器', () => {
+  it('seeding: blocks in the first screen and within the preload distance enter synchronously as one batch; far ones go to the observer', () => {
     const { entered, io, by } = setup()
     expect(entered).toHaveLength(1)
     expect(entered[0]!.map(b => b.id)).toEqual(['a', 'b'])
@@ -76,7 +76,7 @@ describe('createLazyScheduler', () => {
     expect(io.observed.has(by.a!.el)).toBe(false)
   })
 
-  it('进入即 unobserve、一次性；同一次回调里的块攒成一批', () => {
+  it('unobserved on entering, once only; blocks of one callback gather into one batch', () => {
     const { entered, io, by } = setup()
     io.emit([by.c!.el, by.d!.el])
     expect(entered).toHaveLength(2)
@@ -86,19 +86,19 @@ describe('createLazyScheduler', () => {
     expect(entered).toHaveLength(2)
   })
 
-  it('没有布局盒的脚注块挂在所在段落上，段落进入时一起进入', () => {
+  it('a footnote block without a layout box hangs on its paragraph and enters with it', () => {
     const { io, by } = setup()
     expect(io.observed.has(by.n!.el)).toBe(false)
     expect(io.observed.has(by.c!.el)).toBe(true)
   })
 
-  it('trigger：手动交出去的块不再等观察器；waiting 随之减少；disconnect 后清空', () => {
+  it('trigger: blocks handed over by hand no longer wait for the observer; waiting decreases; cleared after disconnect', () => {
     document.body.innerHTML = PAGE
     const blocks = extract(document)
     markBlocks(blocks)
     const entered: Block[][] = []
     const scheduler = createLazyScheduler(blocks, { ...DEFAULT_PRELOAD, onEnter: picked => entered.push(picked) })
-    // 全是零布局盒：谁都没播种；p 各自观察自己，脚注挂在 c 上
+    // All zero layout boxes: nobody is seeded; each p observes itself, the footnote hangs on c
     expect(entered).toHaveLength(0)
     expect(scheduler.waiting()).toBe(blocks.length)
     scheduler.trigger([blocks[0]!])
@@ -111,7 +111,7 @@ describe('createLazyScheduler', () => {
     expect(FakeIntersectionObserver.instances[0]!.observed.size).toBe(0)
   })
 
-  it('没有 IntersectionObserver 的环境：只播种，其余靠 trigger', () => {
+  it('an environment without IntersectionObserver: seeding only, the rest through trigger', () => {
     delete g.IntersectionObserver
     document.body.innerHTML = PAGE
     const blocks = extract(document)
@@ -125,7 +125,7 @@ describe('createLazyScheduler', () => {
   })
 })
 
-describe('播种与观察器用同一个 threshold（Codex 在 #35 指出）', () => {
+describe('seeding and the observer use the same threshold (Codex on #35)', () => {
   const g = globalThis as { IntersectionObserver?: unknown; innerHeight?: number }
   beforeEach(() => {
     FakeIntersectionObserver.instances = []
@@ -137,14 +137,14 @@ describe('播种与观察器用同一个 threshold（Codex 在 #35 指出）', (
     document.body.innerHTML = ''
   })
 
-  /** 造一个块，让它按给定的可见比例卡在边距边界上 */
+  /** Build a block stuck on the margin boundary at the given visible ratio */
   function seedWith(threshold: number, visibleRatio: number) {
     document.body.innerHTML = PAGE
     const blocks = extract(document)
     markBlocks(blocks)
     const by = Object.fromEntries(blocks.map(b => [b.id, b]))
     const height = 200
-    // 边距下沿是 innerHeight + margin = 800 + 1000 = 1800；让块只露出 visibleRatio 的高度
+    // The margin's lower edge is innerHeight + margin = 800 + 1000 = 1800; let the block show only visibleRatio of its height
     const top = 1800 - height * visibleRatio
     layout(by.a!.el, top, height)
     for (const id of ['b', 'c', 'd']) layout(by[id]!.el, 9000)
@@ -154,20 +154,20 @@ describe('播种与观察器用同一个 threshold（Codex 在 #35 指出）', (
     return { seeded: entered.flat().some(b => b.id === 'a'), observed: io.observed.has(by.a!.el) }
   }
 
-  it('threshold 0：擦到边就播种（默认行为不变）', () => {
+  it('threshold 0: touching the edge seeds (the default behaviour unchanged)', () => {
     expect(seedWith(0, 0.05)).toEqual({ seeded: true, observed: false })
   })
 
-  it('threshold 0.5：只露出 20% 的块不播种，交给观察器按比例判', () => {
+  it('threshold 0.5: a block showing 20% only is not seeded and left to the observer\'s ratio check', () => {
     expect(seedWith(0.5, 0.2)).toEqual({ seeded: false, observed: true })
   })
 
-  it('threshold 0.5：露出 80% 的块照常播种', () => {
+  it('threshold 0.5: a block showing 80% is seeded as usual', () => {
     expect(seedWith(0.5, 0.8)).toEqual({ seeded: true, observed: false })
   })
 })
 
-/** 一个块，高度可控，起始位置在很远处（只能走观察器） */
+/** One block of controllable height, starting far away (observer only) */
 function oneWith(height: number, threshold: number) {
   document.body.innerHTML = '<article class="ltx_document"><p class="ltx_p" id="a">A.</p></article>'
   const blocks = extract(document)
@@ -178,30 +178,30 @@ function oneWith(height: number, threshold: number) {
   return { io: FakeIntersectionObserver.instances[0]!, entered, el: blocks[0]!.el }
 }
 
-describe('可见比例阈值真的起作用（Codex 在 #32 / #36 指出）', () => {
+describe('the visibility threshold really applies (Codex on #32 / #36)', () => {
   const g = globalThis as { IntersectionObserver?: unknown; innerHeight?: number }
   beforeEach(() => { FakeIntersectionObserver.instances = []; g.IntersectionObserver = FakeIntersectionObserver; g.innerHeight = 900 })
   afterEach(() => { delete g.IntersectionObserver; document.body.innerHTML = '' })
 
   const one = oneWith
 
-  it('比例不够就不翻：threshold 0.5 时露出一成的块不该被触发', () => {
+  it('not translated below the ratio: at threshold 0.5 a block showing a tenth must not be triggered', () => {
     const { io, entered, el } = one(200, 0.5)
-    // 初始通知：isIntersecting 为真（定义是"比例 > 0"），但比例只有 0.1
+    // The initial notification: isIntersecting true (defined as “ratio > 0”), but the ratio is only 0.1
     io.emit([el], 0.1, 900)
     expect(entered).toEqual([])
     io.emit([el], 0.6, 900)
     expect(entered.flat()).toHaveLength(1)
   })
 
-  it('比视口还高的块用够得着的阈值：threshold 1 也要能翻，否则那张大表一辈子不翻', () => {
-    // 元素 3000 高、root 只有 900：比例封顶在 0.3，要求 1 的话永远不满足
+  it('a block taller than the viewport gets a reachable threshold: threshold 1 must still translate, or that big table never does', () => {
+    // The element is 3000 high, the root only 900: the ratio caps at 0.3, and requiring 1 is never met
     const { io, entered, el } = one(3000, 1)
     io.emit([el], 0.3, 900)
     expect(entered.flat()).toHaveLength(1)
   })
 
-  it('够得着的块仍然按原阈值要求：不是所有块都放行', () => {
+  it('a reachable block is still held to the original threshold: not every block is let through', () => {
     const { io, entered, el } = one(300, 1)
     io.emit([el], 0.9, 900)
     expect(entered).toEqual([])
@@ -209,23 +209,23 @@ describe('可见比例阈值真的起作用（Codex 在 #32 / #36 指出）', ()
     expect(entered.flat()).toHaveLength(1)
   })
 
-  it('threshold 0（默认）时行为不变：任何相交都触发', () => {
+  it('at threshold 0 (the default) the behaviour is unchanged: any intersection triggers', () => {
     const { io, entered, el } = one(200, 0)
     io.emit([el], 0.01, 900)
     expect(entered.flat()).toHaveLength(1)
   })
 })
 
-describe('注册给观察器的比例点要覆盖钳过的阈值（Codex 在 #76 指出）', () => {
-  // 观察器**只在跨越注册值时**回调。只注册 [0, threshold] 的话，一个比例上限低于 threshold 的
-  // 超大块跨过 0 之后就再没有通知，钳到上限的判定永远等不到能通过的那一次。
-  // Chromium 实测（3000 px 元素 / 900 px root / threshold 1）：注册 [0,1] 全程一次回调、ratio 0.267；
-  // 换成 5% 细网格后拿到了 ratio 0.3。tests/e2e/layout.mjs 里有一条守着真实浏览器的那一面
-  it('threshold 为 0（默认）时仍是单个 0：任何相交都算进入', () => {
+describe('the ratio points registered with the observer must cover the clamped threshold (Codex on #76)', () => {
+  // The observer calls back **only when a registered value is crossed**. Registering [0, threshold] alone, an oversized block whose ratio cap is below
+  // threshold gets no notification after crossing 0, and the check clamped to the cap never sees the one that could pass.
+  // Chromium, measured (3000 px element / 900 px root / threshold 1): with [0,1] registered one callback in all, ratio 0.267;
+  // with a 5% grid it got ratio 0.3. tests/e2e/layout.mjs has a case guarding the real-browser side
+  it('at threshold 0 (the default) it is still the single 0: any intersection counts as entering', () => {
     expect(observerThresholds(0)).toBe(0)
   })
 
-  it('threshold 大于 0 时是 5% 一档的细网格，含 0 与 1', () => {
+  it('at a threshold above 0 it is a 5% grid, 0 and 1 included', () => {
     const t = observerThresholds(0.5) as number[]
     expect(Array.isArray(t)).toBe(true)
     expect(t).toHaveLength(21)
@@ -233,9 +233,9 @@ describe('注册给观察器的比例点要覆盖钳过的阈值（Codex 在 #76
     expect(t.at(-1)).toBe(1)
   })
 
-  it('任何可达上限都能找到一个不高于它的注册点，差距不超过 5%', () => {
+  it('every reachable cap has a registered point no higher than it, at most 5% below', () => {
     const grid = observerThresholds(1) as number[]
-    // 元素高 / root 高 的各种比值：上限 = root / 元素
+    // Various ratios of element height / root height: the cap = root / element
     for (const ratio of [0.3, 0.07, 0.42, 0.99, 0.5, 0.13]) {
       const usable = grid.filter(g => g <= ratio + 1e-9)
       expect(usable.length).toBeGreaterThan(0)
@@ -244,22 +244,22 @@ describe('注册给观察器的比例点要覆盖钳过的阈值（Codex 在 #76
   })
 })
 
-describe('判定与注册用同一套刻度（Codex 在 #81 指出）', () => {
+describe('the check and the registration use one scale (Codex on #81)', () => {
   const g = globalThis as { IntersectionObserver?: unknown; innerHeight?: number }
   beforeEach(() => { FakeIntersectionObserver.instances = []; g.IntersectionObserver = FakeIntersectionObserver; g.innerHeight = 900 })
   afterEach(() => { delete g.IntersectionObserver; document.body.innerHTML = '' })
 
-  // 通知里带的是**当时的真实比例**，所以上限落在两个网格点之间的元素永远拿不到
-  // 「比例等于上限」的那一次。Chromium 实测（2700 px 元素 / 900 px root，上限 0.3333）：
-  // 跨越 0.30 的那次报 0.30000001，之后再没有回调——拿精确的 0.3333 去比就永远不通过
-  it('可达上限向下对齐到网格', () => {
+  // The notification carries the **real ratio of the moment**, so an element whose cap falls between two grid points never gets
+  // the one where “the ratio equals the cap”. Chromium, measured (2700 px element / 900 px root, cap 0.3333):
+  // the crossing of 0.30 reports 0.30000001 and no callback follows — compared against the exact 0.3333 it never passes
+  it('the reachable cap is aligned down to the grid', () => {
     expect(quantizeThreshold(1 / 3)).toBeCloseTo(0.3, 10)
     expect(quantizeThreshold(0.3)).toBeCloseTo(0.3, 10)
     expect(quantizeThreshold(0.0741)).toBeCloseTo(0.05, 10)
     expect(quantizeThreshold(1)).toBeCloseTo(1, 10)
   })
 
-  it('对齐后的值一定是注册过的网格点', () => {
+  it('the aligned value is always a registered grid point', () => {
     const grid = observerThresholds(1) as number[]
     for (const cap of [1 / 3, 0.07, 900 / 2700, 900 / 1234, 0.999]) {
       const q = quantizeThreshold(cap)
@@ -269,22 +269,22 @@ describe('判定与注册用同一套刻度（Codex 在 #81 指出）', () => {
     }
   })
 
-  it('不在网格上的配置值也要注册进去（Codex 在 #81 指出）', () => {
-    // 用户可以填 0.33：不注册它的话，上限在 0.33–0.35 之间的块会卡死——
-    // 跨越 0.30 的回调报 0.30 < 0.33 被拒，0.35 又够不着
+  it('a configured value off the grid is registered too (Codex on #81)', () => {
+    // The reader may enter 0.33: unregistered, a block with its cap between 0.33 and 0.35 is stuck —
+    // the callback crossing 0.30 reports 0.30 < 0.33 and is refused, and 0.35 is out of reach
     const t = observerThresholds(0.33) as number[]
     expect(t).toContain(0.33)
     expect(t).toHaveLength(22)
     expect([...t].sort((a, b) => a - b)).toEqual(t)
   })
 
-  it('正好落在网格上的配置值不重复注册', () => {
+  it('a configured value exactly on the grid is not registered twice', () => {
     const t = observerThresholds(0.5) as number[]
     expect(t).toHaveLength(21)
     expect(t.filter(v => Math.abs(v - 0.5) < 1e-9)).toHaveLength(1)
   })
 
-  it('配置值不在网格上、但块够得着它：按配置值判，回调也到得了', () => {
+  it('a configured value off the grid that the block can reach: judged by the configured value, and the callback arrives', () => {
     const { io, entered, el } = oneWith(300, 0.33)
     io.emit([el], 0.32, 900)
     expect(entered).toEqual([])
@@ -292,7 +292,7 @@ describe('判定与注册用同一套刻度（Codex 在 #81 指出）', () => {
     expect(entered.flat()).toHaveLength(1)
   })
 
-  it('够得着配置值时不降级：正常大小的块仍按用户配的比例要求', () => {
+  it('no degrading when the configured value is reachable: a block of normal size is still held to the reader\'s ratio', () => {
     const { io, entered, el } = oneWith(300, 0.5)
     io.emit([el], 0.4, 900)
     expect(entered).toEqual([])
@@ -300,20 +300,20 @@ describe('判定与注册用同一套刻度（Codex 在 #81 指出）', () => {
     expect(entered.flat()).toHaveLength(1)
   })
 
-  it('上限落在网格点之间：按对齐后的值放行（实测里那次 0.30000001）', () => {
-    // 2700 px 元素、900 px root：上限 0.3333，对齐到 0.30
+  it('the cap between grid points: let through at the aligned value (the measured 0.30000001)', () => {
+    // A 2700 px element, a 900 px root: cap 0.3333, aligned to 0.30
     const { io, entered, el } = oneWith(2700, 1)
     io.emit([el], 0.30000001, 900)
     expect(entered.flat()).toHaveLength(1)
   })
 
-  it('还没到对齐后的阈值就不放行', () => {
+  it('not let through before the aligned threshold', () => {
     const { io, entered, el } = oneWith(2700, 1)
     io.emit([el], 0.28, 900)
     expect(entered).toEqual([])
   })
 
-  it('泛型：只要有 el 就能调度——图片目标（§15）与文字块共用同一套观察器', () => {
+  it('generic: anything with an el can be scheduled — image targets (§15) and text blocks share one observer', () => {
     document.body.innerHTML = '<article class="ltx_document"><img class="ltx_graphics" id="g1"><img class="ltx_graphics" id="g2"></article>'
     const targets = Array.from(document.querySelectorAll('img')).map(el => ({ id: el.id, el: el as HTMLImageElement }))
     layout(targets[0]!.el, 100)

@@ -3,10 +3,10 @@ import { T_CLASS } from '@/core/marks'
 import { alignPairMargins, clearPairMargins, readPairMargins, writePairMargins } from '@/core/renderer/pair-margins'
 import { docOf } from './helpers'
 
-/** 站点里形如 ar5iv `.ltx_role_affiliation + .ltx_role_affiliation` 的相邻兄弟边距规则 */
+/** The site's adjacent-sibling margin rule of the form ar5iv `.ltx_role_affiliation + .ltx_role_affiliation` */
 const SITE_CSS = '.aff + .aff { margin-top: 8px }'
 
-/** 作者区的形状：两对（邮箱、机构），译文复制原块的 class */
+/** The author area's shape: two pairs (email, affiliation), the translation copying the original block's class */
 function setup(css = SITE_CSS): { original: HTMLElement; translation: HTMLElement } {
   document.head.innerHTML = `<style>${css}</style>`
   document.body.innerHTML = `<article class="ltx_document"><span class="box"
@@ -17,49 +17,49 @@ function setup(css = SITE_CSS): { original: HTMLElement; translation: HTMLElemen
   return { original, translation: original.nextElementSibling as HTMLElement }
 }
 
-/** happy-dom 对没有声明的边距返回空串，浏览器返回 "0px" */
+/** happy-dom returns an empty string for an undeclared margin, a browser "0px" */
 const mt = (el: Element) => getComputedStyle(el).marginTop || '0px'
 
 describe('alignPairMargins', () => {
-  it('译文插进来会改写相邻兄弟规则的匹配结果，同一对的上边距因此不一致', () => {
+  it('an inserted translation changes what the adjacent-sibling rule matches, so the top margins of a pair disagree', () => {
     const { original, translation } = setup()
-    // 原文的前一个兄弟是上一条译文（.mail），译文的前一个兄弟是自己的原文（.aff）
+    // The source's previous sibling is the previous translation (.mail); the translation's previous sibling is its own source (.aff)
     expect(mt(original)).toBe('0px')
     expect(mt(translation)).toBe('8px')
   })
 
-  it('把原文的上边距抄到译文上，两边计算值一致', () => {
+  it('copies the source\'s top margin onto the translation, and the computed values agree', () => {
     const { original, translation } = setup()
     expect(alignPairMargins(document)).toBe(1)
     expect(mt(translation)).toBe(mt(original))
     expect(translation.style.marginTop).toBe('0px')
   })
 
-  it('幂等：重复调用不再报告改动（值已经写好）', () => {
+  it('idempotent: a repeated call reports no change (the value is written already)', () => {
     setup()
     expect(alignPairMargins(document)).toBe(1)
     expect(alignPairMargins(document)).toBe(0)
   })
 
-  it('重算时先擦掉上一轮的值，站点边距变了能跟着改', () => {
+  it('a recomputation wipes the previous round\'s value first, so a changed site margin is followed', () => {
     const { translation } = setup()
     alignPairMargins(document)
     expect(translation.style.marginTop).toBe('0px')
-    // 窗口变化后站点样式给出新的边距（这里直接换规则模拟）
+    // After a viewport change the site style gives a new margin (imitated here by swapping the rule)
     document.head.innerHTML = '<style>.aff { margin-top: 5px }</style>'
-    // 两边都成了 5px，本来就一致：擦掉上一轮写死的 0px 也算一次改动
+    // Both became 5px and agree by themselves: wiping the 0px written last round still counts as a change
     expect(alignPairMargins(document)).toBe(1)
     expect(translation.style.marginTop).toBe('')
     expect(mt(translation)).toBe('5px')
   })
 
-  it('原节点不被改写（§7.1）', () => {
+  it('the original node is not rewritten (§7.1)', () => {
     const { original } = setup()
     alignPairMargins(document)
     expect(original.getAttribute('style')).toBeNull()
   })
 
-  it('clearPairMargins 把内联边距还给站点样式', () => {
+  it('clearPairMargins gives the inline margins back to the site style', () => {
     const { translation } = setup()
     alignPairMargins(document)
     clearPairMargins(document)
@@ -67,15 +67,15 @@ describe('alignPairMargins', () => {
     expect(mt(translation)).toBe('8px')
   })
 
-  it('前一个兄弟也是译文（镜像挨着译文）时不配对', () => {
+  it('no pairing when the previous sibling is a translation too (a mirror next to a translation)', () => {
     document.head.innerHTML = ''
     document.body.innerHTML = `<article class="ltx_document"><span class="c">x</span
       ><span class="c ${T_CLASS}">甲</span><span class="c ${T_CLASS}">乙</span></article>`
     expect(alignPairMargins(document)).toBe(0)
   })
 
-  it('拆分克隆里的译文不参与对齐：它前面的兄弟不是原文', () => {
-    // 克隆件里原文成员已被摘掉，说明译文的前一个兄弟是插图，会抄到插图的边距（Codex 在 #26 指出）
+  it('a translation inside a split clone takes no part in the alignment: its previous sibling is no source', () => {
+    // Inside the clone the source member was removed, so the translation's previous sibling is the figure, whose margin it would copy (Codex on #26)
     document.head.innerHTML = '<style>img { margin-top: 30px }</style>'
     document.body.innerHTML = `<article class="ltx_document"><figure class="ltx_figure axt-split ${T_CLASS}">
       <img src="a.png"><figcaption class="ltx_caption ${T_CLASS}">图 1</figcaption></figure></article>`
@@ -84,13 +84,13 @@ describe('alignPairMargins', () => {
   })
 })
 
-describe('读写拆开（issue #46）：整理层把读排在任何写之前', () => {
-  it('readPairMargins 不写内联边距，writePairMargins 才写；合起来与 alignPairMargins 等价', () => {
+describe('reads and writes apart (issue #46): the tidy layer puts every read before any write', () => {
+  it('readPairMargins writes no inline margin, writePairMargins does; together they equal alignPairMargins', () => {
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" style="margin-top: 8px">A</p><p class="ltx_p axt-t" data-axt-for="a">译</p></div>')
     const t = doc.querySelector('.axt-t') as HTMLElement
     const plan = readPairMargins(doc)
     expect(plan.pairs).toHaveLength(1)
-    expect(t.style.marginTop).toBe('') // 读阶段不写
+    expect(t.style.marginTop).toBe('') // the read phase writes nothing
     const changed = writePairMargins(plan)
     const again = docOf('<div class="ltx_para"><p class="ltx_p" style="margin-top: 8px">A</p><p class="ltx_p axt-t" data-axt-for="a">译</p></div>')
     expect(changed).toBe(alignPairMargins(again))

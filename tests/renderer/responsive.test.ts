@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MODE_ATTR } from '@/core/renderer/attrs'
 import { createModeController } from '@/core/renderer/responsive'
-/** 可控的 matchMedia 替身 */
+/** A controllable stand-in for matchMedia */
 function fakeMedia(matches: boolean) {
   const listeners = new Set<() => void>()
   return {
@@ -19,7 +19,7 @@ const docOf = () => new DOMParser().parseFromString('<!doctype html><html><body>
 const modeOf = (doc: Document) => doc.documentElement.getAttribute(MODE_ATTR)
 
 describe('createModeController', () => {
-  it('宽视口：side 原样生效', () => {
+  it('a wide viewport: side applies as it is', () => {
     const doc = docOf()
     const { media } = fakeMedia(false)
     const c = createModeController(doc, 'side', { media })
@@ -27,7 +27,7 @@ describe('createModeController', () => {
     expect(modeOf(doc)).toBe('side')
   })
 
-  it('窄视口：side 自动降级为 stack，但偏好仍是 side', () => {
+  it('a narrow viewport: side falls back to stack of itself, the preference still side', () => {
     const doc = docOf()
     const { media } = fakeMedia(true)
     const c = createModeController(doc, 'side', { media })
@@ -36,7 +36,7 @@ describe('createModeController', () => {
     expect(modeOf(doc)).toBe('stack')
   })
 
-  it('变窄自动降级，变宽自动回到 side，并回调', () => {
+  it('narrowing falls back of itself, widening returns to side of itself, with a callback', () => {
     const doc = docOf()
     const m = fakeMedia(false)
     const seen: string[] = []
@@ -49,7 +49,7 @@ describe('createModeController', () => {
     expect(c.preference()).toBe('side')
   })
 
-  it('stack 与 only 不受视口影响', () => {
+  it('stack and only are unaffected by the viewport', () => {
     const doc = docOf()
     const m = fakeMedia(true)
     const c = createModeController(doc, 'only', { media: m.media })
@@ -58,7 +58,7 @@ describe('createModeController', () => {
     expect(c.effective()).toBe('only')
   })
 
-  it('choose 返回实际生效的模式：窄视口选 side 得到 stack', () => {
+  it('choose returns the mode in effect: side on a narrow viewport gives stack', () => {
     const doc = docOf()
     const m = fakeMedia(true)
     const c = createModeController(doc, 'stack', { media: m.media })
@@ -68,7 +68,7 @@ describe('createModeController', () => {
     expect(modeOf(doc)).toBe('only')
   })
 
-  it('stop 之后不再响应视口变化，监听器被移除', () => {
+  it('after stop it no longer responds to viewport changes, the listener removed', () => {
     const doc = docOf()
     const m = fakeMedia(false)
     const c = createModeController(doc, 'side', { media: m.media })
@@ -79,14 +79,14 @@ describe('createModeController', () => {
     expect(c.effective()).toBe('side')
   })
 
-  it('没有 matchMedia 的环境视为不窄', () => {
+  it('an environment without matchMedia counts as not narrow', () => {
     const doc = docOf()
     const c = createModeController(doc, 'side', { media: null })
     expect(c.effective()).toBe('side')
     expect(() => c.stop()).not.toThrow()
   })
 
-  it('同一个模式重复应用不重复回调', () => {
+  it('applying the same mode again does not call back again', () => {
     const doc = docOf()
     const m = fakeMedia(false)
     const onChange = vi.fn()

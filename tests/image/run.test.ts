@@ -7,7 +7,7 @@ import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import type { OcrCall, OcrLine } from '@/shared/ocr'
 import { docOf } from '../renderer/helpers'
 
-// 图片翻译的小管线（DESIGN §15）。happy-dom 没有 IntersectionObserver，目标靠 translate 手动交出去
+// The small image-translation pipeline (DESIGN §15). happy-dom has no IntersectionObserver, so targets are handed over by translate by hand
 
 const FIGURE = '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="https://arxiv.org/html/x/a.png" id="F1.g1" width="476" height="357">'
   + '<figcaption class="ltx_caption" id="F1.cap">Figure 1. Escape velocity versus radius.</figcaption></figure>'
@@ -15,7 +15,7 @@ const line = (text: string, y: number): OcrLine => ({ text, conf: 1, quad: [[0.1
 const LINES = [line('Static charge', 0.1), line('Even sites', 0.5), line('12.5', 0.9)]
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]).buffer
 
-/** 在同一份 DOM 上再开一轮：沿用第一轮的 doc / targets / fetch / ocr / translate */
+/** Open another round on the same DOM: reusing the first round's doc / targets / fetch / ocr / translate */
 function firstOptions(first: ReturnType<typeof setup>): ImageRunOptions {
   return {
     doc: first.doc, targets: first.targets, paper: '2507.00150', target: 'cmn', scope: 's2', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
@@ -52,21 +52,21 @@ function setup(overrides: Partial<ImageRunOptions> = {}) {
 }
 
 describe('startImageTranslation', () => {
-  it('正常路径：取图 → OCR → 合框过滤 → 翻译 → 叠加层；同批带图注做上下文；回调与进度', async () => {
+  it('the normal path: fetch → OCR → merge and filter boxes → translate → overlay; the caption in the same batch as context; callbacks and progress', async () => {
     const { doc, targets, run, ocr, translate, rendered, progress } = setup()
     await run.translate(targets)
     const overlay = doc.querySelector(`.${IMG_CLASS}`)!
     expect(overlay).not.toBeNull()
     expect(overlay.previousElementSibling).toBe(targets[0]!.el)
-    // 3 行里数字被过滤，2 个标签
+    // Of the 3 lines the number is filtered out, 2 labels
     expect(Array.from(overlay.children).map(s => s.textContent)).toEqual(['译:Static charge', '译:Even sites'])
     expect(Array.from(overlay.children).map(s => (s as HTMLElement).title)).toEqual(['Static charge', 'Even sites'])
-    // OCR 调用：hash、base64、mime、paper、scope
+    // The OCR call: hash, base64, mime, paper, scope
     expect(ocr).toHaveBeenCalledTimes(1)
     const ocrCall = ocr.mock.calls[0]![0]
     expect(ocrCall).toMatchObject({ image: toBase64(PNG), mime: 'image/png', paper: '2507.00150', scope: 's1' })
     expect(ocrCall.imageHash).toMatch(/^[0-9a-f]{64}$/)
-    // 翻译调用：纯文本路径，段 id 带图的 id，图注进 sectionTitle，缓存按 tags，带 scope
+    // The translate call: the plain-text path, segment ids carrying the image's id, the caption in sectionTitle, cache by tags, with scope
     const call = translate.mock.calls[0]![0] as { request: { segments: { id: string; text: string }[]; context?: { sectionTitle?: string; paperTitle?: string } }; cache: unknown; scope?: string }
     expect(call.request.segments).toEqual([{ id: 'F1.g1#L0', text: 'Static charge' }, { id: 'F1.g1#L1', text: 'Even sites' }])
     expect(call.request.context).toEqual({ paperTitle: 'Paper', sectionTitle: 'Figure 1. Escape velocity versus radius.' })
@@ -78,18 +78,18 @@ describe('startImageTranslation', () => {
     expect(run.failed()).toEqual([])
   })
 
-  it('原文里的 < 与 & 按占位符协议转义、译文解码', async () => {
+  it('< and & in the source are escaped by the placeholder protocol, the translation decoded', async () => {
     const { doc, targets, run } = setup({
       ocr: async () => ({ ok: true, result: { width: 1, height: 1, lines: [line('ab < cd & ef', 0.1)] }, cached: false }),
-      // 引擎照占位符协议返回转义过的文本，前面加个前缀（恒等译文不画）
+      // The engine returns the escaped text by the placeholder protocol, with a prefix in front (an identity translation is not drawn)
       translate: async (call: { request: { segments: { id: string; text: string }[] } }) => ({ ok: true, result: { segments: call.request.segments.map(s => ({ id: s.id, text: `译:${s.text}` })), provider: 'mock' }, cached: 0 }),
     })
     await run.translate(targets)
-    // 发出去的是 `ab &lt; cd &amp; ef`，回来解码后标签里是原样的字符
+    // Sent out is `ab &lt; cd &amp; ef`; decoded on return, the label holds the characters as they were
     expect(doc.querySelector(`.${IMG_CLASS} > span`)!.textContent).toBe('译:ab < cd & ef')
   })
 
-  it('stop() 之后到达的 OCR 结果不落 DOM：恢复原文与晚到的识别互不干扰', async () => {
+  it('an OCR result arriving after stop() does not land in the DOM: restoring the original and a late recognition do not interfere', async () => {
     let release: () => void = () => {}
     const held = new Promise<void>(resolve => { release = resolve })
     const { doc, targets, run } = setup({
@@ -106,12 +106,12 @@ describe('startImageTranslation', () => {
     expect(doc.querySelector(`.${IMG_CLASS}`)).toBeNull()
   })
 
-  it('会话换了（isCurrent 为假）：翻译结果到达也丢弃', async () => {
+  it('the session changed (isCurrent false): a translation result arriving is dropped too', async () => {
     let current = true
     const { doc, targets, run } = setup({
       isCurrent: () => current,
       translate: async (call: { request: { segments: { id: string; text: string }[] } }) => {
-        current = false // 回应到达前会话已换
+        current = false // the session changed before the reply arrived
         return { ok: true, result: { segments: call.request.segments.map(s => ({ id: s.id, text: '译' })), provider: 'mock' }, cached: 0 }
       },
     })
@@ -119,13 +119,13 @@ describe('startImageTranslation', () => {
     expect(doc.querySelector(`.${IMG_CLASS}`)).toBeNull()
   })
 
-  it('模式闸关着：进入的目标停着不请求；resume 时放出去', async () => {
+  it('the mode gate closed: targets entering wait without a request; released on resume', async () => {
     let enabled = false
     const { doc, targets, run, ocr } = setup({ isEnabled: () => enabled })
     await run.translate(targets)
     expect(ocr).not.toHaveBeenCalled()
     expect(run.progress().requested).toBe(0)
-    run.resume() // 还关着：没动静
+    run.resume() // still closed: nothing happens
     expect(ocr).not.toHaveBeenCalled()
     enabled = true
     run.resume()
@@ -133,7 +133,7 @@ describe('startImageTranslation', () => {
     expect(ocr).toHaveBeenCalledTimes(1)
   })
 
-  it('不是位图 / 超过上限：记失败、零请求；failed() 给出来，重试走 translate', async () => {
+  it('not a bitmap / over the cap: recorded failed, zero requests; failed() lists it, retry goes through translate', async () => {
     let mime = 'image/svg+xml'
     const { targets, run, ocr } = setup({ fetchBytes: async () => ({ bytes: PNG, mime }) })
     await run.translate(targets)
@@ -150,8 +150,8 @@ describe('startImageTranslation', () => {
     expect(big.run.failed()).toHaveLength(1)
   })
 
-  it('OCR 出错记失败；图里没有可翻的字算完成、不插叠加层', async () => {
-    const failing = setup({ ocr: async () => ({ ok: false, error: { kind: 'network', message: 'helper 断开', isolatable: false } }) })
+  it('an OCR error is recorded failed; an image without translatable text counts as done and gets no overlay', async () => {
+    const failing = setup({ ocr: async () => ({ ok: false, error: { kind: 'network', message: 'helper disconnected', isolatable: false } }) })
     await failing.run.translate(failing.targets)
     expect(failing.run.failed()).toHaveLength(1)
     const empty = setup({ ocr: async () => ({ ok: true, result: { width: 1, height: 1, lines: [line('12.5', 0.1), line('B', 0.5)] }, cached: false }) })
@@ -161,7 +161,7 @@ describe('startImageTranslation', () => {
     expect(empty.translate).not.toHaveBeenCalled()
   })
 
-  it('译文与原文相同的标签不画（单位、变量名、引擎原样返回）；全都相同就不插叠加层', async () => {
+  it('labels whose translation equals the source are not drawn (units, variable names, the engine returning as it was); with all equal no overlay is inserted', async () => {
     const identity = async (call: { request: { segments: { id: string; text: string }[] } }) => ({
       ok: true as const,
       result: { segments: call.request.segments.map(s => ({ id: s.id, text: s.text === 'Static charge' ? '静态电荷' : s.text })), provider: 'mock' },
@@ -170,7 +170,7 @@ describe('startImageTranslation', () => {
     const some = setup({ translate: identity })
     await some.run.translate(some.targets)
     const spans = Array.from(some.doc.querySelectorAll(`.${IMG_CLASS} > span`))
-    expect(spans.map(s => s.textContent)).toEqual(['静态电荷']) // "Even sites" 原样返回，不画
+    expect(spans.map(s => s.textContent)).toEqual(['静态电荷']) // "Even sites" came back as it was and is not drawn
     const all = setup({ ocr: async () => ({ ok: true, result: { width: 1, height: 1, lines: [line('Vr [km s-]', 0.9)] }, cached: false }), translate: identity })
     await all.run.translate(all.targets)
     expect(all.doc.querySelector(`.${IMG_CLASS}`)).toBeNull()
@@ -178,7 +178,7 @@ describe('startImageTranslation', () => {
     expect(all.rendered).toEqual([])
   })
 
-  it('配置级错误（auth / no-key）：第一张图就停调度，之后进入的图不再取、不再识别；fatal() 给出原因（Codex 在 #89 指出）', async () => {
+  it('a configuration-level error (auth / no-key): scheduling stops at the first image, images entering afterwards are neither fetched nor recognised; fatal() gives the reason (Codex on #89)', async () => {
     const doc = docOf(FIGURE + FIGURE.replace(/F1/g, 'F2'))
     markBlocks(extract(doc))
     const targets = collectImageTargets(doc)
@@ -193,12 +193,12 @@ describe('startImageTranslation', () => {
     await run.translate([targets[0]!])
     expect(run.fatal()).toContain('auth')
     expect(run.failed()).toEqual([targets[0]])
-    await run.translate([targets[1]!]) // 停了：第二张连 OCR 都不做
+    await run.translate([targets[1]!]) // stopped: the second image gets no OCR at all
     expect(ocr).toHaveBeenCalledTimes(1)
     expect(run.progress().requested).toBe(1)
   })
 
-  it('普通失败（network）不算致命：下一张照常处理', async () => {
+  it('an ordinary failure (network) is not fatal: the next image is processed as usual', async () => {
     const doc = docOf(FIGURE + FIGURE.replace(/F1/g, 'F2'))
     markBlocks(extract(doc))
     const targets = collectImageTargets(doc)
@@ -215,11 +215,11 @@ describe('startImageTranslation', () => {
     expect(run.failed()).toHaveLength(2)
   })
 
-  // Codex 在 #163 指出：一张图的标签可能横跨多个批次（内联 TikZ 上百个节点），
-  // 一批失败时另一批已经译好的标签随失败一起回来，不该整张图空着
-  it('部分成功：译好的标签先画上去，同时仍记这张图失败', async () => {
+  // Codex on #163: one image's labels may span several batches (an inline TikZ with hundreds of nodes),
+  // and when one batch fails the labels another batch had translated come back with the failure; the image must not stay empty
+  it('partial success: the labels translated are drawn first, while the image is still recorded failed', async () => {
     const { doc, targets, run } = setup({
-      // 第一个标签译出来了，其余没有
+      // The first label came out translated, the rest did not
       translate: async call => ({
         ok: false as const,
         error: { kind: 'network' as const, message: 'offline', isolatable: false },
@@ -228,15 +228,15 @@ describe('startImageTranslation', () => {
     })
     await run.translate(targets)
     expect(run.failed()).toHaveLength(1)
-    // 叠加层画出来了，且只有译好的那一个标签
+    // The overlay is drawn, with only the one label that was translated
     const overlay = doc.querySelector('.axt-img')
     expect(overlay).not.toBeNull()
     expect(overlay!.querySelectorAll('span')).toHaveLength(1)
   })
 
-  // 第五轮：致命失败会就地停掉整个调度，这张图这一轮再没有第二次机会——
-  // 降级链上前一步译出来的标签会跟着末步的 auth 失败一起回来，画在致命分支之前才画得上
-  it('致命失败也先画：降级链上译好的标签不能跟着 auth 一起丢', async () => {
+  // Fifth round: a fatal failure stops the whole scheduling on the spot, and this image gets no second chance this round —
+  // the labels an earlier step of the fallback chain translated come back with the last step's auth failure, and only drawn before the fatal branch do they get drawn at all
+  it('a fatal failure draws first too: labels translated along the fallback chain must not be lost with the auth failure', async () => {
     const { doc, targets, run } = setup({
       translate: async call => ({
         ok: false as const,
@@ -249,7 +249,7 @@ describe('startImageTranslation', () => {
     expect(doc.querySelector('.axt-img')?.querySelectorAll('span')).toHaveLength(1)
   })
 
-  it('一个标签都没译出来就不画叠加层', async () => {
+  it('with not one label translated no overlay is drawn', async () => {
     const { doc, targets, run } = setup({
       translate: async () => ({ ok: false as const, error: { kind: 'network' as const, message: 'offline', isolatable: false } }),
     })
@@ -258,7 +258,7 @@ describe('startImageTranslation', () => {
     expect(doc.querySelector('.axt-img')).toBeNull()
   })
 
-  it('并发有上限：同时在处理的图不超过 maxConcurrent，其余排队（Codex 在 #89 指出）', async () => {
+  it('concurrency is capped: no more than maxConcurrent images processed at once, the rest queued (Codex on #89)', async () => {
     const doc = docOf([1, 2, 3, 4, 5].map(i => FIGURE.replace(/F1/g, `F${i}`)).join(''))
     markBlocks(extract(doc))
     const targets = collectImageTargets(doc)
@@ -282,7 +282,7 @@ describe('startImageTranslation', () => {
     const all = run.translate(targets)
     const releaseAll = () => { for (const r of release.splice(0)) r() }
     await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(2))
-    expect(inFlight).toBe(2) // 5 张只开了 2 张，其余排队
+    expect(inFlight).toBe(2) // of 5 images only 2 started, the rest queued
     releaseAll()
     await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(4))
     releaseAll()
@@ -293,7 +293,7 @@ describe('startImageTranslation', () => {
     expect(run.progress().done).toBe(5)
   })
 
-  it('并发上限对整个 run 生效：两次 translate() 各带一批，同时在飞的仍不超过 maxConcurrent（Codex 在 #89 指出）', async () => {
+  it('the concurrency cap applies to the whole run: two translate() calls with a batch each, still no more than maxConcurrent in flight (Codex on #89)', async () => {
     const doc = docOf([1, 2, 3, 4, 5].map(i => FIGURE.replace(/F1/g, `F${i}`)).join(''))
     markBlocks(extract(doc))
     const targets = collectImageTargets(doc)
@@ -314,7 +314,7 @@ describe('startImageTranslation', () => {
       isEnabled: () => true, isCurrent: () => true,
     })
     const first = run.translate(targets.slice(0, 3))
-    const second = run.translate(targets.slice(3)) // 观察器的第二次回调
+    const second = run.translate(targets.slice(3)) // the observer's second callback
     await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(2))
     expect(inFlight).toBe(2)
     const releaseAll = () => { for (const r of release.splice(0)) r() }
@@ -328,7 +328,7 @@ describe('startImageTranslation', () => {
     expect(run.progress().done).toBe(5)
   })
 
-  it('致命错误时并发中与排队的目标一并记失败，进度对得上、failed() 全给出（Codex 在 #89 指出）', async () => {
+  it('on a fatal error the targets in flight and queued are all recorded failed, the progress adds up, failed() lists them all (Codex on #89)', async () => {
     const doc = docOf([1, 2, 3].map(i => FIGURE.replace(/F1/g, `F${i}`)).join(''))
     markBlocks(extract(doc))
     const targets = collectImageTargets(doc)
@@ -341,25 +341,25 @@ describe('startImageTranslation', () => {
     const run = startImageTranslation({
       doc, targets, paper: 'p', target: 'cmn', scope: 's', renderPath: 'tags' as const, preload: DEFAULT_PRELOAD,
       fetchBytes: async () => ({ bytes: PNG, mime: 'image/png' }), ocr, maxConcurrent: 2,
-      translate: async () => ({ ok: false, error: { kind: 'no-key', message: '未配置 key', isolatable: false } }),
+      translate: async () => ({ ok: false, error: { kind: 'no-key', message: 'no key configured', isolatable: false } }),
       isEnabled: () => true, isCurrent: () => true,
       onProgress: p => { progress.push({ failed: p.failed, fatal: p.fatal }) },
     })
-    const all = run.translate(targets) // 2 在飞、1 排队
+    const all = run.translate(targets) // 2 in flight, 1 queued
     await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(2))
-    release.shift()?.() // 第一张回来 → 翻译 no-key → 致命
+    release.shift()?.() // the first comes back → translate no-key → fatal
     await vi.waitFor(() => expect(run.fatal()).toBeDefined())
-    // 另一张还在等 OCR：带 fatal 的进度已经发出去了，popup 不用等它（Codex 在 #89 指出）
+    // The other is still waiting for OCR: the progress with fatal has gone out already, and the popup need not wait for it (Codex on #89)
     expect(progress.at(-1)).toMatchObject({ failed: 3 })
     expect(run.progress().fatal).toContain('no-key')
-    release.shift()?.() // 第二张这时才回来：会话已致命，丢弃
+    release.shift()?.() // the second comes back only now: the session is fatal, dropped
     await all
-    expect(ocr).toHaveBeenCalledTimes(2) // 排队的第三张没开始
+    expect(ocr).toHaveBeenCalledTimes(2) // the queued third never started
     expect(run.progress()).toEqual({ total: 3, requested: 3, done: 0, failed: 3, fatal: expect.stringContaining('no-key') })
     expect(run.failed()).toHaveLength(3)
   })
 
-  it('stop() 结清排队没开始的：等它们的 translate() 也会返回', async () => {
+  it('stop() settles the queued ones that never started: the translate() waiting for them returns too', async () => {
     const doc = docOf([1, 2, 3].map(i => FIGURE.replace(/F1/g, `F${i}`)).join(''))
     markBlocks(extract(doc))
     const targets = collectImageTargets(doc)
@@ -372,46 +372,46 @@ describe('startImageTranslation', () => {
       translate: async () => ({ ok: false, error: { kind: 'network', message: 'x', isolatable: false } }),
       isEnabled: () => true, isCurrent: () => true,
     })
-    const all = run.translate(targets) // 1 在飞、2 排队
+    const all = run.translate(targets) // 1 in flight, 2 queued
     await vi.waitFor(() => expect(ocr).toHaveBeenCalledTimes(1))
     run.stop()
-    release() // 在飞的回来了：会话已停，丢弃；排队的两张要是没被结清，all 永远不返回
+    release() // the one in flight came back: the session is stopped, dropped; unless the two queued are settled, all never returns
     const outcome = await Promise.race([all.then(() => 'settled'), new Promise(resolve => setTimeout(() => resolve('hung'), 500))])
     expect(outcome).toBe('settled')
-    // 排队的两张连字节都不取：不结清的话它们会被 worker 依次拿起、先 fetch 再发现会话已停
+    // The two queued fetch not one byte: unsettled, the worker would pick them up in turn, fetch first and only then find the session stopped
     expect(fetchBytes).toHaveBeenCalledTimes(1)
     expect(ocr).toHaveBeenCalledTimes(1)
   })
 
-  it('新一轮没有标签（换了目标语言后全是恒等译文）：上一轮的叠加层要清掉（Codex 在 #89 指出）', async () => {
+  it('a new round with no labels (all identity translations after a change of target language): the previous round\'s overlay has to go (Codex on #89)', async () => {
     const first = setup()
     await first.run.translate(first.targets)
     expect(first.doc.querySelector(`.${IMG_CLASS}`)).not.toBeNull()
-    // 同一份 DOM 上开第二轮：译文原样返回
+    // A second round on the same DOM: the translation comes back as it was
     const identity = async (call: { request: { segments: { id: string; text: string }[] } }) => ({ ok: true as const, result: { segments: call.request.segments.map(s => ({ id: s.id, text: s.text })), provider: 'mock' }, cached: 0 })
     const rendered: ImageTarget[][] = []
     const second = startImageTranslation({ ...firstOptions(first), translate: identity, onRendered: ts => { rendered.push(ts) } })
     await second.translate(first.targets)
     expect(first.doc.querySelector(`.${IMG_CLASS}`)).toBeNull()
     expect(second.progress().done).toBe(1)
-    // 摘掉了旧叠加层 → 通知整理层重算拆图签名；没东西可摘的图不通知
+    // The old overlay was removed → the tidy layer is told to recompute the split signature; an image with nothing to remove is not reported
     expect(rendered).toEqual([first.targets])
     const third = startImageTranslation({ ...firstOptions(first), translate: identity, onRendered: ts => { rendered.push(ts) } })
     await third.translate(first.targets)
     expect(rendered).toHaveLength(1)
   })
 
-  it('动图（frames > 1）不叠译文、按完成处理，旧叠加层也清掉（helper 只识别了第 0 帧，Codex 在 #89 指出）', async () => {
+  it('an animation (frames > 1) gets no translation overlay and is treated as done, the old overlay removed too (the helper recognised frame 0 only, Codex on #89)', async () => {
     const first = setup()
     await first.run.translate(first.targets)
     const animated = startImageTranslation({ ...firstOptions(first), ocr: async () => ({ ok: true, result: { width: 1, height: 1, frames: 2, lines: LINES }, cached: false }) })
     await animated.translate(first.targets)
     expect(first.doc.querySelector(`.${IMG_CLASS}`)).toBeNull()
     expect(animated.progress()).toEqual({ total: 1, requested: 1, done: 1, failed: 0 })
-    expect(first.translate).toHaveBeenCalledTimes(1) // 第二轮没发翻译
+    expect(first.translate).toHaveBeenCalledTimes(1) // the second round sent no translation
   })
 
-  it('已在请求中的目标不重复请求', async () => {
+  it('a target already in flight is not requested again', async () => {
     let release: () => void = () => {}
     const held = new Promise<void>(resolve => { release = resolve })
     const ocr = vi.fn(async () => { await held; return { ok: true as const, result: { width: 1, height: 1, lines: LINES }, cached: false } })
@@ -426,7 +426,7 @@ describe('startImageTranslation', () => {
 })
 
 describe('captionOf', () => {
-  it('嵌套分图取自己那层的说明，不是最外层的第一个说明（2410.00260 的 A2.F4，Codex 在 #89 指出）', () => {
+  it('a nested subfigure takes the caption of its own level, not the outermost\'s first caption (A2.F4 of 2410.00260, Codex on #89)', () => {
     const doc = docOf('<figure id="A2.F4" class="ltx_figure"><div class="ltx_flex_figure">'
       + '<div class="ltx_flex_cell"><figure id="sf1" class="ltx_figure ltx_figure_panel"><img class="ltx_graphics" id="g1" src="a.png"><figcaption class="ltx_caption">(a) Classifier confusion matrix</figcaption></figure></div>'
       + '<div class="ltx_flex_cell"><figure id="sf2" class="ltx_figure ltx_figure_panel"><img class="ltx_graphics" id="g2" src="b.png"><figcaption class="ltx_caption">(b) Agreement between LLM judge and classifier</figcaption></figure></div>'
@@ -434,7 +434,7 @@ describe('captionOf', () => {
       + '<figure id="F9" class="ltx_figure"><div class="ltx_flex_cell"><img class="ltx_graphics" id="g3" src="c.png"></div><figcaption class="ltx_caption">Figure 9: Outer only</figcaption></figure>')
     expect(captionOf(doc.getElementById('g2')!)).toBe('(b) Agreement between LLM judge and classifier')
     expect(captionOf(doc.getElementById('g1')!)).toBe('(a) Classifier confusion matrix')
-    // 分图自己没有说明就往外层找
+    // A subfigure without a caption of its own looks outward
     expect(captionOf(doc.getElementById('g3')!)).toBe('Figure 9: Outer only')
   })
 })
@@ -447,19 +447,19 @@ describe('readImageResponse', () => {
     },
   })
 
-  it('Content-Length 超上限：不读响应体就拒', async () => {
+  it('Content-Length over the cap: refused without reading the body', async () => {
     const res = new Response(stream([10]), { headers: { 'content-type': 'image/png', 'content-length': String(MAX_IMAGE_BYTES + 1) } })
     await expect(readImageResponse(res)).rejects.toThrow(/over/)
-    expect(res.bodyUsed).toBe(false) // 没碰响应体
+    expect(res.bodyUsed).toBe(false) // the body was not touched
   })
 
-  it('没有 Content-Length 的响应流式读取：超过上限立刻取消，不把整个响应读进内存（Codex 在 #89 指出）', async () => {
+  it('a response without Content-Length is read as a stream: over the cap it is cancelled at once, not read whole into memory (Codex on #89)', async () => {
     let cancelled = false
     let pulled = 0
     const body = new ReadableStream<Uint8Array>({
       pull(controller) {
         pulled++
-        if (pulled > 10) controller.close() // 有限的 10 块共 10 000 字节：不设上限的读法会把它全读完再"成功"
+        if (pulled > 10) controller.close() // finite: 10 chunks of 10 000 bytes in all; an uncapped read would read them all and then “succeed”
         else controller.enqueue(new Uint8Array(1000))
       },
       cancel() { cancelled = true },
@@ -467,10 +467,10 @@ describe('readImageResponse', () => {
     const res = new Response(body, { headers: { 'content-type': 'image/png' } })
     await expect(readImageResponse(res, 2500)).rejects.toThrow(/over/)
     expect(cancelled).toBe(true)
-    expect(pulled).toBeLessThanOrEqual(4) // 读到第 3 块（3000 > 2500）就停，不会一直拉
+    expect(pulled).toBeLessThanOrEqual(4) // stops at chunk 3 (3000 > 2500) and does not keep pulling
   })
 
-  it('正常大小：拼成一整块，mime 从 content-type 取', async () => {
+  it('a normal size: assembled into one block, the mime taken from content-type', async () => {
     const res = new Response(stream([100, 200]), { headers: { 'content-type': 'image/jpeg; charset=binary' } })
     const out = await readImageResponse(res, 1000)
     expect(out.bytes.byteLength).toBe(300)

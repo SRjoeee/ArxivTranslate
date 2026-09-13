@@ -1,5 +1,5 @@
-// 线上格式协商（#104，DESIGN §8.5）：一次会话只能有一种格式，链要取交集。
-// 用合成引擎测，因为真的 markers-only 引擎（微软）要到 #98 才接进来。
+// Wire-format negotiation (#104, DESIGN §8.5): one session can have one format only, and the chain takes the intersection.
+// Tested with synthetic engines, because the real markers-only engine (Microsoft) only arrives with #98.
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fakeBrowser } from 'wxt/testing/fake-browser'
 import { DEFAULT_CONFIG } from '@/config/schema'
@@ -18,45 +18,45 @@ const engine = (id: string, wireFormats: readonly WireFormat[], available = true
   translate: async () => ({ segments: [], provider: id }),
 })
 
-/** 首选走 google-web（两种格式都保得住），免费引擎表由测试给 */
+/** The first choice is google-web (keeps both formats); the free-engine table comes from the test */
 const chainOf = (free: TranslationProvider[]) =>
   buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' }, { freeEngines: free.map(p => () => p) })
 
-describe('buildChain 的格式协商', () => {
+describe('buildChain\'s format negotiation', () => {
   beforeEach(() => fakeBrowser.reset())
 
-  it('只有 Google 时走 tags：它两种都行，偏好序里 tags 在前，内联样式保得住', async () => {
+  it('with Google alone it takes tags: it keeps both, tags comes first in the preference order, and inline styles survive', async () => {
     const { chain, renderPath } = await chainOf([])
     expect(chain.map(p => p.id)).toEqual(['google-web'])
     expect(renderPath).toBe('tags')
   })
 
-  it('接上只认 tags 的引擎，交集仍是 tags', async () => {
+  it('with a tags-only engine added the intersection is still tags', async () => {
     const { chain, renderPath } = await chainOf([engine('builtin-ish', ['tags'])])
     expect(chain.map(p => p.id)).toEqual(['google-web', 'builtin-ish'])
     expect(renderPath).toBe('tags')
   })
 
-  it('首选偏好 tags 时，markers-only 的候选进不来——它救不了 tags 会话', async () => {
+  it('with the first choice preferring tags a markers-only candidate cannot get in — it cannot rescue a tags session', async () => {
     const { chain, renderPath } = await chainOf([engine('microsoft-ish', ['markers'])])
     expect(chain.map(p => p.id)).toEqual(['google-web'])
     expect(renderPath).toBe('tags')
   })
 
-  it('**顺序无关**：候选表怎么排，格式与进链结果都一样（#103 的前置）', async () => {
-    // 这是这条规则存在的理由。旧规则让交集随迭代顺序收缩，于是一个兜底引擎能改变首选引擎的
-    // 渲染格式——用户在 #103 里只是调一下兜底优先级，整页的内联样式就会静默消失
+  it('**order-independent**: however the candidate table is ordered, the format and who joins the chain are the same (the precondition of #103)', async () => {
+    // This is why the rule exists. The old rule let the intersection shrink with iteration order, so a fallback engine could change the first-choice engine's
+    // render format — the reader in #103 only adjusted a fallback priority, and the whole page's inline styles vanished silently
     const markers = () => engine('microsoft-ish', ['markers'])
     const tags = () => engine('builtin-ish', ['tags'])
     const a = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' }, { freeEngines: [markers, tags] })
     const b = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' }, { freeEngines: [tags, markers] })
     expect(a.chain.map(p => p.id)).toEqual(b.chain.map(p => p.id))
     expect([a.renderPath, b.renderPath]).toEqual(['tags', 'tags'])
-    // 具体是：只有支持 tags 的那个进得来
+    // Concretely: only the one supporting tags gets in
     expect(a.chain.map(p => p.id)).toEqual(['google-web', 'builtin-ish'])
   })
 
-  it('首选是 markers-only 时锁定 markers，两种都保得住的 Google 进链兜底', async () => {
+  it('with a markers-only first choice markers is locked in, and Google, keeping both, joins the chain as the fallback', async () => {
     const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG }, {
       primary: engine('microsoft-ish', ['markers']),
       freeEngines: [() => engine('builtin-ish', ['tags']), () => engine('google-ish', ['tags', 'markers'])],
@@ -65,15 +65,15 @@ describe('buildChain 的格式协商', () => {
     expect(renderPath).toBe('markers')
   })
 
-  it('不可用的候选不参与协商，也不该把交集压窄', async () => {
+  it('an unavailable candidate takes no part in the negotiation and must not narrow the intersection', async () => {
     const { chain, renderPath } = await chainOf([engine('microsoft-ish', ['markers'], false), engine('builtin-ish', ['tags'])])
     expect(chain.map(p => p.id)).toEqual(['google-web', 'builtin-ish'])
     expect(renderPath).toBe('tags')
   })
 
-  it('首选一个格式都保不住时走 runs，兜底引擎照样进链——runs 发的是纯文本，不需要共同格式', async () => {
-    // wireFormats: [] 是 DESIGN §8.1 记着的取值（将来的 apple-translate）。
-    // 空交集会把每个候选都挡掉，首选一挂就没得降级（Codex 在 #107 指出）
+  it('with a first choice keeping neither format it takes runs, and the fallback engines still join — runs sends plain text and needs no common format', async () => {
+    // wireFormats: [] is the value DESIGN §8.1 records (the future apple-translate).
+    // An empty intersection would block every candidate, and with the first choice down there would be nothing to fall back to (Codex on #107)
     const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web', fallback: { enabled: true } }, {
       primary: engine('runs-only', []),
       freeEngines: [() => engine('tags-ish', ['tags']), () => engine('markers-ish', ['markers'])],
@@ -82,36 +82,36 @@ describe('buildChain 的格式协商', () => {
     expect(renderPath).toBe('runs')
   })
 
-  it('renderPath 就是协商出的线上格式本身，中间不做转换（#116）', async () => {
-    // 这条钉的是契约。真正的护栏是类型：`RenderPath = WireFormat | 'runs'`，所以 `renderPath: format`
-    // 能直接通过；将来加第三种 WireFormat 会自动流下去，而不是被一个 `? :` 静默改写成 tags
+  it('renderPath is the negotiated wire format itself, with no conversion in between (#116)', async () => {
+    // This pins the contract. The real guardrail is the type: `RenderPath = WireFormat | 'runs'`, so `renderPath: format`
+    // passes directly; a future third WireFormat flows down of itself rather than being rewritten to tags by a silent `? :`
     for (const fmt of ['tags', 'markers'] as const) {
       const { renderPath } = await buildChain(DEFAULT_CONFIG, { primary: engine('x', [fmt]), freeEngines: [] })
       expect([fmt, renderPath]).toEqual([fmt, fmt])
     }
   })
 
-  it('真的选微软：链是 [microsoft, google-web]，走 markers（#98）', async () => {
-    // 用真的 FREE_ENGINES，不注入：内置引擎只认 tags，与 markers 无交集会被剔除；
-    // Google 两种都保得住，所以留得下来做兜底——这正是 #104 把布尔位换成集合的理由
+  it('really choosing Microsoft: the chain is [microsoft, google-web] on markers (#98)', async () => {
+    // The real FREE_ENGINES, nothing injected: the built-in engine takes tags only and is dropped for having no intersection with markers;
+    // Google keeps both and stays as the fallback — exactly why #104 replaced the boolean with a set
     const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'microsoft' })
     expect(chain.map(p => p.id)).toEqual(['microsoft', 'google-web'])
     expect(renderPath).toBe('markers')
   })
 
-  it('微软不在 FREE_ENGINES：选 Google 仍然走 tags，内联样式不会被它拖下水（#98）', async () => {
+  it('Microsoft is not in FREE_ENGINES: choosing Google still takes tags, and inline styles are not dragged down by it (#98)', async () => {
     const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web' })
     expect(chain).not.toContainEqual(expect.objectContaining({ id: 'microsoft' }))
     expect(renderPath).toBe('tags')
   })
 
-  it('微软 + 不支持的目标语言：isAvailable 为假，但首选仍留在链首（popup 要据此提示）', async () => {
+  it('Microsoft + an unsupported target language: isAvailable is false, but the first choice stays at the head of the chain (the popup\'s hint relies on it)', async () => {
     const { chain } = await buildChain({ ...DEFAULT_CONFIG, provider: 'microsoft', targetLanguage: 'epo' })
     expect(chain[0]?.id).toBe('microsoft')
     expect(await chain[0]!.isAvailable()).toBe(false)
   })
 
-  it('关掉降级就只剩首选，格式取它自己的偏好', async () => {
+  it('with the fallback off only the first choice remains, and the format is its own preference', async () => {
     const { chain, renderPath } = await buildChain({ ...DEFAULT_CONFIG, provider: 'google-web', fallback: { enabled: false } }, {
       freeEngines: [() => engine('microsoft-ish', ['markers'])],
     })

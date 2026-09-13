@@ -22,7 +22,7 @@ describe('appearance profiles', () => {
     const r = resetBuiltIns(a, 'styles')
     expect(r.styles.map(s => s.id)).toEqual([...BUILT_IN_STYLES.map(s => s.id), own.id])
     expect(r.styles[0]!.color).toBe('')
-    // The other grid has its own 重置; resetting styles must not undo an edited band
+    // The other grid has its own reset; resetting styles must not undo an edited band
     expect(r.highlights).toEqual([editedBand])
     const b = resetBuiltIns(a, 'highlights')
     expect(b.highlights.map(h => h.id)).toEqual(BUILT_IN_HIGHLIGHTS.map(h => h.id))

@@ -483,7 +483,7 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.move()
 
     expect(browser.bands().length).toBe(2)
-    // 原块与译文一个字节都没动，底色层挂在 body 上、不在它们之间
+    // Not a byte of the original block or the translation moved; the band layer hangs on body, not between them
     expect(source.outerHTML + target.outerHTML).toBe(before)
     expect(doc.querySelector('.axt-hl')!.parentElement!.tagName.toLowerCase()).toBe('body')
     expect(source.nextElementSibling).toBe(target)
@@ -697,7 +697,7 @@ describe('hover sentence highlight (§7.7)', () => {
     browser.move()
     expect(browser.bands().length).toBe(0)
 
-    // 外部清空同样什么都不留
+    // An external clear likewise leaves nothing
     clearSentenceHighlights(doc)
     expect(browser.bands().length).toBe(0)
     expect(doc.querySelectorAll('.axt-hl')).toHaveLength(0)

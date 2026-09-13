@@ -1,13 +1,13 @@
-// 方程组里的 `\intertext`（issue #152）：夹在公式之间的说明文字。
-// LaTeXML 不把它渲染成 `<p>`，而是组表里整整一行的单元格，所以既要让提取器看见它，
-// 又不能因此改变**别的**块发出去的内容——组对外层单元仍然是一个原子。
+// `\intertext` inside equation groups (issue #152): explanatory text between formulas.
+// LaTeXML renders it not as a `<p>` but as a full-row cell of the group's table, so the extractor has to see it
+// without changing what **other** blocks send out — to the enclosing unit the group is still one atom.
 import { describe, expect, it } from 'vitest'
 import { extract, type TextBlock } from '@/core/extractor'
 import { serialize } from '@/core/protector'
 import { EQN_PROSE_ROW, classify, eqnProseCell } from '@/core/rules/latexml'
 import { serialize as ser } from '@/core/protector'
 
-/** 真实形状（抄自 2609.09360v1）：间隔行、公式行、说明行各一 */
+/** The real shape (copied from 2609.09360v1): one spacer row, one formula row, one intertext row */
 const GROUP = `<table class="ltx_equationgroup ltx_eqn_table"><tbody>
   <tr class="ltx_eqn_row"><td class="ltx_eqn_cell" colspan="5"></td></tr>
   <tr class="ltx_equation ltx_eqn_row ltx_align_baseline"><td class="ltx_eqn_cell ltx_align_right"><math class="ltx_Math"><mi>x</mi></math></td><td class="ltx_eqn_cell ltx_eqn_eqno"><span class="ltx_tag ltx_tag_equation">(1)</span></td></tr>
@@ -17,19 +17,19 @@ const GROUP = `<table class="ltx_equationgroup ltx_eqn_table"><tbody>
 const docOf = (body: string) =>
   new DOMParser().parseFromString(`<!doctype html><html><body><article class="ltx_document">${body}</article></body></html>`, 'text/html')
 
-describe('说明行的识别', () => {
-  it('说明行是块，边界是**行**而不是格', () => {
+describe('recognising the intertext row', () => {
+  it('the intertext row is a block, and the boundary is the **row**, not the cell', () => {
     const blocks = extract(docOf(`<div class="ltx_para">${GROUP}</div>`)) as TextBlock[]
     const rows = blocks.filter(b => b.unit === 'intertext')
     expect(rows).toHaveLength(1)
-    // 行才对：译文作下一个兄弟（§7.1），格的兄弟是同一行的第二个格，两个 colspan 会把表撑出一倍的列
+    // The row is right: the translation is the next sibling (§7.1), and the cell's sibling would be a second cell in the same row, two colspans stretching the table to twice the columns
     expect(rows[0]!.el.tagName).toBe('TR')
     expect(rows[0]!.el.className).toContain('ltx_eqn_row')
   })
 
-  it('公式行与间隔行都不成块', () => {
+  it('neither the formula row nor the spacer row is a block', () => {
     const blocks = extract(docOf(`<div class="ltx_para">${GROUP}</div>`))
-    // 公式行整块跳过；间隔行虽然匹配选择器，但格里没有字母，「有字母才成块」自然挡住
+    // The formula row is skipped whole; the spacer row matches the selector, but the cell has no letters, and “a block needs letters” stops it by itself
     expect(blocks.filter(b => b.el.tagName === 'TR')).toHaveLength(1)
     const doc = docOf(`<div class="ltx_para">${GROUP}</div>`)
     const spacer = doc.querySelector('tr.ltx_eqn_row:not(.ltx_align_baseline)')!
@@ -37,60 +37,60 @@ describe('说明行的识别', () => {
     expect(classify(spacer)?.kind).toBe('unit')
   })
 
-  it('公式行仍然整块跳过，不下钻', () => {
+  it('the formula row is still skipped whole, without descending', () => {
     const doc = docOf(`<div class="ltx_para">${GROUP}</div>`)
     const eqn = doc.querySelector('tr.ltx_equation')!
     expect(classify(eqn)).toMatchObject({ kind: 'skip', descend: false })
   })
 
-  it('说明行的正文只留下文字，公式与引用是占位符', () => {
+  it('the intertext row\'s text keeps only the words; formulas and references are placeholders', () => {
     const blocks = extract(docOf(`<div class="ltx_para">${GROUP}</div>`)) as TextBlock[]
     const row = blocks.find(b => b.unit === 'intertext')!
     const wire = serialize(row.el, 'tags').text
     expect(wire).toContain('In the Helfrich flow of')
     expect(wire).toContain('again the mean curvature')
-    // 行内公式是 void，不会被送去翻译
+    // Inline math is a void and is not sent for translation
     expect(wire).toMatch(/<x id="\d+"\/>/)
     expect(wire).not.toContain('<math')
   })
 })
 
-describe('方程组对外层单元仍是一个原子', () => {
-  // 12 篇 fixture 的 39 个方程组里有 5 个落在 `.ltx_item` 之类的单元内部。
-  // 写成 skip 或漏掉 descend，那 5 个块发出去的内容就会变——把 `<table><tbody><tr>`
-  // 当成对标签发给引擎，既多花 token 又给占位符协议添风险
-  // 用 `.ltx_item`（<li>）而不是 `.ltx_p`：HTML 解析器不许 `<table>` 待在 `<p>` 里，会把段落提前关掉——
-  // 实测那 5 个真实案例的容器正是 `.ltx_item`
-  it('组在单元里时序列化成一个 void，而不是一串表格标签', () => {
+describe('to the enclosing unit the equation group is still one atom', () => {
+  // 5 of the 39 equation groups in the 12 fixtures sit inside a unit such as `.ltx_item`.
+  // Written as skip, or with descend left out, what those 5 blocks send out changes — `<table><tbody><tr>`
+  // sent to the engine as paired tags, costing tokens and adding risk to the placeholder protocol
+  // `.ltx_item` (<li>) rather than `.ltx_p`: the HTML parser does not allow a `<table>` inside a `<p>` and closes the paragraph early —
+  // measured, the container of those 5 real cases is exactly `.ltx_item`
+  it('a group inside a unit serialises to one void, not a string of table tags', () => {
     const doc = docOf(`<ul class="ltx_itemize"><li class="ltx_item">See the system ${GROUP} for details.</li></ul>`)
     const blocks = extract(doc) as TextBlock[]
     const para = blocks.find(b => b.unit === 'item')!
     const wire = serialize(para.el, 'tags').text
     expect(wire).toContain('See the system')
     expect(wire).toContain('for details.')
-    // 整组一个 void：没有成对标签，也没有组里的任何文字
+    // The whole group one void: no paired tags, and none of the group's text
     expect(wire).not.toContain('<t id=')
     expect(wire).not.toContain('Helfrich')
     expect((wire.match(/<x id="\d+"\/>/g) ?? [])).toHaveLength(1)
   })
 
-  // 嵌套的组里，说明行**不**成块：外层已经把整组当成一个 void 原子克隆进自己的译文了，
-  // 说明行再单独成块，页面上就会出现两份——外层克隆里一份英文、组里一份中文——而且拆分
-  // 还会在原件下面再生成一份（Codex 在 #168 指出）。脚注靠 localizeNotes 归位，方程组没有
-  // 对应的一步，所以这里与改动前逐字节一致。实测 13 篇 fixture 的 5 个嵌套组一个都没有说明行
-  it('组嵌在别的单元里时，说明行不成块（外层已经整组克隆过去了）', () => {
+  // Inside a nested group the intertext row is **not** a block: the enclosing unit has already cloned the whole group as one void atom into its translation,
+  // and an intertext row as a block of its own would appear twice on the page — once in English inside the outer clone, once in Chinese in the group — and the split
+  // would generate one more copy under the original (Codex on #168). Footnotes go back into place through localizeNotes; equation groups have no
+  // such step, so this stays byte for byte as before the change. Measured: none of the 5 nested groups in 13 fixtures has an intertext row
+  it('with the group nested in another unit the intertext row is no block (the enclosing unit has cloned the whole group already)', () => {
     const doc = docOf(`<ul class="ltx_itemize"><li class="ltx_item">See the system ${GROUP} for details.</li></ul>`)
     const units = (extract(doc) as TextBlock[]).map(b => b.unit)
     expect(units).toContain('item')
     expect(units).not.toContain('intertext')
   })
 
-  it('组自己成块时照常下钻：说明行是独立的翻译单元', () => {
+  it('with the group a block of its own it descends as usual: the intertext row is a translation unit in its own right', () => {
     const doc = docOf(`<div class="ltx_para">${GROUP}</div>`)
     expect((extract(doc) as TextBlock[]).map(b => b.unit)).toContain('intertext')
   })
 
-  it('分类是 protect + descend，与脚注同一个形状', () => {
+  it('the classification is protect + descend, the same shape as a footnote', () => {
     const doc = docOf(`<div class="ltx_para">${GROUP}</div>`)
     const group = doc.querySelector('table.ltx_equationgroup')!
     expect(classify(group)).toMatchObject({ kind: 'protect', descend: true })
@@ -98,7 +98,7 @@ describe('方程组对外层单元仍是一个原子', () => {
 })
 
 describe('eqnProseCell', () => {
-  it('给出说明行里装正文的那个格，渲染层拿它的浅克隆当译文行的壳', () => {
+  it('gives the cell holding the intertext row\'s text; the renderer uses its shallow clone as the translation row\'s shell', () => {
     const doc = docOf(`<div class="ltx_para">${GROUP}</div>`)
     const row = doc.querySelector('tr.ltx_eqn_row:not(.ltx_equation).ltx_align_baseline')!
     const cell = eqnProseCell(row)
@@ -106,29 +106,29 @@ describe('eqnProseCell', () => {
     expect(cell?.getAttribute('colspan')).toBe('5')
   })
 
-  it('不是说明行就没有壳：公式行、段落都返回 null', () => {
+  it('no shell for anything but an intertext row: formula rows and paragraphs return null', () => {
     const doc = docOf(`<div class="ltx_para">${GROUP}<p class="ltx_p">text</p></div>`)
     expect(eqnProseCell(doc.querySelector('tr.ltx_equation')!)).toBeNull()
     expect(eqnProseCell(doc.querySelector('p.ltx_p')!)).toBeNull()
   })
 })
 
-// LaTeXML 也会输出 span 形态的方程组（实测 2312.17141 的 26 个组里有 2 个），
-// 收窄成 `table.` 会让它们丢掉整块保护：外层会把整组序列化成一个成对包装加一串独立的 void，
-// 而 provider 允许重排占位符，公式行就可能在译文克隆里换位置（Codex 在 #168 指出）
-describe('span 形态的方程组同样是原子', () => {
+// LaTeXML also emits span-shaped equation groups (measured: 2 of the 26 groups in 2312.17141),
+// and narrowing to `table.` would lose them their whole-block protection: the enclosing unit would serialise the group as one paired wrapper plus a string of separate voids,
+// and since the provider may reorder placeholders, a formula row could change position inside the translation clone (Codex on #168)
+describe('a span-shaped equation group is an atom too', () => {
   const SPAN_GROUP = `<span class="ltx_equationgroup ltx_eqn_gather ltx_eqn_table">
     <span class="ltx_equation"><math class="ltx_Math"><mi>a</mi></math></span>
     <span class="ltx_equation"><math class="ltx_Math"><mi>b</mi></math></span>
   </span>`
 
-  it('分类成 protect，与表形态同一条规则', () => {
+  it('classified protect, the same rule as the table shape', () => {
     const doc = docOf(`<div class="ltx_para"><p class="ltx_p">See ${SPAN_GROUP} above.</p></div>`)
     const group = doc.querySelector('span.ltx_equationgroup')!
     expect(classify(group)).toMatchObject({ kind: 'protect', descend: true })
   })
 
-  it('在成块的段落里序列化成**一个** void，不是包装加一串 void', () => {
+  it('inside a paragraph block it serialises to **one** void, not a wrapper plus a string of voids', () => {
     const doc = docOf(`<div class="ltx_para"><p class="ltx_p">See ${SPAN_GROUP} above.</p></div>`)
     const para = (extract(doc) as TextBlock[]).find(b => b.unit === 'p')!
     const wire = ser(para.el, 'tags').text
@@ -139,20 +139,20 @@ describe('span 形态的方程组同样是原子', () => {
   })
 })
 
-// 判据是「外层真的成了块」而不是「祖先匹配单元选择器」：`.ltx_item` 里只有嵌套的 `.ltx_p`
-// 和一个方程组时，它自己没有 ownText、根本不成块，没人克隆那个组（Codex 在 #168 指出）
-describe('让位的判据是外层真的成块', () => {
-  it('外层单元自己不成块时，说明行照常翻', () => {
+// The criterion is “the enclosing unit really became a block”, not “an ancestor matches the unit selector”: an `.ltx_item` holding only a nested `.ltx_p`
+// and an equation group has no ownText, is no block at all, and nobody clones that group (Codex on #168)
+describe('the criterion for giving way is the enclosing unit really being a block', () => {
+  it('with the enclosing unit no block of its own, the intertext row is translated as usual', () => {
     const doc = docOf(`<ul class="ltx_itemize"><li class="ltx_item"><p class="ltx_p">Prose lives here.</p>${GROUP}</li></ul>`)
     const blocks = extract(doc) as TextBlock[]
-    // `.ltx_item` 的自有文本只有空白，不成块；那段正文归嵌套的 `.ltx_p`
+    // The `.ltx_item`'s own text is whitespace only, so it is no block; that text belongs to the nested `.ltx_p`
     expect(blocks.map(b => b.unit)).not.toContain('item')
     expect(blocks.map(b => b.unit)).toContain('p')
-    // 没人把整组克隆走，所以说明行要自己成块，否则整段不翻
+    // Nobody clones the whole group away, so the intertext row has to be a block of its own, or the passage is not translated
     expect(blocks.map(b => b.unit)).toContain('intertext')
   })
 
-  it('外层单元确实成块时才让位', () => {
+  it('gives way only when the enclosing unit really is a block', () => {
     const doc = docOf(`<ul class="ltx_itemize"><li class="ltx_item">See the system ${GROUP} for details.</li></ul>`)
     const units = (extract(doc) as TextBlock[]).map(b => b.unit)
     expect(units).toContain('item')
