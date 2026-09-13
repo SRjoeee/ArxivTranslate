@@ -19,6 +19,11 @@ export interface MountedHook<T> {
   current(): T
   /** Let pending promises settle and React commit */
   flush(): Promise<void>
+  /**
+   * Flush until `ready()` holds, up to `ticks` rounds: a mount-time read (storage, a digest) takes as many ticks as the
+   * machine gives it — one was enough locally and not on CI
+   */
+  until(ready: () => boolean, ticks?: number): Promise<void>
   /** Run an action inside `act` and settle after it */
   run(action: () => void | Promise<void>): Promise<void>
   unmount(): Promise<void>
@@ -36,9 +41,14 @@ export async function mountHook<T>(use: () => T): Promise<MountedHook<T>> {
   const flush = async () => { await act(async () => { await tick() }) }
   await act(async () => { root.render(createElement(Probe)) })
   await flush()
+  const until = async (ready: () => boolean, ticks = 50) => {
+    for (let i = 0; i < ticks && !ready(); i++) await flush()
+    if (!ready()) throw new Error(`the hook did not reach the expected state within ${ticks} ticks`)
+  }
   return {
     current: () => latest as T,
     flush,
+    until,
     run: async action => { await act(async () => { await action() }); await flush() },
     unmount: async () => { await act(async () => { root.unmount() }); container.remove() },
   }

@@ -71,8 +71,7 @@ describe('usePopupData', () => {
     // The fourth local pass of S1: a page on shows its session's chain and the polling stops with the page
     wire.page = async () => page('on', 's1')
     const hook = await mountHook(usePopupData)
-    expect(hook.current().input.page?.progress.state).toBe('on')
-    expect(savedAsks()).toHaveLength(1)
+    await hook.until(() => hook.current().input.page?.progress.state === 'on' && savedAsks().length === 1)
     await hook.run(() => savedAsks()[0]?.answer.reject(new Error('the chain did not settle')))
     expect(hook.current().input.saved).toBeNull()
     // The reader restores from the popup; the page reports itself stopped
@@ -91,6 +90,7 @@ describe('usePopupData', () => {
   it('a page that is on shows its session chain only once it has answered — never the saved chain in its place', async () => {
     wire.page = async () => page('on', 's1')
     const hook = await mountHook(usePopupData)
+    await hook.until(() => savedAsks().length === 1 && hook.current().input.page?.progress.state === 'on')
     await hook.run(() => savedAsks()[0]?.answer.resolve(status('saved-chain')))
     expect(hook.current().input.saved?.providerId).toBe('saved-chain')
     expect(hook.current().input.session).toBeNull()
@@ -106,12 +106,14 @@ describe('usePopupData', () => {
     // Codex on #185: a change landing between the locale's read and the hook's first read has no watcher yet
     store.config = { ...DEFAULT_CONFIG, uiLanguage: 'zh-CN' }
     const hook = await mountHook(usePopupData)
+    await hook.until(() => reload.mock.calls.length > 0)
     expect(reload).toHaveBeenCalledTimes(1)
     await hook.unmount()
   })
 
   it('the same interface language at the first read does not reload', async () => {
     const hook = await mountHook(usePopupData)
+    await hook.until(() => hook.current().input.config !== null)
     expect(reload).not.toHaveBeenCalled()
     expect(hook.current().input.config?.uiLanguage).toBe('en')
     await hook.unmount()
@@ -119,6 +121,7 @@ describe('usePopupData', () => {
 
   it('a change saved elsewhere shows without reopening, and the saved chain is asked fresh', async () => {
     const hook = await mountHook(usePopupData)
+    await hook.until(() => hook.current().input.config !== null)
     expect(hook.current().input.config?.targetLanguage).toBe(DEFAULT_CONFIG.targetLanguage)
     store.config = { ...DEFAULT_CONFIG, uiLanguage: 'en', targetLanguage: 'jpn' }
     await hook.run(() => { for (const watcher of store.watchers) watcher(store.config as Config) })

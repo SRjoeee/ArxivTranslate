@@ -59,6 +59,7 @@ describe('useOptionsData', () => {
 
   it('a change saved elsewhere shows without a reload', async () => {
     const hook = await mountHook(useOptionsData)
+    await hook.until(() => hook.current().config !== null || reload.mock.calls.length > 0)
     expect(hook.current().config?.targetLanguage).toBe(DEFAULT_CONFIG.targetLanguage)
     await hook.run(() => saveElsewhere({ ...DEFAULT_CONFIG, uiLanguage: 'en', targetLanguage: 'jpn' }))
     expect(hook.current().config?.targetLanguage).toBe('jpn')
@@ -68,6 +69,7 @@ describe('useOptionsData', () => {
 
   it('an interface language saved elsewhere reloads the page at once when nothing is being edited', async () => {
     const hook = await mountHook(useOptionsData)
+    await hook.until(() => hook.current().config !== null || reload.mock.calls.length > 0)
     await hook.run(() => saveElsewhere({ ...DEFAULT_CONFIG, uiLanguage: 'zh-CN' }))
     expect(reload).toHaveBeenCalledTimes(1)
     await hook.unmount()
@@ -77,6 +79,7 @@ describe('useOptionsData', () => {
     // The fourth local pass of S1: a service being edited in another tab's drawer is local until 连接; the reload the
     // watcher asked for would have discarded it
     const hook = await mountHook(useOptionsData)
+    await hook.until(() => hook.current().config !== null || reload.mock.calls.length > 0)
     const release = drafts.hold()
     await hook.run(() => saveElsewhere({ ...DEFAULT_CONFIG, uiLanguage: 'zh-CN', targetLanguage: 'jpn' }))
     expect(reload).not.toHaveBeenCalled()
@@ -93,6 +96,7 @@ describe('useOptionsData', () => {
     // The fifth local pass of S1: `save()` queues its patch on the write chain and closes the editor; the hold ends,
     // and a reload issued at once would cut the write off before its read of the store came back
     const hook = await mountHook(useOptionsData)
+    await hook.until(() => hook.current().config !== null || reload.mock.calls.length > 0)
     const release = drafts.hold()
     await hook.run(() => saveElsewhere({ ...DEFAULT_CONFIG, uiLanguage: 'zh-CN' }))
     expect(reload).not.toHaveBeenCalled()
@@ -113,6 +117,7 @@ describe('useOptionsData', () => {
   it('a draft opened while the reload waits for a write holds it again', async () => {
     // The fifth local pass of S1: the wait for the write ended in an unconditional reload, over a prompt opened meanwhile
     const hook = await mountHook(useOptionsData)
+    await hook.until(() => hook.current().config !== null || reload.mock.calls.length > 0)
     const releaseFirst = drafts.hold()
     await hook.run(() => saveElsewhere({ ...DEFAULT_CONFIG, uiLanguage: 'zh-CN' }))
     let land!: () => void
@@ -133,6 +138,7 @@ describe('useOptionsData', () => {
 
   it('a save queued while the reload waits for an earlier one lands before the reload', async () => {
     const hook = await mountHook(useOptionsData)
+    await hook.until(() => hook.current().config !== null || reload.mock.calls.length > 0)
     const release = drafts.hold()
     await hook.run(() => saveElsewhere({ ...DEFAULT_CONFIG, uiLanguage: 'zh-CN' }))
     let land!: () => void
@@ -152,6 +158,7 @@ describe('useOptionsData', () => {
     // Codex on #185: a change landing between the locale's read and the hook's first read has no watcher yet
     store.config = { ...DEFAULT_CONFIG, uiLanguage: 'zh-CN' }
     const hook = await mountHook(useOptionsData)
+    await hook.until(() => hook.current().config !== null || reload.mock.calls.length > 0)
     expect(reload).toHaveBeenCalledTimes(1)
     await hook.unmount()
   })
