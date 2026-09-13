@@ -24,7 +24,8 @@
     "e2e:placeholders": "node tests/e2e/placeholders.mjs",
     "helper:build": "swift build -c release --package-path helper",
     "helper:smoke": "node scripts/helper-smoke.mjs",
-    "lint": "biome lint . && node scripts/check-english.mjs",
+    "lint": "biome lint . && node scripts/check-english.mjs && node scripts/check-boundary.mjs",
+    "check:boundary": "node scripts/check-boundary.mjs",
     "check:english": "node scripts/check-english.mjs",
     "lint:fix": "biome lint --write ."
   },

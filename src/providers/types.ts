@@ -95,7 +95,8 @@ export interface TranslationProvider {
   cacheId?: string
 }
 
-export type ProviderErrorKind = 'no-key' | 'network' | 'rate-limit' | 'auth' | 'bad-request' | 'invalid-response' | 'timeout' | 'aborted' | 'unknown'
+export const PROVIDER_ERROR_KINDS = ['no-key', 'network', 'rate-limit', 'auth', 'bad-request', 'invalid-response', 'timeout', 'aborted', 'unknown'] as const
+export type ProviderErrorKind = (typeof PROVIDER_ERROR_KINDS)[number]
 
 /**
  * The kinds that continuing can only repeat: a missing or rejected key. The one definition (ADR-0004) behind the

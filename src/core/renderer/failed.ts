@@ -6,7 +6,8 @@
 // the clean-up there is.
 import type { Block } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
-import { S, parseFatal, reasonText } from '@/ui/strings'
+import { parseFatal } from '@/core/pipeline/fatal'
+import { coreStrings } from '@/core/strings'
 import { ERROR_CLASS, FOR_ATTR } from './attrs'
 import { translationShell } from './shell'
 import { clearTranslation, setState } from './translation'
@@ -52,15 +53,16 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
   const { node: outer, slot } = translationShell(block)
   const widget = outer === slot ? null : outer
   // The reader sees the sentence in the interface's language; the tail of `kind: diagnostic` is kept for diagnosis, not shown (Codex on #161)
+  const strings = coreStrings()
   const kind = parseFatal(reason)
-  host.title = reasonText(kind.kind) || S.page.retry
+  host.title = strings.failureTitle(kind.kind) || strings.retry
   host.setAttribute(REASON_ATTR, reason)
   const root = host.attachShadow({ mode: 'open' })
   const style = doc.createElement('style')
   style.textContent = STYLE
   const button = doc.createElement('button')
   button.type = 'button'
-  button.textContent = S.page.retry
+  button.textContent = strings.retry
   button.addEventListener('click', () => {
     button.disabled = true
     retry()
@@ -94,11 +96,11 @@ export function relabelFailed(doc: Document): number {
   for (const host of hosts) {
     const root = (host as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot
     const button = root?.querySelector('button')
-    if (button) button.textContent = S.page.retry
+    if (button) button.textContent = coreStrings().retry
     // The sentence shown on hover must follow too: it is derived from kind, and the raw diagnostic stays in the attribute (Codex on #161)
     const reason = host.getAttribute(REASON_ATTR)
     if (reason === null) continue
-    host.title = reasonText(parseFatal(reason).kind) || S.page.retry
+    host.title = coreStrings().failureTitle(parseFatal(reason).kind) || coreStrings().retry
     const mark = root?.querySelector<HTMLElement>('.mark')
     if (mark) mark.title = host.title
   }

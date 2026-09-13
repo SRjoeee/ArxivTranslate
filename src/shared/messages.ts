@@ -2,6 +2,7 @@
 import { browser } from 'wxt/browser'
 import type { Progress } from '@/core/pipeline/run'
 import type { Mode } from '@/core/renderer'
+import type { StartResult } from '@/core/session'
 import type { ProviderStatus } from '@/providers/transport'
 import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
 import type { HelperStatus, ImageProgress, OcrCall, OcrMessageResponse } from './ocr'
@@ -51,7 +52,7 @@ export interface AxtMessages {
    * page has moved — the reader restored, restarted or translated meanwhile — so a decision that took a while (the
    * toggle waits for the chain's probes) cannot undo what the reader did in between (sixth and twelfth passes)
    */
-  'axt:translate-page': { request: { mode?: Mode; restart?: boolean; epoch?: string }; response: { started: boolean; reason?: string } }
+  'axt:translate-page': { request: { mode?: Mode; restart?: boolean; epoch?: string }; response: StartResult }
   /** popup → content: stop and restore the original. `epoch` as above: a restore decided on an earlier epoch is `refused` */
   'axt:restore-page': { request: { epoch?: string }; response: { removedNodes: number; refused?: true } }
   /** popup → content: switch the mode (changes the attribute on <html> only, no retranslation; §4 step 9) */

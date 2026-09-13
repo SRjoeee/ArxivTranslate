@@ -16,7 +16,7 @@ import { isBuiltInService, isLlmChosen } from '@/config/services'
 import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
 import { type PackState, createPackLookup, downloadPack } from '@/shared/pack'
-import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, actionErrorText, pollsBackground, runnable } from './view-model'
+import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, actionErrorText, pollsBackground, runnable, startRefusalText } from './view-model'
 import { chainRevision } from '@/config/revision'
 import { localeInUse, S } from '@/ui/strings'
 import { pickLocale } from '@/locales'
@@ -270,14 +270,14 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
       // translated and restored meanwhile (the local review of S2, fourteenth pass)
       const { epoch } = await sendToActiveTab({ type: 'axt:page-status' })
       const r = await sendToActiveTab({ type: 'axt:translate-page', ...(epoch !== undefined ? { epoch } : {}) })
-      if (!r.started) throw new Error(r.reason ?? '')
+      if (!r.started) throw new Error(startRefusalText(r))
     }),
     // The epoch a click acts on is read at the click, not from the last poll: an automatic hand-over restart between
     // polls would make the poll's stale and the command refused (the local review of S2, seventh pass)
     retranslate: () => void guard(async () => {
       const { epoch } = await sendToActiveTab({ type: 'axt:page-status' })
       const r = await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(epoch !== undefined ? { epoch } : {}) })
-      if (!r.started) throw new Error(r.reason ?? '')
+      if (!r.started) throw new Error(startRefusalText(r))
     }),
     restore: () => void guard(async () => {
       const { epoch } = await sendToActiveTab({ type: 'axt:page-status' })

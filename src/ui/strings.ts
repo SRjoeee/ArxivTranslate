@@ -14,6 +14,7 @@ import { LANG_CODE_TO_EN_UI_NAME, LANG_CODE_TO_ZH_NAME, type LangCode, label } f
 import type { FallbackReason } from '@/config/storage'
 import { FALLBACK_LOCALE, LOCALES, type Locale, type LocaleCode } from '@/locales'
 import type { ProviderErrorKind } from '@/providers/types'
+import { setCoreStrings } from '@/core/strings'
 
 export { PREVIEW_SOURCE, PREVIEW_TARGET } from '@/locales/preview'
 
@@ -41,6 +42,12 @@ export function setLocale(code: LocaleCode): void {
   current = LOCALES[code]
   S = current.S
   O = current.O
+  installCoreStrings()
+}
+
+/** The core renders the failure widget itself and knows no pack (ADR-0008): hand it this locale's sentences, at load and on every switch */
+function installCoreStrings(): void {
+  setCoreStrings({ retry: S.page.retry, failureTitle: kind => reasonText(kind) })
 }
 
 /** Which pack is in use; the settings page marks it in its menu */
@@ -116,26 +123,13 @@ export const MODE_ORDER = ['side', 'stack', 'only'] as const
 
 /** The settings page (docs/UI.md §3.2). Same register as `S`: nouns for states, verbs for buttons */
 
-
 /** §3.4: ProviderErrorKind → a reader's sentence. `aborted` is the reader's own doing and shows nothing. */
-
-
 export function reasonText(kind: ProviderErrorKind): string {
   return current.REASON[kind]
 }
 
-/** The kinds themselves are the same in every pack; the sentences are what differ */
-const KINDS = new Set<string>(Object.keys(LOCALES[FALLBACK_LOCALE].REASON))
-
-/** run.ts writes a fatal error as `${kind}: ${message}`; only a kind from the table counts, anything else is the whole message. */
-export function parseFatal(fatal: string): { kind: ProviderErrorKind; message: string } {
-  const at = fatal.indexOf(': ')
-  if (at > 0) {
-    const kind = fatal.slice(0, at)
-    if (KINDS.has(kind)) return { kind: kind as ProviderErrorKind, message: fatal.slice(at + 2) }
-  }
-  return { kind: 'unknown', message: fatal }
-}
+/** `kind: diagnostic` → its parts; lives in the core now (pipeline/fatal.ts), re-exported for the popup and the tests */
+export { parseFatal } from '@/core/pipeline/fatal'
 
 /** service id → the name a reader sees (§2): built-ins by id, the reader's own by the name they gave */
 export function serviceName(id: string, services: readonly { id: string; name: string }[] = []): string {
@@ -163,3 +157,5 @@ export const HELPER_GUIDE_URL = `https://github.com/SRjoeee/ReadarXiv/blob/${HEL
 export function helperInstallCommand(extensionId: string): string {
   return `curl -fsSL https://raw.githubusercontent.com/SRjoeee/ReadarXiv/${HELPER_REF}/helper/install-remote.sh | bash -s -- ${extensionId} ${HELPER_REF}`
 }
+
+installCoreStrings()
