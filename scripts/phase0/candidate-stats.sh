@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 对已下载的候选 HTML 重算特征统计（修正 LaTeXML 版本正则，增加 cite/ref/typewriter 列）
+# Recompute the feature statistics of the downloaded candidate HTML (corrected LaTeXML version regex, added cite/ref/typewriter columns)
 S="$(cd "$(dirname "$0")" && pwd)"
 cnt() { grep -o "$1" "$2" | wc -l | tr -d ' '; }
 printf 'id\tkb\tlatexml\tmath\teqn\tlist\talgo\ttabular\ttd\tnote\tthm\tproof\tERR\tsvg\timg\tbib\tcite\tref\ttt\ttitle\n'

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 候选 fixture 发现：按类别+日期查 arXiv API，下载 HTML，统计 ltx_* 特征，输出 TSV
+# Candidate fixture discovery: query the arXiv API by category + date, download the HTML, count ltx_* features, write a TSV
 set -u
 S="$(cd "$(dirname "$0")" && pwd)"
 UA="ArxivTranslate-fixture-fetch/0.1 (srjoe2022@gmail.com)"
 OUT="$S/candidates.tsv"
 printf 'id\tyear\tcat\thttp\tkb\tlatexml\tmath\tequation\tlisting\talgo\ttabular\ttd\tnote\ttheorem\tproof\terror\tsvg\timg\tbib\ttitle\n' > "$OUT"
 
-# 类别 起 止（YYYYMMDD）
+# category from to (YYYYMMDD)
 QUERIES=(
   "math.CO 20231201 20231231"
   "cs.LG 20231201 20231231"

@@ -1,11 +1,11 @@
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'wxt'
 
-// WXT 工程配置。host_permissions 等到 Phase 3 接网络引擎时再加。
+// The WXT project configuration. host_permissions arrive with the network engines in Phase 3.
 export default defineConfig({
   srcDir: 'src',
   modules: ['@wxt-dev/module-react'],
-  // 扩展页面里 <link rel="modulepreload" crossorigin> 会触发 Chrome 的 "cross-world extension resource mismatch" 告警（无害但刷屏），关掉预加载
+  // In extension pages <link rel="modulepreload" crossorigin> triggers Chrome's "cross-world extension resource mismatch" warning (harmless but noisy); preloading is off
   vite: () => ({ build: { modulePreload: false }, plugins: [tailwindcss()] }),
   // The gallery is for `wxt` (serve) only: a release must not ship a debug page anyone can open
   hooks: {
@@ -26,9 +26,9 @@ export default defineConfig({
     action: {
       default_icon: { 16: 'icon/mark-16.png', 32: 'icon/mark-32.png', 48: 'icon/mark-48.png' },
     },
-    // 图片叠加层用 CSS 锚点定位，`anchor-scope` 要 Chrome 131（§15.2）。文档一直这么写，但没落到
-    // manifest 上，低于这个版本的 Chrome 照样装得上、拿到一个错位的叠加层，而且滚动容器也不进
-    // 顺序焦点（Codex 在 #99 指出）。声明出来，让文档写的下限真正生效
+    // The image overlay uses CSS anchor positioning, and `anchor-scope` needs Chrome 131 (§15.2). The document always said so, but it never reached
+    // the manifest: a Chrome below that version installs the extension all the same and gets a misplaced overlay, and its scroll containers do not enter
+    // sequential focus either (Codex on #99). Declared, so the floor the document states really applies
     minimum_chrome_version: '131',
     // The two strings Chrome itself shows — the extensions page, the store listing and the shortcuts
     // page — come from public/_locales, because only the browser reads them and only it can pick a
@@ -47,15 +47,15 @@ export default defineConfig({
     // The keyboard entry (UI.md S-P-50): the same toggle as the context menu. The popup shows the
     // binding Chrome reports, so a reader who rebinds or removes it sees the truth
     commands: { 'axt-toggle': { suggested_key: { default: 'Alt+T' }, description: '__MSG_toggle__' } },
-    // background 向 LLM 端点 fetch 需要 host 权限；默认只给 OpenRouter，自定义 baseURL 在设置页保存时按 origin 申请。
-    // google-web 的端点也列进来（Codex 在 #59 指出）：它眼下返 CORS 头，普通跨域就能过，
-    // 但那正是这次搬迁想摆脱的依赖——对方哪天不发这个头，免费引擎就整个不可用了
-    // 每个联网引擎都要在这里：MV3 的 background fetch 仍然受 CORS 约束，没有 host 权限时
-    // 只能指望对方返 `Access-Control-Allow-Origin`。微软今天确实返 `*`（实测），但那是我们控制不了的
-    // 依赖——它哪天不返，整个引擎就变成 `network` 失败（Codex 在 #115 指出；加 provider 时漏了这一行）
+    // The background's fetch to an LLM endpoint needs a host permission; by default only OpenRouter, a custom baseURL is requested by origin when saved on the settings page.
+    // google-web's endpoint is listed too (Codex on #59): today it returns CORS headers and an ordinary cross-origin request passes,
+    // but that is exactly the dependency this move wants to shed — the day they stop sending the header the free engine is unusable whole
+    // Every network engine has to be here: an MV3 background fetch is still bound by CORS, and without a host permission it can only
+    // hope for `Access-Control-Allow-Origin` from the other side. Microsoft does return `*` today (measured), but that is a dependency
+    // beyond our control — the day it stops, the whole engine becomes a `network` failure (Codex on #115; the line was missed when the provider was added)
     host_permissions: ['https://openrouter.ai/*', 'https://translate-pa.googleapis.com/*', 'https://edge.microsoft.com/*'],
-    // 自定义端点可能是 http 的 127.0.0.1 / 局域网（Ollama、LM Studio）；只写 localhost 字面量时申请会直接失败（Codex 在 #6 指出）。
-    // 这里只是"允许申请"的范围，真正授权仍在设置页按 origin 逐个请求
+    // A custom endpoint may be http on 127.0.0.1 / the LAN (Ollama, LM Studio); with only the localhost literal the request fails outright (Codex on #6).
+    // This is only the range that may be requested; the real grant is still asked for per origin on the settings page
     optional_host_permissions: ['https://*/*', 'http://*/*'],
   },
 })
