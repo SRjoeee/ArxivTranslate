@@ -1,7 +1,7 @@
 // 阅读: the two appearance lists (translation styles, hover bands) and when translation starts.
 // Everything is immediate: choosing a tile or dragging a slider writes the config, and the page
 // being read picks it up through its own config watcher.
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   BUILT_IN_HIGHLIGHTS, BUILT_IN_STYLES, type HighlightProfile, type StyleProfile,
   activeHighlight, activeStyle, duplicateHighlight, duplicateStyle, newProfileId, resetBuiltIns,
@@ -17,29 +17,51 @@ import type { OptionsData } from '../data'
 
 /** The preload margin as screens rather than pixels: a number of pixels means nothing to a reader */
 const MARGINS = [450, 900, 1800, 2700]
+
+/**
+ * The list with the profile written into it — in place, or appended when the profile is no longer there: deleted in
+ * another tab while its drawer was open here, and the list followed (INVENTORY S1). The reader's change is their later
+ * word on that profile; a write that found nothing to replace would have dropped it without a trace
+ */
+const withProfile = <T extends { id: string }>(list: readonly T[], next: T): T[] =>
+  list.some(p => p.id === next.id) ? list.map(p => (p.id === next.id ? next : p)) : [...list, next]
 const THRESHOLDS = [0, 0.5, 1]
 const nearest = (stops: readonly number[], value: number) => stops.reduce((best, s) => (Math.abs(s - value) < Math.abs(best - value) ? s : best), stops[0]!)
 
 export function Reading({ data }: { data: OptionsData }) {
   const { config, patch } = data
   const [editing, setEditing] = useState<{ list: 'style' | 'highlight'; id: string } | null>(null)
+  /** The profiles being edited as this tab last saw them: a drawer outlives a deletion made elsewhere (below) */
+  const lastStyle = useRef<StyleProfile | undefined>(undefined)
+  const lastBand = useRef<HighlightProfile | undefined>(undefined)
   if (!config) return null
   const a = config.appearance
   const style = activeStyle(a)
   const highlight = activeHighlight(a)
-  const setAppearance = (fn: (current: typeof a) => typeof a) => void patch(latest => ({ ...latest, appearance: fn(latest.appearance) }))
+  // The write itself is handed back: an editor's box waits for its own writes to land before it takes anything from the store (AdvancedCss)
+  const setAppearance = (fn: (current: typeof a) => typeof a) => patch(latest => ({ ...latest, appearance: fn(latest.appearance) }))
 
-  const editingStyle = editing?.list === 'style' ? a.styles.find(s => s.id === editing.id) : undefined
-  const editingBand = editing?.list === 'highlight' ? a.highlights.find(h => h.id === editing.id) : undefined
+  // The profile being edited as the configuration has it — or, not there, as this tab last saw it under that id: one
+  // deleted in another tab while its drawer is open here (the drawer stays with the reader's draft, and their next
+  // change writes the profile back — `withProfile`; the local review of S1, eighth pass), or one just added or
+  // duplicated here whose write is still out (`addStyle`, `onDuplicate` seed it). Never another profile's: a copy
+  // still out would otherwise open on its original, and the first keystroke would rename that (ninth pass)
+  const cached = <T extends { id: string }>(last: T | undefined, id: string) => (last?.id === id ? last : undefined)
+  const editingStyle = editing?.list === 'style' ? (a.styles.find(s => s.id === editing.id) ?? cached(lastStyle.current, editing.id)) : undefined
+  const editingBand = editing?.list === 'highlight' ? (a.highlights.find(h => h.id === editing.id) ?? cached(lastBand.current, editing.id)) : undefined
+  lastStyle.current = editingStyle
+  lastBand.current = editingBand
 
   const addStyle = () => {
     const next: StyleProfile = { ...BUILT_IN_STYLES[0]!, id: newProfileId('style'), name: O.reading.newProfile }
     setAppearance(c => ({ ...c, styles: [...c.styles, next], activeStyle: next.id }))
+    lastStyle.current = next
     setEditing({ list: 'style', id: next.id })
   }
   const addBand = () => {
     const next: HighlightProfile = { ...BUILT_IN_HIGHLIGHTS[0]!, id: newProfileId('hl'), name: O.reading.newProfile }
     setAppearance(c => ({ ...c, highlights: [...c.highlights, next], activeHighlight: next.id }))
+    lastBand.current = next
     setEditing({ list: 'highlight', id: next.id })
   }
   /** Deleting the chosen profile falls back to the first of the list, never to nothing */
@@ -111,12 +133,16 @@ export function Reading({ data }: { data: OptionsData }) {
 
       {editingStyle && (
         <StyleEditor
+          // One editor per profile: a duplicate opens its own, not the original's boxes with their drafts and the
+          // writes they have out (the local review of S1, twelfth pass)
+          key={editingStyle.id}
           value={editingStyle}
           highlight={highlight}
-          onChange={next => setAppearance(c => ({ ...c, styles: c.styles.map(s => (s.id === next.id ? next : s)) }))}
+          onChange={next => setAppearance(c => ({ ...c, styles: withProfile(c.styles, next) }))}
           onDuplicate={() => {
             const copy = duplicateStyle(editingStyle, copyName(editingStyle, 'styles'))
             setAppearance(c => ({ ...c, styles: [...c.styles, copy], activeStyle: copy.id }))
+            lastStyle.current = copy
             setEditing({ list: 'style', id: copy.id })
           }}
           onDelete={() => removeStyle(editingStyle.id)}
@@ -125,12 +151,14 @@ export function Reading({ data }: { data: OptionsData }) {
       )}
       {editingBand && (
         <HighlightEditor
+          key={editingBand.id}
           value={editingBand}
           style={style}
-          onChange={next => setAppearance(c => ({ ...c, highlights: c.highlights.map(h => (h.id === next.id ? next : h)) }))}
+          onChange={next => setAppearance(c => ({ ...c, highlights: withProfile(c.highlights, next) }))}
           onDuplicate={() => {
             const copy = duplicateHighlight(editingBand, copyName(editingBand, 'highlights'))
             setAppearance(c => ({ ...c, highlights: [...c.highlights, copy], activeHighlight: copy.id }))
+            lastBand.current = copy
             setEditing({ list: 'highlight', id: copy.id })
           }}
           onDelete={() => removeBand(editingBand.id)}

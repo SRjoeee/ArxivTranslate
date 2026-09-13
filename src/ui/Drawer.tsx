@@ -1,12 +1,15 @@
 // A right-side panel for editing one thing (a service, an appearance profile). Escape and a click
 // on the backdrop close it; the panel itself is a dialog for assistive technology.
 import { type ReactNode, useEffect, useRef } from 'react'
+import { drafts } from './drafts'
 import { O } from './strings'
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 export function Drawer({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   const panel = useRef<HTMLElement>(null)
+  // What a drawer edits is local until its own save: the page must not reload under it (ui/drafts.ts)
+  useEffect(() => drafts.hold(), [])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)

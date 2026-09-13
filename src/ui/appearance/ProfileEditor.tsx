@@ -17,7 +17,8 @@ import { UnderlineField } from './UnderlineField'
 export function StyleEditor({ value, highlight, onChange, onDuplicate, onDelete, onClose }: {
   value: StyleProfile
   highlight: HighlightProfile
-  onChange: (next: StyleProfile) => void
+  /** Answers with the write, for the boxes that wait for their own (AdvancedCss) */
+  onChange: (next: StyleProfile) => unknown
   onDuplicate: () => void
   onDelete: () => void
   onClose: () => void
@@ -58,7 +59,7 @@ export function StyleEditor({ value, highlight, onChange, onDuplicate, onDelete,
 export function HighlightEditor({ value, style, onChange, onDuplicate, onDelete, onClose }: {
   value: HighlightProfile
   style: StyleProfile
-  onChange: (next: HighlightProfile) => void
+  onChange: (next: HighlightProfile) => unknown
   onDuplicate: () => void
   onDelete: () => void
   onClose: () => void

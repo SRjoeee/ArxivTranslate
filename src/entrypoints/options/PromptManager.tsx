@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { PromptFileFormatError, downloadPromptFile, readPromptFile } from '@/providers/prompt-file'
 import {
   BUILT_IN_PROMPTS, DEFAULT_PROMPT_ID, PROMPT_TOKENS, getTokenCellText,
@@ -6,6 +6,7 @@ import {
 } from '@/providers/prompt-library'
 import { getRandomUUID as uuid } from '@/shared/uuid'
 import { O } from '@/ui/strings'
+import { drafts } from '@/ui/drafts'
 
 // The prompt library: the same features as Read Frog's components/prompt-configurator/* — the list,
 // reading a built-in one, copying it into an editable one, new / edit / delete, import / export, and
@@ -13,7 +14,7 @@ import { O } from '@/ui/strings'
 // a whole UI stack for a dozen fields is not worth it, so this is the settings page's plain React.
 // A change is handed to the parent, which writes it to storage straight away — the page has no save button.
 
-type EditorMode = 'view' | 'copy' | 'edit' | 'new'
+export type EditorMode = 'view' | 'copy' | 'edit' | 'new'
 type Field = 'systemPrompt' | 'prompt'
 
 /** Read at render, not at import: this module is evaluated before the pack is chosen (ui/strings.ts) */
@@ -30,15 +31,42 @@ const small = { display: 'block', color: 'var(--axt-fg-2)', fontSize: 12 }
 const row = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--axt-line)' }
 const button = { font: 'inherit', fontSize: 12 }
 
-export function PromptManager({ value, onChange }: { value: PromptsConfig; onChange: (next: PromptsConfig) => void }) {
+/**
+ * The list with the draft saved into it. An edit replaces its template in place — or, when the template is no longer
+ * in the list (deleted in another tab while this editor was open, and the list followed), appends it: the save is the
+ * reader's later word on that prompt, and a save that persisted nothing while reporting success would have lost the
+ * draft without a trace (the local review of S1, sixth pass). A new template and a copy always append
+ */
+export function withSaved(patterns: readonly PromptTemplate[], mode: EditorMode, draft: PromptTemplate): PromptTemplate[] {
+  if (mode === 'edit' && patterns.some(p => p.id === draft.id)) return patterns.map(p => (p.id === draft.id ? draft : p))
+  return [...patterns, draft]
+}
+
+/**
+ * A change to the prompts, as an update of the configuration **as stored when the write runs** — not of `value`, which
+ * is what this tab last saw: a prompt added or deleted in another tab while its refresh was still queued would
+ * otherwise be dropped or brought back by a list built from the stale copy (Codex on #185)
+ */
+export type PromptsUpdate = (current: PromptsConfig) => PromptsConfig
+
+export function PromptManager({ value, onChange }: { value: PromptsConfig; onChange: (update: PromptsUpdate) => unknown }) {
   const [editor, setEditor] = useState<{ mode: EditorMode; draft: PromptTemplate } | null>(null)
+  // The editor's draft is local until 保存: the page must not reload under it (ui/drafts.ts). Keyed on whether an
+  // editor is open, not on the draft — every keystroke would otherwise end one hold and begin another
+  const editing = editor !== null
+  useEffect(() => (editing ? drafts.hold() : undefined), [editing])
   const [message, setMessage] = useState('')
   const areas = useRef<Record<Field, HTMLTextAreaElement | null>>({ systemPrompt: null, prompt: null })
   const lastFocused = useRef<Field>('prompt')
   const fileInput = useRef<HTMLInputElement>(null)
 
   const builtIns = Object.values(BUILT_IN_PROMPTS)
-  const select = (promptId: string) => onChange({ ...value, promptId })
+  // A choice made from a stale list must not store an id that names nothing: deleted in another tab before this
+  // one's refresh ran, the prompt would resolve to the default silently, and neither it nor the previous choice would
+  // translate (the local review of S1, thirteenth pass). Such a choice keeps what is stored
+  const select = (promptId: string) => onChange(current => (
+    builtIns.some(t => t.id === promptId) || current.patterns.some(p => p.id === promptId) ? { ...current, promptId } : current
+  ))
 
   function open(mode: EditorMode, template?: PromptTemplate) {
     setMessage('')
@@ -55,18 +83,17 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
     const { mode, draft } = editor
     if (!draft.name.trim()) return setMessage(O.prompts.manager.nameEmpty)
     if (!draft.prompt.trim()) return setMessage(O.prompts.manager.promptEmpty)
-    const patterns = mode === 'edit' ? value.patterns.map(p => (p.id === draft.id ? draft : p)) : [...value.patterns, draft]
-    onChange({ patterns, promptId: mode === 'copy' ? draft.id : value.promptId })
+    onChange(current => ({ patterns: withSaved(current.patterns, mode, draft), promptId: mode === 'copy' ? draft.id : current.promptId }))
     setEditor(null)
     setMessage(mode === 'edit' ? O.prompts.manager.saved : O.prompts.manager.added)
   }
 
   function remove(template: PromptTemplate) {
     if (!window.confirm(O.prompts.manager.removeConfirm(template.name))) return
-    onChange({
-      patterns: value.patterns.filter(p => p.id !== template.id),
-      promptId: value.promptId === template.id ? DEFAULT_PROMPT_ID : value.promptId,
-    })
+    onChange(current => ({
+      patterns: current.patterns.filter(p => p.id !== template.id),
+      promptId: current.promptId === template.id ? DEFAULT_PROMPT_ID : current.promptId,
+    }))
     if (editor?.draft.id === template.id) setEditor(null)
   }
 
@@ -74,7 +101,8 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
     if (!file) return
     try {
       const entries = await readPromptFile(file)
-      onChange({ ...value, patterns: [...value.patterns, ...entries.map(entry => ({ ...entry, id: uuid() }))] })
+      const added = entries.map(entry => ({ ...entry, id: uuid() }))
+      onChange(current => ({ ...current, patterns: [...current.patterns, ...added] }))
       setMessage(O.prompts.manager.imported(entries.length))
     } catch (e) {
       // 解析器只说是哪一种，句子在语言包里（Codex 在 #161 指出）

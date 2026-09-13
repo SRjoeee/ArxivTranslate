@@ -8,19 +8,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { browser } from 'wxt/browser'
 import { type Config, DEFAULT_CONFIG, MODE_VALUES } from '@/config/schema'
-import { getConfig, setConfig } from '@/config/storage'
+import { getConfig, setConfig, watchConfig } from '@/config/storage'
 import type { Mode } from '@/core/renderer'
 import { COMMAND_ID } from '@/entrypoints/background/context-menu'
 import type { ProviderStatus } from '@/providers/transport'
 import { isBuiltInService, isLlmChosen } from '@/config/services'
 import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
-import { type PackState, downloadPack, packState } from '@/shared/pack'
+import { type PackState, createPackLookup, downloadPack } from '@/shared/pack'
 import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, pollsBackground, runnable } from './view-model'
 import { chainRevision } from '@/config/revision'
-import { S } from '@/ui/strings'
+import { localeInUse, S } from '@/ui/strings'
+import { pickLocale } from '@/locales'
+import { browserLanguages } from '@/ui/apply-locale'
+import { createProviderAsks } from './provider-asks'
 
 const scriptStart = performance.now()
+
+/** The stored interface language resolves to another pack than the one in use (chosen once, before the first paint) */
+const staleLocale = (c: Config) => pickLocale(c.uiLanguage, browserLanguages()) !== localeInUse()
 
 export interface PopupActions {
   translate(): void
@@ -61,7 +67,14 @@ function openOptions(section?: OptionsSection): void {
 
 export function usePopupData(): { input: PopupInput; error: string | null; actions: PopupActions } {
   const [page, setPage] = useState<PageStatus | null>(null)
-  const [provider, setProvider] = useState<ProviderStatus | null>(null)
+  /**
+   * Two provider statuses, published by two kinds of ask and never confused (the local review of S1): the saved
+   * settings' chain — asked at mount, after a save, after a configuration change (fresh) — and the running
+   * session's own chain, polled while the page is on. A poll that answers late must not overwrite what the saved
+   * settings say once the page has stopped, so a stopped page reads the saved one
+   */
+  const [savedProvider, setSavedProvider] = useState<ProviderStatus | null>(null)
+  const [sessionProvider, setSessionProvider] = useState<ProviderStatus | null>(null)
   /**
    * The configuration this popup shows, with the digest of its chain settings — **one** state, set once the digest
    * is known: a configuration shown beside the previous one's digest would call a page current that is behind it,
@@ -70,9 +83,16 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const [local, setLocal] = useState<{ config: Config; revision: string } | null>(null)
   const config = local?.config ?? null
   const savedRevision = local?.revision ?? null
-  const settle = useCallback(async (next: Config) => setLocal({ config: next, revision: await chainRevision(next) }), [])
   /** The offline service's language pack (§8.4); `downloadable` needs a click to create() (user gesture) */
   const [pack, setPack] = useState<PackState | null>(null)
+  /** The lookups' bookkeeping (shared/pack.ts): the committed target, the newest lookup, the downloads in flight */
+  const [packs] = useState(() => createPackLookup({ publish: setPack }))
+  const settle = useCallback(async (next: Config) => {
+    // The committed configuration owns the wanted target: another target forgets the previous one's pack state at
+    // once (Codex on #185); the lookup that follows fills the new one
+    packs.want(next.targetLanguage)
+    setLocal({ config: next, revision: await chainRevision(next) })
+  }, [packs])
   const [helper, setHelper] = useState<HelperStatus | null>(null)
   const [platform, setPlatform] = useState<'mac' | 'other' | null>(null)
   const [menu, setMenu] = useState<MenuKind | null>(null)
@@ -85,35 +105,67 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const refresh = useCallback(() => {
     sendToActiveTab({ type: 'axt:page-status' }).then(setPage).catch(() => setPage(null))
   }, [])
+  /** The session the page reports right now */
+  const sessionRef = useRef<string | null>(null)
   /**
-   * Service availability. Re-queried after a pack download and after every config change, or the
-   * translate button stays in the state it had when the popup mounted
+   * Service availability. Re-queried after a pack download and after every config change, or the translate button
+   * stays in the state it had when the popup mounted. The two asks' bookkeeping is provider-asks.ts: only the newest
+   * saved ask publishes; one session ask in flight at a time, given up on after a while so a stalled one cannot hold
+   * the polling
    */
-  const loadProvider = useCallback((scope?: string | null) => {
+  const [asks] = useState(() => createProviderAsks({
+    send: sendMessage,
+    publishSaved: setSavedProvider,
+    // An answer for a session the page no longer reports publishes nothing
+    publishSession: (scope, status) => { if (sessionRef.current === scope) setSessionProvider(status) },
+  }))
+  const loadProvider = useCallback((scope?: string | null): Promise<void> => {
     // While a page is translating, ask **its** chain: it stays on the one it started with, so the
-    // global chain would describe someone else's hand-overs (Codex on #157)
-    sendMessage({ type: 'axt:provider-status', ...(scope ? { scope } : {}) }).then(setProvider).catch(() => setProvider(null))
-  }, [])
-  const checkPack = useCallback(async (target: string): Promise<PackState> => {
-    const state = await packState(target)
-    setPack(state)
-    return state
-  }, [])
+    // global chain would describe someone else's hand-overs (Codex on #157). Without a scope, the saved
+    // settings' chain as built from what is stored now (provider-asks.ts says why every such ask carries the barrier)
+    return scope ? asks.session(scope) : asks.saved()
+  }, [asks])
 
   useEffect(() => {
     console.debug(`[axt] popup mounted ${Math.round(performance.now() - scriptStart)} ms after script start`)
-    loadProvider()
-    getConfig().then(async c => {
+    // The first read is queued on the write chain with everything that follows it: a slow first digest must not
+    // land after a watcher reload settled newer settings (the local review of S1)
+    const init = async () => {
+      const c = await getConfig()
+      // A change landing between the locale's read (main.tsx) and this one would otherwise show its settings in the
+      // labels of the previous language (Codex on #185)
+      if (staleLocale(c)) { location.reload(); return c }
       await settle(c)
-      void checkPack(c.targetLanguage)
-    }).catch(() => setLocal(null))
+      void packs.check(c.targetLanguage)
+      return c
+    }
+    writes.current = writes.current.then(init, init)
+    writes.current.catch(() => setLocal(null))
     refresh()
     browser.commands.getAll()
       .then(all => setShortcut(all.find(c => c.name === COMMAND_ID)?.shortcut || null))
       .catch(() => setShortcut(null))
     sendMessage({ type: 'axt:helper-status', recheck: true }).then(setHelper).catch(() => setHelper({ state: 'not-installed' }))
     browser.runtime.getPlatformInfo().then(info => setPlatform(info.os === 'mac' ? 'mac' : 'other')).catch(() => setPlatform('other'))
-  }, [refresh, checkPack, loadProvider, settle])
+    // A change saved elsewhere — the settings page, another tab's popup — shows here without reopening (INVENTORY S1).
+    // Re-read on the serialized write chain rather than taken from the event, which carries no order (#182)
+    const unwatch = watchConfig(() => {
+      const follow = async () => {
+        const stored = await getConfig()
+        // The interface language was applied once at mount (applyLocale); a stored choice that resolves to another
+        // pack takes a reload, as the settings page's own change does. Compared with the locale actually in use, not
+        // with a value this hook recorded: a change landing between the locale's read and this hook's first read
+        // would otherwise pass unnoticed (Codex on #185)
+        if (staleLocale(stored)) { location.reload(); return stored }
+        await settle(stored)
+        void packs.check(stored.targetLanguage)
+        void loadProvider()
+        return stored
+      }
+      writes.current = writes.current.then(follow, follow)
+    })
+    return unwatch
+  }, [refresh, packs, loadProvider, settle])
 
   // The background broadcasts the helper's state when it changes on its own — the guided install's wait found it,
   // or the fresh worker after a runtime grant reported (ADR-0002). Without this the card would stay up until the
@@ -140,11 +192,25 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     return () => clearInterval(id)
   }, [page, refresh])
 
+  // The session the answers are for; when it ends, its answer goes with it
+  // A new session — the page restarted from A to B, or stopped — starts with no chain status of its own: A's hand-overs
+  // are not B's (Codex on #185); the next poll fills it
+  useEffect(() => {
+    sessionRef.current = page?.session ?? null
+    setSessionProvider(null)
+  }, [page?.session])
+
   // Poll progress every 500 ms while translation is on: scrolling keeps triggering, there is no
   // "finished" (§10). The replaced-service state lives in background and is queried alongside —
   // measured at millisecond round-trips (RESEARCH §6.7)
   const on = page?.progress.state === 'on'
   const session = page?.session ?? null
+  // The saved settings' chain is asked whenever the page is not running — at mount, and again when it stops. A page
+  // that is on shows its session's chain and the polling below stops with it: had the first ask failed, nothing would
+  // ask again, and the button would stay disabled after 显示原文 (the local review of S1, fourth pass)
+  useEffect(() => {
+    if (!on) void loadProvider()
+  }, [on, loadProvider])
   // Paused while a grant takes effect: the background has to be left alone to idle out (view-model.ts says why)
   const askBackground = pollsBackground(helper)
   useEffect(() => {
@@ -194,7 +260,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     if (status?.progress.state !== 'on') return
     if (!runnable(next, packState)) return // the view shows the page as behind the settings
     // The chain the restart will run on: one built from what was just saved (background/provider-status.ts)
-    setProvider(await sendMessage({ type: 'axt:provider-status', fresh: true }).catch(() => null))
+    await loadProvider()
     await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(status.epoch !== undefined ? { epoch: status.epoch } : {}) })
   }
 
@@ -232,13 +298,13 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
         isBuiltInService(id) || latest.services.some(s => s.id === id) ? { ...latest, provider: id } : latest
       ))
       if (next.provider !== id) return
-      const packState = id === 'chrome-builtin' ? await checkPack(next.targetLanguage) : pack
+      const packState = id === 'chrome-builtin' ? await packs.check(next.targetLanguage) : pack
       await restartIfOn(next, packState)
     }),
     chooseLanguage: code => void guard(async () => {
       setMenu(null)
       const next = await patchConfig(latest => ({ ...latest, targetLanguage: code }))
-      const packState = await checkPack(code)
+      const packState = await packs.check(code)
       await restartIfOn(next, packState)
     }),
     choosePrompt: id => void guard(async () => {
@@ -272,21 +338,18 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     // From the click itself (shared/pack.ts says why); the menu shows a spinner meanwhile
     downloadPack: () => void guard(async () => {
       if (!config) return
-      setPack('downloading')
-      try {
-        await downloadPack(config.targetLanguage)
-      } finally {
-        await checkPack(config.targetLanguage)
-      }
+      await packs.download(config.targetLanguage, downloadPack)
       // The service chain lives in background (§8.0): have it rebuild one so the now-usable offline
       // service is back on it. The promise shown next to this button is about **this** tab, so only
       // its session moves onto the new chain (Codex on #157)
       await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin', ...(page?.session ? { scope: page.session } : {}) }).catch(() => undefined)
-      loadProvider()
+      void loadProvider()
     }),
     openOptions: section => void openOptions(section),
     helperStatus: setHelper,
   }
 
-  return { input: { page, provider, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id, savedRevision }, error, actions }
+  // The view gets both: the session's chain only while the page is on — unknown until it answers, never the saved
+  // chain in its place (Codex on #185) — and the saved settings' chain for what a start would run on
+  return { input: { page, saved: savedProvider, session: on ? sessionProvider : null, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id, savedRevision }, error, actions }
 }

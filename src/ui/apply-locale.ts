@@ -13,7 +13,7 @@ import { S, setLocale } from './strings'
  * language, which is the better guess than the reader's *content* languages: someone reading English
  * papers has English in `accept-languages` without wanting an English interface
  */
-function browserLanguages(): string[] {
+export function browserLanguages(): string[] {
   const ui = browser.i18n?.getUILanguage?.()
   return ui ? [ui] : (navigator.languages as string[] | undefined) ?? [navigator.language]
 }
