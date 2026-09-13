@@ -1,4 +1,4 @@
-// 配置形状（DESIGN §9）。改形状就升 version 并在 storage.ts 的 migrations 里写迁移。
+// The configuration's shape (DESIGN §9). A change of shape bumps version and gets a migration in storage.ts.
 import { z } from 'zod'
 import { DEFAULT_PRELOAD } from '@/core/scheduler/lazy'
 import { DEFAULT_PROMPTS_CONFIG } from '@/providers/prompt-library'
@@ -8,20 +8,20 @@ import { DEFAULT_LANG_CODE, langCodeSchema } from './languages'
 
 export const CONFIG_VERSION = 13
 
-/** 三种阅读模式（DESIGN §7）；`mode` 与图片翻译的模式闸共用 */
+/** The three reading modes (DESIGN §7); `mode` is shared with the image translation's mode gate */
 export const MODE_VALUES = ['stack', 'side', 'only'] as const
 const modeSchema = z.enum(MODE_VALUES)
 
-/** 术语表的限额。迁移与 schema 共用，改一处两边同时生效 */
+/** The glossary's limits. Shared by the migration and the schema, so one change applies to both */
 export const GLOSSARY_LIMITS = { term: 120, translation: 200, entries: 200, totalChars: 6000 } as const
 
 const glossaryChars = (entries: readonly { term: string; translation: string }[]) =>
   entries.reduce((n, e) => n + e.term.length + e.translation.length, 0)
 
 /**
- * 把来历不明的术语表规整成合法值：非法条目丢掉，超额部分截断。
- * 迁移时必须过一遍——旧版本没有这些限额，直接抄过来的话 `getConfig()` 会因为一条超长术语
- * 判定整份配置不合法而回退默认值，用户看到的是 API key、引擎、提示词全没了（Codex 在 #52 指出）
+ * Tidy a glossary of unknown origin into a valid value: invalid entries dropped, the excess truncated.
+ * A migration must run it: earlier versions had no such limits, and copied over as it was, `getConfig()` would judge the
+ * whole configuration invalid over one over-long term and fall back to the defaults — the reader would see API key, engine and prompts all gone (Codex on #52)
  */
 export function normalizeGlossary(value: unknown): { term: string; translation: string }[] {
   if (!Array.isArray(value)) return []
@@ -42,24 +42,26 @@ export function normalizeGlossary(value: unknown): { term: string; translation: 
 export const configSchema = z.object({
   version: z.literal(CONFIG_VERSION),
   /** A built-in id or the id of one of `services` (spec §2, v12) */
+  // The zod messages below reach the reader verbatim through the settings page's fallback notice (ui/strings.ts fallbackText),
+  // so they are product copy in the interface's default language, not developer text; mapping them onto the locale pack is an open item
   provider: z.string().refine(v => (BUILT_IN_SERVICES as readonly string[]).includes(v) || SERVICE_ID_RE.test(v), '不是有效的翻译服务'),
   /** The reader's own services (v12); keys stay local (CLAUDE.md rule 7) */
   services: z.array(serviceSchema).max(20).default([]),
-  /** ISO 639-3（v4 起；languages.ts），LLM 填英文名、Google 转 BCP-47 */
+  /** ISO 639-3 (since v4; languages.ts); an LLM gets the English name, Google a BCP-47 conversion */
   targetLanguage: langCodeSchema,
   mode: modeSchema,
-  /** 提示词库（移植自 Read Frog）：当前选用的 id + 用户自定义 */
+  /** The prompt library (ported from Read Frog): the id in use + the reader's own */
   prompts: z.object({
     promptId: z.string().min(1),
     patterns: z.array(z.object({ id: z.string().min(1), name: z.string(), systemPrompt: z.string(), prompt: z.string() })),
   }).default(DEFAULT_PROMPTS_CONFIG),
   /**
-   * 术语表（§8.2）：每批 prompt 都带上，让同一篇里的术语译法统一。只对 LLM 有效，免费引擎不看上下文。
-   * 上限 200 条——200 条约 2–3 KB、约 700 token，与摘要同量级；再多就该按段落命中过滤，那是 v2 的事
+   * The glossary (§8.2): carried by every batch's prompt, so a term is translated the same way throughout a paper. LLMs
+   * only; the free engines read no context. Capped at 200 entries — about 2–3 KB, about 700 tokens, of the abstract's order; beyond that, matching per passage is v2's business
    */
   glossary: z.array(z.object({
-    // 单条也要限长：只限条数的话，一整篇文档被当成一条粘进来照样收下，
-    // 然后进每一批 prompt 与每个分段的缓存键（Codex 在 #52 指出）
+    // Each entry is capped in length too: capping the count alone, a whole document pasted in as one entry would be
+    // accepted, then enter every batch's prompt and every segment's cache key (Codex on #52)
     term: z.string().min(1).max(GLOSSARY_LIMITS.term),
     translation: z.string().min(1).max(GLOSSARY_LIMITS.translation),
   })).max(GLOSSARY_LIMITS.entries).refine(
@@ -68,17 +70,17 @@ export const configSchema = z.object({
   ).default([]),
   /** Appearance profiles (§7.5, v12): the reader's style list and band list, and which of each is active */
   appearance: appearanceSchema.default(DEFAULT_APPEARANCE),
-  /** 引擎降级链（§8.5）：首选引擎失败时自动切到免费引擎，别让整页翻译停死 */
+  /** The engine fallback chain (§8.5): a failing first choice switches to the free engines of itself, so the whole page does not stop */
   fallback: z.object({ enabled: z.boolean() }).default({ enabled: true }),
-  /** 按视口翻译的范围（§10，Read Frog 的 preload）：视口下方多少像素算临近（0–10000）、露出多少比例算进入（0–1） */
+  /** The viewport translation range (§10, Read Frog's preload): how many pixels below the viewport count as near (0–10000), how much must show to count as entered (0–1) */
   preload: z.object({
     margin: z.number().min(0).max(10_000),
     threshold: z.number().min(0).max(1),
   }).default({ ...DEFAULT_PRELOAD }),
   /**
-   * 阅读辅助（§7.7，v10 起）：悬停时把原文与译文里对应的那一句一起用底色标出来（issue #105）。
-   * 默认开——它只在引擎报了句边界、且两边都能重建时才有东西可显示，其余情形本就无声无息、无代价。
-   * 带 default，所以没有这个字段的既有存储照常通过校验，不用升 CONFIG_VERSION
+   * Reading aid (§7.7, since v10): on hover the matching sentence in the original and in the translation is marked
+   * with a band (issue #105). On by default — it shows anything only when the engine reported sentence boundaries and
+   * both sides could be rebuilt, silent and free otherwise. With a default, so existing storage without the field passes validation and CONFIG_VERSION needs no bump
    */
   reading: z.object({ sentenceHighlight: z.boolean() }).default({ sentenceHighlight: true }),
   /**
@@ -105,8 +107,8 @@ export const DEFAULT_CONFIG: Config = {
   provider: 'microsoft',
   services: [],
   targetLanguage: DEFAULT_LANG_CODE,
-  // 左右对照是宽屏下大多数人停留的读法（用户 2026-09-11）；窗口窄时页面自己退回上下（§7.2 / S-P-74），
-  // 所以这个默认在小屏上也不会读不成
+  // Side by side is how most readers stay on a wide screen (the owner, 2026-09-11); on a narrow window the page falls
+  // back to stacked on its own (§7.2 / S-P-74), so this default reads fine on a small screen too
   mode: 'side',
   glossary: [],
   appearance: DEFAULT_APPEARANCE,

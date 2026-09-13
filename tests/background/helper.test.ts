@@ -163,7 +163,7 @@ describe('createHelperClient', () => {
     await flush()
     expect(port().sent.map(m => m.cmd)).toEqual(['ping'])
     port().reply({ v: 1, id: port().sent[0]?.id as string, error: { code: 'bad-request', message: '协议版本不对' } })
-    await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('握手失败') })
+    await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('handshake failed') })
     await expect(b).rejects.toMatchObject({ kind: 'invalid-response' })
     await flush()
     expect(port().sent).toHaveLength(1) // 没有第二个 ping
@@ -236,7 +236,7 @@ describe('createHelperClient', () => {
     const a = c2.ocr({ image: 'A' })
     await flush()
     p2().reply({ v: 2, id: p2().sent[0]?.id as string, ok: true, version: '9.9.9' })
-    await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('协议版本') })
+    await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('protocol version') })
     expect(p2().disconnected).toBe(true)
   })
 
@@ -251,7 +251,7 @@ describe('createHelperClient', () => {
     const a = c2.ocr({ image: 'A' })
     await flush()
     p2().reply({ v: 1, id: p2().sent[0]?.id as string, ok: true, version: '  ' })
-    await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('版本号') })
+    await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('no version') })
   })
 
   it('helper 丢过行的回应带 truncated，原样透传给调用方（Codex 在 #87 指出）', async () => {

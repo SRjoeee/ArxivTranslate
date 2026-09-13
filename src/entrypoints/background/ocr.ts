@@ -16,7 +16,7 @@ export interface OcrServiceDeps {
    * the helper's queue and `helper.cancel` finds nothing (seen on a real machine)
    */
   cancelled: Pick<CancelledScopeRegistry, 'has'>
-  /** 读缓存的等待上限（测试用）；默认与译文相同的 CACHE_READ_BUDGET_MS */
+  /** The cache read's waiting cap (tests); the same CACHE_READ_BUDGET_MS as translations by default */
   cacheReadBudgetMs?: number
 }
 
@@ -28,7 +28,7 @@ export interface OcrService {
   cancel(scope: string): number
 }
 
-/** 缓存里的记录得是我们写的那个形状，别的东西撞了键也不能当结果用 */
+/** A cached record has to be the shape we wrote; anything else that collides with the key cannot serve as a result */
 function parseCached(raw: string | null | undefined): OcrResult | null {
   if (!raw) return null
   try {
@@ -47,7 +47,7 @@ const unavailable = (status: Exclude<HelperStatus, { state: 'ready' }>): string 
     : 'recognition helper: waiting for a fresh background worker'
 
 export function createOcrService(deps: OcrServiceDeps): OcrService {
-  const aborted = (): OcrMessageResponse => ({ ok: false, error: { kind: 'aborted', message: '会话已撤销' } })
+  const aborted = (): OcrMessageResponse => ({ ok: false, error: { kind: 'aborted', message: 'session withdrawn' } })
 
   return {
     status: options => deps.backend.status(options),
@@ -57,20 +57,20 @@ export function createOcrService(deps: OcrServiceDeps): OcrService {
       const status = await deps.backend.status()
       if (status.state !== 'ready') return { ok: false, error: { kind: 'network', message: unavailable(status) } }
       const key = await ocrCacheKey(call.imageHash, status.version)
-      // IndexedDB 可能挂住而不是拒绝：超预算当未命中，否则 helper 的超时永远开始不了、消息通道一直开着（Codex 在 #87 指出）
+      // IndexedDB may hang rather than reject: over budget counts as a miss, or the helper's timeout could never start and the message channel would stay open (Codex on #87)
       const [hit] = await readWithBudget(deps.cache, [key], deps.cacheReadBudgetMs ?? CACHE_READ_BUDGET_MS)
       // Dropped while the status or the cache was being read: a hit is not returned either, and nothing goes to
       // the helper (Codex on #87)
       if (call.scope && deps.cancelled.has(call.scope)) return aborted()
-      // OCR 走的是同一个缓存端口，但它存的是自己的 JSON，与句子对齐无关：只取译文那一栏
+      // OCR goes through the same cache port but stores its own JSON, unrelated to sentence alignment: the translation column only
       const cached = parseCached(hit?.translation)
       if (cached) return { ok: true, result: cached, cached: true }
       try {
         const { result, version } = await deps.backend.ocr({ image: call.image }, call.scope)
-        // 读缓存期间端口断过、重连的 helper 换了版本：按回应所在连接的版本落缓存，别记在旧键下。
-        // 写缓存是优化，不等它：IndexedDB 挂住时识别结果照样回去（Codex 在 #87 指出）
+        // The port broke during the cache read and the reconnected helper is another version: the result is cached under
+        // the version of the connection it came on, not the old key. Writing the cache is an optimisation and is not awaited: with IndexedDB hung the recognition result goes back all the same (Codex on #87)
         const storeKey = version === status.version ? key : await ocrCacheKey(call.imageHash, version)
-        deps.cache.putMany([{ key: storeKey, translation: JSON.stringify(result), paper: call.paper }]).catch((e: unknown) => console.warn('[axt] OCR 结果写缓存失败', e))
+        deps.cache.putMany([{ key: storeKey, translation: JSON.stringify(result), paper: call.paper }]).catch((e: unknown) => console.warn('[axt] OCR result cache write failed', e))
         return { ok: true, result, cached: false }
       } catch (e) {
         if (e instanceof OcrBackendError) return { ok: false, error: { kind: e.kind, message: e.message } }

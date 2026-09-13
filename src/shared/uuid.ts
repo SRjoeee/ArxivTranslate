@@ -9,7 +9,7 @@ function getCryptoWithRandomValues(): Crypto {
   return crypto
 }
 
-/** 用 crypto.getRandomValues 生成 UUIDv4（非安全上下文也能用） */
+/** A UUIDv4 from crypto.getRandomValues (works outside secure contexts too) */
 export function generateUUIDv4(): string {
   const cryptoWithRandomValues = getCryptoWithRandomValues()
   const bytes = new Uint8Array(16)

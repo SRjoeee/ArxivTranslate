@@ -216,9 +216,9 @@ function drawAngle(angle: number): number {
 function cornersOf(run: GlyphRun): [number, number][] {
   const cos = Math.cos(run.angle)
   const sin = Math.sin(run.angle)
-  // 最后一个字形自己的宽度没有记录，用一个名义宽度顶上。0.70 em 是量出来的：白框要盖住它译的
-  // 那段原文字，0.55 em 时结尾是大写字母的标签会露出约 0.7% 图宽（`training cost C`），
-  // 0.70 降到 0.09%（亚像素），再放大到 0.80 没有任何改善，只会让窄结尾的框多外扩
+  // The last glyph's own width is not recorded; a nominal width stands in. 0.70 em was measured: the white box has to
+  // cover the source text it translates, and at 0.55 em a label ending in a capital showed about 0.7% of the figure width
+  // (`training cost C`); 0.70 brings it to 0.09% (sub-pixel), and going up to 0.80 improves nothing and only makes the box of a narrow ending stick out more
   const end = run.to + 0.7 * run.size
   const top = run.across - run.size * 0.78
   const bottom = run.across + run.size * 0.22

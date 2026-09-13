@@ -2,27 +2,27 @@
 // action as the popup's main button — ask the page its state once, decide the way the button does, send what it
 // would send.
 //
-// **标签不跟着状态变**：`contextMenus.update` 是全局的、不是按标签页的，跟着当前页改的话，
-// 一切换标签页就说错了。沉浸式翻译的那一条也是静态的。
+// **The label does not follow the state**: `contextMenus.update` is global, not per tab, and following the current
+// page would be wrong the moment the reader switched tabs. Immersive Translate's entry is static too.
 
 import type { PageStatus } from '@/shared/messages'
 import { messageFor, pageDecision, type SavedSettings } from '@/shared/page-action'
 import { S } from '@/ui/strings'
 
-/** 菜单项 id；重建时按它删旧的，worker 每次唤醒都会重新跑一遍 create */
+/** The menu item's id; the old one is removed by it on rebuild, since the worker runs create again on every wake-up */
 export const MENU_ID = 'axt-toggle'
 /** The same words as the popup's primary button (S-P-50 / S-P-51); also the command's description */
 export const menuTitle = (): string => S.page.menuToggle
 /** The keyboard command's id, as declared in the manifest (`commands` in wxt.config.ts) */
 export const COMMAND_ID = 'axt-toggle'
-/** 只在 arXiv 的 HTML 全文页上出现——别的页面上它什么也做不了 */
+/** Shown on arXiv's HTML full-text pages only — anywhere else it can do nothing */
 export const MENU_PATTERNS = ['https://arxiv.org/html/*']
 /**
- * 右键点在什么上都要有这一条。
+ * This entry has to be there whatever the right click lands on.
  *
- * Chrome 是按**点中的目标**给 context 的：点在链接上给 `link`、点在图上给 `image`，`page` 只在
- * 点空白处才给。论文页里到处是引用链接和插图，只注册 `page` 的话，最容易点到的地方反而没有菜单
- *（Codex 在 #147 指出）。`documentUrlPatterns` 仍然把范围锁在 arXiv 全文页
+ * Chrome gives the context by **what was clicked**: `link` on a link, `image` on a figure, and `page` only on blank
+ * space. A paper page is full of citation links and figures, and with `page` alone registered the easiest places to
+ * click would be the ones without the menu (Codex on #147). `documentUrlPatterns` still confines it to arXiv full-text pages
  */
 export const MENU_CONTEXTS = ['page', 'selection', 'link', 'image', 'video', 'audio', 'editable']
 
@@ -70,11 +70,13 @@ export async function toggleTranslation(deps: ToggleDeps, tabId: number): Promis
 }
 
 /**
- * 装上菜单项与它的点击处理。`removeAll` 在前：worker 每次唤醒都会再跑一遍，不删会撞 id。
+ * Install the menu item and its click handler. `removeAll` first: the worker runs this again on every wake-up, and
+ * without it the id collides.
  *
- * **点击处理是同步注册的**（Codex 在 #161 指出）：worker 被「点了菜单」这件事唤醒时，事件在脚本求值
- * 之后就派发，而读配置是个 promise——把注册放进 `.then` 里，那一次点击就落不到任何监听器上，菜单
- * 看起来毫无反应。所以只有**菜单的标题**等语言包，注册不等。
+ * **The click handler is registered synchronously** (Codex on #161): when the worker is woken by “the menu was
+ * clicked”, the event is dispatched right after the script has evaluated, while reading the configuration is a
+ * promise — registered inside `.then`, that click would reach no listener and the menu would look dead. So only
+ * **the menu's title** waits for the locale pack; the registration does not.
  */
 export function installContextMenu(deps: MenuDeps): void {
   deps.onClicked((info, tab) => {
@@ -85,8 +87,9 @@ export function installContextMenu(deps: MenuDeps): void {
 }
 
 /**
- * 用当前语言包重建菜单项。第一次在 worker 启动时（先用兜底语言，语言包读到之后再来一次），
- * 之后每次读者改界面语言时——worker 不会因为这个重启，不重建的话标题会一直停在旧语言（Codex 在 #161 指出）
+ * Rebuild the menu item with the current locale pack. First at worker start-up (in the fallback language, then once
+ * more when the pack has been read), and after that whenever the reader changes the interface language — the worker
+ * does not restart for it, and unrebuilt the title would stay in the old language (Codex on #161)
  */
 export function refreshContextMenu(deps: MenuDeps): void {
   void Promise.resolve(deps.removeAll()).then(() => {

@@ -120,7 +120,7 @@ describe('createOcrService', () => {
     const registry = new CancelledScopeRegistry()
     const service = build({ backend, cache: cache.port, cancelled: registry })
     registry.markScope('s1')
-    expect(await service.ocr(call)).toEqual({ ok: false, error: { kind: 'aborted', message: '会话已撤销' } })
+    expect(await service.ocr(call)).toEqual({ ok: false, error: { kind: 'aborted', message: 'session withdrawn' } })
     expect(ocr).not.toHaveBeenCalled()
     // Dropped during the cache read: wait until the service is inside getMany (status and the key are two awaits
     // before it), hold it there, drop the way the router does — mark, then drain — and release
@@ -134,7 +134,7 @@ describe('createOcrService', () => {
     registry.markScope('s2')
     service.cancel('s2')
     release()
-    expect(await pending).toEqual({ ok: false, error: { kind: 'aborted', message: '会话已撤销' } })
+    expect(await pending).toEqual({ ok: false, error: { kind: 'aborted', message: 'session withdrawn' } })
     expect(ocr).not.toHaveBeenCalled()
     // 别的 scope 不受影响
     cache.port.getMany = original
@@ -183,7 +183,7 @@ describe('createOcrService', () => {
     registry.markScope('s9')
     service.cancel('s9')
     release()
-    expect(await pending).toEqual({ ok: false, error: { kind: 'aborted', message: '会话已撤销' } })
+    expect(await pending).toEqual({ ok: false, error: { kind: 'aborted', message: 'session withdrawn' } })
     expect(ocr).not.toHaveBeenCalled()
   })
 

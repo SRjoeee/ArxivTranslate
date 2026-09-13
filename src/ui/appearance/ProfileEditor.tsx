@@ -37,7 +37,7 @@ export function StyleEditor({ value, highlight, onChange, onDuplicate, onDelete,
       <Preview style={value} highlight={highlight} />
       {/* The shipped profiles are stored under their Chinese names and displayed in the reader's
           language (`profileName`); the field has to show what the grid shows, or an English drawer
-          opens on 与原文相同. Typing is a rename and writes what was typed (Codex on #161) */}
+          opens on “Same as the original”. Typing is a rename and writes what was typed (Codex on #161) */}
       <Field label={O.reading.name}>
         <input className={inputClass} value={profileName(value, 'styles')} onChange={e => onChange({ ...value, name: e.target.value })} />
       </Field>

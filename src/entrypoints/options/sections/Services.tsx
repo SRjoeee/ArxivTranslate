@@ -1,4 +1,4 @@
-// 翻译服务: the three built-in services as cards, then the reader's own as a list, then the target
+// Services: the three built-in services as cards, then the reader's own as a list, then the target
 // language and image translation. Choosing is one click and takes effect at once.
 import { useState } from 'react'
 import { LANG_CODES, LANG_CODE_TO_EN_NAME, LANG_CODE_TO_LOCALE_NAME, LANG_CODE_TO_ZH_NAME, type LangCode } from '@/config/languages'

@@ -9,8 +9,8 @@ import { createMessageTransport } from '@/shared/transport'
 import { applyLocaleFrom } from '@/ui/apply-locale'
 import { enableDebug } from './debug'
 
-// 注入 arxiv.org/html/*。页面加载只 extract（不写 DOM），Block[] 留在内存里；
-// popup 发 axt:translate-page 才开始翻译（DESIGN §4.1）。URL 带 #axt-debug 描边、#axt-translate 自动开始，便于调试与自动化验证。
+// Injected into arxiv.org/html/*. On page load it only extracts (no DOM writes) and keeps the Block[] in memory;
+// translation starts when the popup sends axt:translate-page (DESIGN §4.1). A URL with #axt-debug draws outlines, one with #axt-translate starts of itself — for debugging and automated checks.
 //
 // This file is an adapter (ADR-0004): the session's state and decisions live in core/session; here
 // the browser's messages, the configuration subscription and the URL hash are mapped onto it.
@@ -20,12 +20,12 @@ export default defineContentScript({
   main() {
     const t0 = performance.now()
     const blocks = extract(document)
-    // 标题 + 摘要在这里抽一次：此时 DOM 里还没有译文，翻译过再抽会把上一轮的译文也算进摘要
+    // The title + abstract are extracted once here: the DOM holds no translation yet, and extracting after a translation would count the previous round's translation into the abstract
     const context = paperContext(document)
     console.debug(`[axt] extracted ${blocks.length} blocks in ${Math.round(performance.now() - t0)} ms`)
 
-    // 引擎链、队列与请求都在 background（DESIGN §8.0）：content 的 fetch 带页面 origin、要走 CORS 预检，
-    // 而且 https 页面够不着 http 端点（本地 Ollama），实测见 RESEARCH §6.7。这里只留一条消息代理
+    // The chain, the queues and the requests all live in the background (DESIGN §8.0): a content-script fetch carries the
+    // page's origin and goes through a CORS preflight, and an https page cannot reach an http endpoint (a local Ollama); measured in RESEARCH §6.7. Only a message proxy stays here
     const session = createPageSession({
       doc: document,
       blocks,
@@ -38,7 +38,7 @@ export default defineContentScript({
       applyLocale: applyLocaleFrom,
       trace: line => console.debug(`[axt] ${line}`),
     })
-    // 用 watchConfig 而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
+    // watchConfig rather than a message: the settings page is itself the active tab and cannot reach the content page; the subscription also updates every open paper at once
     watchConfig(config => session.onConfig(config))
 
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {

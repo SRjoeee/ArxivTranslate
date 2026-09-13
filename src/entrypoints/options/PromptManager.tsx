@@ -22,7 +22,7 @@ const tokenHint = (token: (typeof PROMPT_TOKENS)[number]): string => O.prompts.m
 /** The shipped prompts' one-line descriptions, in the interface's language (Codex on #161) */
 const builtInDescription = (id: string): string => (O.prompts.manager.builtIn as Record<string, string>)[id] ?? ''
 
-/** 新建提示词的起点：点名目标语言并带上原文，只填名称也能用（Codex 在 #39 指出只有 {{input}} 的模板不知道译成哪种语言） */
+/** The starting point of a new prompt: names the target language and carries the source text, so it works with only a name filled in (Codex on #39: a template of `{{input}}` alone does not know which language to translate into) */
 const NEW_SYSTEM_PROMPT = `You are a professional ${getTokenCellText('targetLanguage')} translator of academic papers.`
 const NEW_USER_PROMPT = `Translate the following into ${getTokenCellText('targetLanguage')}:\n\n${getTokenCellText('input')}`
 
@@ -51,7 +51,7 @@ export type PromptsUpdate = (current: PromptsConfig) => PromptsConfig
 
 export function PromptManager({ value, onChange }: { value: PromptsConfig; onChange: (update: PromptsUpdate) => unknown }) {
   const [editor, setEditor] = useState<{ mode: EditorMode; draft: PromptTemplate } | null>(null)
-  // The editor's draft is local until 保存: the page must not reload under it (ui/drafts.ts). Keyed on whether an
+  // The editor's draft is local until “Save”: the page must not reload under it (ui/drafts.ts). Keyed on whether an
   // editor is open, not on the draft — every keystroke would otherwise end one hold and begin another
   const editing = editor !== null
   useEffect(() => (editing ? drafts.hold() : undefined), [editing])
@@ -73,7 +73,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
     setEditor({ mode, draft: template ?? { id: uuid(), name: '', systemPrompt: NEW_SYSTEM_PROMPT, prompt: NEW_USER_PROMPT } })
   }
 
-  /** 内置只读；"复制并自定义"给一份新 id 的副本，保存后直接选用（Read Frog 的做法） */
+  /** A built-in is read-only; “Duplicate and customise” gives a copy with a new id, selected as soon as it is saved (Read Frog's way) */
   function copyBuiltIn(template: PromptTemplate) {
     setEditor({ mode: 'copy', draft: { ...template, id: uuid(), name: O.prompts.manager.copyOf(template.name) } })
   }
@@ -105,14 +105,14 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
       onChange(current => ({ ...current, patterns: [...current.patterns, ...added] }))
       setMessage(O.prompts.manager.imported(entries.length))
     } catch (e) {
-      // 解析器只说是哪一种，句子在语言包里（Codex 在 #161 指出）
+      // The parser only says which kind; the sentence is in the locale pack (Codex on #161)
       setMessage(e instanceof PromptFileFormatError ? O.prompts.manager.importFailed[e.kind] : e instanceof Error ? e.message : String(e))
     } finally {
       if (fileInput.current) fileInput.current.value = ''
     }
   }
 
-  /** 把变量插到最后聚焦的那个文本框的光标处（对应 Read Frog 的 QuickInsertableTextarea） */
+  /** Insert a variable at the caret of the text box focused last (Read Frog's QuickInsertableTextarea) */
   function insertToken(token: (typeof PROMPT_TOKENS)[number]) {
     if (!editor) return
     const which = lastFocused.current
