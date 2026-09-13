@@ -1,10 +1,11 @@
-// OCR 行 → 译文框（DESIGN §15.1）。纯函数，happy-dom 与真机同一份。
+// OCR lines → translation boxes (DESIGN §15.1). Pure functions, one and the same under happy-dom and on a real machine.
 //
-// Vision 按行返回；图里换行的标签（"Dynamical / charge"、"Pair / Production"）是两行，翻译要当一句送，
-// 所以竖直相邻、水平对齐（左缘或中线）、横向有重叠的行合成一个框。
-// 过滤照 §6 的保留规则：纯数字（刻度）、不含两个连续字母的（单字母面板标号 "B"、"(a)"、"E=+1"）不翻，
-// 置信度太低的也不要——Vision 对这些给 0.5，真正的词几乎都是 1.0。
-// 规则参数对着 tests/fixtures/ocr/qed3d-string-breaking.json 里的真实坐标定的。
+// Vision returns lines; a label wrapped in the image ("Dynamical / charge", "Pair / Production") is two lines and
+// has to be sent as one sentence, so lines that are vertically adjacent, aligned (left edge or centre line) and
+// overlapping horizontally merge into one box. The filter follows the keep rules of §6: bare numbers (tick marks),
+// text without two consecutive letters (single-letter panel labels "B", "(a)", "E=+1") are not translated, and
+// low confidence is dropped — Vision gives these 0.5, and real words are almost all 1.0.
+// The rule parameters were set against the real coordinates in tests/fixtures/ocr/qed3d-string-breaking.json.
 import { isNumericCell } from '@/core/rules/latexml'
 import type { OcrLine, Quad } from '@/shared/ocr'
 
@@ -13,28 +14,29 @@ export interface Box {
   y: number
   w: number
   h: number
-  /** 合并后的原文（行之间空格相连） */
+  /** The merged source text (lines joined with spaces) */
   text: string
-  /** 合并进来的行数，字号按它均摊 */
+  /** How many lines were merged in; the font size is shared out by it */
   lines: number
   /**
-   * 旋转标签自己的盒子（都按图**宽**的比例）：`len` 沿基线、`thick` 垂直于基线。
-   * 只有带 `angle` 的行有；轴对齐外接框对斜标签既太大、两根轴又是两个尺度，摆不了它（§15.5）
+   * A rotated label's own box (both as fractions of the image's **width**): `len` along the baseline, `thick` across
+   * it. Only lines with an `angle` have it; the axis-aligned bounding box is both too large for a tilted label and
+   * in two different scales on its two axes, so it cannot place one (§15.5)
    */
   len?: number
   thick?: number
   /**
-   * 文字方向，弧度；不在表示横排（§15.5）。
+   * Text direction in radians; absent means upright (§15.5).
    *
-   * 只有 SVG 路径会设，语料里只有 0 与 -π/2 两种。**旋转的行不参与合并**：下面的相邻 / 对齐判定
-   * 是按「行往下叠」写的，而竖排的行是往旁边叠，套上去只会把两条无关的轴标签粘在一起。
-   * 竖排标签本来就极少多行。
+   * Set by the SVG path only, and the corpus has only 0 and -π/2. **A rotated line takes no part in merging**: the
+   * adjacency / alignment tests below are written for “lines stacking downwards”, while a vertical line stacks
+   * sideways, and applying them would glue two unrelated axis labels together. A vertical label is rarely multi-line anyway.
    */
   angle?: number
 }
 
 export interface BoxOptions {
-  /** 低于这个置信度的行丢掉 */
+  /** Lines below this confidence are dropped */
   minConf?: number
   /**
    * Whether vertically adjacent, aligned lines are one label. True for anything that arrives as
@@ -48,7 +50,7 @@ export interface BoxOptions {
   merge?: boolean
 }
 
-/** 四角的轴对齐外接框：旋转的坐标轴标签四角不是轴对齐的，先按外接框画 */
+/** The axis-aligned bounding box of the four corners: a rotated axis label's corners are not axis-aligned, so its box is drawn first */
 export function quadBounds(quad: Quad): { x: number; y: number; w: number; h: number } {
   const xs = quad.map(([x]) => x)
   const ys = quad.map(([, y]) => y)
@@ -57,14 +59,14 @@ export function quadBounds(quad: Quad): { x: number; y: number; w: number; h: nu
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
 }
 
-/** 值得翻的文字：至少两个连续字母（任何文字），且不是数值 */
+/** Text worth translating: at least two consecutive letters (of any script), and not a number */
 export function isTranslatable(text: string): boolean {
   const trimmed = text.trim()
   if (!/\p{L}{2,}/u.test(trimmed)) return false
   return !isNumericCell(trimmed)
 }
 
-/** 同一列：左缘或中线相差不到四分之三行高 */
+/** The same column: left edges or centre lines within three quarters of a line height */
 function aligned(a: Box, b: { x: number; w: number; h: number }): boolean {
   const tolerance = 0.75 * Math.min(a.h / a.lines, b.h)
   const leftClose = Math.abs(a.x - b.x) <= tolerance
@@ -73,7 +75,7 @@ function aligned(a: Box, b: { x: number; w: number; h: number }): boolean {
   return overlapX && (leftClose || centerClose)
 }
 
-/** 竖直相邻：下一行的顶到上一框的底不超过 0.6 行高（允许轻微重叠） */
+/** Vertically adjacent: the next line's top within 0.6 line heights of the previous box's bottom (slight overlap allowed) */
 function adjacent(a: Box, b: { y: number; h: number }): boolean {
   const gap = b.y - (a.y + a.h)
   return gap <= 0.6 * Math.min(a.h / a.lines, b.h) && gap >= -0.5 * b.h

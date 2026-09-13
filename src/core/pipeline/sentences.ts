@@ -1,11 +1,12 @@
-// 哪些块该切句、切在哪（§8.6，issue #105）。
+// Which blocks get their sentences cut, and where (§8.6, issue #105).
 //
-// **切点在这一层算，不在服务层。** 服务层只有线上文本，而选切点要看块本身：
-// `sentenceCuts` 需要一个从占位符槽位建出来的 `SplitContext` 才分得清「注解」与「公式」——
-// 句末的句点可能藏在数学节点里，`\citet` 占位符本身是句子的主语——而它实测的精度明确不含
-// 参考文献块，模块文档写着调用方不得在那里运行它（Codex 在 #137 两条都指出了）。
+// **The cut points are computed at this layer, not in the service.** The service has only the wire text, while
+// choosing the cuts needs the block itself: `sentenceCuts` needs a `SplitContext` built from the placeholder slots
+// to tell an “annotation” from a “formula” — a sentence-final full stop may hide inside a math node, and a `\citet`
+// placeholder is itself the sentence's subject — and its measured precision expressly excludes reference blocks,
+// whose module documentation says callers must not run it there (Codex on #137 pointed out both).
 //
-// 服务层拿着切点去插标记，仅此而已。
+// The service takes the cut points and inserts the markers, nothing more.
 
 import type { Segment } from './batches'
 import { ANNOTATION_SELECTOR } from '@/core/rules/latexml'
@@ -13,20 +14,21 @@ import { sentenceCuts, visibleTextOf } from '@/core/sentences'
 import { wireFormatOf, type RenderPath } from '@/cache/key'
 
 /**
- * 参考文献单元。切句器在这里没有精度保证——期刊缩写（`Sci. Rep. 14 (2024)`、
- * `Theor. Comput. Sci.`）会切出假边界，而假边界把高亮打在半句上，比没有高亮更糟。
+ * Reference units. The sentence splitter has no precision guarantee here — journal abbreviations (`Sci. Rep. 14
+ * (2024)`, `Theor. Comput. Sci.`) cut false boundaries, and a false boundary puts the highlight on half a sentence, worse than none.
  */
 const NO_SENTENCES = new Set(['bibblock', 'bibitem'])
 
 /**
- * 这一段的句子边界。
+ * This block's sentence boundaries.
  *
- * **空数组与 undefined 不是一回事**：空数组表示「这一块该对齐，但它只有一句」——整段对整段
- * 就是安全的对齐，不需要任何标记，而单句块占正文一大半；undefined 表示「这一块不该对齐」，
- * 参考文献与非 `tags` 的路径属于后者（Codex 在 #137 指出我把两者混为一谈了）。
+ * **An empty array and undefined are not the same**: an empty array says “this block is aligned, and it is one
+ * sentence” — whole block to whole block is a safe alignment needing no marker, and single-sentence blocks are most
+ * of a body; undefined says “this block is not aligned”, which is where references and the non-`tags` paths fall
+ * (Codex on #137 pointed out that I had conflated the two).
  *
- * `runs` 与 `markers` 两条路不切：前者送的是切碎的纯文本段、拼回去不产出线上偏移，
- * 后者线上没有活得下来的标记。
+ * The `runs` and `markers` paths are not cut: the former sends fragmented plain-text runs and joining them back
+ * yields no wire offsets, the latter has no marker that survives the wire.
  */
 export function cutsOf(segment: Segment, renderPath: RenderPath): number[] | undefined {
   if (renderPath !== 'tags') return undefined
