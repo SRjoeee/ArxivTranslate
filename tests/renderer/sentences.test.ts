@@ -26,7 +26,7 @@ function render(html: string, fmt: 'tags' | 'markers' = 'tags') {
   return { d, source, target, block, spans: fragment.offsets }
 }
 
-/** 一张拆过图的插图：原文图注、被藏起来的译文、屏幕上那份副本 */
+/** A split figure: the source caption, the hidden translation, the copy on screen */
 function splitCaption() {
   const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
     + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
@@ -59,17 +59,17 @@ describe('sentence registry (#105)', () => {
     expect(sentenceMapAt(source)?.map.pairs.length).toBe(lengths.length)
   })
 
-  it('side 模式拆图之后，高亮跟着屏幕上那份走（#139）', () => {
-    // `splitFigures` 把整张图连图注一起克隆到右栏，**读者看到的是克隆件**，而原件那份译文被藏起来了。
-    // 只登记原件的话，悬停图注时译文侧算出来的矩形是空的——用户 2026-09-10 在 2609.04987v1 上报的
-    // 拆图只在翻译根里扫，所以页面要有 `article.ltx_document`
+  it('after a side-mode split the highlight follows the copy on screen (#139)', () => {
+    // `splitFigures` clones the whole figure with its caption into the right column, **the reader sees the clone**, and the original's translation is hidden.
+    // Registering the original alone, hovering the caption gives an empty rectangle on the translation side — the owner's report on 2609.04987v1, 2026-09-10
+    // The split scans inside the translation root only, so the page needs `article.ltx_document`
     const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
       + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
     const source = d.querySelector('figcaption')!
     const block = serialize(source, 'tags')
     const fragment = rehydrate(block.text, block, d)
     const target = d.createElement('figcaption')
-    // `renderText` 打的那两个标记：拆图按 `.axt-t` 找译文，没有它这张图根本不会被拆
+    // The two marks `renderText` sets: the split finds translations by `.axt-t`, and without it this figure is not split at all
     target.className = 'axt-t'
     target.setAttribute('data-axt-for', 'F1.cap')
     target.append(fragment)
@@ -82,29 +82,29 @@ describe('sentence registry (#105)', () => {
     const copy = clone.querySelector('figcaption')!
     expect(copy.textContent).toBe(target.textContent)
 
-    // 悬停克隆件里的图注：解析得到同一个块，而且认得出这是译文那一侧
+    // Hovering the caption inside the clone: resolves to the same block, and it is recognised as the translation side
     const inCopy = sentenceMapAt(copy.firstChild!)
     expect(inCopy?.side).toBe('target')
     expect(inCopy?.map.pairs.length).toBe(lengths.length)
-    // 悬停原文时，译文那侧指向的是**克隆件**——原件那份在 side 模式下没有盒子
+    // Hovering the source, the translation side points at the **clone** — the original copy has no box in side mode
     expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
-    // span 换成了克隆里的节点，不是原件的
+    // The span was swapped for the node in the clone, not the original's
     const nodes = new Set(sentenceMapOf(copy)!.target.spans.map(s => s.node))
     expect([...nodes].every(n => copy.contains(n))).toBe(true)
     expect([...nodes].some(n => target.contains(n))).toBe(false)
   })
 
-  it('切回 stack 时副本被藏起来，高亮回落到原件那份（#139）', () => {
-    // **切模式不会删掉副本**，只是用 CSS 把一边藏起来（stack 藏副本、only 藏原件）。
-    // 所以判据是「谁在屏幕上」而不是「谁还在文档里」——后者两边都成立，高亮会画在看不见的那份上
-    // 拆图只在翻译根里扫，所以页面要有 `article.ltx_document`
+  it('switching back to stack hides the copy, and the highlight falls back to the original (#139)', () => {
+    // **A mode switch does not delete the copy**, it only hides one side with CSS (stack hides the copy, only hides the original).
+    // So the criterion is “who is on screen”, not “who is still in the document” — the latter holds for both, and the highlight would be drawn on the invisible one
+    // The split scans inside the translation root only, so the page needs `article.ltx_document`
     const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
       + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
     const source = d.querySelector('figcaption')!
     const block = serialize(source, 'tags')
     const fragment = rehydrate(block.text, block, d)
     const target = d.createElement('figcaption')
-    // `renderText` 打的那两个标记：拆图按 `.axt-t` 找译文，没有它这张图根本不会被拆
+    // The two marks `renderText` sets: the split finds translations by `.axt-t`, and without it this figure is not split at all
     target.className = 'axt-t'
     target.setAttribute('data-axt-for', 'F1.cap')
     target.append(fragment)
@@ -113,23 +113,23 @@ describe('sentence registry (#105)', () => {
     registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
     splitFigures(d)
     const copy = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
-    // side：两边都在屏幕上，取副本（右栏那份就是它）
+    // side: both on screen, take the copy (the right column's is exactly it)
     for (const el of [target, copy]) Object.assign(el, { checkVisibility: () => true })
     expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
 
-    // stack：副本被 CSS 藏了，但**还在文档里**——回落到原件那份
+    // stack: the copy is hidden by CSS but **still in the document** — falls back to the original
     Object.assign(copy, { checkVisibility: () => false })
     expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(target)
   })
 
-  it('拆图里按单元格登记的表格也跟着镜像（#148）', () => {
-    // 表格的句子是按**单元格**登记的（`renderTable` 回报「原格 → 克隆格」），格子在 `.axt-t` 表格
-    // 里面。只镜像 `.axt-t` 的话，插图里带表格时那些格子在克隆件里仍然没登记（Codex 在 #148 指出）
+  it('a table registered by cells inside a split figure is mirrored too (#148)', () => {
+    // A table's sentences are registered by **cell** (`renderTable` reports “source cell → clone cell”), and the cells sit inside the `.axt-t` table.
+    // Mirroring `.axt-t` alone, those cells of a table inside a figure stay unregistered in the clone (Codex on #148)
     const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
       + '<figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption>'
       + '<div class="axt-t" data-axt-for="F1.cap"><table><tbody><tr>'
       + '<td class="ltx_td" id="F1.c1">One. Two.</td></tr></tbody></table></div></figure>')
-    // 「格子」这一层：源与译各一个单元格，按格子登记，正是 renderTable 的做法
+    // The “cell” layer: one cell each for source and translation, registered by cell, exactly as renderTable does
     const cell = d.getElementById('F1.c1')!
     const block = serialize(cell, 'tags')
     const fragment = rehydrate(block.text, block, d)
@@ -142,15 +142,15 @@ describe('sentence registry (#105)', () => {
     expect(splitFigures(d)).toBe(1)
     const copy = d.querySelector(`.${SPLIT_CLASS}`)!.querySelectorAll('td')[1]!
     for (const el of [target, copy]) Object.assign(el, { checkVisibility: () => true })
-    // 悬停克隆件里的那个格子：解析得到同一个块
+    // Hovering that cell inside the clone: resolves to the same block
     expect(sentenceMapAt(copy.firstChild!)?.side).toBe('target')
-    // 悬停原文格子：译文那侧指向克隆里的格子
+    // Hovering the source cell: the translation side points at the cell in the clone
     expect(sentenceMapAt(cell.firstChild!)?.map.target.root).toBe(copy)
   })
 
-  it('重新翻一遍之后，还挂着的副本用的是这一版的句边界（#148）', () => {
-    // 译文正文没变时 `translationKey` 不变，副本就不会被重建——它记的还是上一轮的句边界，
-    // 而 side 模式下屏幕上正是它。正文一样时 span 仍然对得上，换掉句边界即可（Codex 在 #148 指出）
+  it('after a retranslation, a copy still hanging around uses this version\'s sentence boundaries (#148)', () => {
+    // With the translation text unchanged `translationKey` does not change and the copy is not rebuilt — it still records the previous round's sentence boundaries,
+    // and in side mode it is exactly what is on screen. With the same text the spans still match, so swapping the boundaries is enough (Codex on #148)
     const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
       + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
     const source = d.querySelector('figcaption')!
@@ -165,25 +165,25 @@ describe('sentence registry (#105)', () => {
     registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
     splitFigures(d)
     const copy = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
-    // side 模式的样子：原件那份译文被藏起来，屏幕上是副本
+    // The side-mode picture: the original's translation is hidden, the copy is on screen
     Object.assign(target, { checkVisibility: () => false })
     Object.assign(copy, { checkVisibility: () => true })
     expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
     expect(sentenceMapAt(source.firstChild!)?.map.pairs).toHaveLength(lengths.length)
 
-    // 同一段正文重翻一遍，这次只有一句
+    // The same text retranslated, this time one sentence only
     const one = [block.text.length]
     registerSentences(source, target, block.offsets, fragment.offsets, { source: one, target: one })
     expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(copy)
     expect(sentenceMapAt(source.firstChild!)?.map.pairs).toHaveLength(1)
 
-    // 这一轮完全没有对齐：副本记的那份也不能再用
+    // This round has no alignment at all: the copy's record cannot be used either
     registerSentences(source, target, block.offsets, fragment.offsets, undefined)
     expect(sentenceMapAt(source.firstChild!)).toBeUndefined()
   })
 
-  it('这一轮没有对齐时，副本自己那份记录也要作废（#148）', () => {
-    // 光删「原文 → 译文」的索引不够：副本自己也是记录表的键，指针直接落在副本上照样查得到
+  it('when this round has no alignment the copy\'s own record is voided too (#148)', () => {
+    // Deleting the “source → translation” index alone is not enough: the copy is a key of the record table itself, and a pointer landing on the copy still finds it
     const { source, target, copy } = splitCaption()
     expect(sentenceMapAt(copy.firstChild!)).toBeDefined()
 
@@ -193,9 +193,9 @@ describe('sentence registry (#105)', () => {
     expect(sentenceMapAt(source.firstChild!)).toBeUndefined()
   })
 
-  it('从「没有对齐」变成「有对齐」时，留着的副本会被重建并镜像（#148）', () => {
-    // 拆图按译文正文的签名决定要不要重建。正文没变、登记从无到有时，副本原样留下就永远不会被
-    // 镜像——悬停原文落到藏起来的原件上，悬停副本什么也查不到
+  it('going from “no alignment” to “alignment” rebuilds and mirrors the copy that stayed (#148)', () => {
+    // The split decides on rebuilding by the translation text's signature. With the text unchanged and the registration going from none to some, a copy left as it is would never be
+    // mirrored — hovering the source lands on the hidden original, hovering the copy finds nothing
     const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
       + '<figcaption class="ltx_caption" id="F1.cap">Figure 1: One. Two.</figcaption></figure>')
     const source = d.querySelector('figcaption')!
@@ -207,13 +207,13 @@ describe('sentence registry (#105)', () => {
     target.append(fragment)
     source.after(target)
 
-    // 第一轮：没有对齐（谷歌 / LLM 的块就是这样）
+    // Round one: no alignment (Google / LLM blocks are like this)
     registerSentences(source, target, block.offsets, fragment.offsets, undefined)
     expect(splitFigures(d)).toBe(1)
     const first = d.querySelector(`.${SPLIT_CLASS} figcaption`)!
     expect(sentenceMapAt(first.firstChild!)).toBeUndefined()
 
-    // 第二轮：同样的正文，这次有对齐了——副本必须重建并登记
+    // Round two: the same text, this time with alignment — the copy must be rebuilt and registered
     const lengths = splitSentences(block.text)
     registerSentences(source, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
     expect(splitFigures(d)).toBe(1)
@@ -224,11 +224,11 @@ describe('sentence registry (#105)', () => {
     expect(sentenceMapAt(source.firstChild!)?.map.target.root).toBe(rebuilt)
   })
 
-  it('表格从「没有对齐」变成「有对齐」时，签名要走进单元格，副本才会重建（#148）', () => {
-    // 表格是唯一把句子登记在**后代**上的译文：`renderTable` 按单元格回报「原格 → 克隆格」，
-    // `.axt-t` 表格本身从来没被登记过。签名只问表格就永远是空的，这种正文不变的转换看不见，
-    // 副本原样留下、格子一格也没被镜像（Codex 在 #148 指出）。
-    // 结构照 `renderTable`：整张 `.ltx_tabular` 克隆一份带 .axt-t，格子在克隆里
+  it('when a table goes from “no alignment” to “alignment” the signature has to enter the cells, or the copy is not rebuilt (#148)', () => {
+    // Tables are the only translations whose sentences are registered on **descendants**: `renderTable` reports “source cell → clone cell” per cell,
+    // and the `.axt-t` table itself was never registered. A signature that asks the table alone is always empty, this text-preserving transition is invisible,
+    // the copy stays as it is and not one cell is mirrored (Codex on #148).
+    // The structure follows `renderTable`: the whole `.ltx_tabular` cloned once with .axt-t, the cells inside the clone
     const d = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">'
       + '<figcaption class="ltx_caption" id="F1.cap">Figure 1.</figcaption>'
       + '<figcaption class="ltx_caption axt-t" data-axt-for="F1.cap">图 1。</figcaption>'
@@ -248,13 +248,13 @@ describe('sentence registry (#105)', () => {
     target.textContent = ''
     target.append(fragment)
 
-    // 第一轮：没有对齐
+    // Round one: no alignment
     registerSentences(cell, target, block.offsets, fragment.offsets, undefined)
     expect(splitFigures(d)).toBe(1)
     const first = d.querySelector(`.${SPLIT_CLASS} td`)!
     expect(sentenceMapAt(first.firstChild!)).toBeUndefined()
 
-    // 第二轮：同样的正文，这次有对齐了——副本必须重建，格子在副本里登记好
+    // Round two: the same text, this time with alignment — the copy must be rebuilt, the cells registered in the copy
     const lengths = splitSentences(block.text)
     registerSentences(cell, target, block.offsets, fragment.offsets, { source: lengths, target: lengths })
     expect(splitFigures(d)).toBe(1)

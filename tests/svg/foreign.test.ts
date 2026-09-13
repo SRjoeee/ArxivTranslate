@@ -1,13 +1,13 @@
-// 内联 TikZ 图的标签（DESIGN §15.6）：文字是 foreignObject 里的 HTML，几何是它自己的矩形
+// The labels of inline TikZ pictures (DESIGN §15.6): the text is HTML inside a foreignObject, the geometry its own rectangle
 import { describe, expect, it } from 'vitest'
 import { foreignLinesOf, pictureTexts } from '@/core/svg'
 import { docOf } from '../renderer/helpers'
 
-/** LaTeXML 画 TikZ 节点的形状：foreignObject 里两层 span，文字在最里面 */
+/** The shape LaTeXML draws a TikZ node in: two spans inside a foreignObject, the text innermost */
 const node = (inner: string) =>
   `<foreignObject width="140" height="14" transform="matrix(1 0 0 -1 0 10)"><span class="ltx_foreignobject_container"><span class="ltx_foreignobject_content">${inner}</span></span></foreignObject>`
 
-/** 一个行内 TikZ 图；每个标签的矩形按 rects 里的顺序打桩（happy-dom 没有布局） */
+/** An inline TikZ picture; each label's rectangle is stubbed in the order of rects (happy-dom has no layout) */
 function pictureOf(inners: string[], rects: Array<[number, number, number, number]>, rows: number[] = []) {
   const doc = docOf(`<figure class="ltx_figure"><span class="ltx_inline-block"><svg id="pic" class="ltx_picture" width="400" height="200" viewBox="0 0 400 200">${inners.map(node).join('')}</svg></span></figure>`)
   const picture = doc.getElementById('pic')!
@@ -23,60 +23,60 @@ function pictureOf(inners: string[], rects: Array<[number, number, number, numbe
 }
 
 describe('foreignLinesOf', () => {
-  it('读出标签的文字与它在图里的位置（归一化到图的盒子）', () => {
+  it('reads a label\'s text and its position in the picture (normalised to the picture\'s box)', () => {
     const picture = pictureOf(['(a) Imbalanced routing'], [[140, 70, 80, 20]])
     const [line] = foreignLinesOf(picture)
     expect(line!.text).toBe('(a) Imbalanced routing')
     expect(line!.conf).toBe(1)
-    // 图 100,50 起 400×200；标签 140,70 起 80×20 → 左上 (0.1, 0.1)、右下 (0.3, 0.2)
+    // The picture 400×200 from 100,50; the label 80×20 from 140,70 → top-left (0.1, 0.1), bottom-right (0.3, 0.2)
     expect(line!.quad).toEqual([[0.1, 0.1], [0.3, 0.1], [0.3, 0.2], [0.1, 0.2]])
   })
 
-  it('公式照样送过去，因为白框会把它一起盖住', () => {
-    // `Block n−1`：词加符号。只送 `Block` 的话，画出来的「区块」会把 n−1 盖掉
+  it('a formula is sent along, because the white box covers it too', () => {
+    // `Block n−1`: a word plus a symbol. Sent as `Block` alone, the drawn 「区块」 would cover the n−1
     const math = '<math class="ltx_Math"><semantics><mrow>n−1</mrow><annotation encoding="application/x-tex">n-1</annotation></semantics></math>'
     const picture = pictureOf([`Block ${math}`], [[140, 70, 80, 20]])
     expect(foreignLinesOf(picture)[0]!.text).toBe('Block n−1')
   })
 
-  it('纯公式的节点一个字都不送：softmax 是词，也是符号', () => {
+  it('a formula-only node sends not one character: softmax is a word and a symbol too', () => {
     const math = (tex: string) => `<math class="ltx_Math"><semantics><mrow>${tex}</mrow><annotation encoding="application/x-tex">${tex}</annotation></semantics></math>`
     const picture = pictureOf([math('softmax'), math('E1'), 'Router'], [[140, 70, 80, 20], [140, 100, 20, 20], [200, 130, 40, 20]])
     expect(foreignLinesOf(picture).map(l => l.text)).toEqual(['Router'])
   })
 
-  it('同一个位置画两遍的节点只算一次（2607.24653v2 的架构图有四个 Stable LatentMoE）', () => {
+  it('a node drawn twice in the same position counts once (the architecture diagram of 2607.24653v2 has four Stable LatentMoE)', () => {
     const picture = pictureOf(['Stable LatentMoE', 'Stable LatentMoE'], [[140, 70, 80, 20], [140, 70, 80, 20]])
     expect(foreignLinesOf(picture)).toHaveLength(1)
   })
 
-  it('折行的标签带上行数，字号才不会按一行去算', () => {
+  it('a wrapped label carries its line count, so the font size is not computed as for one line', () => {
     const picture = pictureOf(['A rather long node label that wraps'], [[140, 70, 80, 40]], [2])
     expect(foreignLinesOf(picture)[0]!.rows).toBe(2)
   })
 
-  // Codex 在 #163 指出：标识符也可以不是 <math>，LaTeXML 会打 .ltx_markedasmath。
-  // 实测语料 507 个图内标签里正有一个（2609.00246 的 initMT），过了判词就会被译、被白底盖住
-  it('被标成数学的标识符不算词：initMT 不送（2609.00246）', () => {
+  // Codex on #163: an identifier need not be <math> either; LaTeXML marks it .ltx_markedasmath.
+  // Measured on the corpus: exactly one of the 507 labels inside figures (initMT of 2609.00246); past the word check it would be translated and covered by a white box
+  it('an identifier marked as math is no word: initMT is not sent (2609.00246)', () => {
     const marked = (id: string) => `<span class="ltx_text ltx_markedasmath ltx_font_sansserif">${id}</span>`
     const picture = pictureOf([marked('initMT'), `start ${marked('initMT')}`, 'Router'], [[140, 70, 80, 20], [140, 100, 80, 20], [200, 130, 40, 20]])
-    // 夹在词里的照旧整条送（白框会把标识符一起盖住，只送 start 会把它盖没）
+    // One sandwiched between words is still sent whole (the white box covers the identifier too; sending start alone would blank it out)
     expect(foreignLinesOf(picture).map(l => l.text)).toEqual(['start initMT', 'Router'])
   })
 
-  it('量不到盒子就什么都不返回（图还没排版、或在隐藏的原件里）', () => {
+  it('with no box to measure nothing is returned (the picture not laid out yet, or inside a hidden original)', () => {
     const picture = pictureOf(['Router'], [[0, 0, 0, 0]])
     expect(foreignLinesOf(picture)).toEqual([])
   })
 })
 
 describe('pictureTexts', () => {
-  it('不读几何，只回答这张图里有没有词——整篇每张图都要问一遍', () => {
+  it('reads no geometry, only answers whether this picture has words — asked once for every picture of the paper', () => {
     const picture = pictureOf(['Router', '(a)'], [[0, 0, 0, 0], [0, 0, 0, 0]])
     expect(pictureTexts(picture)).toEqual(['Router'])
   })
 
-  it('整张图只有被标成数学的标识符时，这张图根本不进图片翻译', () => {
+  it('a picture holding only identifiers marked as math does not enter image translation at all', () => {
     const picture = pictureOf(['<span class="ltx_text ltx_markedasmath">initMT</span>'], [[0, 0, 0, 0]])
     expect(pictureTexts(picture)).toEqual([])
   })

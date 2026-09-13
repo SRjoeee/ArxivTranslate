@@ -9,81 +9,81 @@ import {
 
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 
-/** 解析一个按 fixture 真实结构手写的最小片段，返回目标元素（默认 body 的第一个子元素） */
+/** Parse a minimal snippet hand-written after a fixture's real structure; returns the target element (the body's first child by default) */
 function el(html: string, selector?: string): Element {
   const doc = new DOMParser().parseFromString(`<!doctype html><html><body>${html}</body></html>`, 'text/html')
   const target = selector ? doc.querySelector(selector) : doc.body.firstElementChild
-  if (!target) throw new Error(`片段中找不到 ${selector ?? '首个元素'}`)
+  if (!target) throw new Error(`${selector ?? 'the first element'} not found in the snippet`)
   return target
 }
 
-describe('规则表完整性', () => {
+describe('the rule table\'s integrity', () => {
   const all = [...UNIT_RULES, ...SKIP_RULES, ...PROTECT_RULES]
 
-  it('id 跨表唯一', () => {
+  it('ids are unique across tables', () => {
     const ids = all.map(r => r.id)
     expect(new Set(ids).size).toBe(ids.length)
   })
 
-  it('每条 selector 都能被 matches 接受', () => {
+  it('every selector is accepted by matches', () => {
     const probe = document.createElement('div')
     for (const r of all) expect(() => probe.matches(r.selector), r.id).not.toThrow()
     expect(() => probe.matches(TABLE_RULES.root)).not.toThrow()
     expect(() => probe.matches(TABLE_RULES.cell)).not.toThrow()
   })
 
-  it('版本号随本次规则变化升级', () => {
+  it('the version number was bumped for this change of rules', () => {
     expect(RULES_VERSION).toBe('0.10.1')
   })
 })
 
-describe('classify：逐规则命中', () => {
+describe('classify: rule by rule', () => {
   type Expected = { kind: string; rule: string; descend: boolean } | null
   const cases: [string, string, string | undefined, Expected][] = [
-    ['正文段落', '<div class="ltx_para"><p class="ltx_p">Text.</p></div>', 'p', { kind: 'unit', rule: 'p', descend: true }],
-    ['标题（含章节号）', '<h2 class="ltx_title ltx_title_section"><span class="ltx_tag ltx_tag_section">1 </span>Intro</h2>', 'h2', { kind: 'unit', rule: 'title', descend: true }],
-    ['副标题', '<div class="ltx_subtitle">(Extended)</div>', undefined, { kind: 'unit', rule: 'title', descend: true }],
-    ['图注', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table"><span class="ltx_text">Table 1</span>: </span>Results.</figcaption>', undefined, { kind: 'unit', rule: 'caption', descend: true }],
-    ['脚注正文', '<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup>Note.</span></span></span>', '.ltx_note_content', { kind: 'unit', rule: 'footnote', descend: true }],
-    // 分段的条目：容器本身不成块，逐个 .ltx_bibblock 才是单元（§5.4）
-    ['参考文献条目（分段）', '<li class="ltx_bibitem"><span class="ltx_tag ltx_tag_bibitem">[1]</span><span class="ltx_bibblock">A. Title.</span></li>', 'li', null],
-    ['参考文献片段', '<li class="ltx_bibitem"><span class="ltx_bibblock">A. Title.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
-    // 多段条目的第一段是作者列表，按位置判断（部分模板才有 .ltx_bib_author）
-    ['参考文献的作者段（2026-09-06 起也翻，§5.4）', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span><span class="ltx_bibblock">B. P. Abbott et al.</span><span class="ltx_bibblock">Title.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
-    ['只有一段的条目不当作者段', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span><span class="ltx_bibblock">B. P. Abbott et al. Title. 2024.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
-    ['未分段的参考文献条目', '<li class="ltx_bibitem"><span class="ltx_tag ltx_tag_bibitem">[1]</span>A. Title, 2024.</li>', 'li', { kind: 'unit', rule: 'bibitem', descend: true }],
-    ['致谢', '<div class="ltx_acknowledgements">Thanks.</div>', undefined, { kind: 'unit', rule: 'ack', descend: true }],
-    // 致谢 / 关键词的 run-in 标题随所在块一起翻，不单独成块（否则外层块会克隆一份英文标题）
-    ['致谢的 run-in 标题', '<div class="ltx_acknowledgements"><h6 class="ltx_title ltx_title_acknowledgements">Acknowledgements.</h6>Text.</div>', 'h6', null],
-    ['关键词的 run-in 标题', '<div class="ltx_keywords"><h6 class="ltx_title ltx_title_keywords">Keywords.</h6>a, b</div>', 'h6', null],
-    ['关键词', '<div class="ltx_keywords">data races</div>', undefined, { kind: 'unit', rule: 'keywords', descend: true }],
-    ['表格根', '<table class="ltx_tabular"><tbody><tr><th class="ltx_td ltx_th">h</th><td class="ltx_td">1</td></tr></tbody></table>', undefined, { kind: 'table', rule: 'table', descend: false }],
-    ['行间公式', '<table class="ltx_equation"><tbody><tr><td class="ltx_td ltx_eqn_cell"><math class="ltx_Math"><mi>x</mi></math></td></tr></tbody></table>', undefined, { kind: 'skip', rule: 'equation', descend: false }],
-    ['代码行', '<div class="ltx_listing"><div class="ltx_listingline"><span class="ltx_text ltx_font_typewriter">x = 1</span></div></div>', '.ltx_listingline', { kind: 'skip', rule: 'listing', descend: false }],
-    ['作者姓名也翻（§5.2，2026-09-06）', '<div class="ltx_authors"><span class="ltx_creator"><span class="ltx_personname">A. B.</span></span></div>', '.ltx_personname', { kind: 'unit', rule: 'personname', descend: true }],
-    ['姓名之间的连接词仍跳过：单独成块会打断姓名列表', '<div class="ltx_authors"><span class="ltx_author_before"> and </span></div>', '.ltx_author_before', { kind: 'skip', rule: 'author-glue', descend: false }],
-    ['联系方式标签作 void：模板生成且站点 display:none（§5.2）', '<div class="ltx_authors"><span class="ltx_contact ltx_role_email"><span class="ltx_contact_name">Email: </span></span></div>', '.ltx_contact_name', { kind: 'protect', rule: 'contact-label', descend: false }],
-    ['作者的机构与联系方式', '<span class="ltx_contact ltx_role_affiliation"><span class="ltx_contact_name">Affiliation: </span>Radboud University</span>', '.ltx_contact', { kind: 'unit', rule: 'authorinfo', descend: true }],
-    // ACM 模板的 \Description{}：站点 display:none，译文节点没有这个 class，翻了就会显示出来
-    ['不显示的无障碍描述作 void（§5.2，2026-09-11）', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table 5. </span>Caption.<span class="ltx_nodisplay ltx_acm_description">A table describing roles. \\parUX designers use AI.</span></figcaption>', '.ltx_nodisplay', { kind: 'protect', rule: 'nodisplay', descend: false }],
-    ['邮箱地址', '<span class="ltx_contact ltx_role_email"><a href="mailto:a@b.c">a@b.c</a></span>', 'a', { kind: 'protect', rule: 'mailto', descend: false }],
-    ['作者之间的连接词', '<span class="ltx_author_before"> and </span>', undefined, { kind: 'skip', rule: 'author-glue', descend: false }],
-    ['日期', '<div class="ltx_dates">2018</div>', undefined, { kind: 'unit', rule: 'authorinfo', descend: true }],
-    ['分类号', '<div class="ltx_classification">Primary: 11L07</div>', undefined, { kind: 'skip', rule: 'classification', descend: false }],
-    ['出版元数据', '<span class="ltx_pubnotes ltx_pubnotes_meta"><span class="ltx_pubnote ltx_role_doi">DOI</span></span>', undefined, { kind: 'skip', rule: 'pubnotes', descend: false }],
-    ['TikZ 图', '<svg class="ltx_picture"><foreignObject><span class="ltx_foreignobject_content">t</span></foreignObject></svg>', undefined, { kind: 'skip', rule: 'picture', descend: false }],
-    ['转换错误', '<p class="ltx_p"><span class="ltx_ERROR undefined">\\foo</span></p>', '.ltx_ERROR', { kind: 'skip', rule: 'error', descend: false }],
-    ['导航栏', '<nav class="ltx_page_navbar"><nav class="ltx_TOC">toc</nav></nav>', undefined, { kind: 'skip', rule: 'nav', descend: false }],
-    ['行内公式', '<p class="ltx_p"><math class="ltx_Math"><mi>x</mi></math></p>', 'math', { kind: 'protect', rule: 'math', descend: false }],
-    ['交叉引用', '<p class="ltx_p"><a class="ltx_ref"><span class="ltx_text ltx_ref_tag">2</span></a></p>', 'a', { kind: 'protect', rule: 'ref', descend: false }],
-    ['引用', '<p class="ltx_p"><cite class="ltx_cite ltx_citemacro_cite">[3]</cite></p>', 'cite', { kind: 'protect', rule: 'cite', descend: false }],
-    ['编号标签', '<span class="ltx_tag ltx_tag_item">•</span>', undefined, { kind: 'protect', rule: 'tag', descend: false }],
-    ['等宽文本', '<span class="ltx_text ltx_font_typewriter">foo</span>', undefined, { kind: 'protect', rule: 'tt', descend: false }],
-    ['脚注容器：protect-but-descend', '<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup></span>', undefined, { kind: 'protect', rule: 'note', descend: true }],
-    ['脚注标记', '<sup class="ltx_note_mark">1</sup>', undefined, { kind: 'protect', rule: 'note-mark', descend: false }],
-    ['脚注类型', '<span class="ltx_note_type">footnotemark: </span>', undefined, { kind: 'protect', rule: 'note-mark', descend: false }],
-    ['图片', '<img class="ltx_graphics" alt="">', undefined, { kind: 'protect', rule: 'img', descend: false }],
-    ['换行', '<br class="ltx_break">', undefined, { kind: 'protect', rule: 'br', descend: false }],
+    ['body paragraph', '<div class="ltx_para"><p class="ltx_p">Text.</p></div>', 'p', { kind: 'unit', rule: 'p', descend: true }],
+    ['heading (with section number)', '<h2 class="ltx_title ltx_title_section"><span class="ltx_tag ltx_tag_section">1 </span>Intro</h2>', 'h2', { kind: 'unit', rule: 'title', descend: true }],
+    ['subtitle', '<div class="ltx_subtitle">(Extended)</div>', undefined, { kind: 'unit', rule: 'title', descend: true }],
+    ['caption', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table"><span class="ltx_text">Table 1</span>: </span>Results.</figcaption>', undefined, { kind: 'unit', rule: 'caption', descend: true }],
+    ['footnote body', '<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup>Note.</span></span></span>', '.ltx_note_content', { kind: 'unit', rule: 'footnote', descend: true }],
+    // A segmented entry: the container itself is no block; each .ltx_bibblock is the unit (§5.4)
+    ['reference entry (segmented)', '<li class="ltx_bibitem"><span class="ltx_tag ltx_tag_bibitem">[1]</span><span class="ltx_bibblock">A. Title.</span></li>', 'li', null],
+    ['reference segment', '<li class="ltx_bibitem"><span class="ltx_bibblock">A. Title.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
+    // The first segment of a multi-segment entry is the author list, judged by position (only some templates have .ltx_bib_author)
+    ['the author segment of a reference (translated too since 2026-09-06, §5.4)', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span><span class="ltx_bibblock">B. P. Abbott et al.</span><span class="ltx_bibblock">Title.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
+    ['a single-segment entry is not taken for an author segment', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span><span class="ltx_bibblock">B. P. Abbott et al. Title. 2024.</span></li>', '.ltx_bibblock', { kind: 'unit', rule: 'bibblock', descend: true }],
+    ['an unsegmented reference entry', '<li class="ltx_bibitem"><span class="ltx_tag ltx_tag_bibitem">[1]</span>A. Title, 2024.</li>', 'li', { kind: 'unit', rule: 'bibitem', descend: true }],
+    ['acknowledgements', '<div class="ltx_acknowledgements">Thanks.</div>', undefined, { kind: 'unit', rule: 'ack', descend: true }],
+    // The run-in heading of acknowledgements / keywords is translated with its block, not as a block of its own (or the enclosing block would clone an English heading)
+    ['the run-in heading of acknowledgements', '<div class="ltx_acknowledgements"><h6 class="ltx_title ltx_title_acknowledgements">Acknowledgements.</h6>Text.</div>', 'h6', null],
+    ['the run-in heading of keywords', '<div class="ltx_keywords"><h6 class="ltx_title ltx_title_keywords">Keywords.</h6>a, b</div>', 'h6', null],
+    ['keywords', '<div class="ltx_keywords">data races</div>', undefined, { kind: 'unit', rule: 'keywords', descend: true }],
+    ['table root', '<table class="ltx_tabular"><tbody><tr><th class="ltx_td ltx_th">h</th><td class="ltx_td">1</td></tr></tbody></table>', undefined, { kind: 'table', rule: 'table', descend: false }],
+    ['display formula', '<table class="ltx_equation"><tbody><tr><td class="ltx_td ltx_eqn_cell"><math class="ltx_Math"><mi>x</mi></math></td></tr></tbody></table>', undefined, { kind: 'skip', rule: 'equation', descend: false }],
+    ['code line', '<div class="ltx_listing"><div class="ltx_listingline"><span class="ltx_text ltx_font_typewriter">x = 1</span></div></div>', '.ltx_listingline', { kind: 'skip', rule: 'listing', descend: false }],
+    ['author names are translated too (§5.2, 2026-09-06)', '<div class="ltx_authors"><span class="ltx_creator"><span class="ltx_personname">A. B.</span></span></div>', '.ltx_personname', { kind: 'unit', rule: 'personname', descend: true }],
+    ['the conjunction between names is still skipped: as a block of its own it would break the name list', '<div class="ltx_authors"><span class="ltx_author_before"> and </span></div>', '.ltx_author_before', { kind: 'skip', rule: 'author-glue', descend: false }],
+    ['the contact label is a void: template-generated and display:none on the site (§5.2)', '<div class="ltx_authors"><span class="ltx_contact ltx_role_email"><span class="ltx_contact_name">Email: </span></span></div>', '.ltx_contact_name', { kind: 'protect', rule: 'contact-label', descend: false }],
+    ['an author\'s affiliation and contact', '<span class="ltx_contact ltx_role_affiliation"><span class="ltx_contact_name">Affiliation: </span>Radboud University</span>', '.ltx_contact', { kind: 'unit', rule: 'authorinfo', descend: true }],
+    // The ACM template's \Description{}: display:none on the site; the translation node lacks that class, and translated it would show
+    ['the invisible accessibility description is a void (§5.2, 2026-09-11)', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table 5. </span>Caption.<span class="ltx_nodisplay ltx_acm_description">A table describing roles. \\parUX designers use AI.</span></figcaption>', '.ltx_nodisplay', { kind: 'protect', rule: 'nodisplay', descend: false }],
+    ['email address', '<span class="ltx_contact ltx_role_email"><a href="mailto:a@b.c">a@b.c</a></span>', 'a', { kind: 'protect', rule: 'mailto', descend: false }],
+    ['the conjunction between authors', '<span class="ltx_author_before"> and </span>', undefined, { kind: 'skip', rule: 'author-glue', descend: false }],
+    ['dates', '<div class="ltx_dates">2018</div>', undefined, { kind: 'unit', rule: 'authorinfo', descend: true }],
+    ['classification', '<div class="ltx_classification">Primary: 11L07</div>', undefined, { kind: 'skip', rule: 'classification', descend: false }],
+    ['publication metadata', '<span class="ltx_pubnotes ltx_pubnotes_meta"><span class="ltx_pubnote ltx_role_doi">DOI</span></span>', undefined, { kind: 'skip', rule: 'pubnotes', descend: false }],
+    ['TikZ picture', '<svg class="ltx_picture"><foreignObject><span class="ltx_foreignobject_content">t</span></foreignObject></svg>', undefined, { kind: 'skip', rule: 'picture', descend: false }],
+    ['conversion error', '<p class="ltx_p"><span class="ltx_ERROR undefined">\\foo</span></p>', '.ltx_ERROR', { kind: 'skip', rule: 'error', descend: false }],
+    ['navigation bar', '<nav class="ltx_page_navbar"><nav class="ltx_TOC">toc</nav></nav>', undefined, { kind: 'skip', rule: 'nav', descend: false }],
+    ['inline formula', '<p class="ltx_p"><math class="ltx_Math"><mi>x</mi></math></p>', 'math', { kind: 'protect', rule: 'math', descend: false }],
+    ['cross-reference', '<p class="ltx_p"><a class="ltx_ref"><span class="ltx_text ltx_ref_tag">2</span></a></p>', 'a', { kind: 'protect', rule: 'ref', descend: false }],
+    ['citation', '<p class="ltx_p"><cite class="ltx_cite ltx_citemacro_cite">[3]</cite></p>', 'cite', { kind: 'protect', rule: 'cite', descend: false }],
+    ['number tag', '<span class="ltx_tag ltx_tag_item">•</span>', undefined, { kind: 'protect', rule: 'tag', descend: false }],
+    ['monospace text', '<span class="ltx_text ltx_font_typewriter">foo</span>', undefined, { kind: 'protect', rule: 'tt', descend: false }],
+    ['footnote container: protect-but-descend', '<span class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup></span>', undefined, { kind: 'protect', rule: 'note', descend: true }],
+    ['footnote mark', '<sup class="ltx_note_mark">1</sup>', undefined, { kind: 'protect', rule: 'note-mark', descend: false }],
+    ['footnote type', '<span class="ltx_note_type">footnotemark: </span>', undefined, { kind: 'protect', rule: 'note-mark', descend: false }],
+    ['image', '<img class="ltx_graphics" alt="">', undefined, { kind: 'protect', rule: 'img', descend: false }],
+    ['line break', '<br class="ltx_break">', undefined, { kind: 'protect', rule: 'br', descend: false }],
   ]
   for (const [name, html, selector, expected] of cases) {
     it(name, () => {
@@ -91,109 +91,109 @@ describe('classify：逐规则命中', () => {
     })
   }
 
-  it('普通容器与样式 span 不命中', () => {
+  it('ordinary containers and style spans match nothing', () => {
     expect(classify(el('<div class="ltx_para"><p class="ltx_p">x</p></div>'))).toBeNull()
     expect(classify(el('<span class="ltx_text ltx_font_italic">x</span>'))).toBeNull()
     expect(classify(el('<section class="ltx_section"></section>'))).toBeNull()
   })
 })
 
-describe('带环境名的 tag 要翻译，纯编号的不翻（§5.2，用户反馈 Definition 1.1 没被翻）', () => {
-    // LaTeXML 把定理环境、图表、算法、附录的名字也放进 .ltx_tag：整体当编号保护的话，
-    // 中文读者看到的还是「Definition 1.1.」。依据是 12 篇 fixture 里 1241 个 tag 的实测分布
+describe('a tag with an environment name is translated, a bare number is not (§5.2, the owner\'s report that Definition 1.1 was not translated)', () => {
+    // LaTeXML puts the names of theorem environments, figures, algorithms and appendices into .ltx_tag too: protected whole as a number,
+    // the Chinese reader still sees “Definition 1.1.”. Based on the measured distribution of the 1241 tags in the 12 fixtures
     const tagOf = (html: string) => classify(el(html, '.ltx_tag'))
     const named: [string, string][] = [
-      ['定理', '<h6 class="ltx_title ltx_title_theorem"><span class="ltx_tag ltx_tag_theorem">Definition 1.1</span>.</h6>'],
-      ['插图', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">Figure 1.</span> Cap.</figcaption>'],
-      ['表格', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table 1:</span> Cap.</figcaption>'],
-      ['算法', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_float">Algorithm 1</span> Cap.</figcaption>'],
-      ['附录', '<h2 class="ltx_title ltx_title_appendix"><span class="ltx_tag ltx_tag_appendix">Appendix A</span> More</h2>'],
-      ['部分', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part 1</span> X</h1>'],
-      ['章', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_chapter">Chapter 1</span> X</h1>'],
+      ['theorem', '<h6 class="ltx_title ltx_title_theorem"><span class="ltx_tag ltx_tag_theorem">Definition 1.1</span>.</h6>'],
+      ['figure', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">Figure 1.</span> Cap.</figcaption>'],
+      ['table', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table 1:</span> Cap.</figcaption>'],
+      ['algorithm', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_float">Algorithm 1</span> Cap.</figcaption>'],
+      ['appendix', '<h2 class="ltx_title ltx_title_appendix"><span class="ltx_tag ltx_tag_appendix">Appendix A</span> More</h2>'],
+      ['part', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part 1</span> X</h1>'],
+      ['chapter', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_chapter">Chapter 1</span> X</h1>'],
     ]
     for (const [name, html] of named) {
-      it(`${name}的 tag 不再是 void：里面有环境名`, () => {
+      it(`the ${name} tag is no longer a void: it holds an environment name`, () => {
         expect(tagOf(html)).toBeNull()
       })
     }
 
-    // 罗马数字编号的照旧作 void：实测机器翻译会把 IV 译成「四」，与受保护的 .ltx_ref 对不上
+    // Roman-numbered ones stay voids: measured, machine translation renders IV as 「四」, which no longer matches the protected .ltx_ref
     const roman: [string, string][] = [
-      ['罗马编号的表', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table IV:</span> Cap.</figcaption>'],
-      ['罗马编号的部分', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part I</span> X</h1>'],
+      ['a Roman-numbered table', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_table">Table IV:</span> Cap.</figcaption>'],
+      ['a Roman-numbered part', '<h1 class="ltx_title"><span class="ltx_tag ltx_tag_part">Part I</span> X</h1>'],
     ]
     for (const [name, html] of roman) {
-      it(`${name}仍是 void`, () => {
+      it(`${name} is still a void`, () => {
         expect(tagOf(html)).toMatchObject({ kind: 'protect', rule: 'tag' })
       })
     }
 
     const numbered: [string, string][] = [
-      ['章节号', '<h2 class="ltx_title"><span class="ltx_tag ltx_tag_section">II</span> Intro</h2>'],
-      ['小节号', '<h3 class="ltx_title"><span class="ltx_tag ltx_tag_subsection">II.1</span> Sub</h3>'],
-      ['公式号', '<td class="ltx_eqn_cell"><span class="ltx_tag ltx_tag_equation">(1.1)</span></td>'],
-      ['列表符号', '<li class="ltx_item"><span class="ltx_tag ltx_tag_item">•</span><div class="ltx_para"><p class="ltx_p">x</p></div></li>'],
-      ['脚注标记', '<span class="ltx_note"><span class="ltx_tag ltx_tag_note">1</span></span>'],
-      ['无细分的 tag', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span></li>'],
+      ['section number', '<h2 class="ltx_title"><span class="ltx_tag ltx_tag_section">II</span> Intro</h2>'],
+      ['subsection number', '<h3 class="ltx_title"><span class="ltx_tag ltx_tag_subsection">II.1</span> Sub</h3>'],
+      ['equation number', '<td class="ltx_eqn_cell"><span class="ltx_tag ltx_tag_equation">(1.1)</span></td>'],
+      ['list bullet', '<li class="ltx_item"><span class="ltx_tag ltx_tag_item">•</span><div class="ltx_para"><p class="ltx_p">x</p></div></li>'],
+      ['footnote mark', '<span class="ltx_note"><span class="ltx_tag ltx_tag_note">1</span></span>'],
+      ['a tag with no subtype', '<li class="ltx_bibitem"><span class="ltx_tag">[1]</span></li>'],
     ]
     for (const [name, html] of numbered) {
-      it(`${name}仍作 void：纯编号翻了只会坏事`, () => {
+      it(`${name} is still a void: translating a bare number only does harm`, () => {
         expect(tagOf(html)).toMatchObject({ kind: 'protect', rule: 'tag' })
       })
     }
 
-    // 光看类名不够：子图面板的标签也是 .ltx_tag_figure，内容却是纯标识符（Codex 在 #53 指出）
+    // The class name alone is not enough: a subfigure panel's label is .ltx_tag_figure too, its content a bare identifier (Codex on #53)
     const panels: [string, string][] = [
-      ['子图面板 (a)', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">(a)</span></figcaption>'],
-      ['子图面板 (b)', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">(b)</span></figcaption>'],
-      ['纯编号的定理 tag', '<h6 class="ltx_title"><span class="ltx_tag ltx_tag_theorem">1.1</span></h6>'],
+      ['subfigure panel (a)', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">(a)</span></figcaption>'],
+      ['subfigure panel (b)', '<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure">(b)</span></figcaption>'],
+      ['a bare-number theorem tag', '<h6 class="ltx_title"><span class="ltx_tag ltx_tag_theorem">1.1</span></h6>'],
     ]
     for (const [name, html] of panels) {
-      it(`${name}仍作 void：翻了会与面板的对应关系断掉`, () => {
+      it(`${name} is still a void: translated, the correspondence with the panel breaks`, () => {
         expect(tagOf(html)).toMatchObject({ kind: 'protect', rule: 'tag' })
       })
     }
 
-    it('括号里的整段标识符不算词：面板标签可以是多字母罗马数字（Codex 在 #53 指出）', () => {
+    it('an identifier inside parentheses as a whole is no word: a panel label may be a multi-letter Roman numeral (Codex on #53)', () => {
       for (const label of ['(a)', '(ii)', '(iii)', '(iv)', '（乙）', '(A.1)']) {
         expect([label, isNamedTag(el(`<span class="ltx_tag ltx_tag_figure">${label}</span>`))]).toEqual([label, false])
       }
-      // 环境名从不带括号：去掉括号后仍有词的照样要翻
+      // An environment name never comes in parentheses: with the parentheses removed, whatever still has a word is translated as usual
       expect(isNamedTag(el('<span class="ltx_tag ltx_tag_theorem">Definition 1.2 (Hall set)</span>'))).toBe(true)
       expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">Figure 3 (a)</span>'))).toBe(true)
     })
 
-    it('罗马数字编号的 tag 不翻：机器翻译会把它本地化，与受保护的 .ltx_ref 对不上', () => {
-      // 2026-09-05 用 google-gtx 实测：Table IV: → 表四：，Table X: → 表十：，Part I → 第一部分
+    it('a Roman-numbered tag is not translated: machine translation localises it, and it no longer matches the protected .ltx_ref', () => {
+      // Measured with google-gtx on 2026-09-05: Table IV: → 表四：, Table X: → 表十：, Part I → 第一部分
       for (const text of ['Table I:', 'Table IV:', 'Table X:', 'Table XIII:', 'Part I', 'Appendix V', 'Table IV.1:', 'Theorem IV-A', 'Lemma II.3.', 'Table iv:', 'Theorem ii.3', 'Part i', 'Table IV :', 'Theorem II .', '(Table IV)']) {
         expect([text, isNamedTag(el(`<span class="ltx_tag ltx_tag_table">${text}</span>`))]).toEqual([text, false])
       }
-      // 阿拉伯数字与字母编号实测都原样保留，照翻
+      // Arabic numerals and letter numbering are measured to stay as they are, and are translated as usual
       for (const text of ['Table 4:', 'Appendix A', 'Appendix C', 'Appendix D', 'Definition 1.1.', 'Corollary A.3.', 'Appendix A.1', 'Lemma D.2', '(Figure 1)', '(Theorem 2)', 'Definition 1 (Hall set)']) {
         expect([text, isNamedTag(el(`<span class="ltx_tag ltx_tag_table">${text}</span>`))]).toEqual([text, true])
       }
     })
 
-    it('判定要含连续两个字母：单字母标识符不算词', () => {
+    it('the check needs two consecutive letters: a single-letter identifier is no word', () => {
       expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">Figure 1.</span>'))).toBe(true)
       expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">(a)</span>'))).toBe(false)
       expect(isNamedTag(el('<span class="ltx_tag ltx_tag_figure">(1)</span>'))).toBe(false)
-      // 类名不在清单里的，含词也不翻
+      // A class name not on the list is not translated even with a word in it
       expect(isNamedTag(el('<span class="ltx_tag ltx_tag_section">Appendix</span>'))).toBe(false)
     })
   })
 
-describe('classify：优先级 skip > table > unit > protect', () => {
-  it('skip 胜 unit', () => {
+describe('classify: precedence skip > table > unit > protect', () => {
+  it('skip beats unit', () => {
     expect(classify(el('<p class="ltx_p ltx_ERROR">x</p>'))?.kind).toBe('skip')
   })
-  it('table 胜 unit', () => {
+  it('table beats unit', () => {
     expect(classify(el('<table class="ltx_tabular ltx_p"></table>'))?.kind).toBe('table')
   })
-  it('unit 胜 protect', () => {
+  it('unit beats protect', () => {
     expect(classify(el('<span class="ltx_p ltx_ref">x</span>'))?.kind).toBe('unit')
   })
-  it('skip 胜 protect', () => {
+  it('skip beats protect', () => {
     expect(classify(el('<span class="ltx_ERROR ltx_ref">x</span>'))?.kind).toBe('skip')
   })
 })
@@ -207,7 +207,7 @@ describe('visibleText / hasTranslatableText', () => {
     + '<span class="ltx_note_content"><sup class="ltx_note_mark">1</sup>Footnote body.</span></span></span> Done.</p>',
   )
 
-  it('剪掉 protect / skip 子树，包括 descend 的脚注容器', () => {
+  it('cuts protect / skip subtrees, the descend footnote container included', () => {
     const t = visibleText(para())
     expect(t).toContain('Let ')
     expect(t).toContain(' be a graph; see ')
@@ -218,43 +218,43 @@ describe('visibleText / hasTranslatableText', () => {
     expect(t).not.toContain('Footnote body')
   })
 
-  it('保留公式两侧的细空格，不 trim 内部空白', () => {
+  it('keeps the thin spaces on both sides of a formula and does not trim inner whitespace', () => {
     expect(visibleText(el('<p class="ltx_p">a\u2009<math class="ltx_Math"><mi>x</mi></math>\u2009b</p>'))).toBe('a\u2009\u2009b')
   })
 
-  it('只含公式、数字或标点的段落没有可翻译文本', () => {
+  it('a paragraph of formulas, digits or punctuation only has no translatable text', () => {
     expect(hasTranslatableText(el('<p class="ltx_p"><math class="ltx_Math"><mi>x</mi></math> = 1.</p>'))).toBe(false)
     expect(hasTranslatableText(el('<p class="ltx_p">12.5 (3)</p>'))).toBe(false)
     expect(hasTranslatableText(el('<p class="ltx_p">   </p>'))).toBe(false)
   })
 
-  it('任何 Unicode 字母都算可翻译', () => {
+  it('any Unicode letter counts as translatable', () => {
     expect(hasTranslatableText(para())).toBe(true)
     expect(hasTranslatableText(el('<p class="ltx_p">证明。</p>'))).toBe(true)
     expect(hasTranslatableText(el('<p class="ltx_p">λ</p>'))).toBe(true)
   })
 })
 
-describe('isNumericCell（Phase 0 校准边界用例）', () => {
+describe('isNumericCell (the calibration boundary cases of Phase 0)', () => {
   const numeric = ['7.7 GeV', '±0.3', '12,345', '1e-5', '3 × 10^4', '0.92 ± 0.01', '(3)', '✓', '—', 'N/A', '']
   const prose = ['ERROR', 'Esp', 'TRUE', 'Total', '(kpc)', 'Au+Au', 'Disk crossing', 'e']
-  for (const t of numeric) it(`数值格：${JSON.stringify(t)}`, () => expect(isNumericCell(t)).toBe(true))
-  for (const t of prose) it(`散文格：${JSON.stringify(t)}`, () => expect(isNumericCell(t)).toBe(false))
+  for (const t of numeric) it(`numeric cell: ${JSON.stringify(t)}`, () => expect(isNumericCell(t)).toBe(true))
+  for (const t of prose) it(`prose cell: ${JSON.stringify(t)}`, () => expect(isNumericCell(t)).toBe(false))
 })
 
-describe('fixture 不变量', () => {
+describe('fixture invariants', () => {
   const files = readdirSync(FIXTURE_DIR).filter(f => f.endsWith('.html')).sort()
 
-  /** 合成结构 fixture：覆盖真实论文里没出现过的模板结构（RESEARCH.md §2.12） */
+  /** The synthetic-structures fixture: covers template structures no real paper showed (RESEARCH.md §2.12) */
   const SYNTHETIC = 'synthetic-structures.html'
 
-  it('有 12 篇真实论文 + 1 份合成结构', () => {
+  it('there are 12 real papers + 1 synthetic structure', () => {
     expect(files.filter(f => f !== SYNTHETIC)).toHaveLength(12)
     expect(files).toContain(SYNTHETIC)
   })
 
   for (const f of files) {
-    it(`${f}：翻译根存在，unit 规则互斥，classify 不抛错`, () => {
+    it(`${f}: the translation root exists, unit rules are mutually exclusive, classify does not throw`, () => {
       const doc = new DOMParser().parseFromString(readFileSync(join(FIXTURE_DIR, f), 'utf8'), 'text/html')
       const root = documentRoot(doc)
       expect(root).not.toBeNull()
@@ -267,11 +267,11 @@ describe('fixture 不变量', () => {
     })
   }
 
-  it('没有翻译根时返回 null', () => {
+  it('returns null without a translation root', () => {
     expect(documentRoot(new DOMParser().parseFromString('<html><body></body></html>', 'text/html'))).toBeNull()
   })
 
-  it('传入的元素本身就是翻译根时返回它自己（Codex 在 #2 / #3 指出 querySelector 只搜后代）', () => {
+  it('returns the element itself when it is the translation root (Codex on #2 / #3: querySelector searches descendants only)', () => {
     const doc = new DOMParser().parseFromString('<html><body><article class="ltx_document"><p class="ltx_p">x</p></article></body></html>', 'text/html')
     const article = doc.querySelector('article')!
     expect(documentRoot(article)).toBe(article)
@@ -279,19 +279,19 @@ describe('fixture 不变量', () => {
   })
 })
 
-describe('description 列表的术语（Codex 在 #18 指出）', () => {
+describe('the terms of a description list (Codex on #18)', () => {
   const doc = (html: string) => new DOMParser().parseFromString(`<!doctype html><html><body><article class="ltx_document">${html}</article></body></html>`, 'text/html')
   const item = (tagText: string) =>
     `<dl class="ltx_description"><dt class="ltx_item"><span class="ltx_tag ltx_tag_item">${tagText}</span></dt></dl>`
 
-  it('含词的术语要翻：不放开的话整个 .ltx_item 没有自有文本、根本不成块', () => {
+  it('a term with a word is translated: unrelaxed, the whole .ltx_item has no own text and is no block at all', () => {
     const d = doc(item('Compactness.'))
     const blocks = extract(d)
     expect(blocks.map(b => b.unit)).toEqual(['item'])
     expect(classify(d.querySelector('.ltx_tag_item')!)).toBeNull()
   })
 
-  it('纯标记仍作 void：项目符号与编号不能翻', () => {
+  it('a bare mark is still a void: bullets and numbers must not be translated', () => {
     for (const marker of ['•', '(1)', '2.', '(ii)']) {
       const d = doc(item(marker))
       expect([marker, extract(d).length]).toEqual([marker, 0])
@@ -300,37 +300,37 @@ describe('description 列表的术语（Codex 在 #18 指出）', () => {
   })
 })
 
-describe('参考文献条目的每一段都翻，作者段不再例外（§5.4，2026-09-06）', () => {
+describe('every segment of a reference entry is translated, the author segment no exception (§5.4, 2026-09-06)', () => {
   const entry = (inner: string) => new DOMParser()
     .parseFromString(`<!doctype html><html><body><article class="ltx_document"><ul class="ltx_biblist"><li class="ltx_bibitem">${inner}</li></ul></article></body></html>`, 'text/html')
 
-  it('带 .ltx_bib_author 标注的作者段是翻译单元', () => {
+  it('an author segment marked .ltx_bib_author is a translation unit', () => {
     const d = entry('<span class="ltx_bibblock"><span class="ltx_bib_author">Doe, J.</span></span><span class="ltx_bibblock">A Title.</span>')
     for (const el of d.querySelectorAll('.ltx_bibblock')) expect(classify(el)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
   })
 
-  it('没有标注、只靠位置认出来的第一段也是翻译单元', () => {
+  it('the first segment recognised by position alone, without the mark, is a translation unit too', () => {
     const d = entry('<span class="ltx_bibblock">Doe, J., and Roe, R.</span><span class="ltx_bibblock">A Title.</span>')
     for (const el of d.querySelectorAll('.ltx_bibblock')) expect(classify(el)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
   })
 
-  it('引文年份作 void 保留，不进翻译文本（Codex 在 #74 指出）', () => {
+  it('the citation year is kept as a void and does not enter the translation text (Codex on #74)', () => {
     const d = entry('<span class="ltx_bibblock"><span class="ltx_bib_author">Doe, J.</span><span class="ltx_text ltx_bib_year"> (2024)</span></span>')
     const year = d.querySelector('.ltx_bib_year')!
     expect(classify(year)).toEqual({ kind: 'protect', rule: 'bib-year', descend: false })
-    // 整段仍然是翻译单元：作者名照翻，年份在里面当占位符
+    // The segment is still a translation unit: the author names are translated, the year inside is a placeholder
     expect(classify(d.querySelector('.ltx_bibblock')!)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
   })
 
-  it('第一段是整条引文、第二段是 doi 的模板：两段都翻（实测 2609.03896，用户反馈）', () => {
-    // 按位置判断的老规则在这里翻车得最厉害：它把第一段当作者列表跳掉，
-    // 于是整条参考文献一个字都不翻，页面上只有 doi 那行变成中文标点
+  it('the template with the whole citation in the first segment and the doi in the second: both translated (measured on 2609.03896, the owner\'s report)', () => {
+    // The old position-based rule failed worst here: it skipped the first segment as the author list,
+    // so not a word of the reference was translated, and on the page only the doi line turned into Chinese punctuation
     const d = entry('<span class="ltx_bibblock">T. M. Apostol, <em class="ltx_emph">Introduction to Analytic Number Theory</em>, Undergraduate Texts in Mathematics, Springer, New York, 1976.</span>'
       + '<span class="ltx_bibblock">doi: <a class="ltx_ref ltx_href" href="https://doi.org/10.1007/978-1-4757-5579-4">10.1007/978-1-4757-5579-4</a>.</span>')
     for (const el of d.querySelectorAll('.ltx_bibblock')) expect(classify(el)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
   })
 
-  it('只有一段的条目仍然整条一个单元，行为没变', () => {
+  it('a single-segment entry is still one unit whole, the behaviour unchanged', () => {
     const d = entry('<span class="ltx_bibblock">Doe, J. A Title. Journal, 2020.</span>')
     expect(classify(d.querySelector('.ltx_bibblock')!)).toEqual({ kind: 'unit', rule: 'bibblock', descend: true })
   })

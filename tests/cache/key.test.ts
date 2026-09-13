@@ -8,7 +8,7 @@ const base: CacheIdentity = {
 }
 
 describe('normalizeText', () => {
-  it('NFC、折叠所有空白、去首尾', () => {
+  it('NFC, all whitespace collapsed, trimmed', () => {
     expect(normalizeText('  a \n\t b  ')).toBe('a b')
     expect(normalizeText('é')).toBe('é')
     expect(normalizeText('a  b')).toBe('a b')
@@ -16,17 +16,17 @@ describe('normalizeText', () => {
 })
 
 describe('buildCacheKey', () => {
-  it('64 位 hex 且稳定', async () => {
+  it('64 hex digits and stable', async () => {
     const key = await buildCacheKey(base)
     expect(key).toMatch(/^[0-9a-f]{64}$/)
     expect(await buildCacheKey({ ...base })).toBe(key)
   })
 
-  it('文本归一化后相同则键相同', async () => {
+  it('texts equal after normalisation give equal keys', async () => {
     expect(await buildCacheKey({ ...base, text: '  Hello   <x id="1"/>\n world ' })).toBe(await buildCacheKey(base))
   })
 
-  it('任一字段不同则键不同', async () => {
+  it('any field differing gives a different key', async () => {
     const key = await buildCacheKey(base)
     const variants: Partial<CacheIdentity>[] = [
       { providerId: 'x' }, { model: 'x' }, { promptVersion: '2' }, { rulesVersion: '0.3.0' }, { target: 'ja' }, { renderPath: 'runs' }, { text: 'Hello <x id="2"/> world' },
@@ -34,26 +34,26 @@ describe('buildCacheKey', () => {
     for (const v of variants) expect(await buildCacheKey({ ...base, ...v }), JSON.stringify(v)).not.toBe(key)
   })
 
-  it('文本里的分隔符不会撞键', async () => {
+  it('separators inside the text cannot collide keys', async () => {
     const a = await buildCacheKey({ ...base, model: 'm|x', text: 'y' })
     const b = await buildCacheKey({ ...base, model: 'm', text: 'x|y' })
     expect(a).not.toBe(b)
   })
 
-  it('提示词指纹不同则键不同：换了提示词不能命中旧译文', async () => {
+  it('a different prompt fingerprint gives a different key: a changed prompt must not hit the old translation', async () => {
     const a = await buildCacheKey({ ...base, promptKey: 'default' })
     const b = await buildCacheKey({ ...base, promptKey: 'custom:abc' })
     expect(a).not.toBe(b)
   })
 
-  it('上下文不同则键不同：同一段文字在另一篇论文 / 另一章里不能拿来命中（Codex 在 #28 指出）', async () => {
+  it('a different context gives a different key: the same passage in another paper / another section must not hit (Codex on #28)', async () => {
     const a = await buildCacheKey({ ...base, context: { paperTitle: 'P1', abstract: 'A' } })
     const b = await buildCacheKey({ ...base, context: { paperTitle: 'P2', abstract: 'A' } })
     expect(a).not.toBe(b)
     expect(await buildCacheKey({ ...base, context: undefined })).toBe(await buildCacheKey({ ...base, context: undefined }))
   })
 
-  it('改一条术语的译法，键就变；空表与不带术语表同键（否则加表那一刻全部缓存失效）', async () => {
+  it('changing one term\'s translation changes the key; an empty table and no table share a key (or adding a table would void the whole cache at once)', async () => {
     const withA = await buildCacheKey({ ...base, context: { glossary: [{ term: 'weights', translation: '权重' }] } })
     const withB = await buildCacheKey({ ...base, context: { glossary: [{ term: 'weights', translation: '重量' }] } })
     expect(withA).not.toBe(withB)
@@ -61,15 +61,15 @@ describe('buildCacheKey', () => {
     expect(empty).toBe(await buildCacheKey({ ...base, context: {} }))
   })
 
-  it('上下文以原文进 SHA-256 载荷，不先压成 32 位 hash：DJB2 相撞的两个标题也不同键（Codex 给的实例）', async () => {
+  it('the context enters the SHA-256 payload as source text, not squeezed into a 32-bit hash first: two titles with a DJB2 collision get different keys too (the instance Codex gave)', async () => {
     const a = await buildCacheKey({ ...base, context: { paperTitle: '19k04n01vcr73f' } })
     const b = await buildCacheKey({ ...base, context: { paperTitle: '1efm0uaep90s9' } })
     expect(a).not.toBe(b)
   })
 })
 
-describe('ocrCacheKey（DESIGN §15.2）', () => {
-  it('只随图片字节的 hash 与 helper 版本变；与译文的键空间不重叠', async () => {
+describe('ocrCacheKey (DESIGN §15.2)', () => {
+  it('varies with the image bytes\' hash and the helper version only; does not overlap the translation key space', async () => {
     const key = await ocrCacheKey('abc', '0.1.0')
     expect(key).toMatch(/^[0-9a-f]{64}$/)
     expect(await ocrCacheKey('abc', '0.1.0')).toBe(key)
@@ -79,39 +79,39 @@ describe('ocrCacheKey（DESIGN §15.2）', () => {
   })
 })
 
-describe('renderPath 进键（#104）', () => {
-  // 大多数块在两种格式下线上文本本来就不同（记号更短、成对占位符被拍平），键自然分开；
-  // 但没有占位符的纯文字块两边文本一模一样，这时只剩 renderPath 能分开它们。
-  // 批次键也用同一个字段（translate-service 的 batchKey），两种格式的段落不会攒进同一批
-  it('同一段没有占位符的原文，三条路径算出三个不同的键', async () => {
+describe('renderPath enters the key (#104)', () => {
+  // Most blocks have different wire text under the two formats anyway (markers are shorter, paired placeholders flattened), so the keys separate by themselves;
+  // but a plain-text block without placeholders reads exactly the same on both sides, and then only renderPath can tell them apart.
+  // The batch key uses the same field (translate-service's batchKey), so segments of the two formats are not gathered into one batch
+  it('the same placeholder-free source gives three different keys on the three paths', async () => {
     const base = { providerId: 'p', model: 'm', promptKey: '', target: 'zh-CN', text: 'Hello world.' }
     const keys = await Promise.all((['tags', 'markers', 'runs'] as const).map(renderPath => cacheKeyFor({ ...base, renderPath })))
     expect(new Set(keys).size).toBe(3)
   })
 
-  it('wireFormatOf 只剩一件真事：runs 按 tags 转义，其余原样（#108）', () => {
-    // 改名之前它还兼着「markup ↔ tags 换名字」，那是同一个东西的两套叫法；
-    // 现在 RenderPath = WireFormat | 'runs'，同名的部分是恒等，只有 runs 需要落到一个格式上
+  it('wireFormatOf has one real thing left: runs escapes as tags, the rest as it is (#108)', () => {
+    // Before the rename it also did “markup ↔ tags renaming”, two sets of names for one thing;
+    // now RenderPath = WireFormat | 'runs', the same-named part is the identity, and only runs has to land on a format
     expect(wireFormatOf('markers')).toBe('markers')
     expect(wireFormatOf('tags')).toBe('tags')
     expect(wireFormatOf('runs')).toBe('tags')
   })
 
-  it('RenderPath 与 WireFormat 同名：serialize 能直接吃 renderPath，不必先换名字（#108）', () => {
-    // 这条钉的是类型关系而不是运行时值：两个格式取值必须逐字相同，
-    // 否则「新加的调用点写错一个字面量」这个坑就回来了
+  it('RenderPath and WireFormat share names: serialize takes renderPath directly, no renaming first (#108)', () => {
+    // This pins the type relation, not a runtime value: the two formats' values must be identical character for character,
+    // or the “a new call site with one wrong literal” trap comes back
     const asWire: WireFormat[] = ['tags', 'markers']
     const asPath: RenderPath[] = [...asWire, 'runs']
     expect(asPath).toEqual(['tags', 'markers', 'runs'])
   })
 })
 
-describe('空白折叠为什么必须升 CACHE_KEY_VERSION（#122）', () => {
-  it('带硬换行的文本与折叠后的文本算出同一个键——所以旧的坏译文不会自然失效', async () => {
-    // #119 之前，带换行的请求让微软逐行翻译（state explosion → 「州级爆炸性质」）。
-    // 键这边 normalizeText 早就折叠空白，两种文本因此**碰撞**：折叠上线后，
-    // 已经翻过的块会命中同一条旧记录，把坏译文在 30 天 TTL 内继续返回，修复到不了它们。
-    // 递增 CACHE_KEY_VERSION 是唯一能作废它们的手段——这条用例钉的就是那个碰撞
+describe('why whitespace collapsing had to bump CACHE_KEY_VERSION (#122)', () => {
+  it('text with hard line breaks and the collapsed text compute the same key — so the old bad translations would not expire by themselves', async () => {
+    // Before #119 a request with line breaks made Microsoft translate line by line (state explosion → 「州级爆炸性质」).
+    // On the key side normalizeText collapsed whitespace long ago, so the two texts **collide**: with collapsing live,
+    // blocks translated already would hit the same old record and keep returning the bad translation for the 30-day TTL, the fix never reaching them.
+    // Bumping CACHE_KEY_VERSION is the only way to void them — this case pins exactly that collision
     const withNewlines = 'Automatic verification faces state\nexplosion due to\nthe interleavings.'
     const collapsed = withNewlines.replace(/[\t\n\f\r ]+/g, ' ')
     expect(withNewlines).not.toBe(collapsed)

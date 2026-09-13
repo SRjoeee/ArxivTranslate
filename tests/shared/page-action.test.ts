@@ -12,7 +12,7 @@ describe('pageAction', () => {
     expect(pageAction({ progress: progress('idle') }, 'r1')).toBe('translate')
     expect(pageAction({ progress: progress('on'), running: running('r1') }, 'r1')).toBe('restore')
     expect(pageAction({ progress: progress('stopped', 'auth: bad key') }, 'r1')).toBe('retranslate')
-    // Stopped without a fatal error is not a paused page: it starts afresh, as the button 翻译本页 says
+    // Stopped without a fatal error is not a paused page: it starts afresh, as the button “Translate this page” says
     expect(pageAction({ progress: progress('stopped') }, 'r1')).toBe('translate')
     // No answer from the page: nothing, not a guess
     expect(pageAction(undefined, 'r1')).toBeUndefined()

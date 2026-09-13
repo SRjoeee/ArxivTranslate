@@ -8,8 +8,8 @@ import { splitFigures } from '@/core/renderer/split-figures'
 import { renderText } from '@/core/renderer/translation'
 import { docOf, frag } from './helpers'
 
-// happy-dom 没有布局引擎：getClientRects 一律为空，那样所有元素都"不可见"。
-// 这里按 only 模式的语义造可见性——被隐藏的是拿到译文的原块，其余都看得见。
+// happy-dom has no layout engine: getClientRects is always empty, which would make every element “invisible”.
+// Visibility is built here after only mode's semantics — hidden are the original blocks that got a translation, everything else shows.
 function layout(doc: Document, hidden: Element[]) {
   const box = [{ top: 0, left: 0, bottom: 10, right: 10, width: 10, height: 10 }] as unknown as DOMRectList
   for (const el of [...doc.querySelectorAll('*')]) {
@@ -20,7 +20,7 @@ function layout(doc: Document, hidden: Element[]) {
 const PAGE = '<div class="ltx_para"><p class="ltx_p" id="src">See <a href="#tgt" id="link">§7</a>.</p></div>'
   + '<div class="ltx_para"><p class="ltx_p" id="tgt">Target paragraph.</p></div>'
 
-/** 造一个「目标块已翻译」的文档，返回锚点与译文节点 */
+/** Build a document whose target block is translated; returns the anchor and the translation node */
 function setup(opts: { hideTarget?: boolean } = {}) {
   const doc = docOf(PAGE)
   const blocks = extract(doc)
@@ -35,8 +35,8 @@ function setup(opts: { hideTarget?: boolean } = {}) {
   return { doc, link: doc.getElementById('link')!, target, translation, scrolled, blocks }
 }
 
-describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
-  it('目标被隐藏时，点击滚到它的译文，并阻止默认跳转', () => {
+describe('in-page anchors land on the translation in only mode (issue #44)', () => {
+  it('with the target hidden a click scrolls to its translation and prevents the default jump', () => {
     const { doc, link, translation, scrolled } = setup()
     const off = installAnchorFallback(doc)
     const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
@@ -46,7 +46,7 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off()
   })
 
-  it('目标看得见就完全不介入——side / stack 下一次都不该动手', () => {
+  it('with the target visible it never steps in — under side / stack it must not act once', () => {
     const { doc, link, scrolled } = setup({ hideTarget: false })
     const off = installAnchorFallback(doc)
     const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
@@ -56,7 +56,7 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off()
   })
 
-  it('卸载之后不再接管', () => {
+  it('after unmounting it no longer takes over', () => {
     const { doc, link, scrolled } = setup()
     installAnchorFallback(doc)()
     const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
@@ -65,7 +65,7 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     expect(event.defaultPrevented).toBe(false)
   })
 
-  it('Ctrl / Cmd / 中键点击是"新标签打开"，不接管', () => {
+  it('a Ctrl / Cmd / middle click is “open in a new tab” and is not taken over', () => {
     for (const mod of [{ ctrlKey: true }, { metaKey: true }, { button: 1 }]) {
       const { doc, link, scrolled } = setup()
       const off = installAnchorFallback(doc)
@@ -77,13 +77,13 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     }
   })
 
-  it('骨架屏与失败小部件不当替身：滚过去只会看到一个空盒子', () => {
+  it('the skeleton and the failure widget are no stand-in: scrolling there would show an empty box', () => {
     const doc = docOf(PAGE)
     const blocks = extract(doc)
     markBlocks(blocks)
     const target = doc.getElementById('tgt')!
     const block = blocks.find(b => b.el === target) as TextBlock
-    renderPending(block) // 只有骨架屏，还没有译文
+    renderPending(block) // only the skeleton, no translation yet
     layout(doc, [target])
     const scrolled: Element[] = []
     for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }
@@ -91,10 +91,10 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
     doc.getElementById('link')!.dispatchEvent(event)
     expect(scrolled).toEqual([])
-    expect(event.defaultPrevented).toBe(false) // 没有替身就交回浏览器
+    expect(event.defaultPrevented).toBe(false) // with no stand-in it goes back to the browser
     off()
 
-    // 失败小部件同理
+    // The failure widget likewise
     renderFailed(block, '网络错误', () => {})
     layout(doc, [target])
     const event2 = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
@@ -105,7 +105,7 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off2()
   })
 
-  it('目标是块内部的元素时，认它所在的块', () => {
+  it('a target inside a block resolves to the block it is in', () => {
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="src">See <a href="#deep" id="link">it</a>.</p></div>'
       + '<div class="ltx_para"><p class="ltx_p" id="tgt">Head <span id="deep">middle</span> tail.</p></div>')
     const blocks = extract(doc)
@@ -122,7 +122,7 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off()
   })
 
-  it('target 指向别的浏览上下文时不接管——普通左键点击那也是"新标签打开"（Codex 在 #80 指出）', () => {
+  it('a target pointing at another browsing context is not taken over — a plain left click there is “open in a new tab” too (Codex on #80)', () => {
     for (const target of ['_blank', '_parent', 'someframe']) {
       const { doc, link, scrolled } = setup()
       link.setAttribute('target', target)
@@ -135,7 +135,7 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     }
   })
 
-  it('target="_self" 与不写 target 一样，照常接管', () => {
+  it('target="_self" behaves like no target and is taken over as usual', () => {
     const { doc, link, translation, scrolled } = setup()
     link.setAttribute('target', '_self')
     const off = installAnchorFallback(doc)
@@ -144,11 +144,11 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off()
   })
 
-  it('改 hash 走 location.hash，让 hashchange 照常派发（Codex 在 #80 指出）', async () => {
+  it('the hash is changed through location.hash so hashchange is dispatched as usual (Codex on #80)', async () => {
     const { doc, link, translation, scrolled } = setup()
     const view = doc.defaultView!
-    // docOf 造的文档共享全局 window，而 happy-dom 的 hashchange 是**异步**派发的：
-    // 前面的用例点过同一个锚点，事件还排在队列里。先把 hash 挪开并排空，这条才测得到自己那一次
+    // The documents docOf builds share the global window, and happy-dom dispatches hashchange **asynchronously**:
+    // an earlier case clicked the same anchor and its event is still queued. Move the hash away and drain first, so this case sees only its own
     view.location.hash = 'elsewhere'
     await new Promise(r => setTimeout(r, 0))
     const fired: string[] = []
@@ -159,27 +159,27 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     expect(scrolled).toEqual([translation])
     await new Promise(r => setTimeout(r, 0))
     expect(fired).toEqual(['#tgt'])
-    // 自己写的那次不该让兜底再滚一遍
+    // The write of our own must not make the fallback scroll once more
     expect(scrolled).toEqual([translation])
     view.removeEventListener('hashchange', onHash)
     off()
   })
 
-  it('嵌套单元的译文也被藏了，就往外层块找（Codex 在 #80 指出）', () => {
-    // 致谢块里嵌一个标题块：内层的译文插在**外层原块内部**，外层一藏，它跟着没
+  it('with a nested unit\'s translation hidden as well, look outward to the enclosing block (Codex on #80)', () => {
+    // A heading block nested inside an acknowledgements block: the inner translation sits **inside the outer original**, and goes with it when the outer is hidden
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="src">See <a href="#inner" id="link">it</a>.</p></div>'
       + '<div class="ltx_acknowledgements" id="outer">Thanks.<h6 class="ltx_title" id="inner">Acknowledgements</h6></div>')
     const blocks = extract(doc)
     markBlocks(blocks)
     const outer = doc.getElementById('outer')!
     const inner = doc.getElementById('inner')!
-    // 两个都是块，且 inner 嵌在 outer 里
+    // Both are blocks, and inner is nested in outer
     expect(blocks.map(b => b.el)).toContain(outer)
     expect(blocks.map(b => b.el)).toContain(inner)
     for (const b of blocks) renderText(b as TextBlock, frag(doc, '译文'))
     const outerT = outer.nextElementSibling!
     const innerT = inner.nextElementSibling!
-    // only 模式：outer 连同它内部的 inner 与 inner 的译文一起隐藏；outer 自己的译文可见
+    // only mode: outer, with the inner and the inner's translation, is hidden; outer's own translation shows
     layout(doc, [outer, inner, innerT])
     const scrolled: Element[] = []
     for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }
@@ -189,9 +189,9 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off()
   })
 
-  it('拆开的插图：只译文模式下原件整个被藏，落到它旁边的克隆上（Codex 在 #80 指出）', () => {
-    // side 模式先跑过 splitFigures，再切 only —— 这时 [data-axt-split] 的原件被 CSS 整个藏起来，
-    // 可见的是紧跟其后的克隆，而克隆被 stripIds 剥了 id，图注引用指不到它
+  it('a split figure: in translation-only mode the original is hidden whole, and the anchor lands on the clone beside it (Codex on #80)', () => {
+    // side mode ran splitFigures first, then switched to only — the [data-axt-split] original is now hidden whole by CSS,
+    // visible is the clone right after it, and the clone was stripped of its id by stripIds, so the caption reference cannot point at it
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="src">See <a href="#fig" id="link">Fig 2</a>.</p></div>'
       + '<figure id="fig" class="ltx_figure"><img class="ltx_graphics" src="x.png" alt="">'
       + '<figcaption class="ltx_caption" id="cap">Figure 2: A picture.</figcaption></figure>')
@@ -204,8 +204,8 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     expect(fig.hasAttribute(SPLIT_ATTR)).toBe(true)
     const clone = fig.nextElementSibling!
     expect(clone.classList.contains('axt-split')).toBe(true)
-    expect(clone.id).toBe('') // 克隆剥了 id：锚点指不到它
-    // only 模式：原件（连同里面的图注与它的译文）整个隐藏，克隆可见
+    expect(clone.id).toBe('') // the clone is stripped of its id: an anchor cannot point at it
+    // only mode: the original (with the caption and its translation inside) is hidden whole, the clone shows
     layout(doc, [fig, cap, ...[...fig.querySelectorAll('*')]])
     const scrolled: Element[] = []
     for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }
@@ -215,8 +215,8 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off()
   })
 
-  it('指向图内某一行的锚点落到克隆里对应的那一行，不是图顶（Codex 在 #80 指出）', () => {
-    // 实测 2312.17141 有 21 个这种锚点：#S3.Ex73–Ex79 都是 Figure 6 里的公式行
+  it('an anchor to one line inside a figure lands on the matching line in the clone, not the top of the figure (Codex on #80)', () => {
+    // Measured: 2312.17141 has 21 such anchors: #S3.Ex73–Ex79 are all equation lines inside Figure 6
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="src">See <a href="#eq" id="link">(7)</a>.</p></div>'
       + '<figure id="fig" class="ltx_figure"><img class="ltx_graphics" src="x.png" alt="">'
       + '<span id="eq" class="ltx_equation">x = 1</span>'
@@ -228,22 +228,22 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     expect(splitFigures(doc)).toBe(1)
     const fig = doc.getElementById('fig')!
     const clone = fig.nextElementSibling!
-    // 克隆里那一行带着 data-axt-split-of，指回原 id
+    // That line in the clone carries data-axt-split-of, pointing back at the original id
     const innerCopy = clone.querySelector('[data-axt-split-of="eq"]')!
     expect(innerCopy).not.toBeNull()
-    expect(innerCopy.id).toBe('') // 不是 id，不会重复
+    expect(innerCopy.id).toBe('') // not an id, so no duplicate
     layout(doc, [fig, ...[...fig.querySelectorAll('*')]])
     const scrolled: Element[] = []
     for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }
     const off = installAnchorFallback(doc)
     doc.getElementById('link')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
-    // 落在对应的那一行，而不是克隆的根
+    // Lands on the matching line, not the clone's root
     expect(scrolled).toEqual([innerCopy])
     expect(scrolled).not.toEqual([clone])
     off()
   })
 
-  it('图内那一处在克隆里被摘掉了（它有译文）就退回图顶', () => {
+  it('when that spot was removed from the clone (it has a translation) it falls back to the top of the figure', () => {
     const doc = docOf('<div class="ltx_para"><p class="ltx_p" id="src">See <a href="#cap" id="link">caption</a>.</p></div>'
       + '<figure id="fig" class="ltx_figure"><img class="ltx_graphics" src="x.png" alt="">'
       + '<figcaption class="ltx_caption" id="cap">Figure 6.</figcaption></figure>')
@@ -253,7 +253,7 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     renderText(blocks.find(b => b.el === cap) as TextBlock, frag(doc, '图 6。'))
     splitFigures(doc)
     const clone = doc.getElementById('fig')!.nextElementSibling!
-    // 图注有译文，克隆里原文那份被摘掉了，找不到对应
+    // The caption has a translation; its source copy was removed from the clone, so there is no match
     expect(clone.querySelector('[data-axt-split-of="cap"]')).toBeNull()
     layout(doc, [doc.getElementById('fig')!, ...[...doc.getElementById('fig')!.querySelectorAll('*')]])
     const scrolled: Element[] = []
@@ -264,7 +264,7 @@ describe('页内锚点在 only 模式下落到译文上（issue #44）', () => {
     off()
   })
 
-  it('hashchange 也走同一条兜底：地址栏输入、前进后退都算', () => {
+  it('hashchange goes through the same fallback: typing in the address bar, back and forward all count', () => {
     const { doc, translation, scrolled } = setup()
     const off = installAnchorFallback(doc)
     const view = doc.defaultView!
