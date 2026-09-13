@@ -62,10 +62,10 @@ gh pr create …                     # or git push to an existing PR
 # wait for CI + Codex's terminal signal aimed at the current HEAD (queries above)
 gh pr checks <N>
 # comments → verify one by one → fix → push → back to waiting (HEAD changed, old signals void)
-# 👍, or verified and handled + CI green → ask the user to confirm → gh pr merge <N> --merge --delete-branch
+# 👍 (or a usage-limit notice), or verified and handled + CI green → gh pr merge <N> --merge --delete-branch
 ```
 
-The merge method is fixed as merge (no squash); ask the user once before every merge.
+The merge method is fixed as merge (no squash). During the rebuild the gate (CLAUDE.md § Working rules, ADR-0001 §7) merges into `rebuild/v1` without asking once the local review passed with its findings addressed, CI is green and the terminal signal is there; merging into `main` still needs the owner's explicit request. Review depth follows importance (the owner, 2026-09-13): plain `review` for text, script and small changes, `adversarial-review` for concurrency, external contracts, DOM invariants and cross-module interfaces.
 
 ## Stacked PRs (B based on A's branch)
 
