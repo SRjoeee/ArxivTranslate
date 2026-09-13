@@ -62,7 +62,7 @@ export function enable(doc: Document, mode: Mode, look?: Look, lang?: string): v
   doc.documentElement.setAttribute(ON_ATTR, '')
   doc.documentElement.setAttribute(MODE_ATTR, mode)
   // The translation's language is recorded on <html> (§7.1: global state lives there only); renderText writes it onto
-  // every translation node's lang. Not by changing <html lang>: that would declare the original Chinese as well
+  // every translation node's lang. Not by changing <html lang>: that would label the original as Chinese as well
   if (lang) {
     doc.documentElement.setAttribute(LANG_ATTR, lang)
     if (isRtlTag(lang)) doc.documentElement.setAttribute(DIR_ATTR, 'rtl')

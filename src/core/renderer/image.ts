@@ -31,7 +31,7 @@ export interface ImageLabel {
   source: string
   /** The translation */
   text: string
-  /** Text direction in radians; absent means upright (§15.5) */
+  /** Text direction in radians; absent means horizontal (§15.5) */
   angle?: number
   /** A tilted label's own length and thickness, both as fractions of the image's **width**; present with angle */
   len?: number
