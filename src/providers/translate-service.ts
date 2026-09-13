@@ -232,8 +232,8 @@ export function createTranslateService(deps: TranslateServiceDeps): TranslateSer
    * non-retryable. **Not for one declared `isolatable: false`** (Codex on #61): BatchQueue retries and falls back
    * per item on `BatchCountMismatchError` only, and converting would stack 3 batch-level retries + one request per
    * segment on a systemic failure — a batch of 100 segments fired 104 times for nothing. A free engine returning
-   * non-JSON is that case, the same however small the split. RequestQueue no longer retries unknown errors;
-   * BatchQueue retries 3 times and then falls back per item. Unmarked, 3 × 4 = 12 requests would go out before the per-item fallback; and with the kind set, the raw model output in the message is not misread by the "429" / "timeout" regex
+   * non-JSON is that case, the same however small the split. RequestQueue no longer retries this error as an unknown
+   * error; BatchQueue retries it 3 times and then falls back per item. Unmarked, 3 × 4 = 12 requests would go out before the per-item fallback; and with the kind set, the raw model output in the message is not misread by the "429" / "timeout" regex
    */
   const asBatchError = (e: unknown, expected: number): unknown =>
     e instanceof ProviderError && e.kind === 'invalid-response' && e.isolatable
