@@ -5,31 +5,27 @@ import { useRef, useState } from 'react'
 import { sanitizeCustomCss } from '@/core/renderer'
 import { O } from '@/ui/strings'
 
-export function AdvancedCss({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+export function AdvancedCss({ value, onChange }: { value: string; onChange: (next: string) => unknown }) {
   const [open, setOpen] = useState(value !== '')
   /**
    * The box holds a draft of its own. A rejected block never reaches the stored profile, so a
    * `value` fed straight back from it would snap the text away before the reason beneath it could
    * be read (Codex on #157). The draft follows the profile when that changes underneath — a change
-   * saved elsewhere (INVENTORY S1) — but never the reader's own typing coming back to them: what this
-   * box handed up is not news when it lands, however many keystrokes later, and a block the sanitiser
-   * refused is theirs to finish (the local review of S1, eighth pass). While a block of its own is still
-   * out, nothing else is adopted either: the store is behind the reader then, and what it says lands
-   * before their block does (Codex on #185)
+   * saved elsewhere (INVENTORY S1) — but never while a write of its own is out: the store is behind
+   * the reader then, and what it says lands before their block does. `onChange` answers with the
+   * write, so the box knows when its own have landed — the prop cannot tell it: a block equal to the
+   * stored one, or written twice, changes no prop (the local review of S1, eighth to eleventh passes).
+   * A refused block, and a write the store refused, are the reader's to finish
    */
   const [draft, setDraft] = useState(value)
   const committed = useRef(value)
-  /**
-   * Blocks handed up and not yet seen landing, oldest first. A block equal to the committed one is handed up but
-   * not waited for: its landing changes nothing, so nothing would ever mark it seen, and the box would take every
-   * later change elsewhere for the store lagging it (the local review of S1, tenth pass)
-   */
-  const handed = useRef<string[]>([])
+  /** Writes of this box not landed yet */
+  const pending = useRef(0)
+  /** The last write was refused: the text is a draft the store does not have, until a later write lands */
+  const failed = useRef(false)
   if (committed.current !== value) {
     committed.current = value
-    const at = handed.current.indexOf(value)
-    if (at >= 0) handed.current.splice(0, at + 1)
-    else if (handed.current.length === 0 && draft !== value && sanitizeCustomCss(draft).ok) setDraft(value)
+    if (pending.current === 0 && !failed.current && draft !== value && sanitizeCustomCss(draft).ok) setDraft(value)
   }
   const check = sanitizeCustomCss(draft)
   return (
@@ -47,8 +43,10 @@ export function AdvancedCss({ value, onChange }: { value: string; onChange: (nex
               setDraft(e.target.value)
               // Only a block that will survive the schema is handed up; the rest stays here with its reason
               if (sanitizeCustomCss(e.target.value).ok) {
-                if (e.target.value !== committed.current) handed.current.push(e.target.value)
-                onChange(e.target.value)
+                pending.current++
+                Promise.resolve(onChange(e.target.value))
+                  .then(() => { failed.current = false }, () => { failed.current = true })
+                  .finally(() => { pending.current-- })
               }
             }}
             rows={3}

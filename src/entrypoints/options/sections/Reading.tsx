@@ -38,7 +38,8 @@ export function Reading({ data }: { data: OptionsData }) {
   const a = config.appearance
   const style = activeStyle(a)
   const highlight = activeHighlight(a)
-  const setAppearance = (fn: (current: typeof a) => typeof a) => void patch(latest => ({ ...latest, appearance: fn(latest.appearance) }))
+  // The write itself is handed back: an editor's box waits for its own writes to land before it takes anything from the store (AdvancedCss)
+  const setAppearance = (fn: (current: typeof a) => typeof a) => patch(latest => ({ ...latest, appearance: fn(latest.appearance) }))
 
   // The profile being edited as the configuration has it — or, not there, as this tab last saw it under that id: one
   // deleted in another tab while its drawer is open here (the drawer stays with the reader's draft, and their next

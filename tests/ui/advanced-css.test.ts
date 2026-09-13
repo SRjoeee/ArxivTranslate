@@ -2,10 +2,11 @@ import { createElement } from 'react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { AdvancedCss } from '@/ui/appearance/AdvancedCss'
 import { setLocale } from '@/ui/strings'
-import { mountElement } from './render-hook'
+import { deferred, mountElement } from './render-hook'
 
 // The advanced CSS box of a style profile (ui/appearance/AdvancedCss.tsx): a draft of its own that follows the
-// profile when that changes elsewhere, and never loses the reader's typing to it
+// profile when that changes elsewhere, and never loses the reader's typing to it. `onChange` answers with the
+// write; the test decides when each lands
 
 const box = (container: HTMLElement) => container.querySelector('textarea') as HTMLTextAreaElement
 const type = (textarea: HTMLTextAreaElement, value: string) => {
@@ -20,79 +21,134 @@ const open = async (mounted: Awaited<ReturnType<typeof mountElement>>) => {
   }
 }
 
+/** A parent whose writes land when the test says: `land()` resolves the oldest write, `refuse()` rejects it */
+function parent(initial: string) {
+  const writes: { css: string; ack: ReturnType<typeof deferred<void>> }[] = []
+  const onChange = (css: string) => { const ack = deferred<void>(); writes.push({ css, ack }); return ack.promise }
+  return {
+    onChange,
+    writes,
+    element: (value: string) => createElement(AdvancedCss, { value, onChange }),
+    initial,
+    land: () => writes.shift()?.ack.resolve(),
+    refuse: () => writes.shift()?.ack.reject(new Error('quota')),
+  }
+}
+
 describe('AdvancedCss', () => {
   beforeEach(() => { setLocale('en') })
 
-  it('follows a block saved elsewhere when the draft is not the reader own', async () => {
-    const handed: string[] = []
-    const mounted = await mountElement(createElement(AdvancedCss, { value: 'color: red;', onChange: css => handed.push(css) }))
+  it('follows a block saved elsewhere when nothing of its own is out', async () => {
+    const p = parent('color: red;')
+    const mounted = await mountElement(p.element('color: red;'))
     expect(box(mounted.container).value).toBe('color: red;')
-    await mounted.rerender(createElement(AdvancedCss, { value: 'color: blue;', onChange: css => handed.push(css) }))
+    await mounted.rerender(p.element('color: blue;'))
     expect(box(mounted.container).value).toBe('color: blue;')
     await mounted.unmount()
   })
 
   it('keeps a refused block while the profile changes elsewhere', async () => {
     // The eighth local pass of S1: tab A holds `color: {`, tab B saves other CSS for the profile, A's text was snapped away
-    const mounted = await mountElement(createElement(AdvancedCss, { value: 'color: red;', onChange: () => undefined }))
+    const p = parent('color: red;')
+    const mounted = await mountElement(p.element('color: red;'))
     await open(mounted)
     type(box(mounted.container), 'color: {')
     await mounted.flush()
-    await mounted.rerender(createElement(AdvancedCss, { value: 'color: blue;', onChange: () => undefined }))
+    await mounted.rerender(p.element('color: blue;'))
     expect(box(mounted.container).value).toBe('color: {')
+    await mounted.unmount()
+  })
+
+  it('its own blocks landing later are not news: the second keystroke survives the first echo', async () => {
+    const p = parent('')
+    const mounted = await mountElement(p.element(''))
+    await open(mounted)
+    type(box(mounted.container), 'color: red;')
+    await mounted.flush()
+    type(box(mounted.container), 'color: red; opacity: .5;')
+    await mounted.flush()
+    expect(p.writes.map(w => w.css)).toEqual(['color: red;', 'color: red; opacity: .5;'])
+    // The first write lands while the second is still out
+    p.land()
+    await mounted.rerender(p.element('color: red;'))
+    expect(box(mounted.container).value).toBe('color: red; opacity: .5;')
+    p.land()
+    await mounted.rerender(p.element('color: red; opacity: .5;'))
+    expect(box(mounted.container).value).toBe('color: red; opacity: .5;')
+    // Idle now: a block saved elsewhere shows
+    await mounted.rerender(p.element('color: blue;'))
+    expect(box(mounted.container).value).toBe('color: blue;')
     await mounted.unmount()
   })
 
   it('while a block of its own is out, nothing else is adopted: the store is behind the reader', async () => {
     // Codex on #185: an external block arriving before the reader's own landed replaced the draft, and the reader's
     // block, an echo when it landed, never came back — the box and the store disagreed
-    const onChange = () => undefined
-    const mounted = await mountElement(createElement(AdvancedCss, { value: '', onChange }))
+    const p = parent('')
+    const mounted = await mountElement(p.element(''))
     await open(mounted)
     type(box(mounted.container), 'color: red;')
     await mounted.flush()
-    await mounted.rerender(createElement(AdvancedCss, { value: 'color: blue;', onChange }))
+    await mounted.rerender(p.element('color: blue;'))
     expect(box(mounted.container).value).toBe('color: red;')
-    await mounted.rerender(createElement(AdvancedCss, { value: 'color: red;', onChange }))
+    p.land()
+    await mounted.rerender(p.element('color: red;'))
     expect(box(mounted.container).value).toBe('color: red;')
-    await mounted.rerender(createElement(AdvancedCss, { value: 'color: green;', onChange }))
+    await mounted.rerender(p.element('color: green;'))
     expect(box(mounted.container).value).toBe('color: green;')
     await mounted.unmount()
   })
 
-  it('undoing to the saved block waits for nothing: a change elsewhere afterwards shows', async () => {
-    // The tenth local pass of S1: the undo was handed up and waited for, its landing changed no prop, and the wait
-    // never ended — every later change elsewhere was taken for the store lagging the box
-    const onChange = () => undefined
-    const mounted = await mountElement(createElement(AdvancedCss, { value: 'color: red;', onChange }))
+  it('a block written twice, or equal to the stored one, is waited for by its write and not by the prop', async () => {
+    // The tenth and eleventh local passes of S1: an undo to the saved block, and a block typed twice around a rejected
+    // one, changed no prop when they landed; the wait keyed on the prop never ended, and every later change elsewhere
+    // was taken for the store lagging the box
+    const p = parent('color: red;')
+    const mounted = await mountElement(p.element('color: red;'))
     await open(mounted)
+    type(box(mounted.container), 'color: blue;')
     type(box(mounted.container), 'color: {')
+    type(box(mounted.container), 'color: blue;')
     await mounted.flush()
-    type(box(mounted.container), 'color: red;')
-    await mounted.flush()
-    await mounted.rerender(createElement(AdvancedCss, { value: 'color: blue;', onChange }))
+    expect(p.writes.map(w => w.css)).toEqual(['color: blue;', 'color: blue;'])
+    p.land()
+    await mounted.rerender(p.element('color: blue;'))
+    await mounted.rerender(p.element('color: green;'))
     expect(box(mounted.container).value).toBe('color: blue;')
+    p.land()
+    await mounted.flush()
+    await mounted.rerender(p.element('color: green;'))
+    expect(box(mounted.container).value).toBe('color: blue;')
+    await mounted.rerender(p.element('color: purple;'))
+    expect(box(mounted.container).value).toBe('color: purple;')
+    // The undo to the saved block, the same way
+    type(box(mounted.container), 'color: {')
+    type(box(mounted.container), 'color: purple;')
+    await mounted.flush()
+    p.land()
+    await mounted.flush()
+    await mounted.rerender(p.element('color: orange;'))
+    expect(box(mounted.container).value).toBe('color: orange;')
     await mounted.unmount()
   })
 
-  it('its own blocks landing later are not news: the second keystroke survives the first echo', async () => {
-    const handed: string[] = []
-    const onChange = (css: string) => handed.push(css)
-    const mounted = await mountElement(createElement(AdvancedCss, { value: '', onChange }))
+  it('a write the store refused leaves a draft: a change elsewhere does not replace it until a later write lands', async () => {
+    const p = parent('color: red;')
+    const mounted = await mountElement(p.element('color: red;'))
     await open(mounted)
-    type(box(mounted.container), 'color: red;')
+    type(box(mounted.container), 'color: blue;')
     await mounted.flush()
-    type(box(mounted.container), 'color: red; opacity: .5;')
+    p.refuse()
     await mounted.flush()
-    expect(handed).toEqual(['color: red;', 'color: red; opacity: .5;'])
-    // The first write lands while the second is still out
-    await mounted.rerender(createElement(AdvancedCss, { value: 'color: red;', onChange }))
-    expect(box(mounted.container).value).toBe('color: red; opacity: .5;')
-    await mounted.rerender(createElement(AdvancedCss, { value: 'color: red; opacity: .5;', onChange }))
-    expect(box(mounted.container).value).toBe('color: red; opacity: .5;')
-    // Idle now: a block saved elsewhere shows
-    await mounted.rerender(createElement(AdvancedCss, { value: 'color: blue;', onChange }))
+    await mounted.rerender(p.element('color: green;'))
     expect(box(mounted.container).value).toBe('color: blue;')
+    type(box(mounted.container), 'color: blue; opacity: .5;')
+    await mounted.flush()
+    p.land()
+    await mounted.flush()
+    await mounted.rerender(p.element('color: blue; opacity: .5;'))
+    await mounted.rerender(p.element('color: teal;'))
+    expect(box(mounted.container).value).toBe('color: teal;')
     await mounted.unmount()
   })
 })
