@@ -171,7 +171,7 @@ describe('stripping comments must not swallow code (Codex on #79)', () => {
     expect(text).toContain('defineContentScript')
     expect(stripComments(text)).toContain('defineContentScript')
     // And the comments were really stripped
-    expect(stripComments(text)).not.toContain('注入 arxiv.org/html/*')
+    expect(stripComments(text)).not.toContain('Injected into arxiv.org/html/*')
   })
 
   it('regex literals and division are not taken for comments', () => {
