@@ -437,7 +437,7 @@ html[data-axt-mode="side"] body {
    the same conclusion:
 
    - 1280–1535px (side in effect, the gutter rules not yet): ar5iv keeps the note in the body flow and fixes
-     `.ltx_note_outer` at 800px. On the original page the article is 800px too, so nothing shows; in side mode the
+     `.ltx_note_outer` at 800px. On the original page the article is 800px too, so the problem is not visible; in side mode the
      article column at 1280px is only 652px, the note **overflows the article's right edge by 156px**, its
      translation can only stack right under the original, while the names and affiliations beside it pair left and
      right — it looks as if the translation fell into the left column (the owner's feedback, reproduced 2026-09-06 on
