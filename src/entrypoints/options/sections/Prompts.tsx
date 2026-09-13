@@ -17,6 +17,8 @@ export function Prompts({ data }: { data: OptionsData }) {
   const own = useRef<string | null>(null)
   /** Writes of this box not seen landing yet. While one is out the store is behind the reader, not ahead of them */
   const pending = useRef(0)
+  /** The last write was refused: the text is a draft the store does not have, and stays until a later write lands (eighth pass) */
+  const failed = useRef(false)
   // The text follows the stored glossary: the first read, and a change saved elsewhere (Codex on #185) — never the
   // reader's own typing coming back to them. What this box wrote is not news when it lands; while a write is still
   // out, whatever the store says is older than the text (the local review of S1, seventh pass: the earlier version
@@ -30,7 +32,7 @@ export function Prompts({ data }: { data: OptionsData }) {
       setText(stored)
       return
     }
-    if (stored === own.current || pending.current > 0) return
+    if (stored === own.current || pending.current > 0 || failed.current) return
     const local = parseGlossary(text)
     if (local.issues.length > 0 || !configSchema.shape.glossary.safeParse(local.entries).success) return
     own.current = stored
@@ -41,8 +43,9 @@ export function Prompts({ data }: { data: OptionsData }) {
   // length, 6000 characters in all). Writing it would reject silently and leave the reader looking
   // at a glossary that is not in storage (Codex on #157)
   const overLimit = parsed !== null && parsed.issues.length === 0 && !configSchema.shape.glossary.safeParse(parsed.entries).success
-  // A table that is not written yet is a draft: the page must not reload under it (ui/drafts.ts)
-  const unsaved = parsed !== null && (parsed.issues.length > 0 || overLimit)
+  // A table that is not written yet is a draft: the page must not reload under it (ui/drafts.ts). A refused write
+  // leaves one too; `failed` is a ref, so the hold for it begins with the next render it is read in
+  const unsaved = parsed !== null && (parsed.issues.length > 0 || overLimit || failed.current)
   useEffect(() => (unsaved ? drafts.hold() : undefined), [unsaved])
   if (!config || parsed === null || text === null) return null
 
@@ -75,7 +78,9 @@ export function Prompts({ data }: { data: OptionsData }) {
           if (next.issues.length === 0 && configSchema.shape.glossary.safeParse(next.entries).success) {
             own.current = formatGlossaryText(next.entries)
             pending.current++
-            void patch(latest => ({ ...latest, glossary: next.entries })).finally(() => { pending.current-- })
+            patch(latest => ({ ...latest, glossary: next.entries }))
+              .then(() => { failed.current = false }, () => { failed.current = true })
+              .finally(() => { pending.current-- })
           }
         }}
         className="w-full rounded-control border border-line bg-card px-3 py-2 font-mono text-[12px] text-fg outline-none focus:border-fg-2"

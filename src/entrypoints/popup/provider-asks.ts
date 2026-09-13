@@ -13,8 +13,13 @@ import type { AxtMessage } from '@/shared/messages'
 export const SESSION_ASK_TTL_MS = 5_000
 
 export interface ProviderAsks {
-  /** The saved settings' chain — the one in force, or with `fresh` one built from what is stored now. Only the newest ask publishes: a stale answer would undo a newer */
-  saved(fresh?: boolean): Promise<void>
+  /**
+   * The saved settings' chain, built from what is stored now — every ask carries the `fresh` barrier: an ask without it,
+   * made while one with it waited on its read, would answer first from the previous chain and, as the newer ask, keep
+   * the answer (the local review of S1, sixth and eighth passes). Only the newest ask publishes: a stale answer would
+   * undo a newer
+   */
+  saved(): Promise<void>
   /**
    * The running session's own chain. Polls of one session are coalesced — one ask in flight; a generation bumped by
    * every 500 ms tick would invalidate each answer slower than a tick (Codex on #185) — and given up on after the
@@ -39,9 +44,9 @@ export function createProviderAsks(deps: ProviderAskDeps): ProviderAsks {
   let tokens = 0
   let inFlight: { scope: string; token: number; since: number } | null = null
   return {
-    saved(fresh) {
+    saved() {
       const ask = ++savedAsks
-      return deps.send({ type: 'axt:provider-status', ...(fresh ? { fresh: true } : {}) })
+      return deps.send({ type: 'axt:provider-status', fresh: true })
         .then(status => { if (ask === savedAsks) deps.publishSaved(status) })
         .catch(() => { if (ask === savedAsks) deps.publishSaved(null) })
     },

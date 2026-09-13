@@ -119,12 +119,11 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     // An answer for a session the page no longer reports publishes nothing
     publishSession: (scope, status) => { if (sessionRef.current === scope) setSessionProvider(status) },
   }))
-  const loadProvider = useCallback((scope?: string | null, fresh = false): Promise<void> => {
+  const loadProvider = useCallback((scope?: string | null): Promise<void> => {
     // While a page is translating, ask **its** chain: it stays on the one it started with, so the
-    // global chain would describe someone else's hand-overs (Codex on #157). `fresh` is the barrier
-    // for a refresh driven by a configuration change: the answer describes a chain built from what
-    // is stored now, not the previous chain still in force (the local review of S1)
-    return scope ? asks.session(scope) : asks.saved(fresh)
+    // global chain would describe someone else's hand-overs (Codex on #157). Without a scope, the saved
+    // settings' chain as built from what is stored now (provider-asks.ts says why every such ask carries the barrier)
+    return scope ? asks.session(scope) : asks.saved()
   }, [asks])
 
   useEffect(() => {
@@ -160,7 +159,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
         if (staleLocale(stored)) { location.reload(); return stored }
         await settle(stored)
         void packs.check(stored.targetLanguage)
-        void loadProvider(undefined, true)
+        void loadProvider()
         return stored
       }
       writes.current = writes.current.then(follow, follow)
@@ -208,11 +207,9 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const session = page?.session ?? null
   // The saved settings' chain is asked whenever the page is not running — at mount, and again when it stops. A page
   // that is on shows its session's chain and the polling below stops with it: had the first ask failed, nothing would
-  // ask again, and the button would stay disabled after 显示原文 (the local review of S1, fourth pass). Asked `fresh`:
-  // an ask without the barrier, made while a configuration change's ask waits on its read, would answer first from
-  // the previous chain and, being the newer ask, keep the answer (sixth pass)
+  // ask again, and the button would stay disabled after 显示原文 (the local review of S1, fourth pass)
   useEffect(() => {
-    if (!on) void loadProvider(undefined, true)
+    if (!on) void loadProvider()
   }, [on, loadProvider])
   // Paused while a grant takes effect: the background has to be left alone to idle out (view-model.ts says why)
   const askBackground = pollsBackground(helper)
@@ -263,7 +260,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     if (status?.progress.state !== 'on') return
     if (!runnable(next, packState)) return // the view shows the page as behind the settings
     // The chain the restart will run on: one built from what was just saved (background/provider-status.ts)
-    await loadProvider(undefined, true)
+    await loadProvider()
     await sendToActiveTab({ type: 'axt:translate-page', restart: true, ...(status.epoch !== undefined ? { epoch: status.epoch } : {}) })
   }
 
@@ -346,7 +343,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
       // service is back on it. The promise shown next to this button is about **this** tab, so only
       // its session moves onto the new chain (Codex on #157)
       await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin', ...(page?.session ? { scope: page.session } : {}) }).catch(() => undefined)
-      void loadProvider(undefined, true)
+      void loadProvider()
     }),
     openOptions: section => void openOptions(section),
     helperStatus: setHelper,

@@ -10,13 +10,20 @@ export function AdvancedCss({ value, onChange }: { value: string; onChange: (nex
   /**
    * The box holds a draft of its own. A rejected block never reaches the stored profile, so a
    * `value` fed straight back from it would snap the text away before the reason beneath it could
-   * be read (Codex on #157). The draft follows the profile whenever that changes underneath.
+   * be read (Codex on #157). The draft follows the profile when that changes underneath — a change
+   * saved elsewhere (INVENTORY S1) — but never the reader's own typing coming back to them: what this
+   * box handed up is not news when it lands, however many keystrokes later, and a block the sanitiser
+   * refused is theirs to finish (the local review of S1, eighth pass)
    */
   const [draft, setDraft] = useState(value)
   const committed = useRef(value)
+  /** Blocks handed up and not yet seen landing, oldest first */
+  const handed = useRef<string[]>([])
   if (committed.current !== value) {
     committed.current = value
-    if (draft !== value) setDraft(value)
+    const at = handed.current.indexOf(value)
+    if (at >= 0) handed.current.splice(0, at + 1)
+    else if (draft !== value && sanitizeCustomCss(draft).ok) setDraft(value)
   }
   const check = sanitizeCustomCss(draft)
   return (
@@ -33,7 +40,10 @@ export function AdvancedCss({ value, onChange }: { value: string; onChange: (nex
             onChange={e => {
               setDraft(e.target.value)
               // Only a block that will survive the schema is handed up; the rest stays here with its reason
-              if (sanitizeCustomCss(e.target.value).ok) onChange(e.target.value)
+              if (sanitizeCustomCss(e.target.value).ok) {
+                handed.current.push(e.target.value)
+                onChange(e.target.value)
+              }
             }}
             rows={3}
             placeholder="font-style: italic;"

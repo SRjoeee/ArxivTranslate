@@ -96,6 +96,27 @@ describe('Prompts: the glossary text', () => {
     await mounted.unmount()
   })
 
+  it('a refused write leaves a draft: the text stays while the store, unchanged, is published again', async () => {
+    // The eighth local pass of S1: the write was refused, the text held no draft, and a change to the target language
+    // elsewhere published the old glossary over the edit
+    const stored: Config = { ...llm, glossary: [{ term: 'weights', translation: 'weight' }] }
+    const refuse = () => Promise.reject(new Error('quota'))
+    const mounted = await mountElement(createElement(Prompts, { data: data(stored, [], refuse) }))
+    type(box(mounted.container), 'weights, weights')
+    await mounted.flush()
+    await mounted.rerender(createElement(Prompts, { data: data({ ...stored, targetLanguage: 'jpn' }, [], refuse) }))
+    expect(box(mounted.container).value).toBe('weights, weights')
+    // A later write that lands lets the box follow the store again
+    await mounted.rerender(createElement(Prompts, { data: data({ ...stored, targetLanguage: 'jpn' }) }))
+    type(box(mounted.container), 'weights, weights!')
+    await mounted.flush()
+    await mounted.rerender(createElement(Prompts, { data: data({ ...stored, glossary: [{ term: 'weights', translation: 'weights!' }] }) }))
+    expect(box(mounted.container).value).toBe('weights, weights!')
+    await mounted.rerender(createElement(Prompts, { data: data({ ...llm, glossary: [{ term: 'bias', translation: '偏置' }] }) }))
+    expect(box(mounted.container).value).toBe('bias, 偏置')
+    await mounted.unmount()
+  })
+
   it('keeps a draft that does not parse yet while the stored glossary changes', async () => {
     const mounted = await mountElement(createElement(Prompts, { data: data({ ...llm, glossary: [] }) }))
     type(box(mounted.container), 'weights')

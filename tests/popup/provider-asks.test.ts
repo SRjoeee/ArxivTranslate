@@ -38,11 +38,11 @@ function harness(ttlMs = 5_000) {
 }
 
 describe('createProviderAsks', () => {
-  it('only the newest saved ask publishes: answers come back in any order', async () => {
+  it('only the newest saved ask publishes: answers come back in any order, and every saved ask carries the barrier', async () => {
     const h = harness()
     void h.asks.saved()
-    void h.asks.saved(true)
-    expect(h.sent.map(s => s.message)).toEqual([{ type: 'axt:provider-status' }, { type: 'axt:provider-status', fresh: true }])
+    void h.asks.saved()
+    expect(h.sent.map(s => s.message)).toEqual([{ type: 'axt:provider-status', fresh: true }, { type: 'axt:provider-status', fresh: true }])
     h.answer(1, status('new'))
     await tick()
     h.answer(0, status('old'))

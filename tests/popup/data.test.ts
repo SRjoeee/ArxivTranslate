@@ -80,9 +80,9 @@ describe('usePopupData', () => {
     await hook.run(() => hook.current().actions.restore())
     expect(hook.current().input.page?.progress.state).toBe('stopped')
     expect(savedAsks()).toHaveLength(2)
-    // With the barrier: made while a configuration change's ask waits on its read, an ask without it would answer
-    // first from the previous chain and, being the newer ask, keep the answer (the sixth local pass)
-    expect(savedAsks()[1]?.message.fresh).toBe(true)
+    // With the barrier, as every saved ask: made while a configuration change's ask waits on its read, an ask without
+    // it would answer first from the previous chain and, being the newer ask, keep the answer (sixth and eighth passes)
+    expect(savedAsks().every(a => a.message.fresh === true)).toBe(true)
     await hook.run(() => savedAsks()[1]?.answer.resolve(status('google-web')))
     expect(hook.current().input.saved?.providerId).toBe('google-web')
     await hook.unmount()
