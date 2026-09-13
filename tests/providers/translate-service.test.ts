@@ -593,7 +593,7 @@ describe('createTranslateService: rate limiting, timeouts, cancellation (fake ti
     vi.useFakeTimers()
     let calls = 0
     const service = build({
-      getProvider: async () => provider(() => { calls++; return new Promise(() => {}) }), // // neither honours the signal nor returns
+      getProvider: async () => provider(() => { calls++; return new Promise(() => {}) }), // neither honours the signal nor returns
       queue: { timeoutMs: 20, maxRetries: 1, baseRetryDelayMs: 0 },
     })
     const pending = service.translate({ request: { segments: [{ id: 'a', text: 'x' }], source: 'en', target: 'zh' } })
@@ -601,7 +601,7 @@ describe('createTranslateService: rate limiting, timeouts, cancellation (fake ti
     const res = await pending
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.error.kind).toBe('timeout')
-    expect(calls).toBe(2) // // the first + one retry
+    expect(calls).toBe(2) // the first + one retry
   })
 
   it('cancel(scope) drains queued and in-flight requests — the signal aborts, nothing is cached; a scope the registry holds is refused next time', async () => {

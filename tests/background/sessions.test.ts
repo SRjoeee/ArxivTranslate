@@ -74,7 +74,7 @@ describe('createSessionRouter', () => {
     await router.forCall('session-1', 7)
 
     router.mayHaveLeft(7)
-    await router.forCall('session-1', 7) // // the old document's last one
+    await router.forCall('session-1', 7) // the old document's last one
     await vi.advanceTimersByTimeAsync(10_000)
 
     expect(transport.cancelled).toEqual(['chain:session-1'])
@@ -117,7 +117,7 @@ describe('createSessionRouter', () => {
 
     router.mayHaveLeft(7)
     await vi.advanceTimersByTimeAsync(4000)
-    expect(transport.cancelled).toEqual([]) // // still loading, no conclusion
+    expect(transport.cancelled).toEqual([]) // still loading, no conclusion
     expect(asked).toHaveLength(1)
 
     // The navigation finally committed: the new document answers with another session
@@ -367,7 +367,7 @@ describe('createSessionRouter', () => {
     const router = routerOver(async () => transport, { onDrop: scope => { dropped.push(scope); return 2 } })
     await router.forCall('s1', 1)
     await router.forCall('s2', 2)
-    expect(await router.drop(['s1'])).toBe(3) // // the transport withdraws 1 + onDrop withdraws 2
+    expect(await router.drop(['s1'])).toBe(3) // the transport withdraws 1 + onDrop withdraws 2
     expect(await router.dropTab(2)).toBe(3)
     expect(dropped).toEqual(['s1', 's2'])
   })
@@ -460,7 +460,7 @@ describe('createSessionRouter', () => {
     expect(router.bound()).toEqual(['s1'])
     expect(nameOf(await router.forCall('s1', 7))).toBe('chain')
     expect(built).toBe(1)
-    expect(await router.dropTab(7)).toBe(2) // // the transport withdraws 1 + onDrop withdraws 1
+    expect(await router.dropTab(7)).toBe(2) // the transport withdraws 1 + onDrop withdraws 1
     expect(dropped).toEqual(['s1'])
     expect(router.bound()).toEqual([])
     // A new scope appears on the same tab: bind withdraws the old one too
@@ -476,7 +476,7 @@ describe('createSessionRouter', () => {
     const router = routerOver(async () => { order.push('current'); return transport }, { onDrop: scope => { order.push(`onDrop:${scope}`); return 1 } })
     router.bind('ocr-only', 3)
     expect(await router.dropTab(3)).toBe(1)
-    expect(order).toEqual(['onDrop:ocr-only']) // // no current
+    expect(order).toEqual(['onDrop:ocr-only']) // no current
     // A session that translated text: onDrop still first, transport.cancel after
     await router.forCall('s1', 4)
     order.length = 0
@@ -492,14 +492,14 @@ describe('createSessionRouter', () => {
     const registry = new CancelledScopeRegistry()
     const router = routerOver(async () => { await held; return transport }, { cancelled: registry, onDrop: () => 1 })
     router.bind('s1', 5)
-    const pending = router.forCall('s1', 5) // // awaiting current() right now
+    const pending = router.forCall('s1', 5) // awaiting current() right now
     await Promise.resolve()
-    expect(await router.dropTab(5)).toBe(1) // // onDrop only: no chain to withdraw yet
+    expect(await router.dropTab(5)).toBe(1) // onDrop only: no chain to withdraw yet
     expect(registry.has('s1')).toBe(true) // marked at once, while the chain is still being built
     release()
     await pending
-    expect(router.bound()).toEqual([]) // // not revived
-    expect(transport.cancelled).toEqual(['chain:s1']) // // forCall came back and withdrew after the fact
+    expect(router.bound()).toEqual([]) // not revived
+    expect(transport.cancelled).toEqual(['chain:s1']) // forCall came back and withdrew after the fact
     // Coming again afterwards: bind is a no-op, forCall gives the chain but withdraws first
     router.bind('s1', 5)
     expect(router.bound()).toEqual([])

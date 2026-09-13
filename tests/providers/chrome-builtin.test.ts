@@ -42,7 +42,7 @@ describe('createChromeBuiltinProvider', () => {
     const provider = createChromeBuiltinProvider('cmn', { translator: api })
     expect(provider.id).toBe('chrome-builtin')
     expect(provider.kind).toBe('builtin')
-    expect(provider.wireFormats).toEqual(['tags']) // // RESEARCH §6.2: measured to keep tags and placeholders
+    expect(provider.wireFormats).toEqual(['tags']) // RESEARCH §6.2: measured to keep tags and placeholders
     expect(provider.rateLimit).toEqual({ rate: 20, capacity: 20 })
   })
 
@@ -148,7 +148,7 @@ describe('createChromeBuiltinProvider', () => {
     const job = (release: Promise<void>) => withPermit(async () => { active++; peak = Math.max(peak, active); await release; active-- })
     let releaseA!: () => void
     const a = job(new Promise<void>(r => { releaseA = r }))
-    const b = job(Promise.resolve()) // // queued, waiting
+    const b = job(Promise.resolve()) // queued, waiting
     releaseA()
     // C arrives in the same turn A releases: an implementation that decrements first and wakes later lets B and C in together
     const c = job(Promise.resolve())

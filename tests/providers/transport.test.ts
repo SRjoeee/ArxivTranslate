@@ -53,9 +53,9 @@ describe('createLocalTransport: translation', () => {
       return { segments: r.segments, provider: 'mock' }
     })])
     const pending = t.translate({ request: req })
-    await vi.advanceTimersByTimeAsync(100) // // accumulating
+    await vi.advanceTimersByTimeAsync(100) // accumulating
     expect(calls).toBe(1)
-    await vi.advanceTimersByTimeAsync(6_000) // // resent after the 429's pause window (base 5s)
+    await vi.advanceTimersByTimeAsync(6_000) // resent after the 429's pause window (base 5s)
     expect((await pending).ok).toBe(true)
     expect(calls).toBe(2)
   })
@@ -77,7 +77,7 @@ describe('createLocalTransport: translation', () => {
     await vi.advanceTimersByTimeAsync(100)
     expect(peak).toBe(2)
     expect(release.length).toBe(2)
-    await vi.advanceTimersByTimeAsync(1_000) // // the third waits for the next token
+    await vi.advanceTimersByTimeAsync(1_000) // the third waits for the next token
     expect(release.length).toBe(3)
     expect(peak).toBe(3)
     for (const fn of release) fn()

@@ -237,7 +237,7 @@ describe('the deadline is a time event that neither a pause nor full load can st
     await vi.advanceTimersByTimeAsync(10)
     expect(started).toBe(1)
     queue.enqueue(stubborn, Date.now(), 'b').catch(() => undefined)
-    await vi.advanceTimersByTimeAsync(200) // // the first timed out long ago
+    await vi.advanceTimersByTimeAsync(200) // the first timed out long ago
     expect(started).toBe(1)
     release()
     await vi.advanceTimersByTimeAsync(10)
@@ -291,7 +291,7 @@ describe('the deadline counts from batch creation, and the backoff is bound by t
   it('the time the dispatch gate holds a batch counts into the total limit: meta.startedAt is the batch\'s creation time, not its dispatch time', async () => {
     vi.useFakeTimers()
     const { BatchQueue } = await import('@/providers/request/batch-queue')
-    let eta = 5_000 // // say “no slot” first, so the underfull batch is held
+    let eta = 5_000 // say “no slot” first, so the underfull batch is held
     const seen: number[] = []
     const batch = new BatchQueue<{ text: string }, string>({
       maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 10, maxRetries: 0,
@@ -301,7 +301,7 @@ describe('the deadline counts from batch creation, and the backoff is bound by t
     })
     const created = Date.now()
     const result = batch.enqueue({ text: 'A' })
-    await vi.advanceTimersByTimeAsync(3_000) // // held for 3 seconds
+    await vi.advanceTimersByTimeAsync(3_000) // held for 3 seconds
     eta = 0
     await vi.advanceTimersByTimeAsync(1_500)
     expect(await result).toBe('译:A')
@@ -318,7 +318,7 @@ describe('the deadline counts from batch creation, and the backoff is bound by t
       maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 1, maxRetries: 3, maxTotalMs: 200,
       enableFallbackToIndividual: true,
       getBatchKey: () => 'k', getCharacters: i => i.text.length,
-      executeBatch: async () => [], // // count mismatch
+      executeBatch: async () => [], // count mismatch
       executeIndividual: async item => { individual++; return `译:${item.text}` },
     })
     const result = batch.enqueue({ text: 'A' })
@@ -337,11 +337,11 @@ describe('the deadline counts from batch creation, and the backoff is bound by t
     const tail = queue.enqueue(async () => 'tail', Date.now(), 'tail')
     const tailSettled = expect(tail).rejects.toThrow(/total budget/)
     await vi.advanceTimersByTimeAsync(2_000)
-    queue.setQueueOptions({ maxTotalMs: 1_000 }) // // the tail queued for 2 seconds is over budget at once
+    queue.setQueueOptions({ maxTotalMs: 1_000 }) // the tail queued for 2 seconds is over budget at once
     await vi.advanceTimersByTimeAsync(10)
     await tailSettled
     released()
-    expect(await head).toBe('head') // // the in-flight one is unaffected
+    expect(await head).toBe('head') // the in-flight one is unaffected
     vi.useRealTimers()
   })
 })
@@ -353,15 +353,15 @@ describe('a batch held by the gate is released at its deadline (Codex on #56, si
     let executed = 0
     const batch = new BatchQueue<{ text: string }, string>({
       maxCharactersPerBatch: 1000, maxItemsPerBatch: 10, batchDelay: 10, maxRetries: 0, maxTotalMs: 200,
-      dispatchGate: { nextDispatchEtaMs: () => 5_000 }, // // always says no slot
+      dispatchGate: { nextDispatchEtaMs: () => 5_000 }, // always says no slot
       getBatchKey: () => 'k', getCharacters: i => i.text.length,
       executeBatch: async items => { executed++; return items.map(i => `译:${i.text}`) },
     })
     const result = batch.enqueue({ text: 'A' })
     await vi.advanceTimersByTimeAsync(150)
-    expect(executed).toBe(0) // // still within budget, keeps accumulating
+    expect(executed).toBe(0) // still within budget, keeps accumulating
     await vi.advanceTimersByTimeAsync(100)
-    expect(executed).toBe(1) // // released at the deadline (downstream handles it by deadlineAt)
+    expect(executed).toBe(1) // released at the deadline (downstream handles it by deadlineAt)
     expect(await result).toBe('译:A')
     vi.useRealTimers()
   })

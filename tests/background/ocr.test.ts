@@ -148,7 +148,7 @@ describe('createOcrService', () => {
     // Wait until the service really reaches getMany (the key computation before it is real async, and the fake clock cannot advance it); the budget timer is registered in the same expression
     let reached: () => void = () => {}
     const reachedP = new Promise<void>(resolve => { reached = resolve })
-    cache.port.getMany = () => { reached(); return new Promise(() => {}) } // // never returns
+    cache.port.getMany = () => { reached(); return new Promise(() => {}) } // never returns
     const service = build({ backend, cache: cache.port, cacheReadBudgetMs: 500 })
     const pending = service.ocr(call)
     await reachedP

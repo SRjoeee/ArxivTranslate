@@ -56,10 +56,10 @@ describe('createGlossaryMatcher', () => {
   it('Khmer, Lao, Burmese and Tibetan are unspaced too and likewise need no word boundary', () => {
     // Each pair: the term + the term embedded in text of the same script
     const cases: [string, string][] = [
-      ['ការបកប្រែ', 'នេះជាការបកប្រែដ៏ល្អ'], // // Khmer “translation”
-      ['ການແປ', 'ນີ້ແມ່ນການແປທີ່ດີ'], // // Lao
-      ['ဘာသာပြန်', 'ဤသည်ဘာသာပြန်ကောင်းသည်'], // // Burmese
-      ['སྒྱུར', 'འདིསྒྱུརབཟང'], // // Tibetan
+      ['ការបកប្រែ', 'នេះជាការបកប្រែដ៏ល្អ'], // Khmer “translation”
+      ['ການແປ', 'ນີ້ແມ່ນການແປທີ່ດີ'], // Lao
+      ['ဘာသာပြန်', 'ဤသည်ဘာသာပြန်ကောင်းသည်'], // Burmese
+      ['སྒྱུར', 'འདིསྒྱུརབཟང'], // Tibetan
     ]
     for (const [term, text] of cases) {
       expect([term, terms(entries([term, 'x']), text)]).toEqual([term, [term]])

@@ -80,7 +80,7 @@ describe('createFallbackService', () => {
 
     clock = 999
     await service.translate(call)
-    expect(first.calls).toBe(1) // // still cooling down
+    expect(first.calls).toBe(1) // still cooling down
 
     clock = 1000
     const back = await service.translate(call)
@@ -112,7 +112,7 @@ describe('createFallbackService', () => {
     const first = step('llm', [fail('auth')])
     const second = step('google-web', [fail('auth'), ok('google-web')])
     const service = createFallbackService([first, second])
-    await service.translate(call) // // both auth, both recorded (the last is reported as it is, not recorded)
+    await service.translate(call) // both auth, both recorded (the last is reported as it is, not recorded)
     const res = await service.translate(call)
     expect(res.ok && res.result.provider).toBe('google-web')
   })

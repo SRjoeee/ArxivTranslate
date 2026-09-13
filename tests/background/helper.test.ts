@@ -49,7 +49,7 @@ describe('createHelperClient', () => {
     port().reply({ v: 1, id: port().lastId(), ok: true, version: '0.1.0' })
     expect(await first).toEqual({ state: 'ready', version: '0.1.0' })
     expect(await client.status()).toEqual({ state: 'ready', version: '0.1.0' })
-    expect(port().sent).toHaveLength(1) // // no second ping
+    expect(port().sent).toHaveLength(1) // no second ping
   })
 
   /** A new connection inserts an internal ping first: reply to it, so the OCR after it is released */
@@ -68,13 +68,13 @@ describe('createHelperClient', () => {
     // In-flight cap 1: B is still queued, the port holds only ping + A
     expect(port().sent).toHaveLength(2)
     const idA = port().lastId()
-    port().reply({ v: 1, id: 'nobody', width: 1, height: 1, lines: [] }) // // dropped
+    port().reply({ v: 1, id: 'nobody', width: 1, height: 1, lines: [] }) // dropped
     port().reply({ v: 1, id: idA, width: 10, height: 20, lines: [{ text: 'x', quad: [[0, 0], [1, 0], [1, 1], [0, 1]], conf: 1 }] })
     const ra = await a
     expect(ra.result.width).toBe(10)
     expect(ra.version).toBe('0.1.0')
     await flush()
-    expect(port().sent).toHaveLength(3) // // only once A settled is B written to the port
+    expect(port().sent).toHaveLength(3) // only once A settled is B written to the port
     const idB = port().lastId()
     expect(idB).not.toBe(idA)
     port().reply({ v: 1, id: idB, width: 30, height: 40, lines: [] })
@@ -92,7 +92,7 @@ describe('createHelperClient', () => {
     await expect(a).rejects.toMatchObject({ kind: 'timeout' })
     await flush()
     expect(ports).toHaveLength(2)
-    old.reply({ v: 1, id: old.sent[1]?.id as string, width: 1, height: 1, lines: [] }) // // A's late reply: dropped
+    old.reply({ v: 1, id: old.sent[1]?.id as string, width: 1, height: 1, lines: [] }) // A's late reply: dropped
     await handshake(port())
     expect(port().sent.map(m => m.image ?? m.cmd)).toEqual(['ping', 'B'])
     port().reply({ v: 1, id: port().lastId(), width: 2, height: 2, lines: [] })
@@ -150,7 +150,7 @@ describe('createHelperClient', () => {
     const b = client.ocr({ image: 'B' })
     await flush()
     expect(ports).toHaveLength(2)
-    expect(port().sent.map(m => m.cmd)).toEqual(['ping']) // // the new connection shakes hands first
+    expect(port().sent.map(m => m.cmd)).toEqual(['ping']) // the new connection shakes hands first
     await handshake(port())
     port().reply({ v: 1, id: port().lastId(), width: 2, height: 2, lines: [] })
     expect((await b).result.width).toBe(2)
@@ -166,7 +166,7 @@ describe('createHelperClient', () => {
     await expect(a).rejects.toMatchObject({ kind: 'invalid-response', message: expect.stringContaining('握手失败') })
     await expect(b).rejects.toMatchObject({ kind: 'invalid-response' })
     await flush()
-    expect(port().sent).toHaveLength(1) // // no second ping
+    expect(port().sent).toHaveLength(1) // no second ping
     expect(port().disconnected).toBe(true)
   })
 
@@ -206,7 +206,7 @@ describe('createHelperClient', () => {
     const b = client.ocr({ image: 'B' })
     await expect(a).rejects.toMatchObject({ kind: 'network', message: expect.stringContaining('no nativeMessaging') })
     await expect(b).rejects.toMatchObject({ kind: 'network' })
-    expect(attempts).toBe(2) // // one connection attempt per call, no more
+    expect(attempts).toBe(2) // one connection attempt per call, no more
   })
 
   it('the first OCR in this worker uses a longer timeout (Vision\'s one-off preparation measured 26.6 s); after one successful recognition the normal timeout applies', async () => {
@@ -214,13 +214,13 @@ describe('createHelperClient', () => {
     const a = client.ocr({ image: 'A' })
     await flush()
     await handshake(port())
-    vi.advanceTimersByTime(1500) // // over the ordinary timeout; the first does not count
+    vi.advanceTimersByTime(1500) // over the ordinary timeout; the first does not count
     expect(port().disconnected).toBe(false)
     port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
     await a
     const b = client.ocr({ image: 'B' })
     await flush()
-    vi.advanceTimersByTime(1001) // // 1000 ms from then on
+    vi.advanceTimersByTime(1001) // 1000 ms from then on
     await expect(b).rejects.toMatchObject({ kind: 'timeout' })
   })
 
@@ -262,7 +262,7 @@ describe('createHelperClient', () => {
     port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [], truncated: true, frames: 3 })
     const ra = await a
     expect(ra.result.truncated).toBe(true)
-    expect(ra.result.frames).toBe(3) // // an animation's frame count is passed through too
+    expect(ra.result.frames).toBe(3) // an animation's frame count is passed through too
     const b = client.ocr({ image: 'B' })
     await flush()
     port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
@@ -275,14 +275,14 @@ describe('createHelperClient', () => {
     await flush()
     const old = port()
     expect(old.sent.map(m => m.cmd)).toEqual(['ping'])
-    vi.advanceTimersByTime(1001) // // handshake timeout: the port dropped, A rejected
+    vi.advanceTimersByTime(1001) // handshake timeout: the port dropped, A rejected
     await expect(a).rejects.toMatchObject({ kind: 'timeout' })
     expect(old.disconnected).toBe(true)
-    old.reply({ v: 1, id: old.sent[0]?.id as string, ok: true, version: '0.0.9' }) // // the late handshake reply on the old port
+    old.reply({ v: 1, id: old.sent[0]?.id as string, ok: true, version: '0.0.9' }) // the late handshake reply on the old port
     const b = client.ocr({ image: 'B' })
     await flush()
     expect(ports).toHaveLength(2)
-    expect(port().sent.map(m => m.cmd)).toEqual(['ping']) // // the new connection shakes hands first as usual, not fooled by the old reply
+    expect(port().sent.map(m => m.cmd)).toEqual(['ping']) // the new connection shakes hands first as usual, not fooled by the old reply
     await handshake(port(), '0.1.0')
     port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
     expect((await b).version).toBe('0.1.0')
@@ -296,7 +296,7 @@ describe('createHelperClient', () => {
     const result = await status
     expect(result).toMatchObject({ state: 'not-installed', reason: expect.stringContaining('not found') })
     await expect(client.ocr({ image: 'A' })).rejects.toBeInstanceOf(OcrBackendError)
-    expect(ports).toHaveLength(1) // // no second connection
+    expect(ports).toHaveLength(1) // no second connection
   })
 
   it('once installed, status({ recheck: true }) connects once more: the guided install\'s “I have it running” relies on it', async () => {
@@ -324,7 +324,7 @@ describe('createHelperClient', () => {
     const c = client.ocr({ image: 'C' }, 's2')
     await flush()
     await handshake(port())
-    expect(port().sent).toHaveLength(2) // // ping + A in flight
+    expect(port().sent).toHaveLength(2) // ping + A in flight
     const old = port()
     expect(client.cancel('s1')).toBe(2)
     await expect(a).rejects.toMatchObject({ kind: 'aborted' })
@@ -366,7 +366,7 @@ describe('createHelperClient', () => {
     port().reply({ v: 1, id: port().lastId(), width: 1, height: 1, lines: [] })
     await a
     vi.advanceTimersByTime(1000)
-    expect(keepAlive).toHaveBeenCalledTimes(3) // // not called again after the end
+    expect(keepAlive).toHaveBeenCalledTimes(3) // not called again after the end
   })
   it('the permission comes first (ADR-0002): without it status says permission-missing and nothing is connected; granted, it connects', async () => {
     let granted = false
