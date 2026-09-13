@@ -2,6 +2,7 @@
 import { browser } from 'wxt/browser'
 import type { Progress } from '@/core/pipeline/run'
 import type { Mode } from '@/core/renderer'
+import type { StartResult } from '@/core/session'
 import type { ProviderStatus } from '@/providers/transport'
 import type { TranslateCall, TranslateMessageResponse } from '@/providers/translate-service'
 import type { HelperStatus, ImageProgress, OcrCall, OcrMessageResponse } from './ocr'
@@ -51,7 +52,7 @@ export interface AxtMessages {
    * page has moved — the reader restored, restarted or translated meanwhile — so a decision that took a while (the
    * toggle waits for the chain's probes) cannot undo what the reader did in between (sixth and twelfth passes)
    */
-  'axt:translate-page': { request: { mode?: Mode; restart?: boolean; epoch?: string }; response: { started: boolean; reason?: string } }
+  'axt:translate-page': { request: { mode?: Mode; restart?: boolean; epoch?: string }; response: StartResult }
   /** popup → content: stop and restore the original. `epoch` as above: a restore decided on an earlier epoch is `refused` */
   'axt:restore-page': { request: { epoch?: string }; response: { removedNodes: number; refused?: true } }
   /** popup → content: switch the mode (changes the attribute on <html> only, no retranslation; §4 step 9) */
@@ -172,11 +173,17 @@ export function sendMessage<T extends AxtMessageType>(message: AxtMessage<T>): P
   return (browser.runtime.sendMessage(message) as Promise<AxtResponse<T> | FailureReply>).then(decodeReply)
 }
 
+/** Thrown by sendToActiveTab when tabs.query finds no active tab; the popup names it in the interface language (S.noActiveTab) */
+export class NoActiveTabError extends Error {
+  constructor() {
+    super('no active tab')
+    this.name = 'NoActiveTabError'
+  }
+}
+
 /** Send to the active tab's content script; the Promise rejects when the tab has no receiver. Reads no url, so no tabs permission */
 export async function sendToActiveTab<T extends AxtMessageType>(message: AxtMessage<T>): Promise<AxtResponse<T>> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true })
-  // Reader-visible: the popup's action guard shows this message verbatim through S.actionFailed, so it is product copy in the
-  // interface's default language, not developer text — mapping it onto the locale pack is an open item (like the zod messages of config/schema.ts)
-  if (tab?.id == null) throw new Error('没有活动标签页')
+  if (tab?.id == null) throw new NoActiveTabError()
   return browser.tabs.sendMessage(tab.id, message) as Promise<AxtResponse<T>>
 }

@@ -6,6 +6,17 @@
 import type { Locale } from './index'
 import { PREVIEW_SOURCE, PREVIEW_TARGET } from './preview'
 
+const FIELD: Record<string, string> = {
+  provider: 'not a valid translation service',
+  glossary: 'the glossary is over its total length and would add many tokens to every batch',
+  color: 'not a valid colour value',
+  css: 'declarations only, no selector and no braces',
+  baseURL: 'not a valid address',
+  apiKey: 'the API key is not valid',
+  model: 'the model name is empty',
+  name: 'the name length is out of range',
+}
+
 const S: Locale['S'] = {
   brand: 'Read arXiv',
   settings: 'Settings',
@@ -93,6 +104,7 @@ const S: Locale['S'] = {
     narrow: 'The window is narrow, so this is stacked for now',
   },
   actionFailed: message => message,
+  noActiveTab: 'No active tab',
   page: {
     retry: 'Retry',
     menuToggle: 'Translate this page / show the original',
@@ -102,6 +114,7 @@ const S: Locale['S'] = {
     nothingToTranslate: 'Nothing on this page to translate',
     abstractLink: brand => `Bilingual version (${brand})`,
     backendSilent: 'The extension’s background did not answer',
+    backendSilentWith: detail => `The extension’s background did not answer: ${detail}`,
     noService: 'No API key yet. Add one in the settings',
   },
 }
@@ -114,10 +127,13 @@ const O: Locale['O'] = {
   fallbackWhy: {
     tooNew: (stored, supported) => `The stored settings are v${stored}; this build reads up to v${supported} (a newer build may have been installed)`,
     invalid: (where, message) => (where ? `${where}: ${message}` : message),
+    field: FIELD,
     unknown: 'Reason unknown',
   },
   fallbackNotice: 'The settings could not be read, so the defaults are in use. Your saved API key and service are not in effect. Please enter them again.',
   services: {
+    issue: (field, message) => `${field}: ${FIELD[String(field).split('.').pop() ?? ''] ?? message}`,
+    issueSeparator: '; ',
     builtIn: 'Built in',
     mine: 'Your services',
     empty: 'No services yet. Add one to translate with an LLM.',
@@ -163,6 +179,7 @@ const O: Locale['O'] = {
     reset: 'Reset',
     resetHint: 'Restores the ones that ship with the extension and keeps your own',
     editTitle: 'Edit',
+    editAria: name => `Edit: ${name}`,
     name: 'Name',
     color: 'Text colour',
     bandColor: 'Band colour',

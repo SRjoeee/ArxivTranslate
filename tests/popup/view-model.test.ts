@@ -205,3 +205,46 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(runnable({ ...c, provider: svc.id, services: [{ ...svc, apiKey: '', baseURL: 'http://127.0.0.1:11434/v1' }] }, null)).toBe(true)
   })
 })
+
+describe('actionErrorText (S-P-90)', () => {
+  it('names a missing active tab in the interface language and passes any other error through as thrown', async () => {
+    const { actionErrorText } = await import('@/entrypoints/popup/view-model')
+    const { NoActiveTabError } = await import('@/shared/messages')
+    const strings = await import('@/ui/strings')
+    setLocale('zh-CN')
+    expect(actionErrorText(new NoActiveTabError())).toBe(strings.S.noActiveTab)
+    expect(actionErrorText(new NoActiveTabError())).toMatch(/标签页/)
+    setLocale('en')
+    expect(actionErrorText(new NoActiveTabError())).toBe('No active tab')
+    setLocale('zh-CN')
+    expect(actionErrorText(new Error('the page did not answer'))).toBe('the page did not answer')
+    expect(actionErrorText('plain')).toBe('plain')
+  })
+})
+
+describe('startRefusalText', () => {
+  it('turns every refusal code the session can answer into the sentence of the interface language', async () => {
+    const { startRefusalText } = await import('@/entrypoints/popup/view-model')
+    const strings = await import('@/ui/strings')
+    setLocale('zh-CN')
+    expect(startRefusalText({ started: false, reason: 'already-on' })).toBe(strings.S.page.alreadyOn)
+    expect(startRefusalText({ started: false, reason: 'not-paper' })).toBe(strings.S.page.notPaper)
+    expect(startRefusalText({ started: false, reason: 'backend-silent', detail: 'gone' })).toBe(strings.S.page.backendSilentWith('gone'))
+    setLocale('en')
+    expect(startRefusalText({ started: false, reason: 'no-service' })).toBe('No API key yet. Add one in the settings')
+    setLocale('zh-CN')
+  })
+})
+
+describe('the core strings seam (ADR-0008)', () => {
+  it('setLocale hands the core the retry label and the failure sentences of that locale', async () => {
+    const { coreStrings } = await import('@/core/strings')
+    const strings = await import('@/ui/strings')
+    setLocale('en')
+    expect(coreStrings().retry).toBe('Retry')
+    expect(coreStrings().failureTitle('auth')).toBe(strings.reasonText('auth'))
+    setLocale('zh-CN')
+    expect(coreStrings().retry).toBe(strings.S.page.retry)
+    expect(coreStrings().failureTitle('no-key')).toBe(strings.reasonText('no-key'))
+  })
+})

@@ -25,7 +25,6 @@ import type { TranslationTransport } from '@/providers/transport'
 import { isPermanentErrorKind, type TranslateContext } from '@/providers/types'
 import type { PageStatus } from '@/shared/messages'
 import type { HelperStatus, ImageProgress, OcrCall, OcrMessageResponse } from '@/shared/ocr'
-import { S } from '@/ui/strings'
 import { createIdleTrace } from './idle-trace'
 
 export interface SessionDeps {
@@ -50,10 +49,10 @@ export interface SessionDeps {
   trace?: (line: string) => void
 }
 
-export interface StartResult {
-  started: boolean
-  reason?: string
-}
+/** Why a start was refused; the popup turns the code into the interface's sentence (ADR-0008: the core knows no locale pack) */
+export type StartRefusal = 'already-on' | 'session-over' | 'not-paper' | 'nothing-to-translate' | 'backend-silent' | 'no-service'
+
+export type StartResult = { started: true; reason?: undefined; detail?: undefined } | { started: false; reason: StartRefusal; detail?: string }
 
 export interface PageSession {
   /** The first configuration read has finished (whether or not it succeeded); `status()` waits for it */
@@ -211,11 +210,11 @@ export function createPageSession(deps: SessionDeps): PageSession {
    * stale, refuses the start: the page moved on since the decision
    */
   async function begin(requested?: Mode, restart = false, from?: string, epoch?: string): Promise<StartResult> {
-    if (progress.state === 'on' && !restart) return { started: false, reason: S.page.alreadyOn }
-    if (from !== undefined && active !== from) return { started: false, reason: S.page.sessionOver }
-    if (epoch !== undefined && epoch !== epochNow()) return { started: false, reason: S.page.sessionOver }
-    if (!paper) return { started: false, reason: S.page.notPaper }
-    if (blocks.length === 0) return { started: false, reason: S.page.nothingToTranslate }
+    if (progress.state === 'on' && !restart) return { started: false, reason: 'already-on' }
+    if (from !== undefined && active !== from) return { started: false, reason: 'session-over' }
+    if (epoch !== undefined && epoch !== epochNow()) return { started: false, reason: 'session-over' }
+    if (!paper) return { started: false, reason: 'not-paper' }
+    if (blocks.length === 0) return { started: false, reason: 'nothing-to-translate' }
     const tStart = now()
     const config = await deps.config.get()
     // The glossary goes out with every batch (§8.2). **An empty glossary omits the field**: with it every existing cache key would change at once, invalidating everything
@@ -231,20 +230,20 @@ export function createPageSession(deps: SessionDeps): PageSession {
     try {
       status = await backend.status(session, { fresh: true })
     } catch (e) {
-      return { started: false, reason: `${S.page.backendSilent}：${e instanceof Error ? e.message : String(e)}` }
+      return { started: false, reason: 'backend-silent', detail: e instanceof Error ? e.message : String(e) }
     }
     // The status request bound this session to a chain provisionally (provider-status.ts). A start refused from here
     // on never makes the request that would settle that binding, and the abandoned scope would keep its chain and
     // engines alive until the tab's next session took over (Codex on #184): a refusal releases it
-    const release = (reason: string): StartResult => {
+    const release = (reason: StartRefusal): StartResult => {
       void backend.cancel(session)
       return { started: false, reason }
     }
     // The first choice unavailable while the chain still has a fallback: start as usual, the requests land straight on the free engine (§8.5)
-    if (!status.available && !status.fallback) return release(S.page.noService)
+    if (!status.available && !status.fallback) return release('no-service')
     // The reader may have restored the page while the two reads above were in flight
-    if (from !== undefined && active !== from) return release(S.page.sessionOver)
-    if (epoch !== undefined && epoch !== epochNow()) return release(S.page.sessionOver)
+    if (from !== undefined && active !== from) return release('session-over')
+    if (epoch !== undefined && epoch !== epochNow()) return release('session-over')
     trace(`start: ready in ${Math.round(now() - tStart)} ms, since page start ${Math.round(tStart)} ms`)
 
     modes?.stop()

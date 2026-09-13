@@ -13,7 +13,6 @@ import type { ProviderStatus, TranslationTransport } from '@/providers/transport
 import type { TranslateCall } from '@/providers/translate-service'
 import type { ImageBytes } from '@/core/image'
 import type { OcrCall, OcrLine } from '@/shared/ocr'
-import { S } from '@/ui/strings'
 import { chainRevision } from '@/config/revision'
 import { behindSettings } from '@/shared/page-action'
 
@@ -188,9 +187,9 @@ describe('page session', () => {
     expect((await h.session.status()).session).toBeNull()
     // The restore moved the epoch too: a translate decided on the page as it was just before the restore is refused
     expect((await h.session.status()).epoch).not.toBe(restarted)
-    expect(await h.session.start(undefined, false, undefined, restarted)).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(await h.session.start(undefined, false, undefined, restarted)).toEqual({ started: false, reason: 'session-over' })
     // Idle → on → idle: a translate decided on the first idle epoch must not translate the page the reader restored
-    expect(await h.session.start(undefined, false, undefined, idle)).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(await h.session.start(undefined, false, undefined, idle)).toEqual({ started: false, reason: 'session-over' })
     expect((await h.session.status()).session).toBeNull()
     expect((await h.session.status()).progress.state).toBe('idle')
     // Decided on the current epoch, it starts
@@ -213,7 +212,7 @@ describe('page session', () => {
     // Refused either way — the page is on (alreadyOn) and the epoch is another document's; the session stays
     expect(await after.session.start(undefined, false, undefined, stale)).toMatchObject({ started: false })
     after.session.restore()
-    expect(await after.session.start(undefined, false, undefined, stale)).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(await after.session.start(undefined, false, undefined, stale)).toEqual({ started: false, reason: 'session-over' })
     expect((await after.session.status()).session).toBeNull()
     expect(kept).not.toBeNull()
   })
@@ -230,7 +229,7 @@ describe('page session', () => {
     const idle = (await h.session.status()).epoch!
     const translate = h.session.start(undefined, false, undefined, idle)
     h.releaseStatus()
-    expect(await restart).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(await restart).toEqual({ started: false, reason: 'session-over' })
     expect(await translate).toEqual({ started: true })
     expect((await h.session.status()).progress.state).toBe('on')
   })
@@ -239,7 +238,7 @@ describe('page session', () => {
     // No usable service: the chain answered, so the scope is bound over there; the refusal cancels it
     const none = harness({ status: () => providerStatus({ available: false }) })
     live = none.session
-    expect(await none.session.start()).toEqual({ started: false, reason: S.page.noService })
+    expect(await none.session.start()).toEqual({ started: false, reason: 'no-service' })
     expect(none.statusCalls).toHaveLength(1)
     expect(none.cancelled).toEqual([none.statusCalls[0]])
     live.restore()
@@ -252,7 +251,7 @@ describe('page session', () => {
     await settle()
     moved.session.restore()
     moved.releaseStatus()
-    expect(await restart).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(await restart).toEqual({ started: false, reason: 'session-over' })
     expect(moved.cancelled).toContain(moved.statusCalls[1])
   })
 
@@ -270,7 +269,7 @@ describe('page session', () => {
     expect(status.session).toBe(h.statusCalls[0])
     expect(h.cancelled).toEqual([])
     // Once the start has settled, a start is a start again: refused while on, as before
-    expect(await h.session.start()).toEqual({ started: false, reason: S.page.alreadyOn })
+    expect(await h.session.start()).toEqual({ started: false, reason: 'already-on' })
   })
 
   it('a second start is refused while the session is on; a restart replaces it and cancels the old scope', async () => {
@@ -278,7 +277,7 @@ describe('page session', () => {
     live = h.session
     await h.session.start()
     const first = (await h.session.status()).session!
-    expect(await h.session.start()).toEqual({ started: false, reason: S.page.alreadyOn })
+    expect(await h.session.start()).toEqual({ started: false, reason: 'already-on' })
     expect(await h.session.start(undefined, true)).toEqual({ started: true })
     const second = (await h.session.status()).session!
     expect(second).not.toBe(first)
@@ -286,12 +285,12 @@ describe('page session', () => {
   })
 
   it('refuses to start off a paper page, on an empty page, without a backend, and without any usable service', async () => {
-    expect(await harness({ paper: null }).session.start()).toEqual({ started: false, reason: S.page.notPaper })
-    expect(await harness({ page: '<div class="ltx_para"></div>' }).session.start()).toEqual({ started: false, reason: S.page.nothingToTranslate })
+    expect(await harness({ paper: null }).session.start()).toEqual({ started: false, reason: 'not-paper' })
+    expect(await harness({ page: '<div class="ltx_para"></div>' }).session.start()).toEqual({ started: false, reason: 'nothing-to-translate' })
     const silent = harness({ status: () => Promise.reject(new Error('gone')) })
-    expect(await silent.session.start()).toEqual({ started: false, reason: `${S.page.backendSilent}：gone` })
+    expect(await silent.session.start()).toEqual({ started: false, reason: 'backend-silent', detail: 'gone' })
     const none = harness({ status: () => providerStatus({ available: false }) })
-    expect(await none.session.start()).toEqual({ started: false, reason: S.page.noService })
+    expect(await none.session.start()).toEqual({ started: false, reason: 'no-service' })
     // a fallback on the chain is enough to start: the requests land on the free engine (§8.5)
     const fallback = harness({ status: () => providerStatus({ available: false, fallback: { id: 'google-web' } }) })
     live = fallback.session
@@ -313,7 +312,7 @@ describe('page session', () => {
     expect(status.progress.state).toBe('idle')
     expect(status.running).toBeUndefined()
     // the continuation of a restart decided in the old session must not translate the page again (Codex on #157)
-    expect(await h.session.start(undefined, true, id)).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(await h.session.start(undefined, true, id)).toEqual({ started: false, reason: 'session-over' })
     expect((await h.session.status()).session).toBeNull()
   })
 
@@ -348,7 +347,7 @@ describe('page session', () => {
     h.session.restore()
     const before = h.calls.length
     h.releaseStatus()
-    expect(await restart).toEqual({ started: false, reason: S.page.sessionOver })
+    expect(await restart).toEqual({ started: false, reason: 'session-over' })
     expect((await h.session.status()).session).toBeNull()
     expect(document.documentElement.hasAttribute(ON_ATTR)).toBe(false)
     expect(h.calls.length).toBe(before)

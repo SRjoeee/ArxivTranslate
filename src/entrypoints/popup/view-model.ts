@@ -16,11 +16,13 @@ import { supportsTarget } from '@/providers/microsoft'
 import { BUILT_IN_PROMPTS } from '@/providers/prompt-library'
 import type { ProviderStatus } from '@/providers/transport'
 import type { PageStatus } from '@/shared/messages'
+import type { StartResult } from '@/core/session'
 import { pageDecision } from '@/shared/page-action'
 import type { HelperStatus } from '@/shared/ocr'
 import type { PackState } from '@/shared/pack'
 import type { MenuItem } from '@/ui/Menu'
 import { styleTile } from '@/ui/appearance/tiles'
+import { NoActiveTabError } from '@/shared/messages'
 import { PREVIEW_TARGET, S, languageLabel, languageName, parseFatal, profileName, reasonText, serviceName } from '@/ui/strings'
 
 export type { PackState }
@@ -307,3 +309,20 @@ function serviceItems(config: Config, pack: PackState | null): MenuItem[] {
   ]
 }
 
+/** What a failed popup action says (S-P-90): a known failure in the interface language, anything else as it was thrown */
+export function actionErrorText(e: unknown): string {
+  if (e instanceof NoActiveTabError) return S.noActiveTab
+  return e instanceof Error ? e.message : String(e)
+}
+
+/** A refused start, in the interface's language: the session answers with a code (core/session StartRefusal), the popup with the sentence */
+export function startRefusalText(result: Extract<StartResult, { started: false }>): string {
+  switch (result.reason) {
+    case 'already-on': return S.page.alreadyOn
+    case 'session-over': return S.page.sessionOver
+    case 'not-paper': return S.page.notPaper
+    case 'nothing-to-translate': return S.page.nothingToTranslate
+    case 'backend-silent': return S.page.backendSilentWith(result.detail ?? '')
+    case 'no-service': return S.page.noService
+  }
+}
