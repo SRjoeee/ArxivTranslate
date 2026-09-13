@@ -2,6 +2,7 @@
 .gitignore 8
 CLAUDE.md 2
 docs/DESIGN.md 41
+docs/adr/0007-sentence-alignment.md 1  # 2026-09-13: an observed Microsoft output quoted as evidence for the boundary snap
 docs/RESEARCH.md 12
 docs/UI.md 177
 docs/rebuild/INVENTORY.md 1
