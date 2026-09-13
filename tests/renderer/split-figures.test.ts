@@ -1,5 +1,5 @@
-// 插图整块拆两份（DESIGN §7.2）。图与公式没有译文，按块配对右栏就空着；
-// 整张图跨两栏又等于放弃对照，所以整块复制一份、副本里只留译文。
+// A figure split in two whole (DESIGN §7.2). Graphics and formulas have no translation, so paired by block the right column would stay empty;
+// a figure spanning both columns gives up the comparison, so the whole thing is copied once and the copy keeps only the translations.
 import { describe, expect, it } from 'vitest'
 import { T_CLASS } from '@/core/marks'
 import { FOR_ATTR, MIRROR_CLASS, SPLIT_ATTR, SPLIT_CLASS, SPLIT_FOR_ATTR } from '@/core/renderer/attrs'
@@ -10,7 +10,7 @@ import { IMG_CLASS } from '@/core/marks'
 import { ID_ATTR } from '@/core/extractor'
 import { docOf } from './helpers'
 
-/** 一张带分图说明的插图：图形 + 说明 + 说明的译文 */
+/** A figure with a subfigure caption: graphic + caption + the caption's translation */
 const figure = (extra = '') => `<figure class="ltx_figure">
   <img class="ltx_graphics" src="a.png" width="600" height="200">
   <figcaption class="ltx_caption">Figure 1. Original</figcaption>
@@ -18,23 +18,23 @@ const figure = (extra = '') => `<figure class="ltx_figure">
 </figure>`
 
 describe('splitFigures', () => {
-  it('内含配对的插图整块复制一份，副本只留译文', () => {
+  it('a figure holding a pair is copied whole, the copy keeping only the translation', () => {
     const doc = docOf(figure())
     expect(splitFigures(doc)).toBe(1)
     const original = doc.querySelector(`figure[${SPLIT_ATTR}]`)!
     const clone = original.nextElementSibling!
     expect(clone.classList.contains(SPLIT_CLASS)).toBe(true)
-    expect(clone.classList.contains(T_CLASS)).toBe(true) // 配对规则据此把它放进右栏
-    // 副本：图还在，原文说明没了，只剩译文
+    expect(clone.classList.contains(T_CLASS)).toBe(true) // // the pairing rule puts it in the right column by this
+    // The copy: the graphic is still there, the source caption is gone, only the translation remains
     expect(clone.querySelector('img')).not.toBeNull()
     expect(clone.querySelectorAll('.ltx_caption')).toHaveLength(1)
     expect(clone.textContent).toContain('图 1. 译文')
     expect(clone.textContent).not.toContain('Figure 1. Original')
-    // 原件一个子节点都没动，只多了标记
+    // Not one child of the original moved; only the mark was added
     expect(original.querySelectorAll('.ltx_caption')).toHaveLength(2)
   })
 
-  it('副本不带原件的 id 与块标记', () => {
+  it('the copy carries neither the original\'s id nor the block marks', () => {
     const doc = docOf(`<figure class="ltx_figure" id="S1.F1">
       <img class="ltx_graphics" src="a.png"><figcaption class="ltx_caption" id="S1.F1.cap" data-axt-id="b1">cap</figcaption>
       <figcaption class="ltx_caption ${T_CLASS}" data-axt-for="b1">说明</figcaption></figure>`)
@@ -45,12 +45,12 @@ describe('splitFigures', () => {
     expect(clone.querySelector('[data-axt-id]')).toBeNull()
   })
 
-  it('没有译文的插图不拆：那是镜像的活', () => {
+  it('a figure without a translation is not split: that is the mirror\'s job', () => {
     const doc = docOf('<figure class="ltx_figure"><img class="ltx_graphics" src="a.png"></figure>')
     expect(splitFigures(doc)).toBe(0)
   })
 
-  it('没有媒体的浮动体不拆：表格浮动体的表本来就有译文克隆', () => {
+  it('a float without media is not split: a table float\'s table has a translation clone already', () => {
     const doc = docOf(`<figure class="ltx_table">
       <table class="ltx_tabular"><tbody><tr><td>a</td></tr></tbody></table>
       <table class="ltx_tabular ${T_CLASS}" data-axt-for="t1"><tbody><tr><td>甲</td></tr></tbody></table>
@@ -59,8 +59,8 @@ describe('splitFigures', () => {
     expect(splitFigures(doc)).toBe(0)
   })
 
-  it('表格浮动体的说明里有行内公式也不拆：说明里的 math 不是"游离"的媒体', () => {
-    // 实测 2312.17527 两个表格浮动体全被误拆（Codex 在 #26 指出）
+  it('a table float whose caption has inline math is not split either: math in the caption is no “loose” media', () => {
+    // Measured on 2312.17527: both table floats were split by mistake (Codex on #26)
     const doc = docOf(`<figure class="ltx_table">
       <table class="ltx_tabular"><tbody><tr><td>a</td></tr></tbody></table>
       <table class="ltx_tabular ${T_CLASS}" data-axt-for="t1"><tbody><tr><td>甲</td></tr></tbody></table>
@@ -69,7 +69,7 @@ describe('splitFigures', () => {
     expect(splitFigures(doc)).toBe(0)
   })
 
-  it('译文内容变了（换目标语言重翻）要重建副本，只数个数会一直用旧的', () => {
+  it('a changed translation (retranslated into another target) rebuilds the copy; counting alone would keep the old one for good', () => {
     const doc = docOf(figure())
     splitFigures(doc)
     doc.querySelector(`figure[${SPLIT_ATTR}] .ltx_caption.${T_CLASS}`)!.textContent = '图 1. 另一种译法'
@@ -78,7 +78,7 @@ describe('splitFigures', () => {
     expect(doc.querySelector(`.${SPLIT_CLASS}`)!.textContent).toContain('另一种译法')
   })
 
-  it('嵌套的分图交给最外层一起复制，不各拆各的', () => {
+  it('nested subfigures are copied together with the outermost one, not each on its own', () => {
     const doc = docOf(`<figure class="ltx_figure"><div class="ltx_flex_figure"><div class="ltx_flex_cell">
       <figure class="ltx_figure ltx_figure_panel"><img class="ltx_graphics" src="a.png">
         <figcaption class="ltx_caption">(a) panel</figcaption>
@@ -88,14 +88,14 @@ describe('splitFigures', () => {
     expect(doc.querySelectorAll(`.${SPLIT_CLASS}`)).toHaveLength(1)
   })
 
-  it('幂等：译文没变就不重建', () => {
+  it('idempotent: with the translation unchanged no rebuild', () => {
     const doc = docOf(figure())
     expect(splitFigures(doc)).toBe(1)
     expect(splitFigures(doc)).toBe(0)
     expect(doc.querySelectorAll(`.${SPLIT_CLASS}`)).toHaveLength(1)
   })
 
-  it('译文变多了要重建副本，否则右栏永远停在半成品', () => {
+  it('more translations arriving rebuilds the copy, or the right column stays half done for good', () => {
     const doc = docOf(figure())
     splitFigures(doc)
     const fig = doc.querySelector(`figure[${SPLIT_ATTR}]`)!
@@ -113,17 +113,17 @@ describe('splitFigures', () => {
     expect(doc.querySelector(`.${SPLIT_CLASS}`)!.textContent).toContain('注')
   })
 
-  it('图里原有的镜像会被清掉：两套方案叠加会重复一份', () => {
+  it('mirrors already inside the figure are cleared: the two schemes stacked would duplicate one copy', () => {
     const doc = docOf(figure(`<img class="ltx_graphics ${T_CLASS} ${MIRROR_CLASS}" src="a.png">`))
     splitFigures(doc)
     expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
   })
 
-  it('恢复原文后与翻译前逐节点相等（§7.1）', () => {
+  it('after restoring the original the DOM equals the pre-translation one node for node (§7.1)', () => {
     const doc = docOf(figure())
     const before = doc.querySelector('article')!.innerHTML
     splitFigures(doc)
-    // 副本与标记都由 restore 清掉
+    // The copy and the marks are both cleared by restore
     for (const t of Array.from(doc.querySelectorAll(`.${T_CLASS}`))) t.remove()
     restore(doc)
     expect(doc.querySelector(`[${SPLIT_ATTR}]`)).toBeNull()
@@ -131,7 +131,7 @@ describe('splitFigures', () => {
       .toBe(before.replace(new RegExp(`<figcaption class="ltx_caption ${T_CLASS}"[^>]*>[^<]*</figcaption>`), '').replace(/\s+/g, ' ').trim())
   })
 
-  it('等待态的 pending 节点不算译文：不拆；混着时副本里去掉骨架屏留原文，译文到了 key 变化再重建（§7.6）', () => {
+  it('a waiting pending node is no translation: no split; mixed, the copy drops the skeleton and keeps the source, and when the translation arrives the key changes and it is rebuilt (§7.6)', () => {
     const pendingOnly = docOf(`<figure class="ltx_figure"><img class="ltx_graphics" src="a.png">
       <figcaption class="ltx_caption">cap</figcaption><figcaption class="ltx_caption ${T_CLASS} axt-pending" data-axt-for="c1"><span class="axt-skel"><span class="axt-skel-line" style="width: 62%;"></span></span></figcaption></figure>`)
     expect(splitFigures(pendingOnly)).toBe(0)
@@ -144,7 +144,7 @@ describe('splitFigures', () => {
     expect(clone.querySelector('.axt-pending, .axt-skel')).toBeNull()
     expect(clone.textContent).toContain('说明 A')
     expect(clone.textContent).toContain('cap B')
-    // B 的译文到了：签名变了，重建
+    // B's translation arrived: the signature changed, rebuild
     const pending = mixed.querySelector('.axt-pending')!
     const done = mixed.createElement('figcaption')
     done.className = `ltx_caption ${T_CLASS}`
@@ -156,35 +156,35 @@ describe('splitFigures', () => {
   })
 })
 
-describe('镜像不是译文（issue #46 实测 2312.17141）', () => {
-  it('图里唯一的 .axt-t 是镜像时不拆：那是说明还没翻完、媒体先被镜像顶位的正常状态', () => {
-    // 基线每趟全量，镜像一进图下一趟就把它当"有译文"假拆——删掉镜像、克隆一份没有译文的图
+describe('a mirror is no translation (issue #46, measured on 2312.17141)', () => {
+  it('when the only .axt-t inside the figure is a mirror there is no split: that is the normal state of the caption not yet translated and the media mirrored first', () => {
+    // With the baseline running full every pass, the pass after a mirror entered the figure took it for “has a translation” and split by mistake — deleting the mirror and cloning a figure without a translation
     const doc = docOf('<figure class="ltx_figure" id="f"><img class="ltx_graphics" src="a.png" alt="">'
       + '<img class="ltx_graphics axt-t axt-mirror" data-axt-for="mirror:0" src="a.png" alt="">'
       + '<figcaption class="ltx_caption" data-axt-id="c" data-axt-state="pending">Figure.</figcaption></figure>')
     expect(splitFigures(doc)).toBe(0)
     expect(doc.querySelector('.axt-split')).toBeNull()
-    expect(doc.querySelectorAll('.axt-mirror')).toHaveLength(1) // 镜像留着
+    expect(doc.querySelectorAll('.axt-mirror')).toHaveLength(1) // // the mirror stays
   })
 
-  describe('图片叠加层（DESIGN §15.2）', () => {
+  describe('the image overlay (DESIGN §15.2)', () => {
     const IMG_FIGURE = '<figure class="ltx_figure" id="F1"><img class="ltx_graphics" src="a.png" id="F1.g1"><figcaption class="ltx_caption">Figure 1.</figcaption></figure>'
     const overlayOn = (doc: Document, text = '静态电荷') => {
       const el = doc.querySelector('img') as HTMLImageElement
       return renderImage({ id: el.id, el, kind: 'raster' as const }, [{ x: 0.1, y: 0.1, w: 0.3, h: 0.05, lines: 1, source: 'Static charge', text }])
     }
 
-    it('只有叠加层、没有文字译文的插图也拆：副本里图与叠加层都在，叠加层不带配对标记', () => {
+    it('a figure with an overlay only and no text translation is split too: graphic and overlay are both in the copy, the overlay without a pairing mark', () => {
       const doc = docOf(IMG_FIGURE)
       overlayOn(doc)
       expect(splitFigures(doc)).toBe(1)
       const clone = doc.querySelector(`.${SPLIT_CLASS}`)!
       const img = clone.querySelector('img')!
       expect(img).not.toBeNull()
-      // 叠加层紧跟在副本的图后面，锚点定位靠这个相邻关系
+      // The overlay follows the copy's image directly; anchor positioning relies on that adjacency
       expect(img.nextElementSibling?.classList.contains(IMG_CLASS)).toBe(true)
-      // 配对标记必须没有（有的话副本里那份会被当成第二份译文），但 `data-axt-split-for` 要留着：
-      // 「不再翻这张图」时 `clearImageEverywhere` 只能靠它找到副本里的这一份（Codex 在 #134 指出）
+      // The pairing mark must be absent (with it the copy's overlay would count as a second translation), but `data-axt-split-for` has to stay:
+      // on “no longer translating this image” `clearImageEverywhere` can find the copy's overlay by it alone (Codex on #134)
       const overlay = clone.querySelector(`.${IMG_CLASS}`)!
       expect(overlay.getAttribute(FOR_ATTR)).toBeNull()
       expect(overlay.getAttribute(SPLIT_FOR_ATTR)).toBe('F1.g1')
@@ -192,7 +192,7 @@ describe('镜像不是译文（issue #46 实测 2312.17141）', () => {
       expect(clone.querySelector(`.${IMG_CLASS}`)!.textContent).toBe('静态电荷')
     })
 
-    it('叠加层后到：签名变了，副本重建、带上叠加层', () => {
+    it('the overlay arriving later: the signature changed, the copy is rebuilt with the overlay', () => {
       const doc = docOf(figure())
       splitFigures(doc)
       const before = doc.querySelector(`.${SPLIT_CLASS}`)!
@@ -202,11 +202,11 @@ describe('镜像不是译文（issue #46 实测 2312.17141）', () => {
       const after = doc.querySelector(`.${SPLIT_CLASS}`)!
       expect(after).not.toBe(before)
       expect(after.querySelector(`.${IMG_CLASS}`)).not.toBeNull()
-      // 签名相同不重建
+      // The same signature: no rebuild
       expect(splitFigures(doc)).toBe(0)
     })
 
-    it('没有图注的插图在会话开始时整张被镜像：拆图时把 figure 级的镜像一并删掉，否则右栏三份', () => {
+    it('a figure without a caption is mirrored whole as the session starts: the split deletes the figure-level mirror too, or the right column shows three', () => {
       const doc = docOf(IMG_FIGURE)
       const fig = doc.querySelector('figure')!
       const mirror = fig.cloneNode(true) as Element
@@ -215,18 +215,18 @@ describe('镜像不是译文（issue #46 实测 2312.17141）', () => {
       overlayOn(doc)
       expect(splitFigures(doc)).toBe(1)
       expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
-      expect(doc.querySelectorAll('figure')).toHaveLength(2) // 原件 + 副本
+      expect(doc.querySelectorAll('figure')).toHaveLength(2) // // original + copy
     })
 
-    it('dropStaleSplits：非 side 下签名过期的副本丢掉、原件的标记摘掉；签名相同的不动', () => {
+    it('dropStaleSplits: outside side a copy with a stale signature is dropped and the original\'s mark removed; an equal signature is left alone', () => {
       const doc = docOf(figure())
       splitFigures(doc)
       expect(dropStaleSplits(doc)).toBe(0)
-      overlayOn(doc) // side → only 之后叠加层才到，进了原件
+      overlayOn(doc) // // the overlay arrived only after side → only, and went into the original
       expect(dropStaleSplits(doc)).toBe(1)
       expect(doc.querySelector(`.${SPLIT_CLASS}`)).toBeNull()
       expect(doc.querySelector(`[${SPLIT_ATTR}]`)).toBeNull()
-      // 回 side 再拆，副本里有叠加层
+      // Back to side and split again: the copy holds the overlay
       expect(splitFigures(doc)).toBe(1)
       expect(doc.querySelector(`.${SPLIT_CLASS} .${IMG_CLASS}`)).not.toBeNull()
     })

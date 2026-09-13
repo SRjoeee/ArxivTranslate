@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { MAX_ANIMATED_SKELETONS, SKELETON_CLASS, SKELETON_LINE_CLASS, activeSkeletonAnimations, cancelSkeletonAnimation, cancelSkeletonsIn, createSkeleton, createSkeletonInside, skeletonLines } from '@/core/renderer/skeleton'
-// 骨架屏保留了 Read Frog 圆环的性能做法：WAAPI、最多 60 个在动、句柄可取消（§7.6）。
-// happy-dom 是否有 Element.animate 决定走哪个分支
+// The skeleton keeps Read Frog's performance approach for the ring: WAAPI, at most 60 animating, cancellable handles (§7.6).
+// Whether happy-dom has Element.animate decides which branch runs
 const canAnimate = typeof HTMLElement.prototype.animate === 'function'
 
 afterEach(() => {
@@ -10,17 +10,17 @@ afterEach(() => {
 })
 
 describe('skeleton', () => {
-  it('是几条按论文字号排的条，条宽写在节点上、其余样式交给 modes.css', () => {
+  it('a few bars sized by the paper\'s font size, the bar width written on the node, the rest of the style left to modes.css', () => {
     const skeleton = createSkeleton(document, { chars: 40 })
     expect(skeleton.tagName).toBe('SPAN')
     expect(skeleton.className).toBe(SKELETON_CLASS)
     const lines = skeleton.querySelectorAll(`.${SKELETON_LINE_CLASS}`)
     expect(lines).toHaveLength(1)
     expect((lines[0] as HTMLElement).style.width).toBe('62%')
-    cancelSkeletonAnimation(skeleton) // 没挂进文档的 afterEach 够不着，自己收
+    cancelSkeletonAnimation(skeleton) // // not attached to the document, so afterEach cannot reach it; cleaned up here
   })
 
-  it('行数按原文长度估，最后一条短：读起来像一段话，不是一个方块', () => {
+  it('the line count is estimated from the source length, the last line short: it reads like a paragraph, not a block', () => {
     expect(skeletonLines(0)).toBe(1)
     expect(skeletonLines(119)).toBe(1)
     expect(skeletonLines(120)).toBe(2)
@@ -29,12 +29,12 @@ describe('skeleton', () => {
     const long = createSkeleton(document, { chars: 900 })
     const widths = Array.from(long.querySelectorAll<HTMLElement>(`.${SKELETON_LINE_CLASS}`), l => l.style.width)
     expect(widths).toEqual(['100%', '100%', '55%'])
-    // 末行明显短于整行：这是"像文字"的那一下
+    // The last line is clearly shorter than a full one: that is the “looks like text” touch
     expect(Number.parseInt(widths[2]!, 10)).toBeLessThan(70)
     cancelSkeletonAnimation(long)
   })
 
-  it('同行的短标题（§7.3）只放一条，宽度按字号走', () => {
+  it('an inline short heading (§7.3) gets one bar only, its width following the font size', () => {
     const inline = createSkeleton(document, { chars: 900, inline: true })
     expect(inline.hasAttribute('data-axt-inline')).toBe(true)
     const lines = inline.querySelectorAll<HTMLElement>(`.${SKELETON_LINE_CLASS}`)
@@ -43,13 +43,13 @@ describe('skeleton', () => {
     cancelSkeletonAnimation(inline)
   })
 
-  it('纯装饰：aria-hidden，等待状态由 popup 的进度承担，不逐块念出来', () => {
+  it('purely decorative: aria-hidden; the waiting state is carried by the popup\'s progress, not read out block by block', () => {
     const skeleton = createSkeleton(document)
     expect(skeleton.getAttribute('aria-hidden')).toBe('true')
     cancelSkeletonAnimation(skeleton)
   })
 
-  it('createSkeletonInside 放在宿主末尾', () => {
+  it('createSkeletonInside places it at the end of the host', () => {
     const host = document.createElement('p')
     host.textContent = 'x'
     document.body.append(host)
@@ -58,23 +58,23 @@ describe('skeleton', () => {
     cancelSkeletonAnimation(skeleton)
   })
 
-  it(`最多 ${MAX_ANIMATED_SKELETONS} 块在呼吸，超出的静止；取消后名额释放`, () => {
+  it(`at most ${MAX_ANIMATED_SKELETONS} blocks breathe, the rest stay still; cancelling frees the slot`, () => {
     const many = Array.from({ length: MAX_ANIMATED_SKELETONS + 1 }, () => createSkeleton(document))
     if (canAnimate) {
       expect(activeSkeletonAnimations()).toBe(MAX_ANIMATED_SKELETONS)
-      // 第 61 块没有动画，静止的骨架屏一样看得出在等
+      // Block 61 has no animation; a still skeleton reads as waiting all the same
       expect(many[MAX_ANIMATED_SKELETONS]!.getAnimations?.() ?? []).toHaveLength(0)
       cancelSkeletonAnimation(many[0]!)
       expect(activeSkeletonAnimations()).toBe(MAX_ANIMATED_SKELETONS - 1)
     } else {
-      // 没有 WAAPI（happy-dom）：全部静止，计数不动
+      // No WAAPI (happy-dom): all still, the count does not move
       expect(activeSkeletonAnimations()).toBe(0)
     }
     many.forEach(cancelSkeletonAnimation)
     expect(activeSkeletonAnimations()).toBe(0)
   })
 
-  it('只动 opacity：合成器跑得完，不重排也不重绘（§7.6 的取舍）', () => {
+  it('opacity only: the compositor can carry it, no relayout and no repaint (the trade-off of §7.6)', () => {
     if (!canAnimate) return
     const skeleton = createSkeleton(document)
     const frames = skeleton.getAnimations?.()[0]
@@ -82,7 +82,7 @@ describe('skeleton', () => {
     cancelSkeletonAnimation(skeleton)
   })
 
-  it('cancelSkeletonsIn：删子树前把里面（含根自己）的动画全部取消，不抛错', () => {
+  it('cancelSkeletonsIn: before removing a subtree every animation inside (the root included) is cancelled, without throwing', () => {
     const wrap = document.createElement('div')
     document.body.append(wrap)
     createSkeletonInside(wrap)

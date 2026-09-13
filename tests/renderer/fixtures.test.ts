@@ -9,7 +9,7 @@ import { enable, restore } from '@/core/renderer/page'
 import { renderTable, renderText } from '@/core/renderer/translation'
 const FIXTURE_DIR = join(import.meta.dirname, '../fixtures/arxiv')
 
-describe('renderer × fixture：DOM 不变量', () => {
+describe('renderer × fixture: the DOM invariant', () => {
   const files = readdirSync(FIXTURE_DIR).filter(f => f.endsWith('.html')).sort()
 
   for (const f of files) {
@@ -44,7 +44,7 @@ describe('renderer × fixture：DOM 不变量', () => {
       }
       const result = restore(doc)
       const ms = Math.round(performance.now() - t0)
-      console.info(`[renderer] ${f}: ${blocks.length} 块渲染 + 恢复，${ms} ms，移除 ${result.removedNodes} 节点 / ${result.strippedAttrs} 属性`)
+      console.info(`[renderer] ${f}: ${blocks.length} blocks rendered + restored, ${ms} ms, ${result.removedNodes} nodes / ${result.strippedAttrs} attributes removed`)
       expect(result.removedNodes).toBe(blocks.length)
       expect(doc.documentElement.outerHTML).toBe(before)
     })

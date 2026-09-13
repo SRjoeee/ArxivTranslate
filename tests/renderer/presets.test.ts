@@ -10,55 +10,55 @@ import { docOf } from './helpers'
 import { LOOK, lookWith } from './looks'
 
 const CSS = readFileSync(join(import.meta.dirname, '../../src/styles/presets.css'), 'utf8')
-/** 注释里也写着属性名，做文本断言前先去掉 */
+/** The comments name the properties too; strip them before a text assertion */
 const RULES = CSS.replace(/\/\*[\s\S]*?\*\//g, '')
 
-describe('译文外观（§7.5）', () => {
-  it('四种线型各有一条变量规则，没有别的预设 id 残留', () => {
+describe('translation appearance (§7.5)', () => {
+  it('the four line styles have one variable rule each, and no other preset id is left', () => {
     for (const underline of UNDERLINES) {
       const has = RULES.includes(`[data-axt-underline="${underline}"]`)
       expect([underline, has]).toEqual([underline, underline !== 'none'])
     }
-    // v12 之前每种效果一个 id；现在值全部走变量，属性只剩两个开关
+    // Before v12 each effect had an id; now the values all go through variables, and only two switches remain as attributes
     expect(RULES).not.toContain('data-axt-style')
   })
 
-  it('外观只做叠加装饰，不写会与站点打架的属性（§7.5 的实测教训）', () => {
-    // font: inherit 曾把摘要标题的 1.4rem 覆盖成父级默认值；display / margin 会破坏 side 的网格配对
+  it('the appearance only decorates on top and writes no property that fights the site (the measured lesson of §7.5)', () => {
+    // font: inherit once overrode the abstract heading's 1.4rem with the parent default; display / margin break side's grid pairing
     for (const property of ['font:', 'font-size', 'font-family', 'line-height', 'display:', 'margin:', 'margin-top', 'width:']) {
       expect(RULES).not.toContain(property)
     }
   })
 
-  it('下划线必须显式画到 math / inline-block 上：text-decoration 不传播到原子行内盒', () => {
-    // 用户反馈的漏线就是这个：公式与行内盒处虚线断掉（2026-09-05 实测 text-decoration-line 计算值为 none）
+  it('the underline has to be drawn explicitly on math / inline-block: text-decoration does not propagate into atomic inline boxes', () => {
+    // The missing line the owner reported was this: the dotted line broke at formulas and inline boxes (measured 2026-09-05: computed text-decoration-line none)
     expect(RULES).toMatch(/html\[data-axt-underline\] :is\(\.axt-t[\s\S]*?:is\(math, \.ltx_inline-block, svg, img\)\)/)
   })
 
-  it('共享规则按「有下划线」匹配，不是对所有译文写 text-decoration：否则会把站点给链接画的线抹掉', () => {
+  it('the shared rule matches on “has an underline” rather than writing text-decoration on every translation: it would wipe the line the site draws under links', () => {
     expect(RULES).not.toMatch(/html\[data-axt-on\][^{]*\.axt-t[^{]*\{[^}]*text-decoration/)
   })
 
-  it('线型与线宽都来自变量：粗细由配置的 thickness 决定，颜色跟随文字颜色', () => {
+  it('line style and width both come from variables: the thickness from the configured thickness, the colour following the text colour', () => {
     expect(RULES).toContain('text-decoration-thickness: var(--axt-deco-thickness, 1px)')
     expect(RULES).toContain('text-decoration: underline var(--axt-deco-style) var(--axt-color, var(--axt-deco-color))')
   })
 
-  it('模糊尊重系统的「减少动态效果」：悬停清晰的过渡停掉', () => {
+  it('the blur respects the system\'s “reduce motion”: the hover-to-sharpen transition is dropped', () => {
     const reduced = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(RULES)
     expect(reduced).not.toBeNull()
     expect(reduced![1]).toMatch(/data-axt-blur[^{]*\{[^}]*transition: none/)
   })
 
-  it('没有持续动画：改样式的动画在长论文上要烧 CPU（Codex 在 #52 指出）', () => {
-    // 实测 600 个译文块 4 秒内的主线程任务：glow 的 text-shadow 动画 1028 ms、gradient 的
-    // background-position 动画 573 ms。v12 把这些效果整个删掉了，关键帧也不该再有
+  it('no continuous animation: an animation changing the style burns CPU on a long paper (Codex on #52)', () => {
+    // Measured main-thread tasks within 4 s on 600 translation blocks: glow's text-shadow animation 1028 ms, gradient's
+    // background-position animation 573 ms. v12 removed these effects whole, and there must be no keyframes left
     expect(RULES).not.toContain('@keyframes')
     expect(RULES).not.toMatch(/animation:\s*axt-/)
   })
 
-  it('装饰一律不落到骨架屏、失败控件与 side 模式的结构性克隆上：它们也带 .axt-t 但不是译文（Codex 在 #52 指出）', () => {
-    // 模糊会把镜像到右栏的公式糊掉；透明度会把「重试」按钮一起淡掉
+  it('the decoration never lands on the skeleton, the failure widget or side mode\'s structural clones: they carry .axt-t too but are no translations (Codex on #52)', () => {
+    // The blur would smudge the formulas mirrored into the right column; the opacity would fade the Retry button with them
     for (const line of RULES.split('\n')) {
       if (!line.includes('.axt-t')) continue
       const excluded = ['.axt-pending', '.axt-error', '.axt-mirror', '.axt-split'].every(c => line.includes(c))
@@ -66,7 +66,7 @@ describe('译文外观（§7.5）', () => {
     }
   })
 
-  it('enable 把下划线与模糊写到 <html>，与模式属性同层', () => {
+  it('enable writes the underline and the blur onto <html>, in the same layer as the mode attribute', () => {
     const doc = docOf('<p class="ltx_p" id="p1">Text.</p>')
     enable(doc, 'stack', lookWith({ underline: 'wavy', blur: true }))
     expect(doc.documentElement.getAttribute(UNDERLINE_ATTR)).toBe('wavy')
@@ -74,14 +74,14 @@ describe('译文外观（§7.5）', () => {
     expect(doc.documentElement.getAttribute('data-axt-mode')).toBe('stack')
   })
 
-  it('不传外观时这两个属性都不写：模式切换不该动外观', () => {
+  it('with no appearance passed neither attribute is written: a mode switch must not touch the appearance', () => {
     const doc = docOf('<p class="ltx_p" id="p1">Text.</p>')
     enable(doc, 'stack')
     expect(doc.documentElement.hasAttribute(UNDERLINE_ATTR)).toBe(false)
     expect(doc.documentElement.hasAttribute(BLUR_ATTR)).toBe(false)
   })
 
-  it('换成不带下划线 / 模糊的配置时属性要拿掉，不能留在上一份的状态里', () => {
+  it('switching to a configuration without underline / blur removes the attributes rather than leaving the previous state', () => {
     const doc = docOf('<p class="ltx_p" id="p1">Text.</p>')
     enable(doc, 'stack', lookWith({ underline: 'dashed', blur: true }))
     enable(doc, 'stack', LOOK)
@@ -89,19 +89,19 @@ describe('译文外观（§7.5）', () => {
     expect(doc.documentElement.hasAttribute(BLUR_ATTR)).toBe(false)
   })
 
-  it('高级 CSS 被包进我们给的选择器里，改了会重写样式表', () => {
+  it('the advanced CSS is wrapped in our selector, and a change rewrites the style sheet', () => {
     const doc = docOf('<p class="ltx_p" id="p1">Text.</p>')
     enable(doc, 'stack', lookWith({ css: 'color: #1565c0;' }))
     const sheet = doc.querySelector('style[data-axt-sheet="modes"]')!
     expect(sheet.textContent).toContain(`${CUSTOM_STYLE_SELECTOR} {`)
     expect(sheet.textContent).toContain('color: #1565c0;')
-    // 再次 enable 用新的声明：同一个 <style> 元素被更新，不叠加第二份
+    // enable again with new declarations: the same <style> element is updated, no second copy stacked
     enable(doc, 'stack', lookWith({ css: 'color: teal;' }))
     expect(doc.querySelectorAll('style[data-axt-sheet="modes"]')).toHaveLength(1)
     expect(doc.querySelector('style[data-axt-sheet="modes"]')!.textContent).toContain('color: teal;')
   })
 
-  it('声明块只收声明：花括号、@ 规则、`<` 一律拒掉（防手滑，不是安全边界）', () => {
+  it('the declaration block accepts declarations only: braces, @ rules and `<` are refused (against slips, not a security boundary)', () => {
     expect(sanitizeCustomCss('color: red')).toEqual({ ok: true, css: 'color: red' })
     expect(sanitizeCustomCss('')).toEqual({ ok: true, css: '' })
     for (const bad of ['a { color: red }', 'color: red }', '@media print { }', '</style>']) {
@@ -109,7 +109,7 @@ describe('译文外观（§7.5）', () => {
     }
   })
 
-  it('恢复原文后 <html> 上的外观属性一起消失（§7.1 第 4 条）', () => {
+  it('after restoring the original the appearance attributes on <html> vanish too (§7.1 item 4)', () => {
     const doc = docOf('<p class="ltx_p" id="p1">Hello.</p>')
     const before = doc.documentElement.outerHTML
     enable(doc, 'side', lookWith({ underline: 'wavy', blur: true, color: '#1565c0' }))
