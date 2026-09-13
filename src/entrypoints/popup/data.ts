@@ -15,12 +15,13 @@ import type { ProviderStatus } from '@/providers/transport'
 import { isBuiltInService, isLlmChosen } from '@/config/services'
 import { type PageStatus, sendMessage, sendToActiveTab } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
-import { type PackState, downloadPack, packState } from '@/shared/pack'
+import { type PackState, createPackLookup, downloadPack } from '@/shared/pack'
 import { MANAGE_SERVICES, MANAGE_STYLES, type MenuKind, type PopupInput, pollsBackground, runnable } from './view-model'
 import { chainRevision } from '@/config/revision'
 import { localeInUse, S } from '@/ui/strings'
 import { pickLocale } from '@/locales'
 import { browserLanguages } from '@/ui/apply-locale'
+import { createProviderAsks } from './provider-asks'
 
 const scriptStart = performance.now()
 
@@ -79,16 +80,16 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const [local, setLocal] = useState<{ config: Config; revision: string } | null>(null)
   const config = local?.config ?? null
   const savedRevision = local?.revision ?? null
-  const settle = useCallback(async (next: Config) => {
-    // Another target forgets the previous one's pack state at once (Codex on #185); checkPack fills the new one
-    if (wantedPack.current !== next.targetLanguage) {
-      wantedPack.current = next.targetLanguage
-      setPack(null)
-    }
-    setLocal({ config: next, revision: await chainRevision(next) })
-  }, [])
   /** The offline service's language pack (§8.4); `downloadable` needs a click to create() (user gesture) */
   const [pack, setPack] = useState<PackState | null>(null)
+  /** The lookups' bookkeeping (shared/pack.ts): the committed target, the newest lookup, the downloads in flight */
+  const [packs] = useState(() => createPackLookup({ publish: setPack }))
+  const settle = useCallback(async (next: Config) => {
+    // The committed configuration owns the wanted target: another target forgets the previous one's pack state at
+    // once (Codex on #185); the lookup that follows fills the new one
+    packs.want(next.targetLanguage)
+    setLocal({ config: next, revision: await chainRevision(next) })
+  }, [packs])
   const [helper, setHelper] = useState<HelperStatus | null>(null)
   const [platform, setPlatform] = useState<'mac' | 'other' | null>(null)
   const [menu, setMenu] = useState<MenuKind | null>(null)
@@ -101,51 +102,27 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const refresh = useCallback(() => {
     sendToActiveTab({ type: 'axt:page-status' }).then(setPage).catch(() => setPage(null))
   }, [])
-  /**
-   * Service availability. Re-queried after a pack download and after every config change, or the
-   * translate button stays in the state it had when the popup mounted
-   */
-  /** Only the latest saved-settings ask may publish: answers come back in any order, and a stale one would undo a newer */
-  const savedAsk = useRef(0)
-  /**
-   * The session ask in flight, if any. Polls of the same session are coalesced rather than numbered: a generation
-   * bumped by every 500 ms tick would invalidate each answer that takes longer than a tick, and the session's chain
-   * would never show (Codex on #185). An answer for a session the page no longer reports publishes nothing
-   */
-  const sessionAskFor = useRef<string | null>(null)
   /** The session the page reports right now */
   const sessionRef = useRef<string | null>(null)
+  /**
+   * Service availability. Re-queried after a pack download and after every config change, or the translate button
+   * stays in the state it had when the popup mounted. The two asks' bookkeeping is provider-asks.ts: only the newest
+   * saved ask publishes; one session ask in flight at a time, given up on after a while so a stalled one cannot hold
+   * the polling
+   */
+  const [asks] = useState(() => createProviderAsks({
+    send: sendMessage,
+    publishSaved: setSavedProvider,
+    // An answer for a session the page no longer reports publishes nothing
+    publishSession: (scope, status) => { if (sessionRef.current === scope) setSessionProvider(status) },
+  }))
   const loadProvider = useCallback((scope?: string | null, fresh = false): Promise<void> => {
     // While a page is translating, ask **its** chain: it stays on the one it started with, so the
     // global chain would describe someone else's hand-overs (Codex on #157). `fresh` is the barrier
     // for a refresh driven by a configuration change: the answer describes a chain built from what
     // is stored now, not the previous chain still in force (the local review of S1)
-    if (scope) {
-      if (sessionAskFor.current === scope) return Promise.resolve()
-      sessionAskFor.current = scope
-      const settled = () => { if (sessionAskFor.current === scope) sessionAskFor.current = null }
-      return sendMessage({ type: 'axt:provider-status', scope })
-        .then(status => { settled(); if (sessionRef.current === scope) setSessionProvider(status) })
-        .catch(() => { settled(); if (sessionRef.current === scope) setSessionProvider(null) })
-    }
-    const ask = ++savedAsk.current
-    return sendMessage({ type: 'axt:provider-status', ...(fresh ? { fresh: true } : {}) })
-      .then(status => { if (ask === savedAsk.current) setSavedProvider(status) })
-      .catch(() => { if (ask === savedAsk.current) setSavedProvider(null) })
-  }, [])
-  /**
-   * The target the pack state is for — the committed configuration's, set where the configuration lands (`settle`),
-   * never by a lookup: a lookup that comes back for another target publishes nothing, and a download that ends after
-   * the target moved on re-checks the target of the moment rather than reclaiming its own (the local review of S1)
-   */
-  const wantedPack = useRef<string | null>(null)
-  /** The targets whose download is in flight, every one of them (a reader can come back to A while it downloads): lookups for such a target publish nothing — the API says `downloadable` until it ends */
-  const downloading = useRef(new Set<string>())
-  const checkPack = useCallback(async (target: string): Promise<PackState> => {
-    const state = await packState(target)
-    if (wantedPack.current === target && !downloading.current.has(target)) setPack(state)
-    return state
-  }, [])
+    return scope ? asks.session(scope) : asks.saved(fresh)
+  }, [asks])
 
   useEffect(() => {
     console.debug(`[axt] popup mounted ${Math.round(performance.now() - scriptStart)} ms after script start`)
@@ -155,7 +132,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     const init = async () => {
       const c = await getConfig()
       await settle(c)
-      void checkPack(c.targetLanguage)
+      void packs.check(c.targetLanguage)
       return c
     }
     writes.current = writes.current.then(init, init)
@@ -180,14 +157,14 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
           return stored
         }
         await settle(stored)
-        void checkPack(stored.targetLanguage)
+        void packs.check(stored.targetLanguage)
         void loadProvider(undefined, true)
         return stored
       }
       writes.current = writes.current.then(reload, reload)
     })
     return unwatch
-  }, [refresh, checkPack, loadProvider, settle])
+  }, [refresh, packs, loadProvider, settle])
 
   // The background broadcasts the helper's state when it changes on its own — the guided install's wait found it,
   // or the fresh worker after a runtime grant reported (ADR-0002). Without this the card would stay up until the
@@ -314,13 +291,13 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
         isBuiltInService(id) || latest.services.some(s => s.id === id) ? { ...latest, provider: id } : latest
       ))
       if (next.provider !== id) return
-      const packState = id === 'chrome-builtin' ? await checkPack(next.targetLanguage) : pack
+      const packState = id === 'chrome-builtin' ? await packs.check(next.targetLanguage) : pack
       await restartIfOn(next, packState)
     }),
     chooseLanguage: code => void guard(async () => {
       setMenu(null)
       const next = await patchConfig(latest => ({ ...latest, targetLanguage: code }))
-      const packState = await checkPack(code)
+      const packState = await packs.check(code)
       await restartIfOn(next, packState)
     }),
     choosePrompt: id => void guard(async () => {
@@ -354,16 +331,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     // From the click itself (shared/pack.ts says why); the menu shows a spinner meanwhile
     downloadPack: () => void guard(async () => {
       if (!config) return
-      const target = config.targetLanguage
-      downloading.current.add(target)
-      setPack('downloading')
-      try {
-        await downloadPack(target)
-      } finally {
-        downloading.current.delete(target)
-        // The target of the moment, not the one downloaded: it may have moved on meanwhile
-        await checkPack(wantedPack.current ?? target)
-      }
+      await packs.download(config.targetLanguage, downloadPack)
       // The service chain lives in background (§8.0): have it rebuild one so the now-usable offline
       // service is back on it. The promise shown next to this button is about **this** tab, so only
       // its session moves onto the new chain (Codex on #157)

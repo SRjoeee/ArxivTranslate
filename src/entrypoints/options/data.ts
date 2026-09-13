@@ -7,7 +7,7 @@ import { type FallbackReason, configFallbackReason, getConfig, setConfig, watchC
 import { type Config, DEFAULT_CONFIG } from '@/config/schema'
 import { sendMessage } from '@/shared/messages'
 import type { HelperStatus } from '@/shared/ocr'
-import { type PackState, downloadPack, packState } from '@/shared/pack'
+import { type PackState, createPackLookup, downloadPack } from '@/shared/pack'
 import { localeInUse, S } from '@/ui/strings'
 import { pickLocale } from '@/locales'
 import { browserLanguages } from '@/ui/apply-locale'
@@ -21,7 +21,7 @@ export interface OptionsData {
   patch(fn: (latest: Config) => Config): Promise<Config>
   pack: PackState | null
   /** Re-query the pack for a language the reader just chose (the Chrome card would otherwise show the old one) */
-  checkPack(target: string): Promise<void>
+  checkPack(target: string): Promise<PackState>
   fetchPack(): Promise<void>
   helper: HelperStatus | null
   /** What the permission step found after a grant (ui/HelperPermission.tsx) */
@@ -45,35 +45,13 @@ export function useOptionsData(): OptionsData {
   const [cacheCleared, setCacheCleared] = useState(false)
   /** Every config write queues behind the previous one; see `patch` */
   const writes = useRef<Promise<Config>>(Promise.resolve(DEFAULT_CONFIG))
-  /** The language the newest pack lookup was for; see `checkPack` */
-  const wanted = useRef<string | null>(null)
-
   /**
-   * Only the answer for the language asked for **last** is kept: two selections whose lookups
-   * overlap can resolve out of order, and the Chrome card would then show another language's
-   * availability (Codex on #157)
+   * The lookups' bookkeeping (shared/pack.ts): the committed configuration owns the wanted target — set where the
+   * configuration lands, and another target forgets the previous one's state at once, so the card never shows, and
+   * the popup never acts on, the old language's availability (Codex on #185) — only the newest lookup for it
+   * publishes, and none while its download is in flight
    */
-  /**
-   * The committed configuration owns the wanted target (set where the configuration lands); a lookup publishes only
-   * for it, and a download that ends after the target moved on re-checks the target of the moment (S1 review).
-   * Committing another target forgets the previous one's pack state at once: until the lookup for the new one
-   * answers, the card must not show — and the popup must not act on — the old language's availability (Codex on #185)
-   */
-  const commitTarget = useCallback((target: string) => {
-    if (wanted.current === target) return
-    wanted.current = target
-    setPack(null)
-  }, [])
-  /**
-   * The targets whose download is in flight — every one of them, since a reader can start B while A downloads and
-   * come back to A: lookups for such a target publish nothing, the API reporting `downloadable` until the download
-   * ends, which would put the Download button back (Codex on #185)
-   */
-  const downloading = useRef(new Set<string>())
-  const checkPack = useCallback(async (target: string) => {
-    const state = await packState(target)
-    if (wanted.current === target && !downloading.current.has(target)) setPack(state)
-  }, [])
+  const [packs] = useState(() => createPackLookup({ publish: setPack }))
 
   const loadCache = useCallback(async () => {
     try {
@@ -92,10 +70,10 @@ export function useOptionsData(): OptionsData {
     // them showed newer settings (the local review of S1)
     const init = async () => {
       const c = await getConfig()
-      commitTarget(c.targetLanguage)
+      packs.want(c.targetLanguage)
       setLocal(c)
       setFallbackReason(configFallbackReason())
-      void checkPack(c.targetLanguage)
+      void packs.check(c.targetLanguage)
       return c
     }
     writes.current = writes.current.then(init, init)
@@ -112,11 +90,11 @@ export function useOptionsData(): OptionsData {
           location.reload()
           return stored
         }
-        commitTarget(stored.targetLanguage)
+        packs.want(stored.targetLanguage)
         setLocal(stored)
         // A valid write elsewhere is the repair of a configuration this page had to fall back from (Codex on #185)
         setFallbackReason(configFallbackReason())
-        void checkPack(stored.targetLanguage)
+        void packs.check(stored.targetLanguage)
         return stored
       }
       writes.current = writes.current.then(reload, reload)
@@ -144,7 +122,7 @@ export function useOptionsData(): OptionsData {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [loadCache, checkPack, commitTarget])
+  }, [loadCache, packs])
 
   /**
    * **Serialized**: each call reads storage, applies one change and writes it back, so two controls
@@ -158,7 +136,7 @@ export function useOptionsData(): OptionsData {
     const run = async () => {
       const next = fn(await getConfig())
       await setConfig(next)
-      commitTarget(next.targetLanguage)
+      packs.want(next.targetLanguage)
       setLocal(next)
       // A valid write **is** the repair: leaving the warning up would go on telling the reader that
       // the key and service they just fixed are not in effect (Codex on #157)
@@ -167,24 +145,19 @@ export function useOptionsData(): OptionsData {
     }
     writes.current = writes.current.then(run, run)
     return writes.current
-  }, [commitTarget])
+  }, [packs])
 
   /** From the click itself (shared/pack.ts says why); the row shows an indeterminate state meanwhile */
   const fetchPack = useCallback(async () => {
     const target = (await getConfig()).targetLanguage
-    downloading.current.add(target)
-    setPack('downloading')
-    try {
-      await downloadPack(target)
+    await packs.download(target, async downloaded => {
+      await downloadPack(downloaded)
       // The chain lives in background (§8.0): have it rebuild one with the now-usable offline
       // service. No session is moved — this page promised nothing about any tab, and a page
       // translating into another language must keep the chain it started on (Codex on #157)
       await sendMessage({ type: 'axt:engine-ready', id: 'chrome-builtin' }).catch(() => undefined)
-    } finally {
-      downloading.current.delete(target)
-      await checkPack(wanted.current ?? target)
-    }
-  }, [checkPack])
+    })
+  }, [packs])
 
   const clearCache = useCallback(async () => {
     const res = await sendMessage({ type: 'axt:cache-clear', paper: undefined })
@@ -194,5 +167,5 @@ export function useOptionsData(): OptionsData {
     await loadCache()
   }, [loadCache])
 
-  return { config, fallbackReason, patch, pack, checkPack, fetchPack, helper, setHelper, platform, cache, cacheError, clearCache, cacheCleared }
+  return { config, fallbackReason, patch, pack, checkPack: packs.check, fetchPack, helper, setHelper, platform, cache, cacheError, clearCache, cacheCleared }
 }
