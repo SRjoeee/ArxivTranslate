@@ -1,7 +1,7 @@
 # Files that may hold lines with CJK characters, and how many (scripts/check-english.mjs). Lower freely; raise with a reason in the PR.
 .gitignore 8
 CLAUDE.md 2
-docs/DESIGN.md 41
+docs/DESIGN.md 42  # raised 2026-09-13: the dated corrections quote the old Chinese header template and product copy as evidence
 docs/RESEARCH.md 12
 docs/UI.md 177
 docs/rebuild/INVENTORY.md 1

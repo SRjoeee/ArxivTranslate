@@ -79,7 +79,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | Location | Claim | Status | Evidence |
 |---|---|---|---|
 | L1 | The title “arXiv HTML Translator — design document” | ❌ | The product name is Read arXiv (`wxt.config.ts:21`, UI.md S-P-01) |
-| L3 | “Version v0.6 · 2026-09-04 · Phase 3 in progress; v0.6 moves provider requests to content” | ❌ | The header has not been updated since 09-04; the body §8.0 (09-06) moved the requests back to the background while the header still says “moved to content”; the last substantive change was 2026-09-12 (`7b6ab60`) |
+| L3 | “Version v0.6 · 2026-09-04 · Phase 3 in progress; v0.6 moves provider requests to content” | ❌ → corrected 2026-09-13 | The header has not been updated since 09-04; the body §8.0 (09-06) moved the requests back to the background while the header still says “moved to content”; the last substantive change was 2026-09-12 (`7b6ab60`) |
 | L6 | “[待验证] Phase 0 needs measurement to confirm” | 🗑 | No `[待验证]` marker remains in the text; the legend stays |
 | L17 | Free engines: “Chrome built-in first, `google-web` as the fallback” | ✅ | `providers/index.ts:29` `FREE_ENGINES = [chrome-builtin, google-web]` |
 | L17 | “The originally planned gtx is replaced by it” | ✅ | No `google-gtx` file |
@@ -87,7 +87,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L22 | Non-goal: “a degraded path for image translation on non-Mac platforms” deferred | ✅ | No multimodal image-reading implementation (RESEARCH §6.10 records it as #91, to do) |
 | L32 | Three paths tags / markers / runs; `wireFormats` is a preference-ordered set | ✅ | `providers/types.ts:66`, `wire-formats.ts:9`, `cache/key.ts` `RenderPath` |
 | L45 | The mode is controlled by `html[data-axt-mode]` | ✅ | `data-axt-mode` at 48 sites |
-| L58 | Architecture diagram: `[cache?]` on the content side | ❌ | Contradicts L81 in the same section (“cache and requests both in the background, content never touches IndexedDB”) and §8.0; the diagram was not updated with the 09-06 move |
+| L58 | Architecture diagram: `[cache?]` on the content side | ❌ → corrected 2026-09-13 | Contradicts L81 in the same section (“cache and requests both in the background, content never touches IndexedDB”) and §8.0; the diagram was not updated with the 09-06 move |
 | L73 | popup: “engine choice, progress”; options: “providers, styles, glossary, cache management” | ⚠️ | Broadly right; but UI.md §4 rules “No counts anywhere”, and the popup has no progress numbers; the four options sections are “翻译服务 · 阅读 · 提示词与术语 · 数据” |
 | L89–97 §4.0b | Five entries: popup / the `axt-toggle` command (Alt+T) / the context menu with `documentUrlPatterns` / `#axt-translate` / the abstract-page link taking arXiv's href | ✅ | `wxt.config.ts:43`, `background/context-menu.ts:11-15,100`, `content/index.ts:465`, `core/abstract/link.ts:12,30` |
 | L101–108 §4.1 | `Block { id, kind: 'text'\|'table', el, unit, cells? }` | ✅ | `extractor/index.ts` splits it into the `TextBlock` / `TableBlock` interfaces with equivalent fields; `cells: Cell[]` carries `numeric` |
@@ -101,7 +101,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L145 | `.ltx_tag` skipped | ⚠️ | Same, in PROTECT (L136), and named tags take part in translation |
 | L147 | `.ltx_text.ltx_font_typewriter` skipped | ⚠️ | In PROTECT (`tt`, L137) |
 | L150 and L153 | `.ltx_ERROR` listed twice | ⚠️ | A redundant row |
-| L152 | `svg, .ltx_picture` “TikZ figures, measured to hold no translatable text, see §15.1” | ❌ | The code comment now says “the labels inside are overlaid by the image pipeline (§15.6)” (`latexml.ts:95`); §15.6 L1003 records 199 real labels with words. The table row was not synchronised |
+| L152 | `svg, .ltx_picture` “TikZ figures, measured to hold no translatable text, see §15.1” | ❌ → corrected 2026-09-13 | The code comment now says “the labels inside are overlaid by the image pipeline (§15.6)” (`latexml.ts:95`); §15.6 L1003 records 199 real labels with words. The table row was not synchronised |
 | L156–162 | Author names translated, `RULES_VERSION` bumped to 0.7.0 | ✅ (historical) | Now 0.10.1 |
 | L164–170 | `.ltx_contact_name` as a void, 0.7.1 | ✅ | `latexml.ts:144` |
 | L170 | “1400-odd unit tests run the whole extraction chain in happy-dom” | ⚠️ | This run's `pnpm test` result is in §7 (a background task) |
@@ -112,9 +112,9 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L181 | `TABLE_RULES = { root: '.ltx_tabular', cell: '.ltx_td' }` | ✅ | L60 |
 | L187 | Partial failure: the original table stays `translated` and gains `data-axt-partial` | ✅ | `renderer/index.ts:48,151` |
 | L189–191 | The three numeric-cell regexes | ✅ | `isNumericCell` L436: `NUMERIC_CELL` / `SYMBOL_CELL` / `NA_CELL` (the regex bodies not compared character for character, ⚠️) |
-| L196 | References “translated by default, **can be turned off in settings**” | ❌ | `config/schema.ts` has no references switch at all; none in the four options sections either |
+| L196 | References “translated by default, **can be turned off in settings**” | ❌ → corrected 2026-09-13 | `config/schema.ts` has no references switch at all; none in the four options sections either |
 | L197–198 | Translated by `.ltx_bibblock`; `isBibAuthorBlock` / `bib-authors` deleted | ✅ | `UNIT_RULES` L42 |
-| L208 | The year `.ltx_bib_year` “**wrapped in its own paired placeholder**” | ❌ | `latexml.ts:153-158`: `bib-year` became a void in `PROTECT_RULES` (reason: the content of a paired placeholder still gets rewritten, Codex #74); the void list of §6.1 does not register it either |
+| L208 | The year `.ltx_bib_year` “**wrapped in its own paired placeholder**” | ❌ → corrected 2026-09-13 | `latexml.ts:153-158`: `bib-year` became a void in `PROTECT_RULES` (reason: the content of a paired placeholder still gets rewritten, Codex #74); the void list of §6.1 does not register it either |
 | L215–218 §5.5 | `RULES_VERSION` enters the cache key; a version fork goes through `latexml-v1.ts` | ✅ / ⚠️ | In the key ✅ (`cache/key.ts:6`); the fork was never needed |
 | L224–227 §5.6 | Exports `UNIT_RULES` `TABLE_RULES` `SKIP_RULES` `PROTECT_RULES`, `documentRoot` `classify` `isNumericCell`; priority skip > table > unit > protect | ✅ | `latexml.ts` L31/60/85/132/237/372/436; `classify` L237–247 in that order |
 | L233 | The protector is an original implementation | ✅ | `src/core/protector/*` carry no attribution header |
@@ -157,7 +157,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L398–407 | The width contract `--axt-side-w` / `--axt-article-w` / `--axt-margin-w`, `--axt-gap` in rem | ✅ | The `modes.css` variables occur 15 / 7 / 3 / 7 times |
 | L408 | `matchMedia('(max-width: 1279px)')`, `createModeController` | ✅ | `responsive.ts:6,35` |
 | L410–412 | `SIDE_LAYOUT` belongs to the rules module; `selector-boundary.test.ts` scans `src/` | ✅ | `latexml.ts:331`, the test file exists |
-| L416 §7.3 | “stack, the **default layout**” | ❌ | `DEFAULT_CONFIG.mode = 'side'` (`config/schema.ts:110`, the owner's decision of 2026-09-11, UI.md S-P-70); neither §7.3 nor §9 L747 “`mode: 'stack' \| 'side' \| 'only'`” updated the default |
+| L416 §7.3 | “stack, the **default layout**” | ❌ → corrected 2026-09-13 | `DEFAULT_CONFIG.mode = 'side'` (`config/schema.ts:110`, the owner's decision of 2026-09-11, UI.md S-P-70); neither §7.3 nor §9 L747 “`mode: 'stack' \| 'side' \| 'only'`” updated the default |
 | L418 | Short headings ≤ 60 characters share the line, `data-axt-inline` | ✅ | `latexml.ts:368` `isInlineTitleCandidate`, the attribute at 8 sites |
 | L422–426 | Block marks written in one go, not sliced; state attributes still sliced | ✅ | `pipeline/run.ts:144` (“writing synchronously also settled the halted() race”) |
 | L428–436 | `observerThresholds` 5% grid, clamped to the reachable maximum | ✅ | `scheduler/lazy.ts:33-39,102-106` |
@@ -168,7 +168,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L464 | “This project's floor of 131” | ✅ | `wxt.config.ts:31` `minimum_chrome_version: '131'` |
 | L479–481 §7.5 | The v12 appearance: `data-axt-underline` / `data-axt-blur` + five variables; `appearanceRule()`; `presets.css` cut to three rules; `data-axt-style` and `--axt-accent` retired | ✅ | `style-preset.ts` `appearanceRule`, `presets.css` (three groups: underline / blur / default variables); `data-axt-style` survives only in 3 **comments** (`renderer/index.ts:53,76`, `content/index.ts:87`) — the comments are stale |
 | L483–488 | “The original record (the preset scheme of 2026-09-05)”: 20 presets, `glow` / `gradient` made static | 🗑 | Explicitly marked historical, yet still half of §7.5; and disciplines such as L487 “the shared rule **lists only the underline-class ids**” have been replaced by v12's `html[data-axt-underline]` form |
-| L489–493 | “Decoration parameters adjustable … written into config (v9)”; “implemented without changing `modes.css` and `presets.css`: `styleVarsRule()` … overrides the `--axt-color` that `muted` / `green` write and the `--axt-accent` on `html[data-axt-on]`”; “when `style` changes call `applyStyle()` — recompute only the injected sheet's content and `data-axt-style`” | ❌ | After v12 `config.style` does not exist (`schema.ts` has `appearance`), `styleVarsRule` does not exist (only `appearanceRule`), `data-axt-style` is no longer written, `presets.css` was rewritten. The passage is not marked “historical” and reads like the current design |
+| L489–493 | “Decoration parameters adjustable … written into config (v9)”; “implemented without changing `modes.css` and `presets.css`: `styleVarsRule()` … overrides the `--axt-color` that `muted` / `green` write and the `--axt-accent` on `html[data-axt-on]`”; “when `style` changes call `applyStyle()` — recompute only the injected sheet's content and `data-axt-style`” | ❌ → corrected 2026-09-13 | After v12 `config.style` does not exist (`schema.ts` has `appearance`), `styleVarsRule` does not exist (only `appearanceRule`), `data-axt-style` is no longer written, `presets.css` was rewritten. The passage is not marked “historical” and reads like the current design |
 | L494 | The preset selector `.axt-t:not(.axt-pending, .axt-error, .axt-mirror, .axt-split)` | ✅ | The shared rule of `presets.css` |
 | L495 | Advanced CSS accepts a declaration block only | ✅ | UI.md S-O-47; `style-values.ts` `sanitizeColor` (the declaration-block validation not checked, ⚠️) |
 | L499–508 §7.6 | The skeleton `.axt-skel` / `.axt-skel-line`, `--axt-skel`, cap 60, Web Animations, `prefers-reduced-motion` | ✅ | `skeleton.ts:7-8,14,33,74`, `modes.css:14-47` |
@@ -176,30 +176,30 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L529 | “`minimum_chrome_version` is 131” | ✅ | Contradicts L920 (see §3) |
 | L531 | Sentence boundaries “reported only by Microsoft at present” | ⚠️ | L555 in the same section says “Microsoft, and Google after #137”; `providers/sentence-markers.ts` exists (the marker scheme of §8.6) — L531 was not updated with #137 |
 | L532 | Registered into the `WeakMap` of `renderer/sentences.ts` | ✅ | The file exists, `mirrorPair` exported |
-| L539 | “The colour follows `--axt-green` … `styleVarsRule` rewrites it from `config.style.accent` — one colour control”; “the switch `config.reading.sentenceHighlight`” | ❌ / ✅ | `--axt-green` is still the default ground (`presets.css:26`, `highlight.css:39`), but what rewrites it is v12's background highlight configuration `--axt-hl-color` / `--axt-hl-mix`; `styleVarsRule` / `config.style.accent` no longer exist; the switch ✅ (`schema.ts:83`) |
+| L539 | “The colour follows `--axt-green` … `styleVarsRule` rewrites it from `config.style.accent` — one colour control”; “the switch `config.reading.sentenceHighlight`” | ❌ → corrected 2026-09-13 / ✅ | `--axt-green` is still the default ground (`presets.css:26`, `highlight.css:39`), but what rewrites it is v12's background highlight configuration `--axt-hl-color` / `--axt-hl-mix`; `styleVarsRule` / `config.style.accent` no longer exist; the switch ✅ (`schema.ts:83`) |
 | L542–555 | The only-mode source hover `axt-peek`, dwell 600 ms, grace 120 ms, `inert` | ✅ | `peek.ts:30` `PEEK_DWELL_MS = 600`, `highlight.ts:41,62`, `marks.ts` `PEEK_CLASS` |
 
 ### 2.3 DESIGN.md §8–§10 (providers, cache and configuration, scheduling)
 
 | Location | Claim | Status | Evidence |
 |---|---|---|---|
-| L565 | content sends only three messages `axt:translate` / `axt:cancel-scope` / `axt:provider-status` | ❌ | content also sends `axt:ocr`, `axt:helper-status`, the `axt:page-status` reply, `axt:stats`, `axt:ping` etc. (`shared/messages.ts` has 17 kinds in all); “only these three for translation” barely holds |
+| L565 | content sends only three messages `axt:translate` / `axt:cancel-scope` / `axt:provider-status` | ❌ → corrected 2026-09-13 | content also sends `axt:ocr`, `axt:helper-status`, the `axt:page-status` reply, `axt:stats`, `axt:ping` etc. (`shared/messages.ts` has 17 kinds in all); “only these three for translation” barely holds |
 | L569–571 | The reasons for moving back to the background, and RESEARCH §6.7 / §6.8 | ✅ | Agrees with RESEARCH |
 | L576 | “The bundle dropped from 428.95 kB to 152.47 kB” | ⚠️ | Historical numbers; content has since gained images / SVG / highlight / peek, not re-measured |
 | L578–585 | `pnpm e2e:local-endpoint` | ✅ | The script exists |
 | L589–594 | `TranslationTransport { translate, cancel, status }` | ⚠️ | `providers/transport.ts` exists; the interface members not checked one by one |
 | L597–598 | `createLocalTransport` / `createMessageTransport` (`shared/transport.ts`) | ✅ | The file exists |
 | L600 | A named engine `TranslateCall.providerId` skips the fallback chain | ⚠️ | Implementation not read |
-| L604 | `id: 'openai-compat' \| 'anthropic' \| 'gemini' \| 'chrome-builtin' \| 'google-web'` | ❌ | `types.ts:58` is `id: string`; the real values include `microsoft` and the reader's service ids (§8.5 L721), `anthropic` / `gemini` do not exist |
+| L604 | `id: 'openai-compat' \| 'anthropic' \| 'gemini' \| 'chrome-builtin' \| 'google-web'` | ❌ → corrected 2026-09-13 | `types.ts:58` is `id: string`; the real values include `microsoft` and the reader's service ids (§8.5 L721), `anthropic` / `gemini` do not exist |
 | L606–612 | `kind` / `wireFormats` / `maxBatchChars` / `maxBatchItems` / `rateLimit` / `isAvailable` / `translate` | ✅ | `types.ts:55-80`; also `maxConcurrent` (L77, mentioned in §8.3), `promptKey` (L88), `cacheId` (L95), absent from the interface example |
 | L615–624 | `TranslateRequest { segments, source: 'en', target, context: { paperTitle, sectionTitle, glossary } }` | ⚠️ | The code's `TranslateContext` also has `abstract` (L23); `TranslatedSegment` carries `alignment` (the product of §8.6, and DESIGN has no §8.6 anywhere — see §7, to verify) |
-| L637 | `openai-compat` “covers OpenRouter (the default endpoint) … the default model is a cheap fast tier” | ❌ | Since v12 there is no default endpoint or model: `services: []`, `DEFAULT_CONFIG.provider = 'microsoft'`; “no vendor templates” (L721); the `openrouter.ai` in `host_permissions` is a leftover |
+| L637 | `openai-compat` “covers OpenRouter (the default endpoint) … the default model is a cheap fast tier” | ❌ → corrected 2026-09-13 | Since v12 there is no default endpoint or model: `services: []`, `DEFAULT_CONFIG.provider = 'microsoft'`; “no vendor templates” (L721); the `openrouter.ai` in `host_permissions` is a leftover |
 | L638–639 | The `anthropic` / `gemini` rows | 🗑 | L646 already says not implemented for now, “kept in the table as an illustration of the interface shape” |
 | L640 | `chrome-builtin` `['tags']`, Chrome 138+ | ✅ | `wire-formats.ts`; the relation of 138 to the manifest's 131, see §3 |
 | L641 | `google-web` `['tags','markers']` | ✅ | `wire-formats.ts` |
 | L642 | `microsoft` `['markers']` | ✅ | Same |
 | L648 | `microsoft` not in `FREE_ENGINES` | ✅ | `providers/index.ts:29-34` |
-| L648 end | “The negotiation of §8.5 is order-dependent; before #103 it has to become ‘the primary decides the format’” | ❌ | §8.5 L727–732 already records the change to order-independence on 2026-09-09, and the `providers/index.ts` comment agrees; this sentence predates the change and was not deleted |
+| L648 end | “The negotiation of §8.5 is order-dependent; before #103 it has to become ‘the primary decides the format’” | ❌ → corrected 2026-09-13 | §8.5 L727–732 already records the change to order-independence on 2026-09-09, and the `providers/index.ts` comment agrees; this sentence predates the change and was not deleted |
 | L650 | Free engines reuse `isAvailable()` for language support | ✅ | The support table of `microsoft.ts` |
 | L652 | “The Microsoft edge channel is connected” | ✅ | — |
 | L656 | AI SDK 7 `generateText` + `Output.object`, `maxRetries: 0` | ⚠️ | `openai-compat.ts` not read; `ai@^7.0.91` in the dependencies |
@@ -208,7 +208,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L660 | Glossary caps 200 / 120 / 200 / 6000, `GLOSSARY_LIMITS`, `normalizeGlossary`, `PROMPT_VERSION` bumped to 4 | ✅ | `schema.ts:16,26`, `prompt.ts:15` |
 | L661 | Paper-level context cut to 1200 characters | ⚠️ | No literal 1200 seen in `pipeline/paper.ts` (possibly renamed or made a constant) |
 | L662 | The cache key holds `promptKey` and the context | ✅ | `cache/key.ts:1,40` |
-| L667 | `CHAIN_CONFIG_FIELDS` = `provider / openaiCompat / prompts / targetLanguage / fallback` | ❌ | Now `['provider','services','prompts','targetLanguage','fallback']` (`transport.ts:179`); `openaiCompat` became `services` in v12 |
+| L667 | `CHAIN_CONFIG_FIELDS` = `provider / openaiCompat / prompts / targetLanguage / fallback` | ❌ → corrected 2026-09-13 | Now `['provider','services','prompts','targetLanguage','fallback']` (`transport.ts:179`); `openaiCompat` became `services` in v12 |
 | L668 | A failed response carries `partial` | ✅ | `run.ts:242` |
 | L669–671 | `createGlossaryMatcher` matches per segment | ✅ | `providers/glossary.ts` |
 | L672 | Batches of 1000 characters / 4 segments; rate 8/s burst 20; 100 ms of batching | ✅ | `openai-compat.ts:57-58`, `translate-service.ts:109,135` |
@@ -217,12 +217,12 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L682 | `google-web` `maxConcurrent: 2`, `rate: 20 / capacity: 8` | ✅ | `google-web.ts:85-86` |
 | L696–697 | `isolatable`, HTTP status mapping 429 / 401 / 403 / 4xx→`bad-request` | ✅ | `http-errors.ts:13-17` |
 | L699 | The default fallback chain `chrome-builtin` → `google-web` | ✅ | `FREE_ENGINES` |
-| L700 | `google-web` “rate pressed down to 2 requests/s, burst 2 … **no batching** (only the LLM batches)” | ❌ | Contradicts L682 / L665; the code has `rate 20 / capacity 8 / maxConcurrent 2`, and every provider gets a `BatchQueue` (`translate-service.ts:183-186`) |
+| L700 | `google-web` “rate pressed down to 2 requests/s, burst 2 … **no batching** (only the LLM batches)” | ❌ → corrected 2026-09-13 | Contradicts L682 / L665; the code has `rate 20 / capacity 8 / maxConcurrent 2`, and every provider gets a `BatchQueue` (`translate-service.ts:183-186`) |
 | L701 | 429 pauses the whole queue | ✅ | `request-queue.ts` (ported as it was) |
 | L702 | Thinking mode sends fields by endpoint domain | ✅ | `thinking.ts:15-18` |
-| L703 | “**Instant engine**: when `chrome-builtin` is ready, render the blocks in the viewport first and replace them in place when the LLM translation arrives … the user can turn it off in settings” | ❌ | No such implementation: the chain only falls back on failure (`fallback.ts`), there is no “built-in first, then LLM replaces” double write; no matching switch in the configuration. RESEARCH §7 item 21's suggestion was written in as a settled design |
+| L703 | “**Instant engine**: when `chrome-builtin` is ready, render the blocks in the viewport first and replace them in place when the LLM translation arrives … the user can turn it off in settings” | ❌ → corrected 2026-09-13 | No such implementation: the chain only falls back on failure (`fallback.ts`), there is no “built-in first, then LLM replaces” double write; no matching switch in the configuration. RESEARCH §7 item 21's suggestion was written in as a settled design |
 | L707–713 §8.4 | `isAvailable()` accepts only `available`; `BUILTIN_MAX_ITEMS = 20`; session creation times out at 60 s; sessions cached per language pair | ✅ | `chrome-builtin.ts:29,37,102` |
-| L710 | “content calls `FallbackService.reset()` to withdraw the demotion record” | ❌ | `fallback.ts:38` “no `reset()`”; §8.5 L734 says so too; `axt:engine-ready` rebuilds the whole chain instead |
+| L710 | “content calls `FallbackService.reset()` to withdraw the demotion record” | ❌ → corrected 2026-09-13 | `fallback.ts:38` “no `reset()`”; §8.5 L734 says so too; `axt:engine-ready` rebuilds the whole chain instead |
 | L710 | “The download entry therefore lives only in the popup's click handler” | ⚠️ | The Chrome card on the settings page has “下载” too (`options/sections/Services.tsx:31`, UI.md S-O-11); both are user gestures, the conclusion stands |
 | L713 | `Translator` exposed in the isolated world, measured | ✅ | RESEARCH §6.3 |
 | L721 §8.5 | `config.services[]`, `getProvider` builds an OpenAI-compatible engine by service id | ✅ | `providers/index.ts:11-13`, `services.ts` |
@@ -233,7 +233,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L734 | `FallbackService` has no `reset()` | ✅ | `fallback.ts:38` |
 | L735 | Configuration v5 `fallback.enabled` on by default | ✅ | `schema.ts:72` |
 | L739 §9 | Dexie, ported from FluentRead | ✅ | `cache/store.ts` |
-| L740 | The key `sha256(providerId \| model \| PROMPT_VERSION \| RULES_VERSION \| target \| renderPath \| normalizedText)`; “`CACHE_KEY_VERSION` bumped to 3, to 4 at the rename” | ❌ | The real key also holds `promptKey`, `context` (L662 in the same section says so); `CACHE_KEY_VERSION = 6` (`key.ts:70`), the bumps to 5 and 6 are not recorded |
+| L740 | The key `sha256(providerId \| model \| PROMPT_VERSION \| RULES_VERSION \| target \| renderPath \| normalizedText)`; “`CACHE_KEY_VERSION` bumped to 3, to 4 at the rename” | ❌ → corrected 2026-09-13 | The real key also holds `promptKey`, `context` (L662 in the same section says so); `CACHE_KEY_VERSION = 6` (`key.ts:70`), the bumps to 5 and 6 are not recorded |
 | L740 | `providerId` takes `cacheId ?? id`, `openai-compat:<origin><path>` | ⚠️ | `types.ts:95` `cacheId` exists; after v12 the service id is itself the provider id, whether the `openai-compat:` prefix is still used not checked |
 | L741 | TTL 30 days / 20,000 entries / 50 MB / 256 KB / hot layer 256 | ✅ | `store.ts:42-46` |
 | L742 | `axt:cache-stats` / `axt:cache-clear`, `cleanup()` before the statistics | ✅ | Each message at 3 sites |
@@ -241,7 +241,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L744 | `CACHE_READ_BUDGET_MS` 2 s | ✅ | `translate-service.ts:116` |
 | L745 | No cache write after a cancel, `cancelledScopes` | ✅ | `translate-service.ts:226` |
 | L746 | `expectationsFromText`, `cache.bypass` | ✅ | `translate-service.ts:15,58` |
-| L747 | Configuration versions v1…v12 | ❌ | `CONFIG_VERSION = 13` (v13 adds `uiLanguage`, recorded in UI.md §6, not in DESIGN); the purpose of v10 (a bump against downgrades after Microsoft was connected) is not recorded either; “the v1 shape `provider: 'openai-compat' \| …`” is history |
+| L747 | Configuration versions v1…v12 | ❌ → corrected 2026-09-13 | `CONFIG_VERSION = 13` (v13 adds `uiLanguage`, recorded in UI.md §6, not in DESIGN); the purpose of v10 (a bump against downgrades after Microsoft was connected) is not recorded either; “the v1 shape `provider: 'openai-compat' \| …`” is history |
 | L749 | `configFallbackReason()`, a red warning at the top of the popup | ⚠️ | The function ✅ (`storage.ts:115`); UI.md L114 says the popup's S-P-34 was removed and it moved to the top of the settings page (S-O-02) — DESIGN not updated |
 | L753 §10 | `scheduler/lazy.ts`, `renderer/pending.ts`, `scheduler/title.ts`, `pipeline/run.ts` | ✅ | All exist |
 | L757 | `rootMargin` 1000 / `threshold` 0; the settings page's “pre-translation distance (0–10000px, step 100) and visibility threshold (0–1)” | ⚠️ | The defaults ✅ (`lazy.ts:56`); the settings UI became steps (半屏 / 一屏 / 两屏 / 三屏; 刚露出 / 露出一半 / 完全露出, `Reading.tsx:98-109`, UI.md S-O-50/51), no longer number boxes |
@@ -249,7 +249,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L768 | No scroll anchoring | ✅ | No `elementFromPoint` anchoring code (not grepped, ⚠️) |
 | L769 | `createCoalescer(fn, { delay: 150, maxWait: 1000 })` gathers the dirty set | ✅ | `coalesce.ts` |
 | L771 | `maxConcurrent` 8, `maxTotalMs` 180 s, the defaults in `translate-service` | ✅ | `translate-service.ts:125-126` |
-| L783 | “`batch-queue` (… **only the LLM batches**)” | ❌ | Contradicts L665; every provider batches |
+| L783 | “`batch-queue` (… **only the LLM batches**)” | ❌ → corrected 2026-09-13 | Contradicts L665; every provider batches |
 | L783 | `p-queue` and the hand-written pause deleted | ✅ | No `p-queue` in `package.json` |
 
 <!-- section 2.2-2.3 done -->
@@ -264,31 +264,31 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L799 | `tests/e2e/a11y.mjs` | ✅ | — |
 | L802 | “10 fixtures” | ❌ | 12 + `synthetic-structures.html` |
 | L170 (§5.2) | “1400-odd unit tests” | ⚠️ | This run: 109 files, **1518** tests passed (28 s) |
-| L808–813 §12 Phase 0 | “completed”; but L812 is still `[ ]` “the isolated world to be verified when `chrome-builtin` is connected” | ❌ | RESEARCH §6.3 measured it on 2026-09-05, and §8.4 L713 says so; the checkbox was never ticked |
+| L808–813 §12 Phase 0 | “completed”; but L812 is still `[ ]` “the isolated world to be verified when `chrome-builtin` is connected” | ❌ → corrected 2026-09-13 | RESEARCH §6.3 measured it on 2026-09-05, and §8.4 L713 says so; the checkbox was never ticked |
 | L815–818 Phase 1 | The `feat/scaffold` / `feat/rules` / `feat/extractor` branch plan | 🗑 | A completed plan with no tick state; “`pnpm fixtures:stats` switches to PROTECT_RULES” is done |
 | L820–826 Phase 2 | “`openai-compat` (… + `generateObject`)” | 🗑 | §8.2 L656 already says `generateObject` was replaced by `Output.object`; `p-queue` is deleted too |
-| L828–829 Phase 3 | “Provider requests move to content (§8.0)” | ❌ | §8.0 reversed it to the background; the line was not changed |
+| L828–829 Phase 3 | “Provider requests move to content (§8.0)” | ❌ → corrected 2026-09-13 | §8.0 reversed it to the background; the line was not changed |
 | L829 | “side / only modes and the width logic; `chrome-builtin` + `google-web` with the runs path; the fallback chain; scheduling and progress; style presets; the glossary; the options page” | ⚠️ | All implemented, but the list has no completion marks; a reader cannot tell “plan” from “status” |
 | L831–841 | PR 1 / 2a / 2b and the porting trade-offs | ✅ (historical) | Agrees with THIRD_PARTY |
 | L843–847 Phase 4 / v2 | “More fixtures and rule corrections; performance; cache export / import; release” | ⚠️ | No progress recorded; cache import / export is not implemented |
 | L855–859 §13 table | The five reference projects | ✅ | Agrees with the THIRD_PARTY project table |
 | L861 | “arXiv adaptation … Phase 1 completed” | ✅ | — |
-| L863 | The GPL header template `// 移植自 reference/<repo>/<path>@<commit>（GPL-3.0），<YYYY-MM-DD> 移植、有修改` | ✅ (code) / ❌ (contradicts CLAUDE.md) | All 26 files use this format; CLAUDE.md L81 changed to the English template |
+| L863 | The GPL header template `// 移植自 reference/<repo>/<path>@<commit>（GPL-3.0），<YYYY-MM-DD> 移植、有修改` | ✅ (code) / ❌ → corrected 2026-09-13 (contradicts CLAUDE.md) | All 26 files use this format; CLAUDE.md L81 changed to the English template |
 | L863 | “The project is open source under GPL-3.0” | ❌ | The repository root has **no LICENSE file** (`ls LICENSE*` finds nothing), and `package.json` has no `license` field either; #167 to do |
 | L873 | The LaTeXML version risk: “a probe function forks” | ⚠️ | No probe function implemented (never needed) |
 | L877 | Narrow screens fall back of themselves through `matchMedia` | ✅ | `responsive.ts` |
 | L884 | “With the helper undetected only bitmaps are not translated, SVG proceeds as usual — **the settings section is no longer greyed out whole**” | ✅ | The comment at `schema.ts:88` agrees |
 | L884 | “No entry for a single image” | ✅ | No matching UI |
-| L891 | Inline `svg.ltx_picture` “measured to have no `<text>`; text appears only as `foreignObject` and rarely, skipped” | ❌ | §15.6 L1003: 199 `foreignObject`s with words, connected to the image pipeline; this sentence of §15.1 did not follow §15.6 |
+| L891 | Inline `svg.ltx_picture` “measured to have no `<text>`; text appears only as `foreignObject` and rarely, skipped” | ❌ → corrected 2026-09-13 | §15.6 L1003: 199 `foreignObject`s with words, connected to the image pipeline; this sentence of §15.1 did not follow §15.6 |
 | L894 | “The overlay is ported from the DOM rendering part of `getImage.js` in `xulihang/ImageTrans_chrome_extension` (GPL-3.0) (`fitBoxFontSize`, `detectBackgroundColor`, line wrapping, rounded boxes)” | ⚠️ | The file headers of `renderer/image.ts` / `image/boxes.ts` carry **no** ImageTrans attribution line, and THIRD_PARTY has no matching file row (only the snapshot in the project table); §15.2 L911 in turn says “ImageTrans's JS bisection of the font size … not used”. Either it is really a rewrite (fix the document) or the registration is missing (a GPL §5 problem) |
 | L909 | OCR results cached by `imageHash \| helper version` in the same Dexie database | ⚠️ | `background/ocr.ts` exists, the key shape not checked |
 | L910 | `.axt-img` does not carry `.axt-t`; `marks.ts` recognises it | ✅ | `data-axt-img-modes` at 7 sites, `marks.ts` |
 | L911 | CSS anchor positioning needs Chrome ≥131 | ✅ | `wxt.config.ts:31` |
-| L920 | “`wxt.config.ts` **declares no minimum Chrome version**, and installed on an old Chromium it must not break the page” | ❌ | `wxt.config.ts:31` `minimum_chrome_version: '131'` (the comment says it was added after Codex pointed it out on #99); contradicts §7.7 L529 and §7.4b L464 |
+| L920 | “`wxt.config.ts` **declares no minimum Chrome version**, and installed on an old Chromium it must not break the page” | ❌ → corrected 2026-09-13 | `wxt.config.ts:31` `minimum_chrome_version: '131'` (the comment says it was added after Codex pointed it out on #99); contradicts §7.7 L529 and §7.4b L464 |
 | L929–942 §15.3 | The protocol `v`, `ping`→`version`, `frames`, `truncated`, `unsupported-protocol` | ✅ | `helper/main.swift:11,18,31,76,102,149-153` |
 | L946 | The helper “Swift, ~100–200 lines” | ✅ | 167 lines |
 | L947 | The host manifest in `<user data directory>/NativeMessagingHosts/` | ✅ (measured record) | The e2e `.profile-image/NativeMessagingHosts` exists |
-| L948 | “Undetected → **the settings item greys out**, image translation silently does not run” | ❌ | Contradicts L884 “no longer greyed out whole”; UI.md S-P-86 / S-O-27 are “show the install guide” |
+| L948 | “Undetected → **the settings item greys out**, image translation silently does not run” | ❌ → corrected 2026-09-13 | Contradicts L884 “no longer greyed out whole”; UI.md S-P-86 / S-O-27 are “show the install guide” |
 | L949 | `nativeMessaging` a required permission for now | ✅ | `wxt.config.ts:40` `permissions: ['storage','nativeMessaging','contextMenus']` |
 | L952–959 | The install guide completes inside the popup; `src/ui/HelperSetup.tsx`; `axt:helper-await` every 2 s, capped at 3 minutes; session storage | ✅ | The file and the message exist; `background/helper-await.ts` |
 | L960 | “Later: an `apple-translate` provider” | ⚠️ | Not done, pure conjecture |
@@ -296,7 +296,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L986 | “v1 draws only multiples of 90° … **now** every run is drawn” | ✅ | `glyphs.ts` has no `quarterTurn` any more (the forward reference in RESEARCH §6.11 L628 is stale) |
 | L993–1010 §15.6 | `foreignObject` labels go through the image pipeline; `proseText`; adjacent lines not merged; deduplication; `pictureTexts` reads no geometry | ✅ | `svg/foreign.ts`, `latexml.ts:401 proseText`, `FIGURE_SELECTORS.pictureText` |
 | L1011 | “15.5b reference” placed after 15.6 | ⚠️ | Numbering out of order |
-| Whole text | **The code cites a §8.6 that does not exist in DESIGN** (sentence alignment / sentence markers, issue #105): `cache/key.ts:49,65`, `providers/types.ts:11,82`, `translate-service.ts` at 7 sites, `pipeline/sentences.ts`, `pipeline/run.ts:172`, `microsoft.ts:175`, `rules/latexml.ts:283`, two test files | ❌ | DESIGN's §8 has only 8.0–8.5 (see the heading list); §7.7 L531 also writes “§8.6 / `providers/alignment.ts`”. This whole piece of design (boundaries reported by the engine or markers inserted by the service layer, the reason for `CACHE_KEY_VERSION` 5→6, the `alignment` field) **exists only in code comments** |
+| Whole text | **The code cites a §8.6 that does not exist in DESIGN** (sentence alignment / sentence markers, issue #105): `cache/key.ts:49,65`, `providers/types.ts:11,82`, `translate-service.ts` at 7 sites, `pipeline/sentences.ts`, `pipeline/run.ts:172`, `microsoft.ts:175`, `rules/latexml.ts:283`, two test files | ❌ → corrected 2026-09-13 | DESIGN's §8 has only 8.0–8.5 (see the heading list); §7.7 L531 also writes “§8.6 / `providers/alignment.ts`”. This whole piece of design (boundaries reported by the engine or markers inserted by the service layer, the reason for `CACHE_KEY_VERSION` 5→6, the `alignment` field) **exists only in code comments** |
 
 ### 2.5 RESEARCH.md
 
@@ -306,11 +306,11 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L7 | “Phase 0 has no test or build target yet; `pnpm test` / `pnpm build` take effect from Phase 1” | 🗑 | In effect long ago |
 | L13 | “10 papers” | ⚠️ | L42 added 2; 12 in all |
 | L25 | `RULES_VERSION 0.1.0-phase0` | ✅ (historical) | Now 0.10.1 |
-| L101 §2.9 | “SVG figures hold no translatable DOM text in practice; v1 skips `svg` whole; the OCR route of §15 is meaningful for `img` only” | ❌ | DESIGN §15.5 (external SVG goes through glyph reading), §15.6 (199 labels with words in the `foreignObject`s of inline TikZ, 2026-09-11); the comment at `latexml.ts:95` was changed. §6.11 L473–476 still says “§2.9 still holds for inline SVG” — also overturned by §15.6 |
-| L160 §3.2 | “side mode only needs `--main-width` overridden on `html[data-axt-mode="side"]`” | ❌ | DESIGN §7.2 L407 measured “overriding `--main-width` alone without touching the tracks overflows horizontally” and switched to rewriting the body grid with three tokens |
+| L101 §2.9 | “SVG figures hold no translatable DOM text in practice; v1 skips `svg` whole; the OCR route of §15 is meaningful for `img` only” | ❌ → corrected 2026-09-13 | DESIGN §15.5 (external SVG goes through glyph reading), §15.6 (199 labels with words in the `foreignObject`s of inline TikZ, 2026-09-11); the comment at `latexml.ts:95` was changed. §6.11 L473–476 still says “§2.9 still holds for inline SVG” — also overturned by §15.6 |
+| L160 §3.2 | “side mode only needs `--main-width` overridden on `html[data-axt-mode="side"]`” | ❌ → corrected 2026-09-13 | DESIGN §7.2 L407 measured “overriding `--main-width` alone without touching the tracks overflows horizontally” and switched to rewriting the body grid with three tokens |
 | L162 | “The 1100px auto-fallback threshold of §7.2 … suggested 1280px instead” | ✅ (adopted) | `responsive.ts:6` `(max-width: 1279px)` |
 | L200–212 §4 map | The “`google-gtx` / `translateHtml`” row | ⚠️ | gtx not connected; the map itself is still useful |
-| L280 | “gtx conditionally declares `preservesMarkup: true` … translateHtml is not worth a provider of its own” | ❌ | Reversed in the same file at §6.6 and §7 line 23: translateHtml adopted, gtx not connected; the `preservesMarkup` field no longer exists |
+| L280 | “gtx conditionally declares `preservesMarkup: true` … translateHtml is not worth a provider of its own” | ❌ → corrected 2026-09-13 | Reversed in the same file at §6.6 and §7 line 23: translateHtml adopted, gtx not connected; the `preservesMarkup` field no longer exists |
 | L344 §6.5 | “Read Frog puts the provider's fetch in the content script” | ❌ (self-corrected) | Corrected at §6.7 L395; the whole of §6.5 carries a strike-through note |
 | L392 | “The Ollama listed in CLAUDE.md … formal translation (through content) is bound to fail” | ⚠️ | Historical state; fixed as §7 line 24 says (background); the sentence is not marked “fixed” |
 | L413 | “This table does not measure a cold start” **[待验证]** | ⚠️ unclosed | No follow-up measurement |
@@ -324,7 +324,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 
 | Location | Claim | Status | Evidence |
 |---|---|---|---|
-| L6 | “Status: draft, under discussion section by section”; §1 / §2 / §3 / §5 marked [议] | ❌ | The copy of §3, the tokens of §5 and the language of §6 are all implemented (`src/ui/strings.ts`, `src/styles/ui.css`, `src/locales/`); the [议] tags and “draft” no longer reflect the state |
+| L6 | “Status: draft, under discussion section by section”; §1 / §2 / §3 / §5 marked [议] | ❌ → corrected 2026-09-13 | The copy of §3, the tokens of §5 and the language of §6 are all implemented (`src/ui/strings.ts`, `src/styles/ui.css`, `src/locales/`); the [议] tags and “draft” no longer reflect the state |
 | L27 | “All three reference products use ‘翻译服务’” | ⚠️ | Cannot be verified |
 | L53 | Typography (#47) “decided, not done” | ✅ | No implementation |
 | L68 S-P-01 | The manifest `name` follows “Read arXiv” | ✅ | `wxt.config.ts:21` |
@@ -338,13 +338,13 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | L143–147 S-O-27 | The two-step guide, shared `HelperSetup.tsx`, automatic detection | ✅ | The file and `helper-await` exist |
 | L151 S-O-42 | Six built-in styles | ⚠️ | `appearance.ts` has three built-in highlights ✅ (柔和绿 / 淡黄 / 淡蓝); the six styles not checked one by one |
 | L159–160 S-O-50/51 | Steps: 半屏…三屏; 刚露出…完全露出 | ✅ | `Reading.tsx:98-109` |
-| L181 | The S-E mapping is used for S-O-28 | ❌ | §3.2 has no S-O-28 (the connection result is S-O-20) |
+| L181 | The S-E mapping is used for S-O-28 | ❌ → corrected 2026-09-13 | §3.2 has no S-O-28 (the connection result is S-O-20) |
 | L183–193 §3.4 | The nine `ProviderErrorKind`s → reader sentences | ✅ | `types.ts:98` nine kinds; `locales/zh-CN.ts:280` |
 | L197–220 §4 | P0–P15 | ⚠️ | `popup/fixtures.ts` has 17 `P<n>` references; not checked state by state |
 | L247–266 §5 | The tokens `--axt-accent #b31b1b / #d63c3c` etc. | ✅ | `ui.css:18,35,52`; the “[议]” tag is stale |
 | L268 | “Whether in-page components follow arXiv's own dark theme: [待验证]” | ⚠️ unclosed | DESIGN §7.7 L546 mentions that arXiv's `data-theme` is switched by the site and the panel colours are read from the page — a partial answer, UI.md not updated |
 | L290–327 §6 | The locale pack files, `pickLocale`, `uiLanguage` | ✅ | `src/locales/{zh-CN,en,index}.ts`, `ui/apply-locale.ts`, `public/_locales/` |
-| L329–339 §7, items that need DESIGN changed | (1) the default provider becomes `google-web` | ❌ | The code default is `microsoft` (`schema.ts:105`), and UI.md's own S-P-46 says Microsoft is the default; the item is stale |
+| L329–339 §7, items that need DESIGN changed | (1) the default provider becomes `google-web` | ❌ → corrected 2026-09-13 | The code default is `microsoft` (`schema.ts:105`), and UI.md's own S-P-46 says Microsoft is the default; the item is stale |
 | Same | (2) The language pack download entry in popup + settings page | ⚠️ | Both implemented; DESIGN §8.4 still says “only in the popup” |
 | Same | (3)(4) “测试连接” merged into “连接”, save on change | ⚠️ | Implemented (S-O-19); DESIGN §8.0 L565 and §9 still say “测试连接”, “saved on the settings page” |
 | Same | (5) The pre-translation parameters as steps | ⚠️ | Implemented; DESIGN §10 L757 still describes number boxes |
@@ -352,7 +352,7 @@ Addendum: the differences between the reminder's CLAUDE.md (an older copy) and H
 | Same | (7) The error mapping table next to `providers/types.ts` | ⚠️ | Actually placed in `locales/zh-CN.ts` (following the interface language, more sensible), not written back |
 | Same | (8) `nativeMessaging` made optional + S-O-86 | ⚠️ | Not done (at distribution) |
 | Same | (9) #47 typography into the schema | ⚠️ | Not done |
-| L345–371 §8 feature table | The id column disagrees with §3 across the board: `S-O-41…44` (styles), `S-O-45…46` (pre-translation), `S-O-50…58` (prompts), `S-O-60…61` (glossary), `S-O-71…74` (cache), `S-O-30` (thinking), `S-O-80…87` (images), `S-P-34 / P10` (configuration fallback), `S-P-48 / S-P-49` (free AI / Microsoft), `P12–P13` (images) | ❌ | After §3.2 was renumbered (S-O-40…49 styles, S-O-50/51 pre-translation, S-O-61/62 prompts and glossary, S-O-70…72 cache, S-O-24…27 images) §8 was not changed back; “three translation services” is now four built-in + the reader's services; the “loading ring” is a skeleton; the “translation style presets” are a configured list |
+| L345–371 §8 feature table | The id column disagrees with §3 across the board: `S-O-41…44` (styles), `S-O-45…46` (pre-translation), `S-O-50…58` (prompts), `S-O-60…61` (glossary), `S-O-71…74` (cache), `S-O-30` (thinking), `S-O-80…87` (images), `S-P-34 / P10` (configuration fallback), `S-P-48 / S-P-49` (free AI / Microsoft), `P12–P13` (images) | ❌ → corrected 2026-09-13 | After §3.2 was renumbered (S-O-40…49 styles, S-O-50/51 pre-translation, S-O-61/62 prompts and glossary, S-O-70…72 cache, S-O-24…27 images) §8 was not changed back; “three translation services” is now four built-in + the reader's services; the “loading ring” is a skeleton; the “translation style presets” are a configured list |
 | L373–382 §9 open items | Item 3 (the two buttons of P8), item 4 (native select or search list for the language row) | ⚠️ decided, not removed | §4 P9 settled the two buttons; S-P-22 settled the search menu |
 
 ### 2.7 THIRD_PARTY.md, docs/agents/*, docs/phase0/*, docs/superpowers/*
@@ -379,43 +379,43 @@ Two statements about the same thing. “What is actually the case” follows the
 
 | # | Location A | Location B | The two statements | What is actually the case |
 |---|---|---|---|---|
-| 1 | RESEARCH L101 (§2.9), L473–476 (§6.11 “§2.9 still holds for inline SVG”); DESIGN L152 (§5.2), L891 (§15.1) | DESIGN L1003 (§15.6) | A: SVG / TikZ figures hold no translatable text, v1 skips them whole; B: of the 954 `foreignObject`s in 170 inline figures 199 hold real words, connected to the image pipeline | B is the state: `svg/foreign.ts` exists, the comment at `latexml.ts:95` changed; the four A sites were not synchronised |
-| 2 | DESIGN L3 (the header “v0.6 moves provider requests to content”), L58 (the architecture diagram with `[cache?]` in content), L829 (Phase 3 “provider requests move to content”) | DESIGN L563–577 (§8.0), L81, L741 | A: requests and cache in content; B: all in the background | B (`shared/transport.ts` is only a message proxy; `background/index.ts` holds the chain and Dexie) |
-| 3 | DESIGN L710 (§8.4 “content calls `FallbackService.reset()`”) | DESIGN L734 (§8.5 “`FallbackService` has no `reset()`”); `fallback.ts:38` | Has / has no `reset()` | None; `axt:engine-ready` rebuilds the whole chain |
-| 4 | DESIGN L700 (§8.3 “google-web's rate pressed down to 2 requests/s, burst 2; **no batching** (only the LLM batches)”), L783 (§10 “only the LLM batches”) | DESIGN L682 (§8.3 “`maxConcurrent: 2`, `rate: 20 / capacity: 8`”), L665 (§8.2 “every provider gets a `BatchQueue`”) | Two sets of numbers, batching yes / no reversed | `google-web.ts:85-86` rate 20 / capacity 8 / maxConcurrent 2; `translate-service.ts:183-186` every provider batches |
-| 5 | DESIGN L920 (§15.2 “`wxt.config.ts` declares no minimum Chrome version”) | DESIGN L464 (§7.4b “this project's floor of 131”), L529 (§7.7 “`minimum_chrome_version` is 131”); `wxt.config.ts:31` | Whether there is a minimum version | There is, 131 |
-| 6 | DESIGN L640 (§8.1 built-in translation “Chrome 138+”), L911 (“the built-in translation API already requires 138+”); the old CLAUDE.md “browser target Chrome 138+” | `wxt.config.ts:31` 131; DESIGN L464 / L529 | 138 or 131 | The install floor is 131 (anchor positioning); on 131–137 built-in translation merely has `isAvailable()` false; the documents never put the two numbers together and explain them |
-| 7 | DESIGN L884 (§15 “with the helper undetected … the settings section is **no longer** greyed out whole”) | DESIGN L948 (§15.4 “undetected → the settings item greys out, image translation silently does not run”) | Greyed / not greyed | Not greyed: the install guide is shown (UI.md S-P-86, S-O-27, `HelperSetup.tsx`) |
-| 8 | DESIGN L648 (§8.1 “the negotiation of §8.5 is order-dependent; before #103 the primary has to decide the format”) | DESIGN L727–732 (§8.5 “the format is decided by the primary engine, order-independent”, 2026-09-09); the `providers/index.ts` comment | Order-dependent / independent | Order-independent already; L648 predates the change |
-| 9 | DESIGN L416 (§7.3 “stack the default layout”), L747 (§9 the v1 shape) | `config/schema.ts:110` `mode: 'side'`; UI.md L99 (S-P-70 “a fresh install defaults to side by side too”) | Default stack / side | side (the owner's decision of 2026-09-11) |
-| 10 | DESIGN L863 (§13 the Chinese GPL header template “移植自 …”) | CLAUDE.md L81 (the English “Ported from …”) | Two templates | All 26 files use the Chinese template; 0 the English one |
+| 1 | RESEARCH L101 (§2.9), L473–476 (§6.11 “§2.9 still holds for inline SVG”); DESIGN L152 (§5.2), L891 (§15.1) | DESIGN L1003 (§15.6) | A: SVG / TikZ figures hold no translatable text, v1 skips them whole; B: of the 954 `foreignObject`s in 170 inline figures 199 hold real words, connected to the image pipeline | B is the state: `svg/foreign.ts` exists, the comment at `latexml.ts:95` changed; the four A sites were not synchronised → corrected 2026-09-13 |
+| 2 | DESIGN L3 (the header “v0.6 moves provider requests to content”), L58 (the architecture diagram with `[cache?]` in content), L829 (Phase 3 “provider requests move to content”) | DESIGN L563–577 (§8.0), L81, L741 | A: requests and cache in content; B: all in the background | B (`shared/transport.ts` is only a message proxy; `background/index.ts` holds the chain and Dexie) → corrected 2026-09-13 |
+| 3 | DESIGN L710 (§8.4 “content calls `FallbackService.reset()`”) | DESIGN L734 (§8.5 “`FallbackService` has no `reset()`”); `fallback.ts:38` | Has / has no `reset()` | None; `axt:engine-ready` rebuilds the whole chain → corrected 2026-09-13 |
+| 4 | DESIGN L700 (§8.3 “google-web's rate pressed down to 2 requests/s, burst 2; **no batching** (only the LLM batches)”), L783 (§10 “only the LLM batches”) | DESIGN L682 (§8.3 “`maxConcurrent: 2`, `rate: 20 / capacity: 8`”), L665 (§8.2 “every provider gets a `BatchQueue`”) | Two sets of numbers, batching yes / no reversed | `google-web.ts:85-86` rate 20 / capacity 8 / maxConcurrent 2; `translate-service.ts:183-186` every provider batches → corrected 2026-09-13 |
+| 5 | DESIGN L920 (§15.2 “`wxt.config.ts` declares no minimum Chrome version”) | DESIGN L464 (§7.4b “this project's floor of 131”), L529 (§7.7 “`minimum_chrome_version` is 131”); `wxt.config.ts:31` | Whether there is a minimum version | There is, 131 → corrected 2026-09-13 |
+| 6 | DESIGN L640 (§8.1 built-in translation “Chrome 138+”), L911 (“the built-in translation API already requires 138+”); the old CLAUDE.md “browser target Chrome 138+” | `wxt.config.ts:31` 131; DESIGN L464 / L529 | 138 or 131 | The install floor is 131 (anchor positioning); on 131–137 built-in translation merely has `isAvailable()` false; the documents never put the two numbers together and explain them → corrected 2026-09-13 |
+| 7 | DESIGN L884 (§15 “with the helper undetected … the settings section is **no longer** greyed out whole”) | DESIGN L948 (§15.4 “undetected → the settings item greys out, image translation silently does not run”) | Greyed / not greyed | Not greyed: the install guide is shown (UI.md S-P-86, S-O-27, `HelperSetup.tsx`) → corrected 2026-09-13 |
+| 8 | DESIGN L648 (§8.1 “the negotiation of §8.5 is order-dependent; before #103 the primary has to decide the format”) | DESIGN L727–732 (§8.5 “the format is decided by the primary engine, order-independent”, 2026-09-09); the `providers/index.ts` comment | Order-dependent / independent | Order-independent already; L648 predates the change → corrected 2026-09-13 |
+| 9 | DESIGN L416 (§7.3 “stack the default layout”), L747 (§9 the v1 shape) | `config/schema.ts:110` `mode: 'side'`; UI.md L99 (S-P-70 “a fresh install defaults to side by side too”) | Default stack / side | side (the owner's decision of 2026-09-11) → corrected 2026-09-13 |
+| 10 | DESIGN L863 (§13 the Chinese GPL header template “移植自 …”) | CLAUDE.md L81 (the English “Ported from …”) | Two templates | All 26 files use the Chinese template; 0 the English one → corrected 2026-09-13 |
 | 11 | CLAUDE.md L16 (`@ai-sdk/anthropic` / `@ai-sdk/google`), L47 (`anthropic.ts gemini.ts`) | DESIGN L646 (§8.1 “not implemented for now”); `package.json` | These two providers exist / do not | They do not |
 | 12 | CLAUDE.md L67 (hard rule 3 `preservesMarkup`) | DESIGN L32, L43–44 (the `wireFormats` set, three paths); `providers/types.ts:66` | A boolean / a set | A set; `preservesMarkup` no longer exists |
 | 13 | CLAUDE.md L47, L68 (`google-gtx`) | DESIGN L17, L652 (gtx not connected, `google-web`) | gtx / translateHtml | translateHtml (`google-web.ts`) |
 | 14 | CLAUDE.md L15 (the injected overlay uses WXT `createShadowRootUi`) | DESIGN L833 (PR 2b “switched to a few dozen lines of native DOM + Shadow DOM”); `renderer/failed.ts` | Uses / does not use WXT's Shadow UI | Does not; native `attachShadow` |
 | 15 | CLAUDE.md L220 (“repository-root `CONTEXT.md` + `docs/adr/`”) | `docs/agents/domain.md` L11 (“skip silently if absent”); the file system | Exist / do not | Do not |
-| 16 | DESIGN L757 (§10 settings page “pre-translation distance (0–10000px, step 100)”, “visibility threshold (0–1)” number boxes) | UI.md L159–160 (S-O-50/51 steps 半屏…三屏 / 刚露出…完全露出); `Reading.tsx:98-109` | Number boxes / steps | Steps |
-| 17 | DESIGN L749 (§9 configuration fallback “a red warning hung at the top of the popup”) | UI.md L114 (S-P-34 removed), L125 (S-O-02 at the top of the settings page) | popup / settings page | The settings page |
-| 18 | DESIGN L710 (§8.4 “the download entry only in the popup”) | UI.md L128 (S-O-11 “下载” on the Chrome card of the settings page); `Services.tsx:31` | One place / two | Two |
-| 19 | DESIGN L565, L600 (“the settings page's connection test / 测试连接”) | UI.md L47, L136 (“连接” = save + verify, no save button) | Test connection + save / one “连接” | One “连接”, save on change |
-| 20 | DESIGN L637 (§8.1 openai-compat “OpenRouter (the default endpoint) … the default model is a cheap fast tier, changeable on the settings page”) | DESIGN L721 (§8.5 “no vendor templates, the reader fills in three fields”); UI.md S-O-16; `schema.ts:106` `services: []` | A default endpoint and model exist / do not | They do not; the `openrouter.ai` in `host_permissions` is a leftover |
-| 21 | UI.md L331 (§7 “§8.1 the default provider becomes `google-web`”) | UI.md L91 (S-P-46 “Microsoft is the shipped default”); `schema.ts:105` | google-web / microsoft | microsoft |
-| 22 | UI.md L114 (“Removed 2026-09-10: … S-P-34”) | UI.md L356 (§8 “configuration read failure notice … S-P-34, P10”) | Removed / still listed | Removed; the id column of §8 was not renumbered with §3 at all (see §2.6) |
-| 23 | DESIGN L604 (the provider id union of five literals) | DESIGN L642 (`microsoft`), L721 (the service id as the engine id); `types.ts:58` `id: string` | A closed / open id | Open |
-| 24 | DESIGN L740 (§9 the seven-part cache key, “`CACHE_KEY_VERSION` bumped to 3 … to 4 at the rename”); CLAUDE.md L70 | DESIGN L662 (§8.2 `promptKey` and the context in the key); `cache/key.ts:1,70` | Seven / nine parts; version 4 / 6 | Nine parts + `CACHE_KEY_VERSION = 6` (5: sentence markers in the key, 6: §8.6) |
-| 25 | DESIGN L747 (configuration up to v12) | UI.md L308 (“configuration v13 adds `uiLanguage`”); `schema.ts:9` | v12 / v13 | v13 |
-| 26 | DESIGN L531 (§7.7 sentence boundaries “reported only by Microsoft at present”) | DESIGN L555 (“Microsoft, and Google after #137”); `providers/sentence-markers.ts` | One engine / two + markers inserted by the service layer | The latter |
-| 27 | DESIGN L119, L802; RESEARCH L13 (“10 fixtures”) | DESIGN L158, L166 etc. (“12”); `tests/fixtures/arxiv/` | 10 / 12 | 12 + 1 synthetic |
+| 16 | DESIGN L757 (§10 settings page “pre-translation distance (0–10000px, step 100)”, “visibility threshold (0–1)” number boxes) | UI.md L159–160 (S-O-50/51 steps 半屏…三屏 / 刚露出…完全露出); `Reading.tsx:98-109` | Number boxes / steps | Steps → corrected 2026-09-13 |
+| 17 | DESIGN L749 (§9 configuration fallback “a red warning hung at the top of the popup”) | UI.md L114 (S-P-34 removed), L125 (S-O-02 at the top of the settings page) | popup / settings page | The settings page → corrected 2026-09-13 |
+| 18 | DESIGN L710 (§8.4 “the download entry only in the popup”) | UI.md L128 (S-O-11 “下载” on the Chrome card of the settings page); `Services.tsx:31` | One place / two | Two → corrected 2026-09-13 |
+| 19 | DESIGN L565, L600 (“the settings page's connection test / 测试连接”) | UI.md L47, L136 (“连接” = save + verify, no save button) | Test connection + save / one “连接” | One “连接”, save on change → corrected 2026-09-13 |
+| 20 | DESIGN L637 (§8.1 openai-compat “OpenRouter (the default endpoint) … the default model is a cheap fast tier, changeable on the settings page”) | DESIGN L721 (§8.5 “no vendor templates, the reader fills in three fields”); UI.md S-O-16; `schema.ts:106` `services: []` | A default endpoint and model exist / do not | They do not; the `openrouter.ai` in `host_permissions` is a leftover → corrected 2026-09-13 |
+| 21 | UI.md L331 (§7 “§8.1 the default provider becomes `google-web`”) | UI.md L91 (S-P-46 “Microsoft is the shipped default”); `schema.ts:105` | google-web / microsoft | microsoft → corrected 2026-09-13 |
+| 22 | UI.md L114 (“Removed 2026-09-10: … S-P-34”) | UI.md L356 (§8 “configuration read failure notice … S-P-34, P10”) | Removed / still listed | Removed; the id column of §8 was not renumbered with §3 at all (see §2.6) → corrected 2026-09-13 |
+| 23 | DESIGN L604 (the provider id union of five literals) | DESIGN L642 (`microsoft`), L721 (the service id as the engine id); `types.ts:58` `id: string` | A closed / open id | Open → corrected 2026-09-13 |
+| 24 | DESIGN L740 (§9 the seven-part cache key, “`CACHE_KEY_VERSION` bumped to 3 … to 4 at the rename”); CLAUDE.md L70 | DESIGN L662 (§8.2 `promptKey` and the context in the key); `cache/key.ts:1,70` | Seven / nine parts; version 4 / 6 | Nine parts + `CACHE_KEY_VERSION = 6` (5: sentence markers in the key, 6: §8.6) → corrected 2026-09-13 |
+| 25 | DESIGN L747 (configuration up to v12) | UI.md L308 (“configuration v13 adds `uiLanguage`”); `schema.ts:9` | v12 / v13 | v13 → corrected 2026-09-13 |
+| 26 | DESIGN L531 (§7.7 sentence boundaries “reported only by Microsoft at present”) | DESIGN L555 (“Microsoft, and Google after #137”); `providers/sentence-markers.ts` | One engine / two + markers inserted by the service layer | The latter → corrected 2026-09-13 |
+| 27 | DESIGN L119, L802; RESEARCH L13 (“10 fixtures”) | DESIGN L158, L166 etc. (“12”); `tests/fixtures/arxiv/` | 10 / 12 | 12 + 1 synthetic → corrected 2026-09-13 |
 | 28 | RESEARCH L280 (“gtx declares `preservesMarkup: true`; translateHtml not worth a provider of its own”), L756 (§7 line 16) | RESEARCH L360 (§6.6), L762 (line 23); DESIGN L652 | Use gtx / use translateHtml | translateHtml |
-| 29 | RESEARCH L160 (§3.2 “side only needs `--main-width` overridden”), L752 (line 12) | DESIGN L407 (“overriding `--main-width` alone without touching the tracks overflows horizontally”) | One variable / rewrite the body grid with three tokens | The latter |
-| 30 | RESEARCH L616–630 (§6.11 “v1 draws only multiples of 90°, `quarterTurn`”) | DESIGN L986 (§15.5 “every run is drawn, along its own axis”, 2026-09-11) | Drop / draw | Draw; `quarterTurn` no longer exists |
+| 29 | RESEARCH L160 (§3.2 “side only needs `--main-width` overridden”), L752 (line 12) | DESIGN L407 (“overriding `--main-width` alone without touching the tracks overflows horizontally”) | One variable / rewrite the body grid with three tokens | The latter → corrected 2026-09-13 |
+| 30 | RESEARCH L616–630 (§6.11 “v1 draws only multiples of 90°, `quarterTurn`”) | DESIGN L986 (§15.5 “every run is drawn, along its own axis”, 2026-09-11) | Drop / draw | Draw; `quarterTurn` no longer exists → corrected 2026-09-13 |
 | 31 | CLAUDE.md L199 (`fixtures:stats` “to be created”) | RESEARCH L6, L25 (the script is in use) | To be created / exists | Exists |
-| 32 | DESIGN L143–147 (§5.2 lists `math` / `.ltx_tag` / `.ltx_font_typewriter` as skipped) | DESIGN L224 (§5.6 “`math` appears only in PROTECT”), L239 (§6.1 void); `latexml.ts:133-137` | skip / protect | protect |
-| 33 | DESIGN L703 (§8.3 the “instant engine” written as a settled convention, “the user can turn it off in settings”) | DESIGN L699, L722 (the chain falls back only on failure); RESEARCH L758 (line 21 is only a suggestion, “whether to adopt depends on the trade-off”); `fallback.ts` | Built-in first then LLM replaces / a pure fallback chain | A pure fallback chain; no switch |
-| 34 | DESIGN L539 (§7.7 “`styleVarsRule` rewrites `--axt-green` from `config.style.accent`”), L489–493 (the §7.5 v9 passage) | DESIGN L481 (§7.5 “`data-axt-style` and `--axt-accent` retired … `appearanceRule()`”); `style-preset.ts` | v9's `style` / v12's `appearance` | v12 |
-| 35 | DESIGN L302 (§7.1 “the original node may only gain `data-axt-id` / `state` / `inline`”) | DESIGN L187 (`data-axt-partial`), L325 (`data-axt-note`), L432 (`data-axt-identity`); the attribute count | Three / six or more | Six or more (all with the `data-axt-` prefix; the spirit holds, the list is void) |
-| 36 | DESIGN L208 (§5.4 the year “wrapped in its own paired placeholder”) | `latexml.ts:153-158` (`bib-year` as a void, Codex #74) | paired / void | void; the §6.1 list does not register it |
-| 37 | 18 code sites citing “§8.6” (`cache/key.ts:49,65`, `types.ts:11,82`, `translate-service.ts` ×7, `microsoft.ts:175`, `latexml.ts:283`, `pipeline/sentences.ts`, `run.ts:172`, two tests) | DESIGN's heading list: §8 has only 8.0–8.5 | §8.6 exists / does not | **DESIGN has no §8.6**; the design of sentence alignment / sentence markers lives only in code comments |
+| 32 | DESIGN L143–147 (§5.2 lists `math` / `.ltx_tag` / `.ltx_font_typewriter` as skipped) | DESIGN L224 (§5.6 “`math` appears only in PROTECT”), L239 (§6.1 void); `latexml.ts:133-137` | skip / protect | protect → corrected 2026-09-13 |
+| 33 | DESIGN L703 (§8.3 the “instant engine” written as a settled convention, “the user can turn it off in settings”) | DESIGN L699, L722 (the chain falls back only on failure); RESEARCH L758 (line 21 is only a suggestion, “whether to adopt depends on the trade-off”); `fallback.ts` | Built-in first then LLM replaces / a pure fallback chain | A pure fallback chain; no switch → corrected 2026-09-13 |
+| 34 | DESIGN L539 (§7.7 “`styleVarsRule` rewrites `--axt-green` from `config.style.accent`”), L489–493 (the §7.5 v9 passage) | DESIGN L481 (§7.5 “`data-axt-style` and `--axt-accent` retired … `appearanceRule()`”); `style-preset.ts` | v9's `style` / v12's `appearance` | v12 → corrected 2026-09-13 |
+| 35 | DESIGN L302 (§7.1 “the original node may only gain `data-axt-id` / `state` / `inline`”) | DESIGN L187 (`data-axt-partial`), L325 (`data-axt-note`), L432 (`data-axt-identity`); the attribute count | Three / six or more | Six or more (all with the `data-axt-` prefix; the spirit holds, the list is void) → corrected 2026-09-13 |
+| 36 | DESIGN L208 (§5.4 the year “wrapped in its own paired placeholder”) | `latexml.ts:153-158` (`bib-year` as a void, Codex #74) | paired / void | void; the §6.1 list does not register it → corrected 2026-09-13 |
+| 37 | 18 code sites citing “§8.6” (`cache/key.ts:49,65`, `types.ts:11,82`, `translate-service.ts` ×7, `microsoft.ts:175`, `latexml.ts:283`, `pipeline/sentences.ts`, `run.ts:172`, two tests) | DESIGN's heading list: §8 has only 8.0–8.5 | §8.6 exists / does not | **DESIGN has no §8.6**; the design of sentence alignment / sentence markers lives only in code comments → corrected 2026-09-13 |
 
 <!-- section 3 done -->
 
