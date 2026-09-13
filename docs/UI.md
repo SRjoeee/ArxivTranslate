@@ -5,11 +5,11 @@
 The single basis for the interface implementation. The design canvas (`docs/design/canvas/`) is reference only; where the two conflict this document wins, and a change starts here.
 Numbering: `P` popup states, `O` the options page, `I` in-page components; copy ids are `S-<surface>-<number>`. Cite the ids directly in feedback.
 
-Status: **draft, discussed section by section**. Settled sections are marked [decided], open ones [open].
+Status: **implemented** — the copy of §3, the tokens of §5 and the language of §6 are in `src/ui/strings.ts`, `src/locales/` and `src/styles/ui.css`; the [open] marks of §1, §2, §3 and §5 dated from the drafting and were changed to [implemented] on 2026-09-13. Settled sections are marked [decided].
 
 ---
 
-## 1. Tone rules [open]
+## 1. Tone rules [implemented; marked 2026-09-13]
 
 1. **Speak to the user, not about the system's insides.** No provider, engine chain, fallback, block, session, background, fixture and the like; every internal concept takes the user word of §2.
 2. **Buttons are verb phrases, 3–5 characters.** 翻译本页, 显示原文, 重试, 连接, 下载, 清空. Never “确定” or “OK”, words that say nothing about the consequence.
@@ -22,7 +22,7 @@ Status: **draft, discussed section by section**. Settled sections are marked [de
 9. **A space between Chinese and Latin text**; product names, model names and “API Key” keep their original casing.
 10. **Full-width punctuation**; the ellipsis is the single character “…”, the separator “·”.
 
-## 2. Terminology [open]
+## 2. Terminology [implemented; marked 2026-09-13]
 
 | Internal word (code / DESIGN.md) | What the user sees | Notes |
 |---|---|---|
@@ -58,7 +58,7 @@ Status: **draft, discussed section by section**. Settled sections are marked [de
 | `microsoft` (#98, implemented) | **Microsoft 翻译** | Free; chosen by hand only, never in the automatic fallback list (DESIGN §8.5). Links and formulas survive; what is lost is inline styling such as italics (a leading label is restored, #150) |
 | `reading.sentenceHighlight` (#105 / #141) | **对照高亮** | The sentence under the pointer lights up; in translation-only mode, dwelling brings the original up |
 
-## 3. Copy tables [open]
+## 3. Copy tables [implemented; marked 2026-09-13]
 
 ### 3.1 Popup
 
@@ -186,7 +186,7 @@ changes, and the two drawers commit with one button.
 
 ### 3.4 Error reasons (S-E)
 
-`ProviderErrorKind` → the user sentence. Used by S-P-30/33, S-O-28, S-I-02.
+`ProviderErrorKind` → the user sentence. Used by S-P-30/33, S-O-20, S-I-02 (corrected 2026-09-13: the connection result is S-O-20; there is no S-O-28).
 
 | kind | User sentence | What the user can do |
 |---|---|---|
@@ -252,7 +252,7 @@ Rules:
 - Dev-only information (background version, block stats, raw `fatal` text) lives only in the
   dev-build gallery.
 
-## 5. Tokens [open]
+## 5. Tokens [implemented; marked 2026-09-13]
 
 Names and the two value sets first; Tailwind v4 `@theme` and the in-page Shadow DOM share one set of CSS variables, prefixed `--axt-`.
 
@@ -338,7 +338,9 @@ a paper reader can mostly get by in English for a while. So adding a language ha
 
 ## 7. Entries DESIGN.md needs to change
 
-- §8.1 the default provider becomes `google-web` (usable on first open)
+> 2026-09-13: items (2), (3) and (5) below are now reflected in DESIGN §8.4, §8.0 and §10 (corrections dated the same day); item (1) is stale — the shipped default is Microsoft (S-P-46, `DEFAULT_CONFIG.provider`); the rest stand as listed.
+
+- ~~§8.1 the default provider becomes `google-web` (usable on first open)~~ — stale, the default is Microsoft
 - §8.4 language pack download entry: the popup's service list + the options page's service card, both click gestures
 - §9 “测试连接” folds into “连接”: `setConfig` first, then a one-sentence test translation naming the current provider; what is tested is the form's values
 - §9 configuration writes: every control but the AI model form saves as it changes; the global save goes
@@ -356,37 +358,37 @@ Every feature added on the main line is registered here first; a feature without
 |---|---|---|---|---|
 | Whole-page translation / show original | §10 | done | popup primary button; context menu (#146); shortcut Alt+T (the same toggle) | S-P-50…53, P1–P9 |
 | The three comparison modes | §7 | done | popup mode bar; no in-page control | S-P-70…74 |
-| Three translation services + fallback chain | §8 | done | popup service card / Settings · 翻译服务 | S-P-10…46, S-O-10…31 |
+| Translation services (four built-in, the reader's own) + fallback chain | §8 | done | popup service card / Settings · 翻译服务 | S-P-10…46, S-O-10…23 (ids reconciled with §3 on 2026-09-13) |
 | Offline language pack download | §8.4 | done | popup service list + settings service card | S-P-40…43 |
-| Prompt library (built-in / custom / import and export) | §8.2 | done | Settings · 提示词与术语; popup sub-row | S-O-50…58, S-P-47 |
-| Glossary | §8.2 | done | Settings · 提示词与术语 | S-O-60…61 |
-| Translation style presets + custom CSS | §7.5 | done | Settings · 阅读 | S-O-41…44 |
-| Preload range / timing | §10 | done | Settings · 阅读 | S-O-45…46 |
-| Cache statistics / clear | §9 | done | Settings · 数据 | S-O-71…74 |
-| Config read-failure notice | §9 | done | popup card note | S-P-34, P10 |
+| Prompt library (built-in / custom / import and export) | §8.2 | done | Settings · 提示词与术语; popup sub-row | S-O-60…61, S-P-47 |
+| Glossary | §8.2 | done | Settings · 提示词与术语 | S-O-62…63 |
+| Translation styles (a configured list since v12) + custom CSS | §7.5 | done | Settings · 阅读 | S-O-40…48 |
+| Preload range / timing | §10 | done | Settings · 阅读 | S-O-50…51 |
+| Cache statistics / clear | §9 | done | Settings · 数据 | S-O-70…72 |
+| Config read-failure notice | §9 | done | top of the settings page (the popup's S-P-34 removed 2026-09-10) | S-O-02 |
 | Thinking switch | §8.2 | done | Settings · 更多选项 | S-O-30 |
-| Loading ring / failed block retry | §7.6 | done | in page | S-I-01…02 |
-| **Image translation**: helper detection, multi-select modes, progress, pause, retry | §15, PR #87–89 | done | Settings · a section under 翻译服务; popup failure line and card note; in-page overlay | S-O-80…87, S-P-35 / 60, S-I-04, P12–P13 |
+| Skeleton while loading / failed block retry | §7.6 | done | in page | S-I-01…02 |
+| **Image translation**: helper detection, multi-select modes, progress, pause, retry | §15, PR #87–89 | done | Settings · a section under 翻译服务; popup failure line and card note; in-page overlay | S-O-24…27d, S-P-35 / 60, S-I-04, P11, P14…P14b |
 | Helper permission button | §15.4, ADR-0002 | done [2026-09-13] | popup card; Settings · 图片翻译 | S-O-86…86b, S-P-86b…d |
-| **Reading typography** (font size / line height / width / spacing / colour / presets / reset) | #47 | decided, not built | Settings · 阅读 · typography card | S-O-47 |
-| Split-view dragging | #83 | experimental | in-page handle; one “恢复居中” in settings | S-I-05, S-O-48 |
-| Free AI translation (hosted) | #97 | candidate | fourth item of the service list | S-P-48, S-O-15 |
-| Microsoft translation | #98 | done | fourth item of the service list | S-P-49, S-O-16 |
+| **Reading typography** (font size / line height / width / spacing / colour / presets / reset) | #47 | decided, not built | Settings · 阅读 · typography card | — (no id yet; S-O-47 names the advanced CSS box since the renumbering) |
+| Split-view dragging | #83 | experimental | in-page handle; one “恢复居中” in settings | S-I-05 (the settings entry has no id yet) |
+| Free AI translation (hosted) | #97 | candidate | fourth item of the service list | — (no ids yet) |
+| Microsoft translation | #98 | done | the service list (the shipped default) | S-P-32c / 44 / 46, S-O-10 |
 | Hover highlight (sentence highlight on hover + the original floating up in translation-only mode) | #105 / #141 | done | popup card switch; Settings · 阅读 | S-P-80…81 |
-| Image translation switch + helper install hint | §15 | done (2026-09-10) | popup card switch and helper hint; Settings · 图片翻译 | S-P-85…89, S-O-24…26 |
-| Translation services the reader adds | §8.5 | done (2026-09-10, config v12) | Settings · 翻译服务; popup service menu | S-O-12…22, S-P-46/48 |
+| Image translation switch + helper install hint | §15 | done (2026-09-10) | popup card switch and helper hint; Settings · 图片翻译 | S-P-85…88, S-O-24…27d |
+| Translation services the reader adds | §8.5 | done (2026-09-10, config v12) | Settings · 翻译服务; popup service menu | S-O-12…22, S-P-45 / 46 |
 | Configuration lists for translation appearance and background highlight | §7.5 | done (2026-09-10, config v12) | Settings · 阅读 | S-O-40…49 |
 | In-page “switched” notice | proposed here | undecided | in page | S-I-03 |
 | Reading toolbar | canvas proposal | undecided | in page | — |
-| Background connectivity / block statistics | existing popup | dev only | only in the dev-build gallery page | — |
+| Background connectivity / block statistics | existing popup | removed | nowhere — the gallery never showed them, and `axt:ping` / `axt:stats` had no sender (noted 2026-09-13; pruned with INVENTORY §4.4) | — |
 
 ## 9. Open for discussion
 
 1. ~~The product name.~~ [decided] Display name **Read arXiv** (named 2026-09-10, changed to two words on 09-11, upheld on the 09-12 re-check); the repository and the domain use the unspaced `ReadarXiv` / readarxiv.org. Three places name one product; changing one does not change another.
 2. The name “AI 模型” vs “AI 翻译”.
-3. P8 paused: primary button “重新翻译” + secondary “显示原文”, or one only?
-4. Whether the language row opens a native `<select>` (first-letter jump) or a searchable list — measure the native one inside the popup first.
+3. ~~P8 paused: primary button “重新翻译” + secondary “显示原文”, or one only?~~ [decided] Both: S-P-52 and S-P-53 shipped (marked 2026-09-13).
+4. ~~Whether the language row opens a native `<select>` (first-letter jump) or a searchable list — measure the native one inside the popup first.~~ [decided] A searchable list: S-P-22 / S-P-23 shipped (marked 2026-09-13).
 5. Whether to build the in-page “switched” notice; without it the user only learns the translation quality changed by opening the popup.
-6. The name “识别助手”.
+6. ~~The name “识别助手”.~~ [decided] Kept; it is the name throughout the shipped copy (marked 2026-09-13).
 7. The field range and preset names of the typography card (#47); re-check against the issue's acceptance items before implementing.
 8. Whether to bundle Manrope (about 60 KB woff2, Latin glyphs only); currently the system font stack.
