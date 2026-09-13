@@ -50,15 +50,6 @@ export function renderPending(block: Block): Element {
   return node
 }
 
-/** Remove a block's pending node (on failure / stop); an arriving translation goes through renderText and does not call this */
-export function clearPending(block: Block): boolean {
-  const node = pendingOf(block)
-  if (!node) return false
-  cancelSkeletonsIn(node)
-  node.remove()
-  return true
-}
-
 /** Stop the session: every pending node on the page removed at once; returns how many */
 export function clearAllPending(doc: Document): number {
   const nodes = Array.from(doc.querySelectorAll(`.${PENDING_CLASS}`))

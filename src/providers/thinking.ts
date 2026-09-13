@@ -20,9 +20,6 @@ const ADAPTERS: Record<string, Adapter> = {
   'api.siliconflow.cn': booleanFlag,
 }
 
-/** The registered endpoint domains, for the settings page's hint */
-export const THINKING_HOSTS: readonly string[] = Object.keys(ADAPTERS)
-
 /** An unregistered endpoint (OpenAI, Ollama, local) gets no field at all, so an unknown parameter cannot be refused */
 export function thinkingBodyFields(baseURL: string, mode: ThinkingMode): Record<string, unknown> {
   let host: string
