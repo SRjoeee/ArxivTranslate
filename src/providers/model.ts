@@ -1,5 +1,5 @@
-// AI SDK 模型工厂。v1 只有 openai-compatible 一条线（OpenRouter / DeepSeek / Ollama 共用）；
-// Read Frog 的 providers/model.ts 覆盖 20 家，拆改比自写 20 行费事，未移植。
+// The AI SDK model factory. v1 has the one openai-compatible line (OpenRouter / DeepSeek / Ollama shared); Read Frog's
+// providers/model.ts covers 20 vendors, and adapting it was more work than writing 20 lines, so it was not ported.
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import type { LanguageModel } from 'ai'
 import type { ThinkingMode } from './thinking'
@@ -12,13 +12,13 @@ export interface OpenAICompatConfig {
   baseURL: string
   apiKey: string
   model: string
-  /** 默认 disabled，见 thinking.ts */
+  /** disabled by default, see thinking.ts */
   thinking?: ThinkingMode
 }
 
 export function createModel(config: OpenAICompatConfig): LanguageModel {
-  // supportsStructuredOutputs：把 zod schema 以 response_format: json_schema 发给端点（OpenRouter 上 DeepSeek / Gemini / GPT 系列均支持）；
-  // 不支持的模型靠 prompt 里写死的输出形状兜底
+  // supportsStructuredOutputs: the zod schema goes to the endpoint as response_format: json_schema (DeepSeek / Gemini /
+  // GPT models on OpenRouter all support it); a model that does not falls back to the output shape spelled out in the prompt
   const provider = createOpenAICompatible({ name: 'openai-compat', baseURL: config.baseURL, apiKey: config.apiKey, supportsStructuredOutputs: true })
   return provider(config.model)
 }

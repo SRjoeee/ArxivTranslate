@@ -1,17 +1,17 @@
-// 术语表的文本形式与结构形式互转（DESIGN §8.2）。
-// 形状照 KISS 的 parseAITerms（reference/kiss-translator/src/libs/utils.js@c95bd46）：一行一条、逗号分隔，
-// 这里加上制表符（方便从表格粘贴）、注释行与行号级的错误报告——论文术语通常是整段粘进来的，
-// 静默丢掉写错的那一行会让用户以为术语生效了。
+// The glossary's text form and its structured form, both ways (DESIGN §8.2).
+// The shape follows KISS's parseAITerms (reference/kiss-translator/src/libs/utils.js@c95bd46): one entry per line,
+// comma-separated; added here: tabs (for pasting from a table), comment lines and per-line issue reports — a
+// paper's terms are usually pasted in as a whole, and silently dropping a miswritten line would leave the reader believing the term took effect.
 export interface GlossaryEntry {
   term: string
   translation: string
 }
 
 export interface GlossaryIssue {
-  /** 从 1 开始，对应用户在文本框里看到的行号 */
+  /** From 1, the line number the reader sees in the text box */
   line: number
   text: string
-  /** 是哪一种问题；句子在语言包里，这一层不认识界面语言（Codex 在 #161 指出同类问题） */
+  /** Which kind of issue; the sentences live in the locale pack, and this layer knows no interface language (Codex on #161 for the same class of problem) */
   reason: 'noSeparator' | 'emptySource' | 'emptyTarget'
 }
 
@@ -20,20 +20,20 @@ export interface ParsedGlossary {
   issues: GlossaryIssue[]
 }
 
-/** 一行里第一个逗号（半角或全角）或制表符作分隔：译文本身可能含逗号，只切一次 */
+/** The first comma (ASCII or full-width) or tab in a line separates: the translation may itself hold commas, so one cut only */
 const SEPARATOR = /[,，\t]/
 
 /**
- * 解析术语表文本。空行与 `#` 开头的注释行跳过；
- * 同一 term 后面出现的覆盖前面的，但保持**首次出现**的顺序，改一条译法不会让它跳到表尾
+ * Parse glossary text. Blank lines and lines starting with `#` are skipped; a later entry of the same term overrides
+ * the earlier while keeping the order of **first appearance**, so changing one translation does not move it to the end
  */
 export function parseGlossary(text: string): ParsedGlossary {
   const entries: GlossaryEntry[] = []
   const issues: GlossaryIssue[] = []
   const index = new Map<string, number>()
 
-  // 一行一条。**分号不作分隔符**：译文里出现分号是正常的（`kernel, 核; 统计学中称核函数`），
-  // 当成记录分隔会把它悄悄拆成两条不相干的映射（Codex 在 #52 指出）。DESIGN §8.2 写的也是按行分隔
+  // One entry per line. **The semicolon is no separator**: a semicolon inside a translation is normal (`kernel, 核;
+  // 统计学中称核函数`), and as a record separator it would quietly split it into two unrelated mappings (Codex on #52). DESIGN §8.2 says per line too
   const lines = text.split('\n')
   let lineNumber = 0
   for (const rawLine of lines) {
@@ -66,49 +66,50 @@ export function parseGlossary(text: string): ParsedGlossary {
   return { entries, issues }
 }
 
-/** 回写成文本框里的形式，一行一条 */
+/** Written back into the text box's form, one entry per line */
 export function formatGlossaryText(entries: readonly GlossaryEntry[]): string {
   return entries.map(entry => `${entry.term}, ${entry.translation}`).join('\n')
 }
 
 /**
- * 只把**这一段真的用到的**术语发出去（DESIGN §8.2，2026-09-11）。
+ * Only the terms **this passage really uses** are sent (DESIGN §8.2, 2026-09-11).
  *
- * 以前每一批都带上整张表：50 条术语约 300 token，而一批正文也就 1000 字上下——请求可能因此
- * 翻倍，模型的注意力被一堆与本段无关的词分走，缓存键里也带着整张表（改一条术语，全站缓存作废）。
- * 匹配之后：请求只带相关的几条，缓存键只在**用到的**术语变化时才变。
+ * Every batch used to carry the whole table: 50 terms are about 300 tokens against a batch of about 1000 characters
+ * of text — the request could double, the model's attention went to a heap of words unrelated to the passage, and
+ * the cache key carried the whole table (one term changed, the whole site's cache void). Matched: a request carries
+ * the few relevant terms, and the cache key changes only when a term **in use** changes.
  *
- * 匹配的坑逐条对着 Read Frog 的 `utils/glossary/matcher.ts` 抄了教训（他们为此发过两次修复），
- * 但没有抄它的实现：他们要在 2 万条术语上跑，用的是一条编译好的巨型交替式加索引；
- * 我们的量级是一位读者为一篇论文列的几十条，逐条扫足够，代码少一个数量级、也就少一类错。
+ * The pitfalls of matching were taken lesson by lesson from Read Frog's `utils/glossary/matcher.ts` (they shipped two
+ * fixes for them), but not its implementation: they run over 20 000 terms with one compiled giant alternation plus
+ * an index; our scale is the few dozen terms one reader lists for one paper, a term-by-term scan is enough, and an
+ * order of magnitude less code is one class of bug fewer.
  *
- * 抄过来的教训：
- * - **术语里的空白要当成"任意空白"**：用户敲的是 `neural network` 一个空格，页面上可能是两个空格、
- *   软换行、不换行空格（HTML 里到处都是）。编译成 `\s+` 才匹配得上
- * - **两边都先 NFC**：`café` 有一码点与两码点两种写法，看着一样、比起来不等
- * - **词边界要按文字系统给**：`net` 不该命中 `network`，但汉字之间本来就没有空格，
- *   对汉字要求边界等于永远匹配不上
- * - **顺序按术语表，不按出现位置**：同一组术语在不同段落里要渲染成同一段提示词，
- *   否则缓存键会按出现顺序碎掉
+ * The lessons taken:
+ * - **Whitespace inside a term means “any whitespace”**: the reader typed `neural network` with one space; the page
+ *   may have two, a soft line break, a no-break space (all over HTML). Compiled to `\s+` it matches
+ * - **NFC on both sides first**: `café` has a one-code-point and a two-code-point spelling, alike to the eye, unequal compared
+ * - **Word boundaries by script**: `net` must not hit `network`, but there are no spaces between Chinese characters
+ *   anyway, and demanding a boundary for them means never matching
+ * - **Order by the glossary, not by position**: the same set of terms in different passages has to render as the same prompt, or the cache key fragments by order of appearance
  */
 export interface GlossaryMatcher {
-  /** 这段文字用到的术语，按术语表里的顺序 */
+  /** The terms this text uses, in the glossary's order */
   match(text: string): GlossaryEntry[]
   size: number
 }
 
 /**
- * 不用空格分词的文字：这一侧不要求词边界。汉字、日文假名、泰文之外，目标语言表里还有
- * 高棉语（khm）、老挝语（lao）、缅甸语（mya）、藏语（bod）也是连写的——少了它们，
- * 这几种语言的术语夹在正文里永远匹配不上（Codex 在 #163 指出）
+ * Scripts written without word spaces: no word boundary is demanded on that side. Beyond Chinese characters, kana
+ * and Thai, the target-language table also has Khmer (khm), Lao (lao), Burmese (mya) and Tibetan (bod), written
+ * unspaced too — without them a term of those languages inside body text would never match (Codex on #163)
  */
 const SCRIPTS_WITHOUT_SPACES = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Khmer}\p{Script=Lao}\p{Script=Myanmar}\p{Script=Tibetan}]/u
-/** 算作"词内部"的字符：两个词字符挨在一起就不是边界 */
+/** Characters that count as “inside a word”: two word characters side by side are no boundary */
 const WORD_CHAR = /[\p{L}\p{N}_]/u
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-/** 这一侧要不要求词边界：术语的边缘字符是词字符、且不是连写的文字，才要求 */
+/** Whether a boundary is demanded on this side: only when the term's edge character is a word character of a script with word spaces */
 const needsBoundary = (edge: string | undefined): boolean =>
   edge !== undefined && WORD_CHAR.test(edge) && !SCRIPTS_WITHOUT_SPACES.test(edge)
 
@@ -118,7 +119,7 @@ export function createGlossaryMatcher(entries: readonly GlossaryEntry[]): Glossa
     .filter(({ source }) => source !== '')
     .map(({ entry, source }) => ({
       entry,
-      // 术语内部的空白 → `\s+`；`g` 是为了逐个命中位置检查边界
+      // Whitespace inside the term → `\s+`; `g` so every hit's position is boundary-checked
       pattern: new RegExp(source.split(' ').map(escapeRegExp).join('\\s+'), 'giu'),
       left: needsBoundary(source[0]),
       right: needsBoundary(source[source.length - 1]),
@@ -136,12 +137,12 @@ export function createGlossaryMatcher(entries: readonly GlossaryEntry[]): Glossa
         while (hit !== null) {
           const before = text[hit.index - 1]
           const after = text[hit.index + hit[0].length]
-          // 边界只按术语自己的两端要求：`net` 不进 `network`，而 `C++`、`(a)` 这种以符号收尾的照常命中
+          // Boundaries are demanded by the term's own ends only: `net` does not enter `network`, while `C++`, `(a)` and the like ending in symbols match as usual
           if ((!left || before === undefined || !WORD_CHAR.test(before)) && (!right || after === undefined || !WORD_CHAR.test(after))) {
             out.push(entry)
             break
           }
-          // 命中但边界不对：从下一个字符继续找，别把后面真正的那一处漏掉
+          // A hit with the wrong boundary: continue from the next character, not to miss the real one further on
           pattern.lastIndex = hit.index + 1
           hit = pattern.exec(text)
         }

@@ -1,18 +1,18 @@
-// HTTP 状态 → ProviderError 分类。google-web 与 microsoft 共用：两个免费端点都要这套判断，
-// 而它带着一段不能重新推导的推理（见下），只该有一处。
+// HTTP status → ProviderError kind. Shared by google-web and microsoft: both free endpoints need this judgement, and
+// it carries a piece of reasoning that cannot be re-derived (below), so it lives in one place.
 
 import type { ProviderErrorKind } from './types'
 
 /**
- * **不能把 4xx 一律归成 `network`**（Codex 在 #17 指出）：retry-policy 的
- * `isRetryableRequestErrorMeta` 会**先看 kind 再看状态码**，`network` 直接判定可重试，
- * 于是一个永远不会成功的 400 会被重试满 3 次、再被 BatchQueue 对半拆分逐条重来——
- * 100 段的一批能放大成几十次无用请求。只有 5xx 与连接层失败才是瞬时的。
+ * **4xx must not be classified `network` across the board** (Codex on #17): retry-policy's
+ * `isRetryableRequestErrorMeta` **reads the kind before the status code**, `network` is retryable outright, and a
+ * 400 that can never succeed would be retried the full 3 times and then halved and redone item by item by
+ * BatchQueue — a batch of 100 segments amplified into dozens of useless requests. Only 5xx and connection-level failures are transient.
  */
 export function kindOfStatus(status: number): ProviderErrorKind {
   if (status === 429) return 'rate-limit'
   if (status === 401 || status === 403) return 'auth'
-  // 408 超时、409 冲突照 retry-policy 的状态码表算瞬时，交给它按状态码判定
+  // 408 timeout and 409 conflict count as transient by retry-policy's status table; left to it by status code
   if (status >= 400 && status < 500 && status !== 408 && status !== 409) return 'bad-request'
   return 'network'
 }

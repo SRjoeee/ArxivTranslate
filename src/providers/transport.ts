@@ -1,8 +1,9 @@
-// 翻译请求的执行位置抽象（DESIGN §8.0）。同一个接口两种实现，页面翻译与设置页的连接测试共用一条路径，
-// 不可能再出现「测试通过、翻译失败」（issue #42）：
-// - createLocalTransport（本文件）：在 background 里建链、排队、发请求；
-// - createMessageTransport（src/shared/transport.ts）：在 content / options 里把每个方法变成一条消息。
-// 两个实现分文件是为了包体积：本文件会拉进三个 provider 与 AI SDK，content script 每打开一篇论文都要解析它。
+// The abstraction of where a translation request runs (DESIGN §8.0). One interface, two implementations, so page
+// translation and the settings page's connection test share one path and “the test passes, the translation fails”
+// (issue #42) cannot recur:
+// - createLocalTransport (this file): builds the chain, queues and sends in the background;
+// - createMessageTransport (src/shared/transport.ts): turns every method into a message in content / options.
+// Two files for bundle size: this one pulls in three providers and the AI SDK, which the content script would parse on every paper opened.
 import type { Config } from '@/config/schema'
 import { chosenService, serviceOf } from '@/config/services'
 import type { RenderPath } from '@/cache/key'
@@ -13,7 +14,7 @@ import type { CancelledScopeRegistry } from './request/cancellation'
 import { createTranslateService, type CachePort, type TranslateCall, type TranslateMessageResponse, type TranslateService, type TranslateServiceDeps } from './translate-service'
 import type { ProviderErrorKind, TranslationProvider } from './types'
 
-/** 此刻实际在用的引擎与最近一次降级原因（§8.5）；popup 据此解释译文为什么换了引擎 */
+/** The engine actually in use right now and the latest hand-over reason (§8.5); the popup explains by it why the translation changed engine */
 export interface EngineStatus {
   id: string
   displayName: string
@@ -30,18 +31,18 @@ export interface ProviderStatus {
    * popup, deciding from the settings, says it is not (`savedFromStatus`, shared/page-action.ts)
    */
   chosen: string
-  /** 它能不能用 */
+  /** Can it be used */
   available: boolean
   /**
-   * 首选不可用时，降级链上第一个能用的引擎（§8.5）。有它就能翻——
-   * popup 的「翻译」按钮据此判断，否则会出现「链上有 Google 兜底、按钮却是灰的」（Codex 在 #50 指出）
+   * With the first choice unavailable, the first usable engine on the fallback chain (§8.5). With it a translation can
+   * run — the popup's “translate” button decides by it, or “Google on the chain as fallback, yet the button greyed out” shows up (Codex on #50)
    */
   fallback?: { id: string; displayName: string }
   model?: string
-  /** content 侧规划批次与选择渲染路径要用（§2 第 3 条） */
+  /** What the content side needs to plan batches and choose the render path (§2 item 3) */
   maxBatchChars: number
   maxBatchItems: number
-  /** 协商出的渲染路径（§8.5）：一次会话只有一个，content 侧据此序列化与算缓存键 */
+  /** The negotiated render path (§8.5): one per session; the content side serialises and computes cache keys by it */
   renderPath: RenderPath
   /** The config this chain was built from: the popup waits for these to match what it just saved before restarting a page */
   targetLanguage: string
@@ -49,7 +50,7 @@ export interface ProviderStatus {
   /** `chainRevision` of the configuration this chain was built from; the toggle compares a page's revision with it */
   revision: string
   engine: EngineStatus
-  /** 链上引擎的 id，按优先级。popup 用它判断刚下好语言包的引擎有没有进链，e2e 用它断言降级 */
+  /** The ids of the engines on the chain, by priority. The popup tells by it whether an engine whose pack just downloaded joined the chain; e2e asserts hand-overs by it */
   chain: string[]
   /**
    * Every hand-over still in force, by engine. The page uses it to ask about **the engine its own
@@ -93,16 +94,17 @@ export interface TranslationTransport {
 export interface LocalTransportDeps extends Pick<TranslateServiceDeps, 'queue' | 'batch' | 'cacheReadBudgetMs'> {
   /** The registry of scopes ended for certain, shared with the session router that writes it (ADR-0005); every service built here reads it */
   cancelled: Pick<CancelledScopeRegistry, 'has'>
-  /** 缓存端口。background 传本地 Dexie；不传就不缓存（测试） */
+  /** The cache port. The background passes the local Dexie; without it nothing is cached (tests) */
   cache?: CachePort
-  /** 换掉建链（测试用） */
+  /** Replace the chain building (for tests) */
   buildChain?: (config: Config) => Promise<{ chain: TranslationProvider[]; renderPath: RenderPath }>
 }
 
 /**
- * 全浏览器共用一条链、一套队列（issue #43 的跨标签页额度策略）。限流是按 API key 算的，不是按标签页：
- * 两个标签页各起一套队列，对同一端点的实际并发就是 2×8，正是招 429 的配方。共享之后两篇论文
- * 分享同一份并发预算，同时翻两篇的吞吐减半，但不会互相把对方打进限流。
+ * One chain and one set of queues for the whole browser (the cross-tab quota policy of issue #43). Rate limits are
+ * per API key, not per tab: two tabs each with a queue of their own make the real concurrency against one endpoint
+ * 2×8, the recipe for 429. Shared, two papers split one concurrency budget — translating both at once halves the
+ * throughput, but neither pushes the other into the limit.
  */
 export async function createLocalTransport(config: Config, deps: LocalTransportDeps): Promise<TranslationTransport> {
   const revision = await chainRevision(config)
@@ -121,7 +123,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     provider: engine,
     service: createTranslateService({
       getProvider: async () => engine,
-      // 模型名只对 LLM 有意义；免费引擎不带，免得换模型时白白让它的缓存失效
+      // The model name means something for an LLM only; the free engines carry none, so a model change does not invalidate their cache for nothing
       getModel: async () => (engine.id === chosen?.id ? chosen.model : undefined),
       cancelled: deps.cancelled,
       retired: isRetired,
@@ -134,7 +136,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
   const service = createFallbackService(steps)
 
   /**
-   * A service of the reader's that this chain is not built around: 连接 has to answer for the
+   * A service of the reader's that this chain is not built around: the connection test has to answer for the
    * endpoint named in the drawer, and editing a service no longer makes it the chosen one, so the
    * one being tested is usually **not** on the chain (Codex on #157). It gets a provider of its own,
    * with no cache behind it — the question is whether the endpoint answers, and a cached sample
@@ -148,9 +150,9 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
   }
 
   /**
-   * 指名引擎的调用**不走降级链**：设置页的「测试连接」问的是「我配的这个端点通不通」，
-   * 链上有免费兜底就把它显示成成功，等于把 issue #42 抱怨的「两条路径不一致」换个方向再犯一次——
-   * 用户会以为端点没问题，实际整页都在用 Google 翻
+   * A call naming an engine **takes no fallback chain**: the settings page's “test connection” asks “does the endpoint
+   * I configured work”, and a free fallback on the chain showing as success would be issue #42's “two inconsistent
+   * paths” committed the other way round — the reader would think the endpoint fine while the whole page translated through Google
    */
   /** Off-chain services with a call inside: built per named call, they are drained and retired with the chain */
   const offChainLive = new Set<TranslateService>()
@@ -159,8 +161,8 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     const step = steps.find(s => s.provider.id === call.providerId)
     if (step) return step.service.translate(call)
     const own = offChain(call.providerId)
-    // 这一条与段落无关，拆小了也还是同一个引擎不在链上
-    if (!own) return { ok: false, error: { kind: 'unknown', message: `引擎 ${call.providerId} 不在当前链上`, isolatable: false } }
+    // This one has nothing to do with the segments; split smaller, the engine is still not on the chain
+    if (!own) return { ok: false, error: { kind: 'unknown', message: `engine ${call.providerId} is not on the current chain`, isolatable: false } }
     offChainLive.add(own.service)
     try {
       return await own.service.translate(call)
@@ -181,7 +183,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
 
   const status = async (): Promise<ProviderStatus> => {
     const available = await primary.isAvailable()
-    // 首选不可用时看看链上还有没有能用的：有就照样能翻，只是走降级引擎
+    // The first choice unavailable, look for a usable one on the chain: with one the translation runs as usual, on the fallback engine
     let fallback: ProviderStatus['fallback']
     if (!available) {
       for (const engine of chain.slice(1)) {

@@ -77,7 +77,7 @@ describe('createGoogleWebProvider', () => {
     const short = createGoogleWebProvider({ fetch: (async () => okResponse(['只有一条'])) as unknown as typeof globalThis.fetch })
     const e1 = await short.translate(req(['a', 'b'])).catch((e: unknown) => e)
     expect((e1 as ProviderError).kind).toBe('invalid-response')
-    expect((e1 as Error).message).toContain('期望 2 条')
+    expect((e1 as Error).message).toContain('expected 2')
 
     const weird = createGoogleWebProvider({ fetch: (async () => new Response('{"nope":1}', { status: 200 })) as unknown as typeof globalThis.fetch })
     const e2 = await weird.translate(req(['a'])).catch((e: unknown) => e)

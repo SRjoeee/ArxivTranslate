@@ -111,12 +111,12 @@ describe('createLocalTransport：翻译', () => {
       { ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC, spare] },
       { cancelled: new CancelledScopeRegistry(), buildChain: async () => ({ chain: [{ ...mockProvider(async r => ({ segments: r.segments, provider: 'mock' })), id: SVC.id }], renderPath: 'tags' as const }) },
     )
-    expect(await t.translate({ request: req, providerId: spare.id })).toEqual({ ok: false, error: { kind: 'no-key', message: '未配置 API key', isolatable: false } })
+    expect(await t.translate({ request: req, providerId: spare.id })).toEqual({ ok: false, error: { kind: 'no-key', message: 'no API key configured', isolatable: false } })
   })
 
   it('指名一个不在链上的引擎：如实说，不悄悄换成别的', async () => {
     const t = await withChain([mockProvider(async r => ({ segments: r.segments, provider: 'mock' }))])
-    expect(await t.translate({ request: req, providerId: 'chrome-builtin' })).toEqual({ ok: false, error: { kind: 'unknown', message: '引擎 chrome-builtin 不在当前链上', isolatable: false } })
+    expect(await t.translate({ request: req, providerId: 'chrome-builtin' })).toEqual({ ok: false, error: { kind: 'unknown', message: 'engine chrome-builtin is not on the current chain', isolatable: false } })
   })
 
   it('cancel 撤掉在飞的请求，撤掉的条数如实返回', async () => {
@@ -565,7 +565,7 @@ describe('createLocalTransport：翻译', () => {
 describe('createLocalTransport：状态', () => {
   const engine = (id: string, available: boolean): TranslationProvider => ({
     id,
-    displayName: id === 'google-web' ? 'Google 网页翻译（免费）' : id,
+    displayName: id === 'google-web' ? 'Google web translation (free)' : id,
     kind: 'mt',
     wireFormats: ['tags'] as const,
     maxBatchChars: 1000,
@@ -606,7 +606,7 @@ describe('createLocalTransport：状态', () => {
     const t = await withChain([engine('chrome-builtin', false), engine('google-web', true)])
     const r = await t.status()
     expect(r.available).toBe(false)
-    expect(r.fallback).toEqual({ id: 'google-web', displayName: 'Google 网页翻译（免费）' })
+    expect(r.fallback).toEqual({ id: 'google-web', displayName: 'Google web translation (free)' })
   })
 
   it('整条链都不可用时不报降级：这时按钮该是灰的', async () => {
@@ -631,7 +631,7 @@ describe('createLocalTransport：状态', () => {
     expect((await t.translate({ request: req })).ok).toBe(true)
     expect((await t.status()).engine).toEqual({
       id: 'google-web',
-      displayName: 'Google 网页翻译（免费）',
+      displayName: 'Google web translation (free)',
       demoted: { id: SVC.id, displayName: SVC.id, kind: 'auth', message: 'bad key' },
     })
   })

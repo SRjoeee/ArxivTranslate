@@ -10,7 +10,7 @@ import { ProviderError, type TranslateRequest, type TranslateResult, type Transl
 import { WIRE_FORMATS } from './wire-formats'
 
 const ENDPOINT = 'https://translate-pa.googleapis.com/v1/translateHtml'
-/** 公开常量，来自 Google 翻译网页版；不是用户凭据 */
+/** A public constant from Google Translate's web app; not a user credential */
 const API_KEY = 'AIzaSyATBXajvzQLTDHEQbcpq0Ihe0vWDHmO520'
 const CLIENT = 'wt_lib'
 
@@ -18,7 +18,7 @@ export interface GoogleWebDeps {
   fetch?: typeof globalThis.fetch
 }
 
-/** 端点按 items 数组返回同长度的译文数组 */
+/** The endpoint answers the items array with a translations array of the same length */
 async function translateHtml(items: string[], from: string, to: string, deps: GoogleWebDeps, signal?: AbortSignal): Promise<string[]> {
   const doFetch = deps.fetch ?? globalThis.fetch
   let response: Response
@@ -30,9 +30,9 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
       signal,
     })
   } catch (error) {
-    if (signal?.aborted) throw new ProviderError('aborted', '请求已取消', { cause: error })
+    if (signal?.aborted) throw new ProviderError('aborted', 'request cancelled', { cause: error })
     throw attachRequestErrorMeta(
-      new ProviderError('network', `网络错误：${error instanceof Error ? error.message : String(error)}`, { cause: error }),
+      new ProviderError('network', `network error: ${error instanceof Error ? error.message : String(error)}`, { cause: error }),
       { kind: 'network', isRetryable: true },
     )
   }
@@ -40,7 +40,7 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
     throw attachRequestErrorMeta(
-      new ProviderError(kindOfStatus(response.status), `translateHtml ${response.status} ${response.statusText}${detail ? `：${detail.slice(0, 200)}` : ''}`),
+      new ProviderError(kindOfStatus(response.status), `translateHtml ${response.status} ${response.statusText}${detail ? `: ${detail.slice(0, 200)}` : ''}`),
       { statusCode: response.status, responseHeaders: response.headers },
     )
   }
@@ -49,44 +49,44 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
   try {
     payload = await response.json()
   } catch (error) {
-    // 整个响应就不是 JSON：拆小批次重来也是一样的结果（§8.3）
-    throw new ProviderError('invalid-response', 'translateHtml 返回的不是 JSON', { cause: error, isolatable: false })
+    // The whole response is not JSON: a smaller batch would come back the same (§8.3)
+    throw new ProviderError('invalid-response', 'translateHtml did not return JSON', { cause: error, isolatable: false })
   }
 
   const translated = Array.isArray(payload) ? payload[0] : undefined
   if (!Array.isArray(translated) || translated.some(item => typeof item !== 'string')) {
-    throw new ProviderError('invalid-response', `translateHtml 响应格式异常：${JSON.stringify(payload).slice(0, 200)}`, { isolatable: false })
+    throw new ProviderError('invalid-response', `unexpected translateHtml response shape: ${JSON.stringify(payload).slice(0, 200)}`, { isolatable: false })
   }
   if (translated.length !== items.length) {
-    throw new ProviderError('invalid-response', `translateHtml 返回 ${translated.length} 条，期望 ${items.length} 条`)
+    throw new ProviderError('invalid-response', `translateHtml returned ${translated.length} items, expected ${items.length}`)
   }
   return translated as string[]
 }
 
 /**
- * Google 网页版翻译的免费端点。视为随时会断（DESIGN §8.3）：错误独立分类，失败可回退到别的 provider。
- * 保留占位符标记，所以走 tags 路径（RESEARCH.md §6.6）。
+ * The free endpoint of Google Translate's web app. Taken as liable to break any time (DESIGN §8.3): its errors are
+ * classified on their own, and a failure falls back to another provider. It keeps placeholder tags, so the tags path (RESEARCH.md §6.6).
  */
 export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationProvider {
   return {
     id: 'google-web',
-    displayName: 'Google 网页翻译（免费）',
+    displayName: 'Google web translation (free)',
     kind: 'mt',
-    // 两种都保得住（实测 tags 100%、markers 98.9%），tags 排前面：它还能保住内联样式。
-    // 正因为它两种都行，选微软时链上才留得住它做兜底（§8.5 的交集协商）
+    // Keeps both (measured: tags 100%, markers 98.9%), tags first: it also keeps inline styling. Precisely because it
+    // keeps both, it stays on the chain as the fallback when Microsoft is chosen (the intersection negotiation of §8.5)
     wireFormats: WIRE_FORMATS['google-web'],
-    // 端点一次能吃很多条；批次给大、速率给小——免费端点经不起 8/s 的默认速率（DESIGN §8.3）
+    // The endpoint takes many items at once; large batches, a low rate — a free endpoint cannot take the default 8/s (DESIGN §8.3)
     maxBatchChars: 8000,
     maxBatchItems: 100,
-    // 原本是 p-queue 的 concurrency: 2（同时 2 个在飞，不限速率）。2026-09-05 移植 RequestQueue 时
-    // 误写成 rate: 2（每秒 2 个）——Google 响应中位只有 63 ms，却被令牌桶按 500 ms 一个卡着，
-    // 整篇 216 块要 29.6 秒（实测，§8.3）。并发上限回到 2，速率只作突发的安全闸：
-    // 速率闸只兜病态情况，**不该成为常态约束**：响应 63 ms、并发 2，自然吞吐约 30/s，
-    // 20/s 基本碰不到；先设 4/s 时它又变成了新瓶颈（24 个请求跑满 5.3 秒），正是同一个错误
+    // This was p-queue's concurrency: 2 (2 in flight, no rate limit). Porting RequestQueue on 2026-09-05 wrote
+    // rate: 2 (2 a second) by mistake — Google's median response is only 63 ms, yet the token bucket held one every
+    // 500 ms, and a paper of 216 blocks took 29.6 seconds (measured, §8.3). The concurrency cap is back at 2, and the
+    // rate is only a safety gate for bursts: **it must not become the ordinary constraint** — at 63 ms and
+    // concurrency 2 the natural throughput is about 30/s, 20/s is hardly touched; set at 4/s first it became the new bottleneck (24 requests ran 5.3 seconds), the same mistake again
     rateLimit: { rate: 20, capacity: 8 },
     maxConcurrent: 2,
     async isAvailable() {
-      // 免费端点不需要凭据；是否可达留给实际请求，失败走 fallback 链
+      // A free endpoint needs no credential; reachability is left to the real request, and a failure takes the fallback chain
       return true
     },
     async translate(request: TranslateRequest): Promise<TranslateResult> {
@@ -94,7 +94,7 @@ export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationPr
       const texts = await translateHtml(
         request.segments.map(segment => segment.text),
         request.source,
-        // 端点按 BCP-47 收目标语言；配置里存的是 ISO 639-3
+        // The endpoint takes the target language as BCP-47; the configuration stores ISO 639-3
         toBcp47(request.target),
         deps,
         request.signal,

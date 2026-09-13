@@ -76,7 +76,7 @@ describe('缓存读取的等待预算：换任何 CachePort 都不会被拖死�
     const res = await service.translate(call)
     expect(res.ok && res.cached).toBe(0)
     expect(calls).toEqual([['a', 'b']])
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('条数'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('count that does not match'))
     warn.mockRestore()
   })
 
@@ -91,7 +91,7 @@ describe('缓存读取的等待预算：换任何 CachePort 都不会被拖死�
     const res = await service.translate(call)
     expect(res.ok).toBe(true)
     expect(calls).toEqual([['a', 'b']])
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('未返回'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('did not return'))
     warn.mockRestore()
   })
 })
