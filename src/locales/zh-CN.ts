@@ -140,7 +140,6 @@ const O = {
     baseURL: '接口地址',
     baseURLHint: 'OpenRouter、DeepSeek、Ollama 等 OpenAI 兼容接口',
     apiKey: 'API Key',
-    apiKeyStored: '已保存',
     apiKeyClear: '清除',
     apiKeyLocalHint: '本机地址可以不填',
     model: '模型',

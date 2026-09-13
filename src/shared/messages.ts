@@ -1,6 +1,5 @@
 // The extension's internal message protocol. popup / content / background may only use the types defined here.
 import { browser } from 'wxt/browser'
-import type { BlockStats } from '@/core/extractor/stats'
 import type { Progress } from '@/core/pipeline/run'
 import type { Mode } from '@/core/renderer'
 import type { ProviderStatus } from '@/providers/transport'
@@ -59,10 +58,6 @@ export interface AxtMessages {
   'axt:set-mode': { request: { mode: Mode }; response: { mode: Mode; preference: Mode } }
   /** popup → content: the progress */
   'axt:page-status': { request: Record<never, never>; response: PageStatus }
-  /** popup → background: connectivity */
-  'axt:ping': { request: Record<never, never>; response: { ok: true; version: string } }
-  /** popup → content script: statistics of the in-memory Block[] */
-  'axt:stats': { request: Record<never, never>; response: BlockStats }
   /** content / options → background: translate a batch of segments (§8.0: the chain, the queues and the requests all live in the background) */
   'axt:translate': { request: TranslateCall; response: TranslateMessageResponse }
   /** content → background: withdraw a session's queued and in-flight requests (restore, restart) */

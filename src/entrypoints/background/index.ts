@@ -14,7 +14,6 @@ import { createConfigOffers, providerStatus, statusInForce } from './provider-st
 import { createOcrService } from './ocr'
 import { createSessionRouter } from './sessions'
 import { installContextMenu, refreshContextMenu, installToggleCommand } from './context-menu'
-import { handlePing } from '@/shared/ping'
 import { applyLocaleFrom, resolveLocale } from '@/ui/apply-locale'
 import { setLocale } from '@/ui/strings'
 import { savedFromStatus } from '@/shared/page-action'
@@ -248,9 +247,6 @@ export default defineBackground(() => {
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!isAxtMessage(message)) return
     switch (message.type) {
-      case 'axt:ping':
-        sendResponse(handlePing(browser.runtime.getManifest().version))
-        return true
       case 'axt:translate':
         // A failed chain build (a provider constructor throwing) is answered honestly too: unanswered, the caller waits for “message channel closed”
         router.forCall(message.scope, sender.tab?.id)
