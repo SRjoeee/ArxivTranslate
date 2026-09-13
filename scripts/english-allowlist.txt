@@ -14,6 +14,7 @@ docs/rebuild/inventory/docs.md 469
 docs/rebuild/inventory/runtime.md 415
 docs/rebuild/inventory/ui.md 273
 docs/superpowers/specs/2026-09-10-settings-services-appearance-design.md 53
+helper/README.md 1
 src/cache/key.ts 1
 src/config/appearance.ts 12
 src/config/schema.ts 2

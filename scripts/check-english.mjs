@@ -8,8 +8,8 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 
-const CJK = /[　-〿㐀-䶿一-鿿＀-￯]/
-const OUTSIDE = [/^src\/locales\//, /^public\/_locales\//, /^src\/config\/languages\.ts$/, /^tests\/fixtures\//, /^reference\//, /^README\.zh/, /\.(png|jpg|jpeg|gif|webp|svg|ico|pdf|woff2?)$/]
+const CJK = /[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uff00-\uffef]/
+const OUTSIDE = [/^src\/locales\//, /^public\/_locales\//, /^src\/config\/languages\.ts$/, /^tests\/fixtures\//, /^reference\//, /\.zh-CN\.md$/, /^README\.zh/, /^scripts\/check-english\.mjs$/, /\.(png|jpg|jpeg|gif|webp|svg|ico|pdf|woff2?)$/]
 const ALLOW_FILE = 'scripts/english-allowlist.txt'
 
 const writing = process.argv.includes('--write')
