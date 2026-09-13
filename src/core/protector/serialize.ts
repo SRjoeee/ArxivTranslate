@@ -44,8 +44,6 @@ const TEXT_NODE = 3
 
 const hasText = (el: Element) => /\S/.test(el.textContent ?? '')
 
-
-
 /**
  * Writes the wire text character by character, escaping and collapsing whitespace as it goes, and
  * records where each wire offset lands in the DOM.

@@ -86,8 +86,6 @@ export const BUILT_IN_PROMPTS: Readonly<Record<string, PromptTemplate>> = {
   },
 }
 
-export const BUILT_IN_PROMPT_IDS = Object.keys(BUILT_IN_PROMPTS)
-
 /** The shape stored in the configuration: the id in use + the reader's own prompts */
 export interface PromptsConfig {
   promptId: string

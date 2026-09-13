@@ -11,7 +11,6 @@
 // clicks a “see §7” reference wants §7 in Chinese. §7.4 also forbids `display: revert` to undo the hiding (it would undo the
 // site's own display too). In keeping with §7.1: the DOM is not changed, only listeners are attached; in side / stack
 // the target is visible anyway and this never steps in.
-import type { Block } from '@/core/extractor'
 import { ID_ATTR } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
 import { ERROR_CLASS, FOR_ATTR, MIRROR_CLASS, PENDING_CLASS, SPLIT_ATTR, SPLIT_CLASS, SPLIT_OF_ATTR } from './attrs'
@@ -150,9 +149,4 @@ export function installAnchorFallback(doc: Document): () => void {
     view.removeEventListener('hashchange', onHashChange)
     view.removeEventListener('popstate', onHashChange)
   }
-}
-
-/** For tests and debugging: would this block's anchors stop working in the current mode */
-export function anchorWouldBreak(doc: Document, block: Block): boolean {
-  return !visible(block.el) && standIn(doc, block.el) !== null
 }

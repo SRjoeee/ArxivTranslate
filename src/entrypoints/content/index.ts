@@ -1,7 +1,6 @@
 import { getConfig, setConfig, watchConfig } from '@/config/storage'
 import { AUTO_TRANSLATE_HASH } from '@/core/abstract/link'
 import { extract, paperContext } from '@/core/extractor'
-import { statsOf } from '@/core/extractor/stats'
 import { paperIdFromUrl } from '@/core/pipeline'
 import { createPageSession } from '@/core/session'
 import { isAxtMessage, sendMessage } from '@/shared/messages'
@@ -44,9 +43,6 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!isAxtMessage(message)) return
       switch (message.type) {
-        case 'axt:stats':
-          sendResponse(statsOf(blocks))
-          return true
         case 'axt:translate-page':
           session.start(message.mode, message.restart === true, undefined, message.epoch).then(sendResponse)
           return true

@@ -129,10 +129,6 @@ function splitSpan(spans: WireSpan[], node: Text, at: number): void {
   spans.splice(i, 1, head, tail)
 }
 
-/**
- * Puts the label's element back around its translation, if the translation is shaped as the
- * original was. Returns whether it did. `spans` is updated in place where a text node is split.
- */
 /** The wire offset a cut in a text node stands at, before the node is split. */
 function wireOffsetOfCut(spans: readonly WireSpan[], node: Text, at: number): number | undefined {
   const span = spans.find(s => s.kind === 'text' && s.node === node)
@@ -160,6 +156,10 @@ function endsSentences(alignment: Boundaries | undefined, labelEnd: number, cut:
   return s0 >= labelEnd && s0 <= labelEnd + BOUNDARY_SLACK && t0 >= cut && t0 <= cut + BOUNDARY_SLACK
 }
 
+/**
+ * Puts the label's element back around its translation, if the translation is shaped as the
+ * original was. Returns whether it did. `spans` is updated in place where a text node is split.
+ */
 export function restoreLeadingLabel(fragment: DocumentFragment, spans: WireSpan[], block: ProtectedBlock, doc: Document, ids: ReadonlyMap<Node, number>, alignment?: Boundaries): boolean {
   const label = leadingLabel(block.root, block.slots)
   if (!label) return false

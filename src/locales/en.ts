@@ -134,7 +134,6 @@ const O: Locale['O'] = {
     baseURL: 'Endpoint',
     baseURLHint: 'An OpenAI-compatible endpoint: OpenRouter, DeepSeek, Ollama and the like',
     apiKey: 'API key',
-    apiKeyStored: 'Saved',
     apiKeyClear: 'Clear',
     apiKeyLocalHint: 'A local endpoint may need none',
     model: 'Model',

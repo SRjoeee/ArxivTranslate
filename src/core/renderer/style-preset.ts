@@ -64,7 +64,7 @@ export function appearanceRule(look: Look): { base: string; overrides: string } 
   const on = [`--axt-hl-mix: ${mix}%;`]
   if (band.ok && band.color !== '') on.push(`--axt-hl-color: ${band.color};`)
   if (look.style.underline !== 'none' && look.style.thickness === 2) on.push('--axt-deco-thickness: 2px;')
-  let overrides = `html[data-axt-on] {\n${on.join('\n')}\n}\n`
+  let overrides = `html[${ON_ATTR}] {\n${on.join('\n')}\n}\n`
   if (color.ok && color.color !== '') overrides += `${TRANSLATION_SELECTOR} {\n--axt-color: ${color.color};\n}\n`
   return { base, overrides }
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { T_CLASS } from '@/core/marks'
-import { alignPairMargins, clearPairMargins, readPairMargins, writePairMargins } from '@/core/renderer/pair-margins'
+import { clearPairMargins, readPairMargins, writePairMargins } from '@/core/renderer/pair-margins'
+/** Read then write in one go — the shape production takes through the tidy layer (prep.ts) */
+const alignPairMargins = (root: Document | Element): number => writePairMargins(readPairMargins(root))
 import { docOf } from './helpers'
 
 /** The site's adjacent-sibling margin rule of the form ar5iv `.ltx_role_affiliation + .ltx_role_affiliation` */

@@ -78,7 +78,3 @@ export function writePairMargins({ pairs, wanted }: PairMarginPlan): number {
   return changed
 }
 
-/** Make every original / translation pair's top margins agree; returns how many translations changed this round (0 once settled) */
-export function alignPairMargins(root: Document | Element): number {
-  return writePairMargins(readPairMargins(root))
-}

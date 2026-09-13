@@ -2,8 +2,8 @@
 // The request layer is Read Frog's utils/request, ported (DESIGN §8.2, §10): RequestQueue governs rate (a token
 // bucket), timeouts, retries, the 429 pause and the single probe after it, draining the whole queue on 401 / no-key,
 // cancellation by scope; BatchQueue collects segments of one batch key into a batch, and its dispatch gate makes it
-// collect more and send less under a rate limit. Assembled as Read Frog's background/translation-queues.ts, only on
-// the content side (§8.0). Independent of the run context: the cache comes through a CachePort — the background uses the local Dexie, the content side a message proxy.
+// collect more and send less under a rate limit. Assembled after Read Frog's background/translation-queues.ts; it runs
+// in the background (§8.0). Independent of the run context: the cache comes through a CachePort — the background uses the local Dexie, the content side a message proxy.
 import type { WireFormat } from '@/core/protector'
 import { wireFormatOf } from '@/cache/key'
 import type { CachedEntry } from '@/cache/store'

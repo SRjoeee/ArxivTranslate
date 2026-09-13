@@ -26,8 +26,7 @@ import { PlaceholderIntegrityError, validate } from './validate'
  * The spans hang off the fragment rather than changing the return shape, so the callers that only
  * want the nodes are untouched. They reference the nodes, not the fragment, so they stay valid
  * after the fragment has been appended and emptied.
- */
-/**
+ *
  * `alignment` is the engine's sentence boundaries for this translation, when it reported them and
  * they verified (`providers/alignment.ts`). The label restore needs them as evidence for a label
  * that ends in a period (`label.ts`); the fragment itself does not.

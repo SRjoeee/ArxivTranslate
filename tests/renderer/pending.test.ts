@@ -3,7 +3,7 @@ import { extract, type TableBlock, type TextBlock } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
 import { FOR_ATTR, INLINE_ATTR, PENDING_CLASS } from '@/core/renderer/attrs'
 import { restore } from '@/core/renderer/page'
-import { clearAllPending, clearPending, renderPending } from '@/core/renderer/pending'
+import { clearAllPending, renderPending } from '@/core/renderer/pending'
 import { SKELETON_CLASS } from '@/core/renderer/skeleton'
 import { clearTranslation, renderText } from '@/core/renderer/translation'
 import { docOf, frag } from './helpers'
@@ -61,15 +61,14 @@ describe('renderPending', () => {
     expect(node.classList.contains(PENDING_CLASS)).toBe(false)
   })
 
-  it('clearPending / clearTranslation / clearAllPending / restore all clear pending together with the skeleton', () => {
+  it('clearTranslation / clearAllPending / restore all clear pending together with the skeleton', () => {
     const doc = docOf(page)
     const blocks = extract(doc)
     const [s1, p1] = blocks as [TextBlock, TextBlock]
     renderPending(s1)
     renderPending(p1)
-    expect(clearPending(s1)).toBe(true)
-    expect(clearPending(s1)).toBe(false)
     clearTranslation(p1)
+    clearTranslation(s1)
     expect(doc.querySelectorAll(`.${PENDING_CLASS}`)).toHaveLength(0)
     for (const b of blocks) renderPending(b)
     expect(clearAllPending(doc)).toBe(3)

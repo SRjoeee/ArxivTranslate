@@ -878,51 +878,6 @@ describe("batchQueue – in-flight coalescing", () => {
   })
 })
 
-describe("batchQueue – configuration", () => {
-  it("updates batch size configuration", async () => {
-    vi.useFakeTimers()
-    mockTranslateSuccess(["result1", "result2"])
-
-    const requestQueue = new RequestQueue(baseRequestQueueConfig)
-    const batchQueue = createBatchQueue(requestQueue, {
-      ...baseBatchConfig,
-      maxItemsPerBatch: 10,
-    })
-
-    batchQueue.setBatchConfig({ maxItemsPerBatch: 2 })
-
-    const promises = [
-      batchQueue.enqueue({
-        text: "Text 1",
-        langConfig: sampleLangConfig,
-        providerConfig: sampleProviderConfig,
-        hash: "hash1",
-      }),
-      batchQueue.enqueue({
-        text: "Text 2",
-        langConfig: sampleLangConfig,
-        providerConfig: sampleProviderConfig,
-        hash: "hash2",
-      }),
-    ]
-
-    vi.advanceTimersByTime(0) // Should flush immediately
-
-    const results = await Promise.all(promises)
-    expect(results).toEqual(["result1", "result2"])
-  })
-
-  it("throws error for invalid configuration", () => {
-    const requestQueue = new RequestQueue(baseRequestQueueConfig)
-    const batchQueue = createBatchQueue(requestQueue)
-
-    expect(() => batchQueue.setBatchConfig({ maxCharactersPerBatch: 0 })).toThrow(/Too small/)
-    expect(() => batchQueue.setBatchConfig({ maxItemsPerBatch: 0 })).toThrow(/Too small/)
-    expect(() => batchQueue.setBatchConfig({ maxCharactersPerBatch: -1 })).toThrow(/Too small/)
-    expect(() => batchQueue.setBatchConfig({ maxItemsPerBatch: -1 })).toThrow(/Too small/)
-  })
-})
-
 describe("batchQueue – dispatch gate", () => {
   interface GateItem {
     text: string

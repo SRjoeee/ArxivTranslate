@@ -3,8 +3,6 @@
 // own subscriber scopes, not the batch's. Batches by batch key (characters / items / hold time), a dispatch
 // gate, batch-level retry then per-item fallback when the result count is off, cancellation by scope; assembled by
 // translate-service (DESIGN §8.2, §10).
-import { getRandomUUID } from "@/shared/uuid"
-import { batchQueueConfigSchema } from "./config"
 import { TranslationCancelledError } from "./cancellation"
 
 export class BatchCountMismatchError extends Error {
@@ -55,7 +53,6 @@ interface BatchTask<T, R> {
 }
 
 interface PendingBatch<T, R> {
-  id: string
   tasks: BatchTask<T, R>[]
   totalCharacters: number
   createdAt: number
@@ -338,10 +335,7 @@ export class BatchQueue<T, R> {
   }
 
   private createNewPendingBatch(task: BatchTask<T, R>, batchKey: string) {
-    const batchId = getRandomUUID()
-
     const pendingBatch: PendingBatch<T, R> = {
-      id: batchId,
       tasks: [task],
       totalCharacters: this.getCharacters(task.data),
       createdAt: Date.now(),
@@ -473,17 +467,5 @@ export class BatchQueue<T, R> {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
-  }
-
-  setBatchConfig(
-    config: Partial<Pick<BatchOptions<T, R>, "maxCharactersPerBatch" | "maxItemsPerBatch">>,
-  ) {
-    const parseConfigStatus = batchQueueConfigSchema.partial().safeParse(config)
-    if (parseConfigStatus.error) {
-      throw new Error(parseConfigStatus.error.issues[0]!.message)
-    }
-
-    this.maxCharactersPerBatch = config.maxCharactersPerBatch ?? this.maxCharactersPerBatch
-    this.maxItemsPerBatch = config.maxItemsPerBatch ?? this.maxItemsPerBatch
   }
 }

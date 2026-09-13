@@ -42,7 +42,7 @@ export interface CacheLimits {
 }
 
 // A paper is hundreds of blocks; “instant on reopening” needs a TTL in months and enough capacity
-export const DEFAULT_CACHE_LIMITS: CacheLimits = {
+const DEFAULT_CACHE_LIMITS: CacheLimits = {
   ttlMs: 30 * 24 * 60 * 60 * 1000,
   maxEntries: 20_000,
   maxBytes: 50 * 1024 * 1024,

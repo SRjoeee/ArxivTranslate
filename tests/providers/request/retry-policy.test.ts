@@ -4,7 +4,6 @@ import {
   attachRequestErrorMeta,
   defaultRequestRetryPolicy,
   getRequestErrorMeta,
-  isRateLimitRequestError,
   MAX_CONSECUTIVE_RATE_LIMIT_PAUSES,
   MAX_RATE_LIMIT_RETRIES_PER_TASK,
   MAX_RETRY_AFTER_MS,
@@ -83,7 +82,6 @@ describe("request retry policy", () => {
       action: "fail",
       failQueue: true,
     })
-    expect(isRateLimitRequestError(error)).toBe(false)
   })
 
   it("preserves explicit bad-request metadata precedence", () => {

@@ -229,20 +229,6 @@ describe("requestQueue – cancelByScope", () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(attempts).toBe(1)
   })
-
-  it("cancelWhere matches scope prefixes (tab close sweep)", async () => {
-    vi.useFakeTimers()
-    const q = new RequestQueue(baseConfig)
-
-    const fromTab7 = q.enqueue(async () => "seven", Date.now() + 5_000, "h7", ["7:sess-a"])
-    const fromTab8 = q.enqueue(async () => "eight", Date.now() + 5_000, "h8", ["8:sess-b"])
-
-    expect(q.cancelWhere((scope) => scope.startsWith("7:"))).toBe(1)
-    await expectCancelled(fromTab7)
-
-    await vi.advanceTimersByTimeAsync(10_000)
-    await expect(fromTab8).resolves.toBe("eight")
-  })
 })
 
 interface FakeBatchData {

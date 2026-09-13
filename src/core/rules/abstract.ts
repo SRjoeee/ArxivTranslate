@@ -15,5 +15,3 @@
  */
 export const HTML_LINK = '#latexml-download-link'
 
-/** The link list of the “Access Paper” column, the parent of the insertion point */
-export const ACCESS_LIST = '.full-text ul'

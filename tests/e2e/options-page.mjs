@@ -82,12 +82,6 @@ export async function clearKeyAndReconnect(options) {
   return result ?? ''
 }
 
-/** Choose one of the reader's services by the name it was given */
-export async function chooseService(options, name) {
-  await openSection(options, 'services')
-  await pick(options.getByRole('radio', { name: new RegExp(name) }))
-}
-
 /** A switch anywhere on the page, by its accessible name */
 export async function setSwitch(options, name, on) {
   const control = options.getByRole('switch', { name, exact: true })
