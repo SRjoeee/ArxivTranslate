@@ -1,26 +1,33 @@
-// 脚注在 side 模式下的两栏归位（DESIGN §7.2）。
+// Footnotes and their two-column placement in side mode (DESIGN §7.2).
 //
-// 段落译文由占位符协议回填，脚注是受保护节点，所以**译文段落里会重建一份原文脚注**：
-// 同一条脚注在页面上出现两次，一次跟着原文、一次跟着译文。
+// A paragraph's translation is filled back through the placeholder protocol, and a footnote is a protected node,
+// so **the translated paragraph rebuilds a copy of the original footnote**: the same footnote appears twice on the
+// page, once with the original and once with the translation.
 //
-// 这里把脚注的译文**复制**进那份副本，副本因此是"原文 + 译文"上下排；
-// 原件那份标上 data-axt-note，由样式隐藏（原件里的译文随整个边注框一起藏起来）。
-// 结果是页面右缘只挂一份边注，英文在上、中文在下
-// （实测 2312.17141：文档 522→2026，边注 2042→2522，side 与 stack 都只剩一份）。
+// This module **copies** the footnote's translation into that copy, which thus reads “original + translation”
+// stacked; the original is marked data-axt-note and hidden by the style sheet (the translation inside it hides with
+// the whole margin box). The result is one margin note at the page's edge, English above and Chinese below
+// (measured on 2312.17141: document 522→2026, margin notes 2042→2522, one copy left in side and in stack alike).
 //
-// 是复制不是移动：renderText 二次翻译时靠"原块的兄弟"找旧译文来替换，译文被搬走后
-// 它找不到、旧副本又会随段落译文一起被删，脚注译文就丢了（Codex 在 #26 指出）。
-// 副本按内容比对，译文变了（换目标语言重翻）就换新的。
+// Copied, not moved: when renderText translates a second time it finds the old translation as “the original
+// block's sibling” to replace it; moved away, it is not found, and the old copy is removed with the paragraph's
+// translation — the footnote's translation is lost (Codex on #26). The copy is compared by content, and replaced
+// when the translation changes (a retranslation into another target language).
 //
-// 边注的位置沿用 arXiv 自己的（float + 负边距挂到文章外），不要改：试过把它收进本栏，
-// 正文被挤、列表项还被盖住（ar5iv 给列表项里的脚注写死了 height: 0），用户反馈"影响阅读"。
+// The margin note's position is arXiv's own (float + negative margin, hung outside the article) and is not
+// changed: pulling it into the column squeezed the body and covered list items (ar5iv fixes footnotes inside list
+// items at height: 0), and the owner reported it “hurts reading”.
 //
-// 隐藏只认 data-axt-note 标记、且标记只在复制成功时才打：第一版用一条无条件的 CSS 藏原件译文，
-// JS 没跑到中文就凭空消失。现在没跑到时只是退回"原件里原文 + 译文并排"的旧样子，不丢内容。
+// Hiding goes by the data-axt-note mark alone, and the mark is set only when the copy succeeded: the first version
+// hid the original's translation with one unconditional CSS rule, and where the JS had not run the Chinese
+// vanished. Now, where it has not run, the page only falls back to the old look of “original + translation side by
+// side inside the original”, losing nothing.
 //
-// "复制成功"有两种：译文已到（副本 = 原文 + 译文），或者这条脚注压根没被提取器登记成块
-//（正文全是 URL、全是公式，没有可翻的字），副本与原件逐字相同。后一种以前不打标记，
-// 原件就一直露着，同一条边注在沟槽里画两遍（2509.10652v3 引言的 6 条 URL 脚注，用户 2026-09-11 反馈）。
+// “The copy succeeded” comes in two kinds: the translation has arrived (copy = original + translation), or the
+// footnote was never registered as a block by the extractor (all URLs, all formulas, nothing to translate) and the
+// copy equals the original word for word. The second kind used to go unmarked, the original stayed in view, and
+// the same margin note painted twice in the gutter (the six URL footnotes in the introduction of 2509.10652v3, the
+// owner's feedback of 2026-09-11).
 import { ID_ATTR } from '@/core/extractor'
 import { AXT_ATTR_PREFIX, T_CLASS, isInjected } from '@/core/marks'
 import { DOCUMENT_ROOT, NOTE } from '@/core/rules/latexml'
@@ -28,9 +35,9 @@ import { ERROR_CLASS, IDENTITY_ATTR, MIRROR_CLASS, PENDING_CLASS, SPLIT_CLASS } 
 import { mirrorPair } from './sentences'
 import { squash } from '@/core/text'
 
-/** 原件上的标记：译文已复制进副本，这份边注由样式隐藏 */
+/** On the original: its translation was copied into the copy, and the style sheet hides this margin note */
 const LOCALIZED_ATTR = 'data-axt-note'
-/** 复制进副本的译文换上的 class：脱掉 ar5iv 的脚注框外壳（见下） */
+/** The class the translation copied into the copy takes: the ar5iv footnote-box shell comes off (below) */
 export const NOTE_T_CLASS = 'axt-note-t'
 /**
  * The wrapper around the copy's **own original text**. The copy is a clone rebuilt from the
@@ -42,11 +49,12 @@ export const NOTE_T_CLASS = 'axt-note-t'
  */
 export const NOTE_S_CLASS = 'axt-note-s'
 
-/** 副本里放进去的那份译文：脱掉脚注框外壳、去掉自带标号（副本外层已经有一个） */
+/** The translation placed inside the copy: the footnote-box shell off, the number it carries removed (the copy's outer layer has one already) */
 function localizedCopy(translated: Element): Element {
   const clone = translated.cloneNode(true) as Element
-  // 译文节点自己也是 .ltx_note_content，套进副本就成了"框里套框"——多一条 double 顶边线、
-  // 多 9.6px 缩进，它自带的标号又是绝对定位的，会飞到正文里（实测，用户反馈"位置是乱的"）
+  // The translation node is itself a .ltx_note_content; nested into the copy it becomes “a box inside a box” — one
+  // more double top border, 9.6px more indent, and its own absolutely positioned number flies into the body text
+  // (measured; the owner reported “the position is a mess”)
   clone.classList.remove(NOTE.contentClass)
   clone.classList.add(NOTE_T_CLASS)
   for (const name of clone.getAttributeNames()) if (name.startsWith(AXT_ATTR_PREFIX)) clone.removeAttribute(name)
@@ -150,12 +158,13 @@ const reproduces = (source: Element, copy: Element): boolean => {
   return text !== '' && text === squash(copy.textContent)
 }
 
-/** 这些副本整块由某个模式藏起来：identity 的与拆图的在 stack、镜像在 side 以外（modes.css）。里面那份脚注副本不能当成"唯一留下的一份" */
+/** Copies hidden whole by some mode: the identity ones and the split ones in stack, the mirrors outside side (modes.css). The footnote copy inside cannot count as “the only one left” */
 const HIDABLE_COPY = `.${T_CLASS}[${IDENTITY_ATTR}], .${MIRROR_CLASS}, .${SPLIT_CLASS}`
 
 /**
- * 把脚注的译文复制进译文块里重建出来的副本，并标记原件。
- * 幂等：副本里已有同样内容就不动；内容变了就换。返回本轮改动的数量。
+ * Copy a footnote's translation into the copy rebuilt inside the translated block, and mark the original.
+ * Idempotent: a copy holding the same content is left alone; changed content is replaced. Returns how many changed
+ * this round.
  */
 export function localizeNotes(root: Document | Element): number {
   const scope = root.querySelector(DOCUMENT_ROOT) ?? ('body' in root ? null : (root as Element))
@@ -167,7 +176,7 @@ export function localizeNotes(root: Document | Element): number {
     const copies = Array.from(translation.querySelectorAll(`${NOTE.content}:not(.${T_CLASS})`))
     if (copies.length === 0) continue
     const sources = Array.from(original.querySelectorAll(`${NOTE.content}:not(.${T_CLASS})`))
-    // 数量对不上就不动：宁可右栏留着原文，也不要张冠李戴
+    // A count that does not match is left alone: better the original in the right column than the wrong footnote
     if (sources.length !== copies.length) continue
     copies.forEach((copy, i) => {
       const source = sources[i]
@@ -210,7 +219,7 @@ export function localizeNotes(root: Document | Element): number {
       const translated = sibling
       const fresh = localizedCopy(translated)
       const existing = copy.querySelector(`:scope > .${NOTE_T_CLASS}`)
-      if (existing?.textContent === fresh.textContent) return // 已归位且内容没变
+      if (existing?.textContent === fresh.textContent) return // placed already, content unchanged
       existing?.remove()
       // The copy keeps its own original with the translation appended: one margin note, English
       // above, Chinese below. The original goes into a wrapper first, which is what only mode can
@@ -220,8 +229,9 @@ export function localizeNotes(root: Document | Element): number {
       // The copy is what is on screen: its sentence registration comes along, so pointing at the
       // note tints the note's own sentence
       if (wrapper) mirrorNote(source, translated, wrapper, fresh)
-      // 副本照放（那个模式显示它时要有译文），但**副本会被藏起来时不藏原件**：
-      // 原件那个边注框里本来就是原文 + 译文，藏了它这条脚注连同译文一起从页面上消失
+      // The copy is placed either way (the mode that shows it needs the translation), but **when the copy is hidden the
+      // original is not**: the original's margin box already holds original + translation, and hiding it would take this
+      // footnote off the page together with its translation
       if (hidable) return
       note?.setAttribute(LOCALIZED_ATTR, '')
       localized += 1
@@ -231,10 +241,11 @@ export function localizeNotes(root: Document | Element): number {
 }
 
 /**
- * 撤销与某块相关的脚注归位，在删掉它的译文之前调用（Codex 在 #30 指出）：
- * 块里的脚注——副本随这块的译文一起没了，原件不能再藏着；
- * 块本身是脚注正文——它的译文副本在外层段落的译文里，删掉副本、原件露出来。
- * 否则再翻失败时原件边注仍被样式隐藏、副本却已删除，脚注在所有模式下都消失。返回撤销的条数
+ * Undo the footnote placement that concerns a block, before its translation is removed (Codex on #30):
+ * footnotes inside the block — their copies go with the block's translation, the originals must not stay hidden;
+ * the block being a footnote body itself — its translation copy lives in the outer paragraph's translation; the copy
+ * removed, the original shows. Otherwise, when a retranslation fails, the original margin note stays hidden by the
+ * style sheet while the copy is gone, and the footnote disappears in every mode. Returns how many were undone
  */
 export function delocalizeNotes(block: Element): number {
   let undone = 0

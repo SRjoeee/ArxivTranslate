@@ -11,14 +11,15 @@ import { OPACITY_MAX, OPACITY_MIN, sanitizeColor, sanitizeCustomCss } from './st
 
 export { COLOR_MAX, OPACITY_MAX, OPACITY_MIN, sanitizeColor, sanitizeCustomCss } from './style-values'
 
-/** 「真正的译文」这条界线来自 attrs.ts 的 REAL_TRANSLATION；presets.css 里的每一份由 tests/renderer/translation-boundary.test.ts 守着 */
+/** The line “a real translation” is REAL_TRANSLATION of attrs.ts; every copy of it in presets.css is guarded by tests/renderer/translation-boundary.test.ts */
 export const TRANSLATION_SELECTOR = `html[${ON_ATTR}] ${REAL_TRANSLATION}`
 
 /**
- * 「不是任何**真**译文的后代」的真译文。透明度必须用它，不能用 TRANSLATION_SELECTOR：
- * side 模式的 `localizeNotes()` 会把脚注译文（`.axt-note-t.axt-t`）插进段落译文内部，
- * 两层都匹配的话 opacity 会相乘——下限 0.3 会渲染成 0.09，几乎看不见（Codex 在 #106 指出）。
- * 内层用 :where() 压掉特异度贡献。拆图副本本身被排除，所以副本**里**的真译文仍然拿到一次透明度
+ * A real translation “that is no descendant of any **real** translation”. Opacity must use it, never
+ * TRANSLATION_SELECTOR: side mode's `localizeNotes()` puts a footnote's translation (`.axt-note-t.axt-t`) inside a
+ * paragraph's translation, and with both layers matching the opacities multiply — the floor of 0.3 renders as 0.09,
+ * barely visible (Codex on #106). The inner layer uses :where() to add no specificity. A split copy itself is
+ * excluded, so a real translation **inside** the copy still gets its opacity once
  */
 export const TOP_TRANSLATION_SELECTOR = `${TRANSLATION_SELECTOR}:not(:where(${REAL_TRANSLATION}) *)`
 
@@ -29,7 +30,7 @@ export const TOP_TRANSLATION_SELECTOR = `${TRANSLATION_SELECTOR}:not(:where(${RE
 export const CUSTOM_STYLE_SELECTOR = TRANSLATION_SELECTOR
 
 
-/** 拼成可注入的规则；空串返回空串（不产生空规则） */
+/** Assemble an injectable rule; an empty string gives an empty string (no empty rule) */
 export function customStyleRule(css: string): string {
   const sanitized = sanitizeCustomCss(css)
   if (!sanitized.ok || sanitized.css === '') return ''
