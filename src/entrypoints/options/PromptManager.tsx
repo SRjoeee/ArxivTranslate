@@ -42,7 +42,14 @@ export function withSaved(patterns: readonly PromptTemplate[], mode: EditorMode,
   return [...patterns, draft]
 }
 
-export function PromptManager({ value, onChange }: { value: PromptsConfig; onChange: (next: PromptsConfig) => void }) {
+/**
+ * A change to the prompts, as an update of the configuration **as stored when the write runs** — not of `value`, which
+ * is what this tab last saw: a prompt added or deleted in another tab while its refresh was still queued would
+ * otherwise be dropped or brought back by a list built from the stale copy (Codex on #185)
+ */
+export type PromptsUpdate = (current: PromptsConfig) => PromptsConfig
+
+export function PromptManager({ value, onChange }: { value: PromptsConfig; onChange: (update: PromptsUpdate) => unknown }) {
   const [editor, setEditor] = useState<{ mode: EditorMode; draft: PromptTemplate } | null>(null)
   // The editor's draft is local until 保存: the page must not reload under it (ui/drafts.ts). Keyed on whether an
   // editor is open, not on the draft — every keystroke would otherwise end one hold and begin another
@@ -54,7 +61,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
   const fileInput = useRef<HTMLInputElement>(null)
 
   const builtIns = Object.values(BUILT_IN_PROMPTS)
-  const select = (promptId: string) => onChange({ ...value, promptId })
+  const select = (promptId: string) => onChange(current => ({ ...current, promptId }))
 
   function open(mode: EditorMode, template?: PromptTemplate) {
     setMessage('')
@@ -71,17 +78,17 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
     const { mode, draft } = editor
     if (!draft.name.trim()) return setMessage(O.prompts.manager.nameEmpty)
     if (!draft.prompt.trim()) return setMessage(O.prompts.manager.promptEmpty)
-    onChange({ patterns: withSaved(value.patterns, mode, draft), promptId: mode === 'copy' ? draft.id : value.promptId })
+    onChange(current => ({ patterns: withSaved(current.patterns, mode, draft), promptId: mode === 'copy' ? draft.id : current.promptId }))
     setEditor(null)
     setMessage(mode === 'edit' ? O.prompts.manager.saved : O.prompts.manager.added)
   }
 
   function remove(template: PromptTemplate) {
     if (!window.confirm(O.prompts.manager.removeConfirm(template.name))) return
-    onChange({
-      patterns: value.patterns.filter(p => p.id !== template.id),
-      promptId: value.promptId === template.id ? DEFAULT_PROMPT_ID : value.promptId,
-    })
+    onChange(current => ({
+      patterns: current.patterns.filter(p => p.id !== template.id),
+      promptId: current.promptId === template.id ? DEFAULT_PROMPT_ID : current.promptId,
+    }))
     if (editor?.draft.id === template.id) setEditor(null)
   }
 
@@ -89,7 +96,8 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
     if (!file) return
     try {
       const entries = await readPromptFile(file)
-      onChange({ ...value, patterns: [...value.patterns, ...entries.map(entry => ({ ...entry, id: uuid() }))] })
+      const added = entries.map(entry => ({ ...entry, id: uuid() }))
+      onChange(current => ({ ...current, patterns: [...current.patterns, ...added] }))
       setMessage(O.prompts.manager.imported(entries.length))
     } catch (e) {
       // 解析器只说是哪一种，句子在语言包里（Codex 在 #161 指出）

@@ -66,7 +66,7 @@ export function Prompts({ data }: { data: OptionsData }) {
 
       <h3 className="mb-2 text-[14px] font-bold">{O.prompts.title}</h3>
       <div className="mb-8 rounded-card border border-line bg-card p-3.5">
-        <PromptManager value={config.prompts} onChange={prompts => void patch(latest => ({ ...latest, prompts }))} />
+        <PromptManager value={config.prompts} onChange={update => patch(latest => ({ ...latest, prompts: update(latest.prompts) }))} />
       </div>
 
       <div className="mb-2 flex items-end justify-between">

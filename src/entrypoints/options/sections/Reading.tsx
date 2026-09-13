@@ -133,6 +133,9 @@ export function Reading({ data }: { data: OptionsData }) {
 
       {editingStyle && (
         <StyleEditor
+          // One editor per profile: a duplicate opens its own, not the original's boxes with their drafts and the
+          // writes they have out (the local review of S1, twelfth pass)
+          key={editingStyle.id}
           value={editingStyle}
           highlight={highlight}
           onChange={next => setAppearance(c => ({ ...c, styles: withProfile(c.styles, next) }))}
@@ -148,6 +151,7 @@ export function Reading({ data }: { data: OptionsData }) {
       )}
       {editingBand && (
         <HighlightEditor
+          key={editingBand.id}
           value={editingBand}
           style={style}
           onChange={next => setAppearance(c => ({ ...c, highlights: withProfile(c.highlights, next) }))}

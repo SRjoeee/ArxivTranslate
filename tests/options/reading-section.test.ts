@@ -89,6 +89,29 @@ describe('Reading: the profile drawer', () => {
     await mounted.unmount()
   })
 
+  it('a duplicate opens its own editor: the original CSS box, with its draft and the write it has out, does not carry over', async () => {
+    // The twelfth local pass of S1: the editor was not keyed by profile, so the copy inherited the original's textarea
+    // state and showed CSS the copy never stored
+    const patches: Config[] = []
+    const mounted = await mountElement(createElement(Reading, { data: data(withMine, patches) }))
+    editButton(mounted.container)?.click()
+    await mounted.flush()
+    const advanced = Array.from(dialog(mounted.container)?.querySelectorAll('button') ?? []).find(b => b.getAttribute('aria-expanded') !== null)
+    advanced?.click()
+    await mounted.flush()
+    const css = dialog(mounted.container)?.querySelector('textarea') as HTMLTextAreaElement
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(css, 'color: red;')
+    css.dispatchEvent(new Event('input', { bubbles: true }))
+    await mounted.flush()
+    expect(css.value).toBe('color: red;')
+    Array.from(dialog(mounted.container)?.querySelectorAll('button') ?? []).find(b => b.textContent === O.reading.duplicate)?.click()
+    await mounted.flush()
+    // The copy was made from the profile as stored — without the block still out — and its box says so
+    const copyBox = dialog(mounted.container)?.querySelector('textarea')
+    expect(copyBox?.value ?? '').toBe('')
+    await mounted.unmount()
+  })
+
   it('a drawer closed here forgets the profile', async () => {
     const mounted = await mountElement(createElement(Reading, { data: data(withMine) }))
     editButton(mounted.container)?.click()
