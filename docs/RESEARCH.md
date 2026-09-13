@@ -104,6 +104,8 @@ There are also 427 upper-case enumeration values `TRUE` / `FALSE` / `UNKNOWN` (o
 
 164 `svg` inside the translation root, all `svg.ltx_picture` (TikZ), 114 of them in 2608.29808 and 43 in 2312.17141 (most with `ltx_markedasmath`, formulas drawn as pictures); **not one contains `<text>`**; text appears only as `foreignObject > .ltx_foreignobject_content`, and across all fixtures that is 1 text node. Bitmaps `img.ltx_graphics`: 13 (5 papers). Conclusion: SVG figures carry no translatable DOM text in practice, v1 skips `svg` whole; the OCR route of §15 is meaningful for `img` only.
 
+> Corrected 2026-09-13: this held for the sample's mathematics papers; DESIGN §15.6 (2026-09-11) found 199 `foreignObject` labels with words across the wider corpus, and the image pipeline reads them. Inline SVG is still skipped by the text pipeline; the OCR route is still for `img` only.
+
 [Correction 2026-09-12: superseded. Inline TikZ pictures do carry translatable text in `foreignObject` (199 word-bearing labels in the corpus); DESIGN §15.6 routes them through the image pipeline. The "skip `svg`" rule remains only for the text pipeline.]
 
 ### 2.10 Other
@@ -168,6 +170,8 @@ Main container: `article.ltx_document` is the translation root; `.ltx_page_navba
 - `.ltx_document { max-width: var(--main-width) }`; `.ltx_page_main { width: 100% }` (unbounded).
 - Under `@media (min-width: 1280px)` the arXiv theme sets `body` to `display: grid; grid-template-columns: 1fr var(--nav-width) var(--main-width) var(--nav-width) 1fr`, `--nav-width: minmax(14rem, 25rem)`; `div.ltx_page_main` lands in the `article` area, `nav.ltx_page_navbar` in the `nav` area.
 - Therefore **side mode need only override `--main-width` on `html[data-axt-mode="side"]`** (e.g. `min(1600px, 96vw)`); the article column and `.ltx_document` widen together, and `.ltx_page_main` is untouched.
+
+  > Corrected 2026-09-13: overriding `--main-width` alone was measured to overflow horizontally; side mode rewrites the body grid with three tokens instead (DESIGN §7.2).
 - Side effect: `--main-width` is also referenced by images (`.ltx_graphics`, `.ltx_img_*`), the code block `.ltx_listing`, the `max-width` of cells `.ltx_td`, and the absolute positioning of footnotes at ≥96rem (`--main-width-margin`); enlarging the variable enlarges these too. Wider images are usually acceptable; if not, pin those rules' `max-width` back to `52rem` in side mode.
 - Breakpoints: the arXiv theme's 1280px (navigation bar / header collapse; `narrowViewport` in the JS has the same value); the ar5iv style has its own 46/52/96/109rem breakpoints, of which 96rem decides whether footnotes pop up or sit in the margin. The 1100px auto-fallback threshold of DESIGN.md §7.2 aligns with neither set; suggested: 1280px, matching arXiv.
 
@@ -289,6 +293,8 @@ My one sample simply did not trigger it (spaces on both sides of the comparison 
 
 **What it means for DESIGN.md**: gtx preserved the placeholders reliably in the samples, so `google-gtx` can conditionally declare `preservesMarkup: true` and take the markup path, with the validator as the safety net (falling back to runs on failure); translateHtml is not worth a provider of its own. See §7.
 
+> Corrected 2026-09-13: reversed by §6.6 and row 23 of §7 — translateHtml was adopted as `google-web`, gtx was never connected, and the boolean `preservesMarkup` became the `wireFormats` set (DESIGN §2).
+
 ## 6. Chrome's built-in Translator API (2026-09-03, Chrome 152, macOS)
 
 Probe script `scripts/phase0/translator-probe.js` (run this time through Claude in Chrome in the main world of the `arxiv.org/html/2410.00260` page, same logic).
@@ -319,6 +325,8 @@ Probe script `scripts/phase0/translator-probe.js` (run this time through Claude 
 | `inputQuota` / `measureInputUsage()` | — | `null` / `0`, no quota-limit signal |
 
 **What it means for DESIGN.md**: `chrome-builtin` preserved placeholders and HTML tags in every sample, so like gtx it can conditionally declare `preservesMarkup: true`, with the runs path only as the safety net after a validator failure; single-sentence latency 10–20 ms, far faster than any network engine, suited as the instant engine for the first screen inside the viewport.
+
+> Corrected 2026-09-13: `preservesMarkup` became `wireFormats` (`['tags']` for the built-in engine); the instant engine was never built (DESIGN §8.3, withdrawn 2026-09-13).
 
 ### 6.3 Not covered
 
@@ -482,8 +490,8 @@ DESIGN §15 records only the two used (`macos-vision-ocr`, `ImageTrans_chrome_ex
 
 **Population.** This section is about **externally referenced figures**, `<object type="image/svg+xml">`. That
 is a different population from the inline `svg.ltx_picture` (TikZ) elements measured in §2.9, and the two do
-not generalise to each other — §2.9's conclusion that inline SVG carries no translatable DOM text still
-stands for inline SVG.
+not generalise to each other — §2.9's conclusion that inline SVG carries no translatable DOM text
+stood for inline SVG until DESIGN §15.6 (2026-09-11) found the TikZ labels; corrected 2026-09-13.
 
 [Correction 2026-09-12: this no longer holds — DESIGN §15.6 wires the inline pictures' `foreignObject` labels into the image pipeline.]
 
@@ -637,7 +645,7 @@ its own axes instead. That is a piece of work, not a barrier; v1 does not need i
 promise it.
 
 **What the decision costs is the last row of the table above: 673 glyphs, 1.160% of 58028, commonest -30°.**
-(Forward reference — `quarterTurn` in `src/core/svg/glyphs.ts` is where the decision now lives, merged with
+(Forward reference — the decision moved to `src/core/svg/glyphs.ts`, where `runsOf` draws every run along its own axis (DESIGN §15.5); `quarterTurn` and the multiples-of-90° limit are gone — corrected 2026-09-13 — merged with
 #134; this PR is the survey and carries no code, and Codex asked twice for forward references to be marked
 as such.)
 
@@ -750,32 +758,32 @@ Ordered by section. Each entry is a suggestion only; whether it is adopted is th
 
 Status as of 2026-09-12 (docs/rebuild/inventory/docs.md §5): **done** 1–5, 7–11, 13, 17–19, 22–27; **superseded by a better design** 6, 12, 14; **reversed by later evidence** 16 (translateHtml was adopted, row 23); **unimplemented, disposition unresolved** 21 (the instant engine was never built, yet DESIGN §8.3 lists it as decided — the rebuild has to either build it or strike the decision); **obsolete** 15, 20.
 
-| # | Entry | Suggestion | Basis |
-|---|---|---|---|
-| 1 | §5 whole section [to verify] | The selectors were corrected against 10 fixtures, body coverage 99.97%; the [to verify] mark can go, revised as in the entries below | §2 |
-| 2 | §5.1 `.ltx_abstract .ltx_p`, `.ltx_item .ltx_p`, `.ltx_theorem .ltx_p, .ltx_proof .ltx_p` | Entirely covered by `.ltx_p`, delete; if the prompt needs "abstract / theorem" context, make it a context mark rather than a block rule | §2.4 |
-| 3 | §5.1 new translation units | `.ltx_acknowledgements`, `.ltx_keywords`; `.ltx_subtitle` folded into the title rule | §2.3 |
-| 4 | §5.1 the tag name of `.ltx_p` | Note that `.ltx_p` may be a `<span>` (inside tables, inline-blocks); extraction and rendering go by class name, not tag name | §2.10 |
-| 5 | §5.1 / §6.1 footnotes | Footnotes are nested blocks: `.ltx_note` whole is a void placeholder inside the paragraph, `.ltx_note_content` a block of its own; the `.ltx_note_mark`, `.ltx_note_type` inside it are voids | §2.5 |
-| 6 | §5.2 `.ltx_author`, `.ltx_date` | Do not exist on real pages. Replace with `.ltx_creator, .ltx_personname, .ltx_author_notes, .ltx_role_affiliation, .ltx_dates`; keep `.ltx_authors`, `.ltx_contact` | §2.2 |
-| 7 | §5.2 new skip rules | `.ltx_pubnotes` (publication metadata), `svg, .ltx_picture` (TikZ pictures), `.ltx_listing_data` (hidden code data) | §2.3 / §2.7 / §2.9 |
-| 8 | §5.2 "the header / footer arXiv injects" | List no selectors; change to "nothing outside `article.ltx_document` is extracted"; the navigation bar `.ltx_page_navbar` is outside the root too | §3.1 / §2.10 |
-| 9 | §5.3 numeric-cell regex | Add `(?=.*\d)` to fix the `ERROR`-type false positives; add the pure-symbol branch and `N/A`. Calibration data: 59% matched, 31% prose | §2.6 |
-| 10 | §5.5 / §14 LaTeXML version branching | Only oxide 0.7.6 exists online (historical articles reconverted); several versions cannot be covered with real pages. Keep the probe function and the branching mechanism; change "fixtures cover several years" to "fixtures record the generator version, re-fetch when it changes" | §1 |
-| 11 | §6.1 void node list | Confirm that `.ltx_ref` (with `.ltx_ref_tag`), `.ltx_cite`, `.ltx_note_mark` must be written into `latexml.ts` as rules, or they are treated as paragraph body (3,500+ elements in all) | §2.5 |
-| 12 | §7.2 width: override the max-width of `.ltx_page_main` | Instead override the CSS variable `--main-width` on `html[data-axt-mode="side"]`; mind the knock-on effect of the enlarged variable on images, code blocks, cells and the ≥96rem margin-note positioning | §3.2 |
-| 13 | §7.2 auto-fallback threshold 1100px | Change to 1280px, aligned with the arXiv theme's breakpoint | §3.2 |
-| 14 | §7.2 scope of the grid technique | Works only for `.ltx_para > p.ltx_p`; `span.ltx_p`, inside tables and inside inline-blocks degrade to stack | §2.10 |
-| 15 | §8.1 `google-gtx` preservesMarkup: false [to verify] | Measured on two sample sets: every placeholder preserved, nesting valid; suggested `true`, the runs path demoted to the safety net after a validator failure | §5 |
-| 16 | §8.3 the idea of a new translateHtml provider | Usable, but translation quality and placeholder positions are worse than gtx; not recommended | §5 |
-| 17 | §8.1 `chrome-builtin` preservesMarkup: false | Measured to preserve HTML tags and void / paired placeholders; suggested `true` as for gtx; `isAvailable()` goes by `availability()`, and when `downloadable` `create()` must be called inside a user gesture (popup click) to start the download; the first download has no progress events and `availability()` does not become `downloading`, so the UI shows an indeterminate state; the translation needs 「。 」 normalised | §6 |
-| 21 | §8.3 default order of the fallback chain | `chrome-builtin` is 10–20 ms per sentence and offline; suggested: with the model ready, put it before the user's chosen LLM as the instant engine for the first screen of the viewport, replaced when the LLM result arrives (the cache key carries the provider, so the two do not clash); adoption depends on the trade-off against translation quality | §6.2 |
-| 18 | §11 fixtures cover several years | Change to "cover several fields and structures"; the year is no longer a proxy for the version | §1 |
-| 19 | §14 conflicts with arXiv's own JS | Measured: no conflict surface (no MutationObserver / MathJax / footnote JS; footnote pop-ups are pure CSS); the risk can be lowered to low | §3.3 |
-| 22 | ~~§8 / §10 provider requests run in the background~~ | ~~Suggested moving the providers' fetch to the content script~~ **Withdrawn (2026-09-06)**: the three §6.5 conclusions it rested on are all overturned (§6.7 / §6.8), and “Read Frog sends requests from content” was a misreading. **Opposite in direction to row 24; row 24 governs**; the actual implementation moved to the background (issue #42, merged) | ~~§6.5~~ → §6.7 / §6.8 |
-| 23 | §8 `google-gtx` uses `translate_a/single`, `preservesMarkup: false` | Use Read Frog's `translate-pa.googleapis.com/v1/translateHtml` instead: measured to preserve placeholders, `preservesMarkup: true`, a batch of 150 in 556 ms | §6.6 |
-| 20 | ~~§15.1 text in SVG figures translated as ordinary blocks~~ **superseded by 27** | ~~Measured: SVG is all TikZ `svg.ltx_picture`, no `<text>`, very little foreignObject text. v1 skips SVG whole; the OCR route targets `img.ltx_graphics` only~~ That entry looked at **inline** SVG only — see 27 | §2.9 |
-| 24 | §8.0 requests run in the content script | Measured: a content-side fetch is bound by CORS and by the **local-network gate** (§6.7): endpoints without CORS headers and local endpoints (Ollama; http and https blocked alike) are unreachable from content and reachable from the background; the connection test goes through the background and the real translation through content, two paths behaving differently. And the “Read Frog sends requests from content” §8.0 cites checks out as a misreading. Suggested: factor out the transport, run requests in the background by default (no CORS preflight, not subject to the local-network gate, the key never enters the page world), content keeps scheduling only; ~~re-measure the cold-start delay first as issue #42 asks, then decide~~ **re-measured** (§6.7 three rounds in real Chrome 77–81 ms, §6.8 long requests of 45 / 90 s both survived), **implemented as this entry says and merged** (issue #42) | §6.7 / §6.8 |
-| 25 | §2 “Non-goals [deferred]” lists “the Microsoft free channel” as not for v1; §8.1's text says “gtx and the Microsoft edge channel are not integrated (the latter's auth endpoint is 404)” | **The basis has lapsed**: that auth flow is indeed gone, but its **unauthenticated successor** works today (§5.1). #104 has put the `markers` wire format and capability negotiation into main, and Microsoft is exactly why it exists. Suggested: change both places to “can be integrated, `wireFormats: ['markers']`”, and add a row to the provider table of §8.1 | §5.1 |
-| 26 | §8.1's provider table has no “supported language range” column | The free engines do not support every target language: Microsoft measured 71 of 179 targets as 400. Suggested: the provider interface gains a “can this target language be translated” verdict, and `buildChain` and the options page filter by it rather than wait for a runtime error | §5.1 |
-| 27 | Narrow §15.1's "skip SVG" to "skip **inline** SVG" | Externally referenced `<object type="image/svg+xml">` figures are a separate population, 49.1% of the 1792 figures in the sample. Their text is drawn as `<use>` glyphs carrying `data-text`, so it is read exactly rather than recognised, and needs no OCR. The 10.1% that draw outlines straight into `<path>` still need an OCR fallback | §6.11 |
+| # | Entry | Suggestion | Basis | Status (2026-09-13) |
+|---|---|---|---|---|
+| 1 | §5 whole section [to verify] | The selectors were corrected against 10 fixtures, body coverage 99.97%; the [to verify] mark can go, revised as in the entries below | §2 | done |
+| 2 | §5.1 `.ltx_abstract .ltx_p`, `.ltx_item .ltx_p`, `.ltx_theorem .ltx_p, .ltx_proof .ltx_p` | Entirely covered by `.ltx_p`, delete; if the prompt needs "abstract / theorem" context, make it a context mark rather than a block rule | §2.4 | done |
+| 3 | §5.1 new translation units | `.ltx_acknowledgements`, `.ltx_keywords`; `.ltx_subtitle` folded into the title rule | §2.3 | done |
+| 4 | §5.1 the tag name of `.ltx_p` | Note that `.ltx_p` may be a `<span>` (inside tables, inline-blocks); extraction and rendering go by class name, not tag name | §2.10 | done |
+| 5 | §5.1 / §6.1 footnotes | Footnotes are nested blocks: `.ltx_note` whole is a void placeholder inside the paragraph, `.ltx_note_content` a block of its own; the `.ltx_note_mark`, `.ltx_note_type` inside it are voids | §2.5 | done |
+| 6 | §5.2 `.ltx_author`, `.ltx_date` | Do not exist on real pages. Replace with `.ltx_creator, .ltx_personname, .ltx_author_notes, .ltx_role_affiliation, .ltx_dates`; keep `.ltx_authors`, `.ltx_contact` | §2.2 | superseded — the author area is translated by default since 2026-09-04 (DESIGN §5.2); `.ltx_date` came back as `authorinfo` |
+| 7 | §5.2 new skip rules | `.ltx_pubnotes` (publication metadata), `svg, .ltx_picture` (TikZ pictures), `.ltx_listing_data` (hidden code data) | §2.3 / §2.7 / §2.9 | done (`svg` is skipped by the text pipeline and read by the image pipeline since §15.6) |
+| 8 | §5.2 "the header / footer arXiv injects" | List no selectors; change to "nothing outside `article.ltx_document` is extracted"; the navigation bar `.ltx_page_navbar` is outside the root too | §3.1 / §2.10 | done |
+| 9 | §5.3 numeric-cell regex | Add `(?=.*\d)` to fix the `ERROR`-type false positives; add the pure-symbol branch and `N/A`. Calibration data: 59% matched, 31% prose | §2.6 | done |
+| 10 | §5.5 / §14 LaTeXML version branching | Only oxide 0.7.6 exists online (historical articles reconverted); several versions cannot be covered with real pages. Keep the probe function and the branching mechanism; change "fixtures cover several years" to "fixtures record the generator version, re-fetch when it changes" | §1 | done |
+| 11 | §6.1 void node list | Confirm that `.ltx_ref` (with `.ltx_ref_tag`), `.ltx_cite`, `.ltx_note_mark` must be written into `latexml.ts` as rules, or they are treated as paragraph body (3,500+ elements in all) | §2.5 | done |
+| 12 | §7.2 width: override the max-width of `.ltx_page_main` | Instead override the CSS variable `--main-width` on `html[data-axt-mode="side"]`; mind the knock-on effect of the enlarged variable on images, code blocks, cells and the ≥96rem margin-note positioning | §3.2 | superseded — overriding the variable alone overflows; the body grid is rewritten with three tokens (DESIGN §7.2) |
+| 13 | §7.2 auto-fallback threshold 1100px | Change to 1280px, aligned with the arXiv theme's breakpoint | §3.2 | done |
+| 14 | §7.2 scope of the grid technique | Works only for `.ltx_para > p.ltx_p`; `span.ltx_p`, inside tables and inside inline-blocks degrade to stack | §2.10 | superseded — structural judgement + subgrid (DESIGN §7.2) |
+| 15 | §8.1 `google-gtx` preservesMarkup: false [to verify] | Measured on two sample sets: every placeholder preserved, nesting valid; suggested `true`, the runs path demoted to the safety net after a validator failure | §5 | obsolete — gtx not connected; `preservesMarkup` became `wireFormats` |
+| 16 | §8.3 the idea of a new translateHtml provider | Usable, but translation quality and placeholder positions are worse than gtx; not recommended | §5 | reversed — translateHtml adopted (row 23, §6.6) |
+| 17 | §8.1 `chrome-builtin` preservesMarkup: false | Measured to preserve HTML tags and void / paired placeholders; suggested `true` as for gtx; `isAvailable()` goes by `availability()`, and when `downloadable` `create()` must be called inside a user gesture (popup click) to start the download; the first download has no progress events and `availability()` does not become `downloading`, so the UI shows an indeterminate state; the translation needs 「。 」 normalised | §6 | done |
+| 21 | §8.3 default order of the fallback chain | `chrome-builtin` is 10–20 ms per sentence and offline; suggested: with the model ready, put it before the user's chosen LLM as the instant engine for the first screen of the viewport, replaced when the LLM result arrives (the cache key carries the provider, so the two do not clash); adoption depends on the trade-off against translation quality | §6.2 | not adopted — the instant engine was never built; DESIGN §8.3 withdrawn 2026-09-13 |
+| 18 | §11 fixtures cover several years | Change to "cover several fields and structures"; the year is no longer a proxy for the version | §1 | done |
+| 19 | §14 conflicts with arXiv's own JS | Measured: no conflict surface (no MutationObserver / MathJax / footnote JS; footnote pop-ups are pure CSS); the risk can be lowered to low | §3.3 | done |
+| 22 | ~~§8 / §10 provider requests run in the background~~ | ~~Suggested moving the providers' fetch to the content script~~ **Withdrawn (2026-09-06)**: the three §6.5 conclusions it rested on are all overturned (§6.7 / §6.8), and “Read Frog sends requests from content” was a misreading. **Opposite in direction to row 24; row 24 governs**; the actual implementation moved to the background (issue #42, merged) | ~~§6.5~~ → §6.7 / §6.8 | withdrawn (marked) |
+| 23 | §8 `google-gtx` uses `translate_a/single`, `preservesMarkup: false` | Use Read Frog's `translate-pa.googleapis.com/v1/translateHtml` instead: measured to preserve placeholders, `preservesMarkup: true`, a batch of 150 in 556 ms | §6.6 | done |
+| 20 | ~~§15.1 text in SVG figures translated as ordinary blocks~~ **superseded by 27** | ~~Measured: SVG is all TikZ `svg.ltx_picture`, no `<text>`, very little foreignObject text. v1 skips SVG whole; the OCR route targets `img.ltx_graphics` only~~ That entry looked at **inline** SVG only — see 27 | §2.9 | superseded by 27 (marked) |
+| 24 | §8.0 requests run in the content script | Measured: a content-side fetch is bound by CORS and by the **local-network gate** (§6.7): endpoints without CORS headers and local endpoints (Ollama; http and https blocked alike) are unreachable from content and reachable from the background; the connection test goes through the background and the real translation through content, two paths behaving differently. And the “Read Frog sends requests from content” §8.0 cites checks out as a misreading. Suggested: factor out the transport, run requests in the background by default (no CORS preflight, not subject to the local-network gate, the key never enters the page world), content keeps scheduling only; ~~re-measure the cold-start delay first as issue #42 asks, then decide~~ **re-measured** (§6.7 three rounds in real Chrome 77–81 ms, §6.8 long requests of 45 / 90 s both survived), **implemented as this entry says and merged** (issue #42) | §6.7 / §6.8 | done |
+| 25 | §2 “Non-goals [deferred]” lists “the Microsoft free channel” as not for v1; §8.1's text says “gtx and the Microsoft edge channel are not integrated (the latter's auth endpoint is 404)” | **The basis has lapsed**: that auth flow is indeed gone, but its **unauthenticated successor** works today (§5.1). #104 has put the `markers` wire format and capability negotiation into main, and Microsoft is exactly why it exists. Suggested: change both places to “can be integrated, `wireFormats: ['markers']`”, and add a row to the provider table of §8.1 | §5.1 | done |
+| 26 | §8.1's provider table has no “supported language range” column | The free engines do not support every target language: Microsoft measured 71 of 179 targets as 400. Suggested: the provider interface gains a “can this target language be translated” verdict, and `buildChain` and the options page filter by it rather than wait for a runtime error | §5.1 | done in another form — `isAvailable()` covers it (DESIGN §8.1) |
+| 27 | Narrow §15.1's "skip SVG" to "skip **inline** SVG" | Externally referenced `<object type="image/svg+xml">` figures are a separate population, 49.1% of the 1792 figures in the sample. Their text is drawn as `<use>` glyphs carrying `data-text`, so it is read exactly rather than recognised, and needs no OCR. The 10.1% that draw outlines straight into `<path>` still need an OCR fallback | §6.11 | done and exceeded (DESIGN §15.5, §15.6) |
