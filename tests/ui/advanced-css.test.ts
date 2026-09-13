@@ -43,6 +43,23 @@ describe('AdvancedCss', () => {
     await mounted.unmount()
   })
 
+  it('while a block of its own is out, nothing else is adopted: the store is behind the reader', async () => {
+    // Codex on #185: an external block arriving before the reader's own landed replaced the draft, and the reader's
+    // block, an echo when it landed, never came back — the box and the store disagreed
+    const onChange = () => undefined
+    const mounted = await mountElement(createElement(AdvancedCss, { value: '', onChange }))
+    await open(mounted)
+    type(box(mounted.container), 'color: red;')
+    await mounted.flush()
+    await mounted.rerender(createElement(AdvancedCss, { value: 'color: blue;', onChange }))
+    expect(box(mounted.container).value).toBe('color: red;')
+    await mounted.rerender(createElement(AdvancedCss, { value: 'color: red;', onChange }))
+    expect(box(mounted.container).value).toBe('color: red;')
+    await mounted.rerender(createElement(AdvancedCss, { value: 'color: green;', onChange }))
+    expect(box(mounted.container).value).toBe('color: green;')
+    await mounted.unmount()
+  })
+
   it('its own blocks landing later are not news: the second keystroke survives the first echo', async () => {
     const handed: string[] = []
     const onChange = (css: string) => handed.push(css)

@@ -13,7 +13,9 @@ export function AdvancedCss({ value, onChange }: { value: string; onChange: (nex
    * be read (Codex on #157). The draft follows the profile when that changes underneath — a change
    * saved elsewhere (INVENTORY S1) — but never the reader's own typing coming back to them: what this
    * box handed up is not news when it lands, however many keystrokes later, and a block the sanitiser
-   * refused is theirs to finish (the local review of S1, eighth pass)
+   * refused is theirs to finish (the local review of S1, eighth pass). While a block of its own is still
+   * out, nothing else is adopted either: the store is behind the reader then, and what it says lands
+   * before their block does (Codex on #185)
    */
   const [draft, setDraft] = useState(value)
   const committed = useRef(value)
@@ -23,7 +25,7 @@ export function AdvancedCss({ value, onChange }: { value: string; onChange: (nex
     committed.current = value
     const at = handed.current.indexOf(value)
     if (at >= 0) handed.current.splice(0, at + 1)
-    else if (draft !== value && sanitizeCustomCss(draft).ok) setDraft(value)
+    else if (handed.current.length === 0 && draft !== value && sanitizeCustomCss(draft).ok) setDraft(value)
   }
   const check = sanitizeCustomCss(draft)
   return (

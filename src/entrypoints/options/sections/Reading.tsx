@@ -40,22 +40,27 @@ export function Reading({ data }: { data: OptionsData }) {
   const highlight = activeHighlight(a)
   const setAppearance = (fn: (current: typeof a) => typeof a) => void patch(latest => ({ ...latest, appearance: fn(latest.appearance) }))
 
-  // The profile being edited as the configuration has it — or, deleted in another tab while its drawer is open here,
-  // as this tab last saw it: the drawer stays with the reader's draft, and their next change writes the profile back
-  // (`withProfile`; the local review of S1, eighth pass). A drawer closed here forgets it
-  const editingStyle = editing?.list === 'style' ? (a.styles.find(s => s.id === editing.id) ?? lastStyle.current) : undefined
-  const editingBand = editing?.list === 'highlight' ? (a.highlights.find(h => h.id === editing.id) ?? lastBand.current) : undefined
+  // The profile being edited as the configuration has it — or, not there, as this tab last saw it under that id: one
+  // deleted in another tab while its drawer is open here (the drawer stays with the reader's draft, and their next
+  // change writes the profile back — `withProfile`; the local review of S1, eighth pass), or one just added or
+  // duplicated here whose write is still out (`addStyle`, `onDuplicate` seed it). Never another profile's: a copy
+  // still out would otherwise open on its original, and the first keystroke would rename that (ninth pass)
+  const cached = <T extends { id: string }>(last: T | undefined, id: string) => (last?.id === id ? last : undefined)
+  const editingStyle = editing?.list === 'style' ? (a.styles.find(s => s.id === editing.id) ?? cached(lastStyle.current, editing.id)) : undefined
+  const editingBand = editing?.list === 'highlight' ? (a.highlights.find(h => h.id === editing.id) ?? cached(lastBand.current, editing.id)) : undefined
   lastStyle.current = editingStyle
   lastBand.current = editingBand
 
   const addStyle = () => {
     const next: StyleProfile = { ...BUILT_IN_STYLES[0]!, id: newProfileId('style'), name: O.reading.newProfile }
     setAppearance(c => ({ ...c, styles: [...c.styles, next], activeStyle: next.id }))
+    lastStyle.current = next
     setEditing({ list: 'style', id: next.id })
   }
   const addBand = () => {
     const next: HighlightProfile = { ...BUILT_IN_HIGHLIGHTS[0]!, id: newProfileId('hl'), name: O.reading.newProfile }
     setAppearance(c => ({ ...c, highlights: [...c.highlights, next], activeHighlight: next.id }))
+    lastBand.current = next
     setEditing({ list: 'highlight', id: next.id })
   }
   /** Deleting the chosen profile falls back to the first of the list, never to nothing */
@@ -133,6 +138,7 @@ export function Reading({ data }: { data: OptionsData }) {
           onDuplicate={() => {
             const copy = duplicateStyle(editingStyle, copyName(editingStyle, 'styles'))
             setAppearance(c => ({ ...c, styles: [...c.styles, copy], activeStyle: copy.id }))
+            lastStyle.current = copy
             setEditing({ list: 'style', id: copy.id })
           }}
           onDelete={() => removeStyle(editingStyle.id)}
@@ -147,6 +153,7 @@ export function Reading({ data }: { data: OptionsData }) {
           onDuplicate={() => {
             const copy = duplicateHighlight(editingBand, copyName(editingBand, 'highlights'))
             setAppearance(c => ({ ...c, highlights: [...c.highlights, copy], activeHighlight: copy.id }))
+            lastBand.current = copy
             setEditing({ list: 'highlight', id: copy.id })
           }}
           onDelete={() => removeBand(editingBand.id)}

@@ -67,6 +67,28 @@ describe('Reading: the profile drawer', () => {
     await mounted.unmount()
   })
 
+  it('a duplicate whose write is still out opens on the copy, not on its original', async () => {
+    // The ninth local pass of S1: the copy's id was absent from the list while its write was out, the drawer fell
+    // back to the last profile seen — the original — and the first keystroke renamed that
+    const patches: Config[] = []
+    const mounted = await mountElement(createElement(Reading, { data: data(withMine, patches) }))
+    editButton(mounted.container)?.click()
+    await mounted.flush()
+    const duplicate = Array.from(dialog(mounted.container)?.querySelectorAll('button') ?? []).find(b => b.textContent === O.reading.duplicate)
+    expect(duplicate).toBeDefined()
+    duplicate?.click()
+    await mounted.flush()
+    // The store has not moved: the list still lacks the copy
+    const name = dialog(mounted.container)?.querySelector('input') as HTMLInputElement
+    expect(name.value).not.toBe('Mine')
+    typeInto(name, 'My duplicate')
+    await mounted.flush()
+    const styles = patches.at(-1)?.appearance.styles ?? []
+    expect(styles.find(s => s.id === 'style-mine')?.name).toBe('Mine')
+    expect(styles.some(s => s.id !== 'style-mine' && s.name === 'My duplicate')).toBe(true)
+    await mounted.unmount()
+  })
+
   it('a drawer closed here forgets the profile', async () => {
     const mounted = await mountElement(createElement(Reading, { data: data(withMine) }))
     editButton(mounted.container)?.click()

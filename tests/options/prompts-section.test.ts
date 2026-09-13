@@ -11,6 +11,7 @@ vi.mock('wxt/browser', () => ({ browser: { runtime: { id: 'test-extension', getU
 import { Prompts } from '@/entrypoints/options/sections/Prompts'
 import type { OptionsData } from '@/entrypoints/options/data'
 import { applyLocaleFrom } from '@/ui/apply-locale'
+import { drafts } from '@/ui/drafts'
 
 const llm: Config = { ...DEFAULT_CONFIG, provider: 'svc-1', services: [{ id: 'svc-1', kind: 'openai-compat', name: 'LLM', baseURL: 'https://api.example.com/v1', apiKey: 'k', model: 'm', thinking: 'disabled' }] }
 
@@ -73,6 +74,8 @@ describe('Prompts: the glossary text', () => {
     const mounted = await mountElement(createElement(Prompts, { data: data(stored, patches, land) }))
     type(box(mounted.container), 'weights, weights')
     await mounted.flush()
+    // A write out is a draft: the page's reload waits for it (the ninth local pass)
+    expect(drafts.any()).toBe(true)
     // The store has not moved yet; the page re-renders with it as it stands
     await mounted.rerender(createElement(Prompts, { data: data(stored, patches, land) }))
     expect(box(mounted.container).value).toBe('weights, weights')
@@ -80,14 +83,16 @@ describe('Prompts: the glossary text', () => {
     await mounted.flush()
     await mounted.rerender(createElement(Prompts, { data: data(stored, patches, land) }))
     expect(box(mounted.container).value).toBe('weights, weights!')
-    // The first write lands: the store says 'weights' while the second is still out
+    // The first write lands: the store says 'weights' while the second is still out — still a draft
     lands.shift()?.()
     await mounted.flush()
+    expect(drafts.any()).toBe(true)
     await mounted.rerender(createElement(Prompts, { data: data({ ...llm, glossary: [{ term: 'weights', translation: 'weights' }] }, patches, land) }))
     expect(box(mounted.container).value).toBe('weights, weights!')
     lands.shift()?.()
     await mounted.flush()
     expect(patches.map(c => c.glossary[0]?.translation)).toEqual(['weights', 'weights!'])
+    expect(drafts.any()).toBe(false)
     await mounted.rerender(createElement(Prompts, { data: data({ ...llm, glossary: [{ term: 'weights', translation: 'weights!' }] }, patches, land) }))
     expect(box(mounted.container).value).toBe('weights, weights!')
     // Idle now: a glossary saved elsewhere shows
@@ -104,12 +109,15 @@ describe('Prompts: the glossary text', () => {
     const mounted = await mountElement(createElement(Prompts, { data: data(stored, [], refuse) }))
     type(box(mounted.container), 'weights, weights')
     await mounted.flush()
+    // The refusal holds the page's reload at once (Codex on #185: a ref would have left the hold to a render that never came)
+    expect(drafts.any()).toBe(true)
     await mounted.rerender(createElement(Prompts, { data: data({ ...stored, targetLanguage: 'jpn' }, [], refuse) }))
     expect(box(mounted.container).value).toBe('weights, weights')
-    // A later write that lands lets the box follow the store again
+    // A later write that lands lets the box follow the store again, and ends the hold
     await mounted.rerender(createElement(Prompts, { data: data({ ...stored, targetLanguage: 'jpn' }) }))
     type(box(mounted.container), 'weights, weights!')
     await mounted.flush()
+    expect(drafts.any()).toBe(false)
     await mounted.rerender(createElement(Prompts, { data: data({ ...stored, glossary: [{ term: 'weights', translation: 'weights!' }] }) }))
     expect(box(mounted.container).value).toBe('weights, weights!')
     await mounted.rerender(createElement(Prompts, { data: data({ ...llm, glossary: [{ term: 'bias', translation: '偏置' }] }) }))
