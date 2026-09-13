@@ -1,4 +1,4 @@
-// 回填（DESIGN §6.4）：译文 → DocumentFragment。占位符换成原节点的克隆，按译文顺序放置；原节点不动。
+// Filling back (DESIGN §6.4): translation → DocumentFragment. Placeholders become clones of the original nodes, placed in the translation's order; the original nodes are untouched.
 import { cloneWithoutIds } from './clone'
 import { type Boundaries, restoreLeadingLabel } from './label'
 import { scanTokens, type WireSpan } from './offsets'

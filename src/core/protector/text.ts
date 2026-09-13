@@ -1,37 +1,44 @@
-// 文本节点的转义 / 反转义，按线上格式分派。不折叠任何空白（§6.2 要求保留公式两侧的细空格）。
+// Escaping / unescaping of text nodes, dispatched by wire format. No whitespace is collapsed (§6.2 keeps the thin
+// spaces around formulas).
 //
-// **不可伪造性**：校验与回填的正确性依赖「请求文本里出现的每个占位符都必然是我们写进去的」。
-// - `tags`：转义 & < >，所以原文里字面的 `<` 到不了线上，`<x>` / `<t>` 必是占位符。
-// - `markers`：**无条件**把每个 `@` 翻倍。转义后每段字面文本里的 `@` 个数必为偶数，
-//   解码器左到右先吃 `@@`、成对消耗，剩下的单个 `@` 必然是记号的开头，因此无歧义。
+// **Unforgeability**: validation and fill-back are correct only if “every placeholder in the request text was
+// written by us”.
+// - `tags`: & < > are escaped, so a literal `<` in the original never reaches the wire, and `<x>` / `<t>` are
+//   placeholders by necessity.
+// - `markers`: every `@` is doubled **unconditionally**. After escaping, every stretch of literal text holds an even
+//   number of `@`; the decoder consumes `@@` pairs first, left to right, and a single `@` left over is by necessity the
+//   start of a marker — no ambiguity.
 //
-//   **转义必须与上下文无关**，这是要害。第一版只在「`@` 后面跟着 `[a-z]*[#@]`」时翻倍，看起来更省，
-//   但序列化是逐个文本节点转义再拼接的，歧义会在**拼接处**产生：`<p>@<math/></p>` 里的文本节点 `@`
-//   单独看后面没东西、不转义，拼上占位符就成了 `@@a#`，分词器读成字面量 `@`，占位符凭空消失
-//   （Codex 在 #107 指出）。`tags` 没这个问题，正因为它的转义（`& < >`）也是无条件的。
-//   代价实测：12 篇 fixture 的 5992 个块、779160 个 markers 线上字符里只有 5 处 `@`（邮箱与 `@app.route`），
-//   翻倍一共多 5 个字符。
+//   **The escaping must be context-free**; that is the crux. The first version doubled only where `@` was followed by
+//   `[a-z]*[#@]`, which looked thriftier, but serialisation escapes text node by text node and concatenates, and the
+//   ambiguity arises **at the seams**: in `<p>@<math/></p>` the text node `@` has nothing after it on its own, is not
+//   escaped, and concatenated with the placeholder becomes `@@a#`, which the tokeniser reads as a literal `@` — the
+//   placeholder vanishes (Codex on #107). `tags` has no such problem precisely because its escaping (`& < >`) is
+//   unconditional too. The cost, measured: across the 5992 blocks of the 12 fixtures and 779160 wire characters in
+//   markers there are only 5 `@` (e-mail addresses and `@app.route`), 5 extra characters in all.
 //
-//   `markers` **也转义 `& < >`**。曾经不转义，理由是「这条线是纯文本」——但那是对引擎的假设，不是事实：
-//   `google-web` 走的是 `translateHtml`，会把请求体当 HTML 解析。实测 12 篇 fixture 的 markers 线上文本里
-//   有 102 个 `&`、1 个 `<`、3 个 `>`，分布在 5992 个块的 80 个里，都是正经内容
-//   （`Springer science & business media`、`Very long (>1k words) … (<500 words)`）——不转义的话 `<500`
-//   会被当成标签开头，`&` 会在响应里变成 `&amp;` 而回填不解实体，读者就看到实体本身（Codex 在 #107 指出）。
-//   转义之后这条线对 HTML 与纯文本两种传输都成立，也不需要给 provider 单开一层编解码。
-//   伪造性不受影响：解实体在**分词之后**做，引擎回来的 `&#64;abc#` 不会被读成记号。
+//   `markers` **escapes `& < >` too**. It did not, once, on the grounds that “this wire is plain text” — an
+//   assumption about the engine, not a fact: `google-web` goes through `translateHtml`, which parses the request body
+//   as HTML. Measured in the markers wire text of the 12 fixtures: 102 `&`, 1 `<`, 3 `>`, spread over 80 of the 5992
+//   blocks, all real content (`Springer science & business media`, `Very long (>1k words) … (<500 words)`) —
+//   unescaped, `<500` is taken for the start of a tag, and `&` comes back as `&amp;` which the fill-back does not
+//   decode, so the reader sees the entity itself (Codex on #107). Escaped, this wire holds for HTML and plain-text
+//   transport alike, and no provider needs a codec layer of its own.
+//   Unforgeability is unaffected: entities are decoded **after tokenising**, so an `&#64;abc#` from the engine is
+//   never read as a marker.
 import type { WireFormat } from './tokens'
 
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 export function escapeText(s: string, format: WireFormat = 'tags'): string {
-  // 两步顺序无关：`@@` 里没有 `& < >`，实体里也没有 `@`
+  // The two steps commute: `@@` holds no `& < >`, and an entity holds no `@`
   return format === 'markers' ? escapeHtml(s.replace(/@/g, '@@')) : escapeHtml(s)
 }
 
-// nbsp 写成转义序列：字面的 U+00A0 会被文本工具悄悄归一成普通空格（改这个文件时踩过）
+// nbsp written as an escape sequence: a literal U+00A0 gets quietly normalised to an ordinary space by text tools (met while editing this file)
 const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }
 
-/** 解实体。两种格式同一套规则——markers 的 `@@` 已经在 tokenize / unescapeText 里还原，这里不碰它 */
+/** Decode entities. One rule for both formats — the `@@` of markers is restored in tokenize / unescapeText already and is not touched here */
 /**
  * The entities `decodeText` resolves, as a source string so the offsets scan can build an anchored
  * copy of it (`src/core/protector/offsets.ts`). One definition, because a scan that recognised a
@@ -51,12 +58,13 @@ export function decodeText(s: string): string {
 }
 
 /**
- * **纯文本往返专用**的反转义：标题（§10）与 OCR 行走的是「escapeText → 翻译 → 这里」，
- * 中间没有分词器，所以 `@@` 得在这一步还原。占位符路径不要用它——那条线的 `@@` 已经在
- * `tokenize` 里还原过，再来一遍会把字面量 `@@` 吃成 `@`（Codex 在 #107 指出这条不对称）。
- * `replace` 与分词器一样从左到右不重叠匹配，所以 `@@@@` → `@@`、`@@@@@` → `@@@`，两边一致
+ * The unescape **for plain-text round trips only**: titles (§10) and OCR lines go “escapeText → translate → here”
+ * with no tokeniser in between, so `@@` has to be restored at this step. Not for the placeholder path — that wire's
+ * `@@` was restored in `tokenize` already, and doing it again would eat a literal `@@` down to `@` (Codex on #107
+ * pointed out the asymmetry). `replace` matches left to right without overlap, like the tokeniser, so `@@@@` → `@@`
+ * and `@@@@@` → `@@@`, consistent on both sides
  */
 export function unescapeText(s: string, format: WireFormat = 'tags'): string {
-  // 先解实体再还原 `@@`：引擎若把 `@@` 编码成 `&#64;&#64;`，反过来的顺序会漏掉它
+  // Entities first, then `@@`: an engine that encoded `@@` as `&#64;&#64;` would be missed the other way round
   return format === 'markers' ? decodeText(s).replace(/@@/g, '@') : decodeText(s)
 }

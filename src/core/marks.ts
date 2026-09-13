@@ -1,68 +1,73 @@
-// 注入节点的共同标记：译文、镜像、拆分副本都带 axt-t（CLAUDE.md 硬规则 5 的前缀）。
-// 放在 core 顶层：extractor 与 protector 要把这些节点当空气（再次翻译时它们已经在原块内部），
-// 但它们不能反过来依赖 renderer。
+// The marks shared by injected nodes: translations, mirrors and split copies all carry axt-t (the prefix of CLAUDE.md
+// hard rule 5). At the top of core: the extractor and the protector have to treat these nodes as air (on a
+// retranslation they are already inside the original block), yet must not depend on the renderer in turn.
 export const T_CLASS = 'axt-t'
 /**
- * 图片叠加层（DESIGN §15.2）：第三种注入标记，**不带** axt-t——带了会被 side 的配对网格排到右栏、
- * 拆图时把 <img> 当配对原件删掉、抑制镜像、被二十个样式预设装饰。它只是"我们的节点"，不是"译文节点"
+ * The image overlay (DESIGN §15.2): the third injected mark, **without** axt-t — with it, side's pairing grid would
+ * put it in the right column, a split would remove the <img> as a pair's original, mirrors would be suppressed and
+ * twenty style presets would decorate it. It is only “our node”, not “a translation node”
  */
 export const IMG_CLASS = 'axt-img'
 /**
- * 悬停对照高亮的底色层（DESIGN §7.7）：第四种注入标记。**挂在 `<body>` 上、不在正文树里**——
- * 它是按行画出来的绝对定位矩形，不参与配对、不参与拆图、不被样式预设装饰；
- * 放进正文树会被当成译文节点处理。恢复原文时随 INJECTED_SELECTOR 一起删掉
+ * The band layer of the hover highlight (DESIGN §7.7): the fourth injected mark. **On `<body>`, outside the body
+ * text tree** — absolutely positioned rectangles drawn per line, taking no part in pairing or splitting and undecorated
+ * by the presets; inside the body tree it would be handled as a translation node. Removed with INJECTED_SELECTOR on restore
  */
 export const HL_CLASS = 'axt-hl'
 /**
- * 只译文下悬浮出来的原文面板（DESIGN §7.7，issue #141）：第五种注入标记。与色带层一样挂在 `<body>` 上、
- * 不在正文树里；里面是原文那一句的克隆（不带 id 与 data-axt-*）。恢复原文时随 INJECTED_SELECTOR 一起删掉
+ * The original-text panel that floats out in translation-only mode (DESIGN §7.7, issue #141): the fifth injected
+ * mark. On `<body>` like the band layer, outside the body tree; inside is a clone of the original sentence (no ids, no
+ * data-axt-*). Removed with INJECTED_SELECTOR on restore
  */
 export const PEEK_CLASS = 'axt-peek'
-/** 所有注入节点：提取、序列化、克隆清理、恢复原文都用这一个选择器 */
+/** Every injected node: extraction, serialisation, clone clean-up and restore all use this one selector */
 export const INJECTED_SELECTOR = `.${T_CLASS}, .${IMG_CLASS}, .${HL_CLASS}, .${PEEK_CLASS}`
 
-/** 是不是我们注入的节点（译文 / 镜像 / 拆分副本 / 图片叠加层 / 色带层 / 原文面板）——提取与序列化都要跳过它们 */
+/** Is this a node we injected (translation / mirror / split copy / image overlay / band layer / original panel) — extraction and serialisation skip them */
 export function isInjected(el: Element): boolean {
   return el.classList.contains(T_CLASS) || el.classList.contains(IMG_CLASS) || el.classList.contains(HL_CLASS) || el.classList.contains(PEEK_CLASS)
 }
 
-/** 所有注入属性的前缀（CLAUDE.md 硬规则 5） */
+/** The prefix of every injected attribute (CLAUDE.md hard rule 5) */
 export const AXT_ATTR_PREFIX = 'data-axt-'
-/** 所有注入 class 的前缀（同一条规则）；提取论文上下文时据此排除我们自己的节点 */
+/** The prefix of every injected class (the same rule); the paper context excludes our own nodes by it */
 export const AXT_CLASS_PREFIX = 'axt-'
 
 /**
- * 会执行脚本的 URL。克隆件里**不留这种**：链接的行为归原件，克隆只是拿来读的副本。
- * 只挡这两种，不做通用 URL 清洗——`data:image/...` 是论文里真实存在的内联图
+ * URLs that run script. **None in a clone**: a link's behaviour belongs to the original, and the clone is a copy for
+ * reading. Only these two are blocked, with no general URL scrubbing — `data:image/...` is a real inline image in papers
  */
 const UNSAFE_URL = /^(?:javascript:|data:text\/html)/i
 const URL_ATTRS = ['href', 'xlink:href', 'src', 'action', 'formaction', 'data']
 
 /**
- * 按 URL 标准先归一化再判协议，否则协议名里塞一个控制符就绕过了（Codex 在 #163 指出）：
- * `href="java&#10;script:alert(1)"` 经 HTML 解析后 `getAttribute` 拿到的是带换行的
- * `java\nscript:`，正则匹配不上，而浏览器解析 URL 时**在任意位置**删掉制表符与换行、
- * 并从头剥掉 C0 控制符与空格，结果照样是一个 `javascript:` URL
+ * Normalised by the URL standard before the scheme is judged, or a control character inside the scheme name gets
+ * round it (Codex on #163): `href="java&#10;script:alert(1)"` comes out of HTML parsing as `java\nscript:` with a
+ * newline, which the regex misses, while the browser's URL parser strips tabs and newlines **anywhere** and C0
+ * controls and spaces from the start — still a `javascript:` URL
  */
 const normalizeUrl = (value: string) => {
   const flat = value.replace(/[\t\n\r]/g, '')
-  // 从头剥掉 C0 控制符与空格。写成码点比较而不是字符类：正则里放控制符 Biome 不让过，
-  // 而这里要的恰恰是 U+0000–U+0020 整段
+  // C0 controls and spaces stripped from the start. Written as code-point comparisons rather than a character class:
+  // Biome refuses control characters in a regex, and exactly the whole range U+0000–U+0020 is wanted here
   let i = 0
   while (i < flat.length && flat.charCodeAt(i) <= 0x20) i += 1
   return flat.slice(i)
 }
 
 /**
- * 克隆件入页之前的清理：删掉克隆里已有的注入节点（别人的译文 / 镜像会被整块复制进来），
- * 再剥掉 id（避免重复锚点，DESIGN §6.4）与全部 data-axt-* 标记（原块、占位符回填的脚注都可能带着块标记）。
- * 镜像、译文表、占位符回填、拆图以前各有一份几乎一样的实现，漂移过（issue #46）；现在只有这一份。
- * `includeRoot=false` 用于根节点是新建的译文壳、只清理被搬进来的子树。
+ * The clean-up of a clone before it enters the page: injected nodes already inside the clone are removed (somebody
+ * else's translation / mirror gets copied in whole), then every id is stripped (no duplicate anchors, DESIGN §6.4) and
+ * every data-axt-* mark (the original block and a footnote filled back may both carry block marks). Mirrors,
+ * translated tables, the fill-back and the split figures each had a near-identical copy of this, and they drifted
+ * (issue #46); now there is one. `includeRoot=false` is for a root that is a freshly made translation shell, cleaning
+ * only the subtree moved into it.
  *
- * **行为属性一并去掉**（2026-09-11，独立审计 B17 实测）：回填出来的克隆带着原节点的 `onclick`，
- * 点下去真的会执行——译文里的副本是给人读的，不该是第二个可触发的控件，而且同一段行为在页面上
- * 出现两次本身就不对。arXiv 的 LaTeXML 不产出事件属性，所以今天没有暴露面；这是把不变量写死，
- * 不是修一个已知故障。Read Frog 的 `sanitizeInlineAtomClone` 做的是同一件事
+ * **Behaviour attributes go too** (2026-09-11, measured by the independent audit B17): a clone filled back carried the
+ * original node's `onclick`, and a click really ran it — the copy in a translation is for reading and must not be a
+ * second trigger, and the same behaviour twice on one page is wrong in itself. arXiv's LaTeXML emits no event
+ * attributes, so there is no exposure today; this fixes the invariant rather than a known fault. Read Frog's
+ * `sanitizeInlineAtomClone` does the same
  */
 export function stripInjected(root: Element, includeRoot = true): void {
   for (const stale of Array.from(root.querySelectorAll(INJECTED_SELECTOR))) stale.remove()
