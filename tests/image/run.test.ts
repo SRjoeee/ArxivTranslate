@@ -449,7 +449,7 @@ describe('readImageResponse', () => {
 
   it('Content-Length 超上限：不读响应体就拒', async () => {
     const res = new Response(stream([10]), { headers: { 'content-type': 'image/png', 'content-length': String(MAX_IMAGE_BYTES + 1) } })
-    await expect(readImageResponse(res)).rejects.toThrow(/超过/)
+    await expect(readImageResponse(res)).rejects.toThrow(/over/)
     expect(res.bodyUsed).toBe(false) // 没碰响应体
   })
 
@@ -465,7 +465,7 @@ describe('readImageResponse', () => {
       cancel() { cancelled = true },
     })
     const res = new Response(body, { headers: { 'content-type': 'image/png' } })
-    await expect(readImageResponse(res, 2500)).rejects.toThrow(/超过/)
+    await expect(readImageResponse(res, 2500)).rejects.toThrow(/over/)
     expect(cancelled).toBe(true)
     expect(pulled).toBeLessThanOrEqual(4) // 读到第 3 块（3000 > 2500）就停，不会一直拉
   })

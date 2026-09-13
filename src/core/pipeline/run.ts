@@ -1,6 +1,8 @@
-// 翻译运行（DESIGN §4 数据流、§10 调度、§6.3 / §8.2 降级链）。content 侧的纯逻辑，通过 transport 与翻译服务通信。
-// 会话式（照 Read Frog 的加载模式）：开始只打标记、把块交给一次性观察器；块进入视口（加预翻译距离）
-// 才攒批发请求，请求前先插带圆环的 pending 节点（§7.6）。没有"整篇翻完"的终点，滚到哪翻到哪。
+// The translation run (DESIGN §4 data flow, §10 scheduling, §6.3 / §8.2 fallback chain). Pure logic on the content
+// side, talking to the translation service through the transport. Session-style (after Read Frog's loading model):
+// the start only marks the blocks and hands them to one-shot observers; a block entering the viewport (plus the
+// preload distance) is batched and requested, with a pending node carrying a ring inserted first (§7.6). There is no
+// “whole paper done” end: what is scrolled to is translated.
 import { toBcp47 } from '@/config/languages'
 import { ID_ATTR, type Block, type TextBlock } from '@/core/extractor'
 import type { SentenceAlignment } from '@/providers/alignment'
@@ -18,17 +20,17 @@ import { planBatches, sectionTitles, type Batch, type Segment } from './batches'
 import { cutsOf } from './sentences'
 
 export interface Progress {
-  /** on：会话开着，滚动会继续触发；stopped：用户恢复原文或致命错误后停下 */
+  /** on: the session is open and scrolling keeps triggering; stopped: the reader restored the original, or a fatal error stopped it */
   state: 'idle' | 'on' | 'stopped'
   total: number
-  /** 已进入视口、发出过请求的块 */
+  /** Blocks that entered the viewport and were requested */
   requested: number
   done: number
   failed: number
   cached: number
-  /** 请求中的块 */
+  /** Blocks in flight */
   inFlight: number
-  /** no-key / auth 之类继续也只会重复失败的错误；设置后不再发新批次 */
+  /** An error like no-key / auth that would only fail again; once set, no new batch goes out */
   fatal?: string
 }
 
@@ -46,8 +48,9 @@ export interface RunOptions {
   transport: Transport
   onProgress?: (progress: Progress) => void
   /**
-   * 这一批块刚在 DOM 上动过（插了圆环 / 译文 / 失败小部件），每批两次、与 onProgress 同步（issue #46）。
-   * 单独一个回调而不塞进 Progress：Progress 要发给 popup，必须可序列化，Block 带着 DOM 节点
+   * These blocks just touched the DOM (a ring / a translation / a failure widget inserted), twice per batch and in
+   * step with onProgress (issue #46). A callback of its own rather than a field of Progress: Progress goes to the
+   * popup and must be serialisable, and a Block carries DOM nodes
    */
   onRendered?: (blocks: Block[]) => void
   /**
@@ -55,41 +58,43 @@ export interface RunOptions {
    * every hand-over down the chain). The caller decides what a hand-over means for the page
    */
   onProvider?: (id: string) => void
-  /** 论文级上下文（标题、摘要、术语表），每批都带；章节标题由批次自己补 */
+  /** The paper-level context (title, abstract, glossary), carried by every batch; the section heading is filled in by the batch itself */
   context?: TranslateContext
-  /** 取消范围 = 会话 id：每次调用都带，stop 时由调用方撤销排队与在飞的请求（§10） */
+  /** The cancellation scope = the session id: carried by every call, and on stop the caller withdraws the queued and in-flight requests (§10) */
   scope?: string
-  /** 视口触发的距离与阈值（§10） */
+  /** The viewport trigger distance and threshold (§10) */
   preload: PreloadOptions
 }
 
 export interface TranslationRun {
-  /** 标记与观察器就绪（标记是切片进行的，让出主线程） */
+  /** The marks and the observers are ready (marking is sliced, yielding the main thread) */
   ready: Promise<void>
-  /** 把这些块排进去翻：观察器进入、重试、测试都走这里；请求中的块跳过 */
+  /** Queue these blocks for translation: observer entry, retries and tests all come through here; blocks in flight are skipped */
   translate(blocks: Block[]): Promise<void>
-  /** 结束会话：断开观察器、删掉 pending 节点，之后不再渲染也不再上报 */
+  /** End the session: disconnect the observers, remove the pending nodes; nothing is rendered or reported after */
   stop(): void
   progress(): Progress
-  /** 翻失败的块（文档序）；popup 的"重试失败"把它们再交给 translate */
+  /** The blocks whose translation failed (document order); the popup's “retry failed” hands them to translate again */
   failed(): Block[]
 }
 
 /**
- * 一段的结果：译文，或失败原因（给失败态小部件看，§7.6）。
+ * A segment's result: the translation, or the reason it failed (for the failure widget, §7.6).
  *
- * `alignment` 只有引擎报了句边界、且两边都能重建时才在（`alignment.ts`），用来登记悬停高亮。
- * `fragment.offsets` 同理只有 `rehydrate` 那条路有：runs 兜底拼出来的 fragment 没有线上偏移，
- * 那样的块登记不了，悬停无反应——比把高亮打在错的句子上好（issue #105）。
+ * `alignment` is present only when the engine reported sentence boundaries and both sides could be rebuilt
+ * (`alignment.ts`), to register the hover highlight. `fragment.offsets` likewise exists on the `rehydrate` path only:
+ * a fragment the runs fallback assembled has no wire offsets, such a block cannot be registered, and hovering does
+ * nothing — better than a highlight on the wrong sentence (issue #105).
  */
 type SegmentResult = { fragment: DocumentFragment & { offsets?: WireSpan[] }; alignment?: SentenceAlignment } | { error: string }
 type BatchResult = Map<Segment, SegmentResult>
 /**
- * 失败原因一律写成 `kind: 诊断`，与 provider 的错误同一个形状（`parseFatal` 读的就是它）：
- * 读者看到的是按界面语言写的那一句，`kind` 之后那半句是给诊断用的，不进界面（Codex 在 #161 指出）
+ * A failure reason is always written as `kind: diagnostic`, the shape of a provider error (`parseFatal` reads it):
+ * the reader sees the sentence in the interface's language, and the half after `kind` is for diagnosis and never
+ * reaches the interface (Codex on #161)
  */
-const CANCELLED: SegmentResult = { error: 'aborted: 已取消' }
-const MISMATCH: SegmentResult = { error: 'invalid-response: 译文的占位符与原文对不上' }
+const CANCELLED: SegmentResult = { error: 'aborted: cancelled' }
+const MISMATCH: SegmentResult = { error: 'invalid-response: the translation placeholders do not match the source' }
 const errorOf = (res: Extract<TranslateMessageResponse, { ok: false }>): SegmentResult => ({ error: `${res.error.kind}: ${res.error.message}` })
 
 export function startTranslation(options: RunOptions): TranslationRun {
@@ -109,8 +114,8 @@ export function startTranslation(options: RunOptions): TranslationRun {
   const report = () => {
     if (!ledger.stopped()) options.onProgress?.(progress())
   }
-  // 不另设 stopped 守卫：第一次调用在 translate() 的 halted() 检查与本批之间没有让出主线程，
-  // 第二次在 `if (stopped) return` 之后——那条 return 就是守卫，这里再判一次是测不到的死代码
+  // No separate stopped guard: on the first call nothing yields the main thread between translate()'s halted() check
+  // and this batch, and on the second the `if (stopped) return` above is the guard — a second check here would be dead code no test could reach
   const rendered = (blocks: Block[]) => options.onRendered?.(blocks)
   const halted = () => ledger.halted()
   let lastProvider: string | undefined
@@ -120,27 +125,28 @@ export function startTranslation(options: RunOptions): TranslationRun {
     options.onProvider?.(id)
   }
 
-  // 译文语言进 <html>，renderText 逐个写到译文节点上：页面的 lang 说的是原文（arXiv 上是 en），
-  // 不标的话屏幕阅读器会用英文语音念中文
+  // The translation's language goes on <html>, and renderText writes it onto each translation node: the page's lang
+  // names the original (en on arXiv), and unmarked, a screen reader would read Chinese in an English voice
   enable(doc, options.mode, options.appearance, toBcp47(options.target))
   const sectionOf = sectionTitles(blocks)
 
-  // 块标记一次性写完，不切片（issue #67）：side prep 的两道闸都看 data-axt-id——
-  // 一个"内部还有未标记块"的容器会被当成静态内容**整块克隆**到右栏，等里面的块翻译出来，
-  // 右栏就多出一整段英文。实测（标记切片进行时跑三趟 prep）2312.17141 36 处、
-  // 2609.00245 87 处，都是 .ltx_para / .ltx_proof / .ltx_theorem 这样的大块。
-  // 切片当初是防"几百个属性写入冻住页面"（Read Frog 的 #1881），但那笔账不成立：
-  // 循环里全是属性写入、不读布局，Chromium 实测 979 块写满 1.2 ms、随后强制布局 0 ms。
-  // 同步写完还顺带解决了 halted() 的竞态——中间没有 await，restore 插不进来
+  // The block marks are written at once, unsliced (issue #67): both gates of side prep read data-axt-id — a
+  // container “with unmarked blocks still inside” would be taken for static content and **cloned whole** into the
+  // right column, and once the blocks inside were translated the right column would hold a whole extra passage of
+  // English. Measured (three prep passes while marking was sliced): 36 places on 2312.17141, 87 on 2609.00245, all
+  // large blocks like .ltx_para / .ltx_proof / .ltx_theorem. The slicing was meant to prevent “hundreds of attribute
+  // writes freezing the page” (Read Frog's #1881), but the sum does not add up: the loop is attribute writes only with
+  // no layout read, and Chromium measured 979 blocks written in 1.2 ms with a forced layout of 0 ms afterwards.
+  // Writing synchronously also settles the halted() race along the way — no await in between, restore cannot get in
   for (const block of blocks) block.el.setAttribute(ID_ATTR, block.id)
 
-  // 状态属性仍然切片：它带样式（pending 的骨架屏），且不影响 side prep 的判定
+  // The state attribute is still sliced: it carries styling (the pending skeleton) and does not affect side prep's decisions
   const ready = (async () => {
     const pacer = createWorkPacer()
     for (const block of blocks) {
-      // 每写一个块之前都要看会话还在不在：让出主线程期间用户可能已经"恢复原文"，
-      // 循环外才检查的话，restore 清干净之后这里会继续往 DOM 上写状态，
-      // 页面留下孤儿 data-axt-*（§7.1 的不变量被破坏，issue #45 的实验 1）
+      // Before each block is written the session has to be checked: while the main thread was yielded the reader may
+      // have “restored the original”; checked outside the loop only, this would keep writing states onto the DOM after
+      // restore cleaned it, leaving orphan data-axt-* on the page (the invariant of §7.1 broken, experiment 1 of issue #45)
       if (halted()) return
       setState(block, 'pending')
       await pauseIfBudgetSpent(pacer)
@@ -159,21 +165,22 @@ export function startTranslation(options: RunOptions): TranslationRun {
   }
 
   /**
-   * 句子边界随请求一起送下去（§8.6）。选切点要看块本身——占位符是注解还是公式、这一块是不是
-   * 参考文献——而服务层只有线上文本，所以决定在这里做，服务层只按位置插标记
+   * The sentence boundaries travel with the request (§8.6). Choosing the cut points needs the block itself — is a
+   * placeholder an annotation or a formula, is this block a reference — and the service has only the wire text, so
+   * the decision is made here and the service only inserts markers by position
    */
   const cutsFor = (segment: Segment): { cuts?: number[] } => {
     const cuts = cutsOf(segment, options.capabilities.renderPath)
-    // 空数组要照样送：它说的是「这一块只有一句，整段对整段」，与「这一块不该对齐」不同
+    // An empty array is sent all the same: it says “this block is one sentence, whole to whole”, unlike “this block is not aligned”
     return cuts === undefined ? {} : { cuts }
   }
 
-  // 配置错了继续也只会重复失败：记下来，观察器断开，不再排新批次；在飞的批次照常收尾
+  // A wrong configuration would only fail again: recorded, the observers disconnected, no new batch queued; the batches in flight finish as usual
   const noteFatal = (res: Extract<TranslateMessageResponse, { ok: false }>) => {
     if (isPermanentErrorKind(res.error.kind)) ledger.fatal(res.error.kind, res.error.message)
   }
 
-  /** runs 兜底（§6.5）：按 void 切段逐段翻译再拼回 */
+  /** The runs fallback (§6.5): cut into runs at voids, translated run by run and joined back */
   async function viaRuns(segment: Segment, sectionTitle?: string): Promise<SegmentResult> {
     if (halted()) return CANCELLED
     const layout = splitRuns(segment.protected)
@@ -187,7 +194,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
     served(res.result.provider)
     const byId = new Map(res.result.segments.map(s => [s.id, s.text]))
     const texts = layout.runs.map((_, i) => byId.get(`${segment.id}#r${i}`))
-    if (texts.some(t => t === undefined)) return { error: 'invalid-response: 译文条数与原文对不上' }
+    if (texts.some(t => t === undefined)) return { error: 'invalid-response: the translation count does not match the source' }
     try {
       return { fragment: joinRuns(texts as string[], layout, segment.protected, doc) }
     } catch {
@@ -196,8 +203,9 @@ export function startTranslation(options: RunOptions): TranslationRun {
   }
 
   /**
-   * 占位符校验失败：单块重发一次，再失败走 runs（§6.3）。
-   * 重发不读缓存：那份坏译文在校验之前就已经写进缓存，照常读只会原样拿回来（Codex 在 #9 指出）
+   * Placeholder validation failed: the block alone is sent once more, and a second failure takes the runs path (§6.3).
+   * The resend does not read the cache: the bad translation went into the cache before validation, and a normal read
+   * would only bring it back as it is (Codex on #9)
    */
   async function retrySingle(segment: Segment, sectionTitle?: string): Promise<SegmentResult> {
     if (halted()) return CANCELLED
@@ -223,9 +231,10 @@ export function startTranslation(options: RunOptions): TranslationRun {
     if (ledger.stopped()) return
     if (!res.ok) {
       noteFatal(res)
-      // 一次调用可能被拆到多个批次，一批失败不代表另一批没成：成功的那些随失败一起送回来，
-      // 先把它们渲染掉（它们已经在缓存里，不渲染的话读者看到"全失败"，重试时又秒回）。
-      // 余下的才进下面的判断（Codex 在 #163 指出）
+      // One call may be cut into several batches, and one batch failing does not mean another did not succeed: the
+      // successful ones come back with the failure and are rendered first (they are in the cache already; unrendered
+      // the reader would see “all failed” and a retry would answer instantly). Only the rest goes into the judgement
+      // below (Codex on #163)
       const done = new Map((res.partial ?? []).map(s => [s.id, s]))
       const left = segments.filter(segment => {
         const hit = done.get(segment.id)
@@ -234,10 +243,11 @@ export function startTranslation(options: RunOptions): TranslationRun {
         return false
       })
       if (left.length === 0) return
-      // 批次失败：**某一段引起的**才对半拆分重试（§8.2）。系统性失败拆了也是同一个结果，
-      // 只是把它乘以段数——实测 4 段的 `bad-request` 会变成 7 次调用（`4,2,1,1,2,1,1`），
-      // 限额类失败更是反效果。判据由 service 侧随错误一起送过来（providers/types.ts 的
-      // `ISOLATABLE_BY_KIND`，provider 可以覆盖），content 这一层不再自己猜
+      // A batch failure: only one **caused by some segment** is split in half and retried (§8.2). A systemic failure
+      // gives the same result split, only multiplied by the segment count — measured: a `bad-request` over 4 segments
+      // became 7 calls (`4,2,1,1,2,1,1`), and a quota failure is worse than useless. The criterion comes from the
+      // service side with the error (`ISOLATABLE_BY_KIND` of providers/types.ts, a provider may override it); the
+      // content layer no longer guesses for itself
       if (ledger.fatalReason() === undefined && left.length > 1 && res.error.isolatable) {
         const mid = Math.ceil(left.length / 2)
         await translateSegments(left.slice(0, mid), sectionTitle, out)
@@ -257,22 +267,22 @@ export function startTranslation(options: RunOptions): TranslationRun {
     }
   }
 
-  // 插入译文时不做任何布局读取：视口不跳由浏览器原生 scroll anchoring 负责（§10）
+  // No layout is read when translations are inserted: the browser's native scroll anchoring keeps the viewport from jumping (§10)
   async function processBatch(batch: Batch): Promise<void> {
     const targets = batch.kind === 'table' && batch.block ? [batch.block] : batch.segments.map(s => s.block)
-    // 请求发出前先插 pending 节点（§7.6）
+    // The pending nodes go in before the request goes out (§7.6)
     ledger.request(targets)
     for (const block of targets) renderPending(block)
     rendered(targets)
     report()
     const out: BatchResult = new Map()
     await translateSegments(batch.segments, batch.sectionTitle, out)
-    if (ledger.stopped()) return // stop() 已经把 pending 清掉、不再上报
+    if (ledger.stopped()) return // stop() has cleared the pending nodes already and reports no more
     if (batch.kind === 'table' && batch.block) {
       const cells = new Map<Element, DocumentFragment>()
-      // 一格的原文侧偏移与对齐，等 renderTable 建出克隆格之后才登记得了（§7.7）
+      // A cell's source-side offsets and alignment can only be registered once renderTable has built the clone cell (§7.7)
       const pairs = new Map<Element, { spans: readonly WireSpan[]; offsets?: WireSpan[]; alignment?: SentenceAlignment }>()
-      let reason = 'unknown: 整批没有结果'
+      let reason = 'unknown: no result for the whole batch'
       for (const [segment, result] of out) {
         if ('fragment' in result) {
           if (!segment.cell) continue
@@ -287,7 +297,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
           if (p) registerSentences(cell, node, p.spans, p.offsets, p.alignment)
         }
       }
-      // 有一格没翻出来就算失败（Codex 在 #9 指出）；半份克隆照常显示，原表保持 translated 另加 partial 标记（Codex 在 #30 指出）
+      // One cell untranslated counts as a failure (Codex on #9); the half clone shows as usual, and the original table stays translated with a partial mark on top (Codex on #30)
       if (cells.size === batch.segments.length) {
         renderTable(batch.block, cells, renderedCells)
         registerCells()
@@ -311,9 +321,10 @@ export function startTranslation(options: RunOptions): TranslationRun {
           registerSentences(segment.block.el, node, segment.protected.offsets, spans, result.alignment)
           ledger.settle(segment.block, 'done')
         } else {
-          // 删掉 pending 与上一轮的译文（换了引擎 / 目标语言后再翻失败，页面不能还挂着旧译文，Codex 在 #9 指出），
-          // 插失败态小部件：原因 + 重试（§7.6）
-          const reason = result?.error ?? 'unknown: 没有这一段的结果'
+          // The pending node and the previous round's translation are removed (after an engine / target-language change a
+          // failed retranslation must not leave the old translation hanging; Codex on #9), and the failure widget goes in:
+          // the reason + retry (§7.6)
+          const reason = result?.error ?? 'unknown: no result for this segment'
           renderFailed(segment.block, reason, () => { void translate([segment.block]) })
           ledger.settle(segment.block, 'failed', reason)
         }
@@ -327,7 +338,7 @@ export function startTranslation(options: RunOptions): TranslationRun {
     const { taken } = ledger.intake(picked)
     if (taken.length === 0) return
     const batches = planBatches(taken, { maxBatchChars: options.capabilities.maxBatchChars, maxBatchItems: options.capabilities.maxBatchItems, renderPath: options.capabilities.renderPath }, block => sectionOf.get(block))
-    // 批次直接交给服务：在飞数量由移植的 request-queue 按速率兜住（§8.2），这里不再有 worker 池
+    // The batch goes straight to the service: the number in flight is held by the ported request-queue's rate limit (§8.2); no worker pool here any more
     await Promise.all(batches.map(processBatch))
   }
 

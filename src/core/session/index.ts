@@ -89,31 +89,34 @@ export function createPageSession(deps: SessionDeps): PageSession {
   const trace = deps.trace ?? (() => undefined)
   const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
-  // 模式：偏好存配置，实际生效的由 ModeController 按视口决定（§7.2）。
-  // 翻译开始前不建控制器，免得往没翻译过的页面写 data-axt-mode；popup 这时看到的是配置里的偏好。
+  // The mode: the preference lives in the configuration, and the one in effect is the ModeController's call by
+  // viewport (§7.2). No controller before a translation starts, so no data-axt-mode is written onto an untranslated
+  // page; until then the popup sees the configured preference.
   let modes: ModeController | null = null
-  /** 页内锚点兜底的卸载函数（issue #44）：会话开始时装、恢复原文时拆 */
+  /** The teardown of the in-page anchor fallback (issue #44): attached when a session starts, removed on restore */
   let uninstallAnchors: (() => void) | null = null
-  /** 悬停对照高亮（§7.7）：跟着一次翻译会话起停，配置关掉时根本不装监听 */
+  /** The hover highlight (§7.7): starts and stops with a translation session; with the setting off no listener is attached at all */
   let highlight: SentenceHighlight | null = null
   /**
-   * 读者存的模式。**问状态要等它读回来**：popup 一拿到非空的状态就不再重试，所以在这之前
-   * 任何猜测都可能把模式条钉在错的那一档上——升级上来的读者存着「上下」，而默认值是「左右」
-   *（Codex 在 #161 两轮分别指出这个默认值与「先猜」本身）。默认值只是读失败时的兜底
+   * The mode the reader saved. **A status request waits for it to come back**: the popup stops retrying the moment
+   * it gets a non-empty status, so any guess before then may pin the mode bar on the wrong stop — a reader who
+   * upgraded has “stack” stored while the default is “side” (Codex on #161, in two rounds: the default, then the
+   * guessing itself). The default is only the fallback for a failed read
    */
   let savedMode: Mode = DEFAULT_CONFIG.mode
   let configRead: () => void = () => undefined
   const ready = new Promise<void>(resolve => { configRead = resolve })
-  /** 由 startImages 装上：识别助手后来装好时，把这一页停着的位图放出来 */
+  /** Set by startImages: once the recognition helper is installed later, the parked bitmaps of this page are released */
   let resumeRaster: () => boolean = () => false
-  /** 译文外观（§7.5）：读者选中的那一份样式与高亮配置，写成 <html> 上的属性与变量 */
+  /** The translation's appearance (§7.5): the style and highlight profiles the reader chose, written as attributes and variables on <html> */
   let look: Look = lookOf(DEFAULT_CONFIG)
   /**
-   * 外观有三个写入点：启动时的这次读、start() 里的那次读、以及 onConfig。
-   * 前两个都是「发起时的快照」，watcher 拿到的才是最新值，所以 watcher 一旦写过，
-   * 任何配置读都不许再把 style 盖回旧快照——否则设置页刚存的外观会被一次晚到的 await 结果吞掉，
-   * 而 storage 事件已经消费过、不会再来一次（Codex 在 #106 两轮分别指出这两个读点）。
-   * 两个读点共用这一个闸，不各自判断
+   * The appearance has three writers: the read at start-up, the read in start(), and onConfig. The first two are
+   * “snapshots at the time of the request”, and only the watcher holds the newest value, so once the watcher has
+   * written, no configuration read may put the style back to an older snapshot — the appearance the settings page
+   * just saved would otherwise be swallowed by one late await result, and the storage event has been consumed and
+   * does not come again (Codex on #106, in two rounds, one per reader). The two readers share this one gate rather
+   * than judging on their own
    */
   let styleFromWatcher = false
   const adoptStyle = (next: Look) => {
@@ -130,13 +133,13 @@ export function createPageSession(deps: SessionDeps): PageSession {
   }
   void deps.config.get()
     .then(config => { savedMode = config.mode; adoptLocale(config.uiLanguage); adoptStyle(lookOf(config)) })
-    // 读失败也要放行：popup 等不到回答会一直显示「正在读取」，而默认值至少是个能用的答案
-    .catch(e => trace(`读配置失败，先按默认值答：${e instanceof Error ? e.message : String(e)}`))
+    // A failed read lets it through too: the popup would show “reading” for ever without an answer, and the defaults are at least a usable one
+    .catch(e => trace(`configuration read failed, answering with the defaults for now: ${e instanceof Error ? e.message : String(e)}`))
     .finally(() => configRead())
 
   let run: TranslationRun | null = null
   let title: TitleTranslator | null = null
-  /** 图片翻译（§15）：helper 可用且设置里至少勾了一种模式时才有 */
+  /** Image translation (§15): only with the helper available and at least one mode ticked in the settings */
   let images: ImageRun | null = null
   /** The image targets of the running session; `translateImages()` hands them all over by default */
   let imageTargets: ImageTarget[] = []
@@ -165,7 +168,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
   const idle = (): Progress => ({ state: 'idle', total: blocks.length, requested: 0, done: 0, failed: 0, cached: 0, inFlight: 0 })
   let progress: Progress = idle()
 
-  /** 结束当前会话：断开观察器、删 pending、撤掉排队与在飞的请求；页面上的译文留着 */
+  /** End the current session: disconnect the observers, remove the pending nodes, withdraw the queued and in-flight requests; the translations on the page stay */
   function endRun(): void {
     highlight?.stop()
     highlight = null
@@ -179,7 +182,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     imageProgress = null
     const session = active
     active = null
-    // 撤请求是尽力而为：排队的批次不再发出、在飞的 fetch 被 abort，撤不掉的由各回调的 alive() 挡住
+    // Withdrawing requests is best effort: queued batches are not sent, an in-flight fetch is aborted, and what cannot be withdrawn is stopped by each callback's alive()
     if (session) void backend.cancel(session)
   }
 
@@ -215,9 +218,9 @@ export function createPageSession(deps: SessionDeps): PageSession {
     if (blocks.length === 0) return { started: false, reason: S.page.nothingToTranslate }
     const tStart = now()
     const config = await deps.config.get()
-    // 术语表随每批发出（§8.2）。**空表不带这个字段**：带上会让所有既有缓存键变一遍，一次性全失效
+    // The glossary goes out with every batch (§8.2). **An empty glossary omits the field**: with it every existing cache key would change at once, invalidating everything
     const context: TranslateContext = config.glossary.length > 0 ? { ...deps.context, glossary: config.glossary } : deps.context
-    // 引擎链在 background；这里只取规划批次与选择渲染路径要用的能力（§2 第 3 条）
+    // The engine chain lives in the background; only the capabilities batch planning and render-path choice need are taken here (§2 item 3)
     // The session id is minted before the status is asked: the status request carries it, and the background binds
     // the session to the chain it answers about — a chain built from the configuration as stored now (`fresh`). The
     // target and the revision the session runs on come from that chain, not from the configuration read above: a
@@ -237,7 +240,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       void backend.cancel(session)
       return { started: false, reason }
     }
-    // 首选不可用而链上还有兜底时照常开始：请求会直接落到免费引擎上（§8.5）
+    // The first choice unavailable while the chain still has a fallback: start as usual, the requests land straight on the free engine (§8.5)
     if (!status.available && !status.fallback) return release(S.page.noService)
     // The reader may have restored the page while the two reads above were in flight
     if (from !== undefined && active !== from) return release(S.page.sessionOver)
@@ -247,11 +250,11 @@ export function createPageSession(deps: SessionDeps): PageSession {
     modes?.stop()
     modes = createModeController(doc, requested ?? config.mode, { onChange: enterSide })
     adoptStyle(lookOf(config))
-    endRun() // 上一轮停下但没恢复原文的会话（致命错误后重试）
-    // 页内锚点兜底（issue #44）：only 模式下目标块被隐藏，交叉引用点了不动窝
+    endRun() // the previous session, stopped but not restored (a retry after a fatal error)
+    // The in-page anchor fallback (issue #44): in only mode the target block is hidden, and a clicked cross-reference goes nowhere
     uninstallAnchors?.()
     uninstallAnchors = installAnchorFallback(doc)
-    // 只在这条路径上装：没开翻译时没有译文，也就没有对照可言
+    // Attached on this path only: with no translation on there is no translation, and nothing to compare
     if (config.reading.sentenceHighlight) highlight = startSentenceHighlight(doc) ?? null
     active = session
     actions++
@@ -262,7 +265,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     const target = status.targetLanguage
     running = { provider: status.chosen, target, engine: startEngine, revision: status.revision }
     current = { session, config, context, renderPath: status.renderPath }
-    prep.reset() // 新会话：镜像允许再跑一次、量宽缓存清空、栏宽重读
+    prep.reset() // a new session: the mirrors may run once more, the width cache is cleared, the column width is re-read
     enterSide(modes.effective())
     // Each busy → idle transition is one line the e2e suites read (idle-trace.ts)
     const traceIdle = createIdleTrace<Progress>({ now, trace }, p => p.inFlight > 0, (p, ms) =>
@@ -274,13 +277,13 @@ export function createPageSession(deps: SessionDeps): PageSession {
       mode: modes.effective(),
       appearance: look,
       paper,
-      // 标题 + 摘要每批都带（DESIGN §8.2）
+      // The title + the abstract go with every batch (DESIGN §8.2)
       context,
       capabilities: { maxBatchChars: status.maxBatchChars, maxBatchItems: status.maxBatchItems, renderPath: status.renderPath },
       transport: request => backend.translate(request),
       scope: session,
       preload: config.preload,
-      // 这一批刚动过 DOM 的块交给整理层：只碰它们所在的容器，不再每趟全篇重扫（issue #46）
+      // The blocks this batch just touched go to the tidy layer: only their containers are touched, no whole-paper re-scan per pass (issue #46)
       onRendered: rendered => {
         if (!alive()) return
         prep.touch(rendered)
@@ -314,7 +317,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       },
     })
     run.ready.catch(e => console.error('[axt] translation crashed', e))
-    // 标签页标题也翻（§10）：走同一个服务、同一份缓存；标题是纯文本，按占位符协议转义再解码
+    // The tab title is translated too (§10): the same service, the same cache; the title is plain text, escaped and decoded by the placeholder protocol
     title = translateTitle(doc, {
       isCurrent: alive,
       translate: async text => {
@@ -331,12 +334,15 @@ export function createPageSession(deps: SessionDeps): PageSession {
   }
 
   /**
-   * 图片翻译（§15）：先问 background 本机 helper 在不在，不在就整条路径不跑，页面翻译不受影响。
-   * 位图与文字块一样按视口懒加载；当前模式不在用户勾选的集合里时进入视口的图先停着，切回来再翻
+   * Image translation (§15): the background is asked first whether the local helper is there; without it the whole
+   * path does not run, and the page's translation is unaffected. Bitmaps are lazily loaded by viewport like text
+   * blocks; with the current mode outside the reader's ticked set, an image entering the viewport parks and is
+   * translated on switching back
    */
   function startImages(session: string, alive: () => boolean, config: Config, context: TranslateContext, renderPath: RenderPath): void {
-    // 上一轮（致命错误后没恢复原文就重开）留下的叠加层与模式闸先摘掉：helper 没了、图片翻译关了、
-    // 目标语言换了，旧的都不该再显示；新一轮处理到那张图时会替换它（Codex 在 #89 指出）
+    // The overlays and the mode gate of the previous round (restarted after a fatal error without a restore) are taken
+    // off first: with the helper gone, image translation off or the target language changed, the old ones must not
+    // show; the new round replaces them when it reaches the image (Codex on #89)
     setImageModes(doc, [])
     if (!config.image.enabled || config.image.modes.length === 0) return
     if (!paper) return
@@ -346,10 +352,11 @@ export function createPageSession(deps: SessionDeps): PageSession {
     setImageModes(doc, config.image.modes)
 
     /**
-     * helper 只决定**位图**（§15.5）。所以这一轮**立刻开跑**，不等它的探测：
-     * SVG 图的文字是从 contentDocument 里读出来的，等一个与它无关的握手没有道理，
-     * 而那个握手在 helper 装了却挂住时要 30 秒才超时，探测本身失败还会把整段跳过
-     *（Codex 在 #134 指出）。位图目标先停在 parked 里，探测回来再放。
+     * The helper decides **bitmaps** only (§15.5). So this round **starts at once**, without waiting for its probe:
+     * an SVG figure's text is read out of its contentDocument, and waiting for a handshake unrelated to it makes no
+     * sense — a handshake that takes 30 seconds to time out when the helper is installed but hung, and whose own
+     * failure would skip the whole stretch (Codex on #134). Bitmap targets park first and are released when the
+     * probe comes back.
      */
     let helperReady = false
     const traceIdle = createIdleTrace<ImageProgress>({ now, trace }, p => p.requested - p.done - p.failed > 0, (p, ms) => `images idle: ${p.done}/${p.requested} of ${p.total}, ${p.failed} failed, ${ms} ms`)
@@ -366,7 +373,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       ocr: call => deps.ocr(call),
       translate: request => backend.translate(request),
       ...(deps.fetchImage ? { fetchBytes: deps.fetchImage } : {}),
-      // 模式闸对两种图一样；位图额外要等 helper（§15.5）
+      // The mode gate is the same for both kinds of image; a bitmap additionally waits for the helper (§15.5)
       isEnabled: t => config.image.enabled && config.image.modes.includes(modes?.effective() ?? config.mode) && (t.kind !== 'raster' || helperReady),
       isCurrent: alive,
       onProgress: p => {
@@ -374,7 +381,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
         imageProgress = p
         traceIdle(p)
       },
-      // 叠加层插好了：side 模式下所在插图要拆两份（§7.2），交给整理层
+      // The overlay is in: in side mode the figure it sits in is split in two (§7.2), the tidy layer's job
       onRendered: rendered => {
         if (!alive()) return
         prep.touch(rendered)
@@ -383,9 +390,9 @@ export function createPageSession(deps: SessionDeps): PageSession {
     trace(`images: ${targets.filter(t => t.kind === 'svg').length} SVG + ${targets.filter(t => t.kind === 'picture').length} inline pictures + ${targets.filter(t => t.kind === 'raster').length} bitmaps, modes ${config.image.modes.join('/')}`)
 
     /**
-     * 位图要等 helper。**探测失败或没装也要收尾**：上一轮成功画过的位图叠加层还挂在页面上，
-     * 而这一轮它们的目标停在 parked 里、永远不会走到 `clearImage`——旧译文（甚至旧的目标语言）
-     * 就那么留着（Codex 在 #134 指出）
+     * Bitmaps wait for the helper. **A failed or absent probe has to settle too**: the bitmap overlays the previous
+     * round drew are still on the page, and this round their targets park and would never reach `clearImage` — the
+     * old translations (even in the old target language) would just stay (Codex on #134)
      */
     const settleRaster = (available: boolean) => {
       if (!alive()) return
@@ -393,8 +400,8 @@ export function createPageSession(deps: SessionDeps): PageSession {
       if (available) images?.resume()
       else for (const t of targets) if (t.kind === 'raster') clearImageEverywhere(t)
     }
-    // 装好识别助手之后要能把这一页放出来（Codex 在 #161 指出）：会话开始时探测扑空的话，
-    // 位图一直停在 parked 里，而这一页自己没有任何再问一次的由头
+    // Once the recognition helper is installed, this page has to be released (Codex on #161): with the probe missing
+    // at session start the bitmaps park for good, and the page itself has no occasion to ask again
     resumeRaster = () => {
       if (helperReady || !alive()) return false
       settleRaster(true)
@@ -402,40 +409,41 @@ export function createPageSession(deps: SessionDeps): PageSession {
     }
     deps.helperStatus()
       .then(helper => settleRaster(helper.state === 'ready'))
-      .catch(e => { trace(`helper-status 失败：${e instanceof Error ? e.message : String(e)}`); settleRaster(false) })
+      .catch(e => { trace(`helper-status failed: ${e instanceof Error ? e.message : String(e)}`); settleRaster(false) })
   }
 
   let fitObserver: ResizeObserver | null = null
 
   /**
-   * 译文到达后的整理（DESIGN §7.2 / §10，issue #46）：脚注归位、拆图、镜像、缩表、对齐边距。
-   * 由 pipeline 每批交出的脏块驱动，每趟只碰它们所在的容器；镜像整个会话只跑一次；
-   * 栏宽在每趟开头、写任何东西之前读。全部在 renderer/prep.ts，这里只接线
+   * The tidy after a translation arrives (DESIGN §7.2 / §10, issue #46): footnote placement, split figures, mirrors,
+   * table fitting, margin alignment. Driven by the dirty blocks the pipeline hands over per batch, each pass touching
+   * only their containers; the mirrors run once per session; the column width is read at the start of a pass,
+   * before anything is written. All of it is renderer/prep.ts; this only wires it up
    */
   const prep = createPrep(doc, {
     isSide: () => modes?.effective() === 'side',
     trace,
   })
 
-  /** 进入 side 时的准备：右栏补一份公式与图表（§7.2），并把表格缩到能装进一栏 */
+  /** The preparation on entering side: the right column gets its copies of formulas and figures (§7.2), and tables shrink to fit a column */
   function enterSide(effective: Mode): void {
-    // 模式闸可能刚打开：停着的图放出去（§15）
+    // The mode gate may have just opened: parked images are released (§15)
     images?.resume()
     if (effective !== 'side') {
       fitObserver?.disconnect()
       fitObserver = null
       prep.cancel()
-      // 对齐用的内联边距只服务于左右分栏，其他模式下要还给站点样式；
-      // 边注的下排同理——别的模式下浮动按自己的高度互相避让，用不着我们推
+      // The inline margins for alignment serve the two-column layout only and go back to the site's styles in the
+      // other modes; the margin-note stacking likewise — in the other modes the floats avoid one another by their own height, with no push from us
       clearPairMargins(doc)
       clearMarginNotes(doc)
       return
     }
-    // 进 side：栏宽重读、全量整理一趟（stack / only 回来时对齐边距已被清掉，得从头算）
+    // Entering side: the column width re-read, one full tidy pass (coming back from stack / only the alignment margins were cleared and have to be computed afresh)
     prep.refreshColumn()
     prep.touchAll()
-    // 栏宽随窗口变化，缩放比例要跟着重算。只在宽度真的变了才重算——
-    // 缩放表格本身也会让观察目标报告一次尺寸变化，不设这道闸就会自激振荡
+    // The column width follows the window, and the zoom ratios have to be recomputed with it. Only when the width
+    // really changed: scaling a table itself makes the observed target report a size change, and without this gate it would oscillate
     if (!fitObserver && typeof ResizeObserver === 'function') {
       let lastWidth = 0
       fitObserver = new ResizeObserver(entries => {
@@ -451,7 +459,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
   }
 
   async function setMode(mode: Mode): Promise<{ mode: Mode; effective: Mode }> {
-    // 没在翻译时也允许切换：控制器会把属性写到 <html> 上，样式立刻生效
+    // Switching is allowed while not translating too: the controller writes the attribute onto <html>, and the styles apply at once
     if (!modes) modes = createModeController(doc, mode, { onChange: enterSide })
     const effective = modes.choose(mode)
     enterSide(effective)
@@ -481,13 +489,15 @@ export function createPageSession(deps: SessionDeps): PageSession {
     return { removedNodes: result.removedNodes }
   }
 
-  // 设置页改完外观立刻生效（#47）：只重算注入表与 <html> 上的属性，一个译文节点都不碰，
-  // 也不重新请求翻译（§8.5 的 chainConfigChanged 本来就忽略 style）。
-  // 订阅而不是消息：设置页自己就是活动标签页，发不到内容页；订阅还能同时更新所有打开的论文
+  // An appearance changed on the settings page applies at once (#47): only the injected sheet and the attributes on
+  // <html> are recomputed, not one translation node is touched, and no translation is requested again (§8.5's
+  // chainConfigChanged ignores style anyway). A subscription rather than a message: the settings page is itself the
+  // active tab and cannot reach the content page; a subscription also updates every open paper at once
   function onConfig(config: Config): void {
-    // 先立闸再比值：watcher 一响就说明它拿到的是最新的存储内容，哪怕这次不需要重画。
-    // 否则「页面带着旧外观启动 + 用户点恢复默认」会走进等值快路径，闸没立起来，
-    // 随后 getConfig() 那份旧快照又把非默认外观装回去（Codex 在 #106 指出）
+    // The gate first, the comparison after: the watcher firing means it holds the newest stored content, even when
+    // nothing needs redrawing this time. Otherwise “the page started with the old appearance + the reader clicks
+    // restore defaults” takes the equal-value fast path, the gate is not raised, and the old snapshot from the
+    // following getConfig() puts the non-default appearance back (Codex on #106)
     styleFromWatcher = true
     // The hover highlight is a front-page toggle (UI.md S-P-80), so it takes effect on this page
     // at once: installed or torn down mid-session, no translation node touched. Outside a session
@@ -517,7 +527,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
       const session = current.session
       if (config.image.enabled) startImages(session, () => active === session, config, current.context, current.renderPath)
     }
-    // 语言变了：已经画出来的失败控件把词抄进了自己的 shadow root，要重新写一遍（Codex 在 #161 指出）
+    // The language changed: the failure widgets already drawn copied the words into their own shadow roots and have to be rewritten (Codex on #161)
     deps.applyLocale(config.uiLanguage)
     relabelFailed(doc)
     const next = lookOf(config)
@@ -542,7 +552,7 @@ export function createPageSession(deps: SessionDeps): PageSession {
     },
     resumeRaster: () => resumeRaster(),
     onConfig,
-    // 等首次读配置：答一次就定了这一轮 popup 的模式条（见 savedMode 的注释）
+    // Wait for the first configuration read: one answer settles this round's popup mode bar (see the note on savedMode)
     status: () => ready.then(() => ({
       paper,
       mode: modes?.effective() ?? savedMode,
