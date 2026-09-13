@@ -241,7 +241,7 @@ export function createHelperClient(deps: HelperClientDeps): OcrBackend {
     },
 
     async ocr(request, scope) {
-      const reply = await send('ocr', { image: request.image, ...(request.langs ? { langs: request.langs } : {}) }, scope)
+      const reply = await send('ocr', { image: request.image }, scope)
       const failure = errorOf(reply)
       if (failure) throw failure
       const lines = reply.lines

@@ -56,7 +56,6 @@ export type ProviderKind = 'llm' | 'mt' | 'builtin'
 
 export interface TranslationProvider {
   id: string
-  displayName: string
   kind: ProviderKind
   /**
    * The wire formats this engine can keep, **in order of preference**; the intersection is negotiated with the other

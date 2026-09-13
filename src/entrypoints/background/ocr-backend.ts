@@ -15,7 +15,7 @@ export interface OcrBackend {
    * Recognise one image. `version` is the build that produced the result — the cache key is computed from it, so a
    * backend whose build can change between calls reports the one that actually answered, not the one `status()` saw
    */
-  ocr(request: { image: string; langs?: string[] }, scope?: string): Promise<{ result: OcrResult; version: string }>
+  ocr(request: { image: string }, scope?: string): Promise<{ result: OcrResult; version: string }>
   /** Drop the scope's queued and in-flight recognitions (they reject as `aborted`); returns how many */
   cancel(scope: string): number
 }

@@ -9,7 +9,7 @@ import type { TranslationProvider } from '@/providers/types'
 
 const engine = (id: string, wireFormats: readonly WireFormat[], available = true): TranslationProvider => ({
   id,
-  displayName: id,
+
   kind: 'mt',
   wireFormats,
   maxBatchChars: 1000,

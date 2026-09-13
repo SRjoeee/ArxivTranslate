@@ -29,7 +29,7 @@ const settle = async (rounds = 4) => { for (let i = 0; i < rounds; i++) await ti
 function providerStatus(over: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
     providerId: 'microsoft', available: true, maxBatchChars: 100_000, maxBatchItems: 100, renderPath: 'tags',
-    targetLanguage: 'cmn', promptId: 'default', revision: 'r1', chosen: 'microsoft', engine: { id: 'microsoft', displayName: 'Microsoft' },
+    targetLanguage: 'cmn', promptId: 'default', revision: 'r1', chosen: 'microsoft', engine: { id: 'microsoft' },
     chain: ['microsoft'], demotions: [], ...over,
   }
 }
@@ -293,7 +293,7 @@ describe('page session', () => {
     const none = harness({ status: () => providerStatus({ available: false }) })
     expect(await none.session.start()).toEqual({ started: false, reason: S.page.noService })
     // a fallback on the chain is enough to start: the requests land on the free engine (§8.5)
-    const fallback = harness({ status: () => providerStatus({ available: false, fallback: { id: 'google-web', displayName: 'Google' } }) })
+    const fallback = harness({ status: () => providerStatus({ available: false, fallback: { id: 'google-web' } }) })
     live = fallback.session
     expect(await fallback.session.start()).toEqual({ started: true })
   })
@@ -396,7 +396,7 @@ describe('page session', () => {
       // A session's start asks fresh with its own scope; the hand-over check asks about its scope without fresh
       status: (scope, _call, statusOptions) => {
         if (scope !== undefined && !statusOptions?.fresh) { handedOver = true; return providerStatus({ demotions: [{ id: 'microsoft', kind: 'auth' }] }) }
-        return providerStatus(handedOver ? { engine: { id: 'google-web', displayName: 'Google' }, chain: ['microsoft', 'google-web'] } : {})
+        return providerStatus(handedOver ? { engine: { id: 'google-web' }, chain: ['microsoft', 'google-web'] } : {})
       },
     })
     live = h.session

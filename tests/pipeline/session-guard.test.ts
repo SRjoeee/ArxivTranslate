@@ -51,7 +51,7 @@ describe('the wait budget of cache reads: no CachePort can drag it down (issue #
     const calls: string[][] = []
     const service = createTranslateService({
       getProvider: async () => ({
-        id: 'mock', displayName: 'mock', kind: 'llm', wireFormats: ['tags'] as const, maxBatchChars: 1000, maxBatchItems: 4,
+        id: 'mock', kind: 'llm', wireFormats: ['tags'] as const, maxBatchChars: 1000, maxBatchItems: 4,
         isAvailable: async () => true,
         translate: async r => { calls.push(r.segments.map(s => s.id)); return { segments: r.segments.map(s => ({ ...s, text: `译:${s.text}` })), provider: 'mock' } },
       }),
@@ -200,7 +200,7 @@ describe('no cache write after a drop (Codex on #33)', () => {
       cancelled: registry,
       // At most 1 per batch: a answers at once, b hangs, released only after the cancel
       getProvider: async () => ({
-        id: 'mock', displayName: 'mock', kind: 'llm', wireFormats: ['tags'] as const, maxBatchChars: 1000, maxBatchItems: 1,
+        id: 'mock', kind: 'llm', wireFormats: ['tags'] as const, maxBatchChars: 1000, maxBatchItems: 1,
         isAvailable: async () => true,
         translate: async r => {
           if (r.segments[0]?.id === 'b') await held

@@ -8,7 +8,7 @@ import { createTranslateService, toErrorInfo, type CacheEntry, type CachePort, t
 import { ProviderError, type TranslationProvider } from '@/providers/types'
 
 const provider = (translate: TranslationProvider['translate'], id = 'mock', extra: Partial<TranslationProvider> = {}): TranslationProvider => ({
-  id, displayName: id, kind: 'llm', wireFormats: ['tags'] as const,
+  id, kind: 'llm', wireFormats: ['tags'] as const,
   maxBatchChars: 1000, maxBatchItems: 4,
   isAvailable: async () => true, translate,
   ...extra,
