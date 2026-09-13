@@ -1,17 +1,17 @@
-/** 解析按 fixture 真实结构手写的片段，返回 body 的第一个子元素 */
+/** Parse a snippet hand-written after a fixture's real structure; returns the body's first child element */
 export function el(html: string): Element {
   const doc = new DOMParser().parseFromString(`<!doctype html><html><body>${html}</body></html>`, 'text/html')
   const target = doc.body.firstElementChild
-  if (!target) throw new Error('片段为空')
+  if (!target) throw new Error('empty snippet')
   return target
 }
 
-/** 回填克隆会剥掉 id，比较时把原文的 id 也剥掉 */
+/** The rehydrated clone strips ids; strip the original's ids too before comparing */
 export function stripIds(html: string): string {
   return html.replace(/ id="[^"]*"/g, '')
 }
 
-/** 把片段挂到 div 里取 innerHTML，便于与原文比较 */
+/** Hang the fragment in a div and take its innerHTML, for comparison with the original */
 export function htmlOf(fragment: DocumentFragment): string {
   const div = document.createElement('div')
   div.append(fragment)
@@ -19,21 +19,21 @@ export function htmlOf(fragment: DocumentFragment): string {
 }
 
 /**
- * 恒等往返的比较口径：两侧都把连续空白折成一个空格再比。
+ * The comparison rule for identity round trips: both sides collapse runs of whitespace to one space before comparing.
  *
- * `serialize` 从 #119 起在出口折叠空白（LaTeXML 的硬换行会被微软当成句号），所以回填出来的
- * HTML 与原文在**空白数量**上不再逐字节相同。这不是缺陷：回填产生的是译文节点——一个新的兄弟
- * 节点——而 HTML 渲染本来就折叠这些空白；DESIGN §7.1 的「恢复后逐节点相等」由用例末尾那条
- * `outerHTML` 断言守着，`serialize` 纯读、不碰原节点。
+ * `serialize` collapses whitespace at its exit since #119 (LaTeXML's hard line breaks were taken for full stops by Microsoft), so the rehydrated
+ * HTML is no longer byte-identical to the original in **whitespace count**. That is no defect: rehydration produces the translation node — a new sibling
+ * node — and HTML rendering collapses that whitespace anyway; DESIGN §7.1's “equal node for node after restore” is guarded by the
+ * `outerHTML` assertion at the end of the case, and `serialize` is read-only, never touching the original node.
  *
- * 放宽的**只有空白数量**这一件事，词间空白**消失**仍然会被抓到：原文折叠后是 `a b`，
- * 若回填成 `ab` 两侧依然不等。`</em> and` 掉成 `</em>and` 同理。
+ * Relaxed is **the whitespace count only**; an inter-word space **vanishing** is still caught: the original collapses to `a b`,
+ * and rehydrated as `ab` the sides still differ. `</em> and` dropping to `</em>and` likewise.
  */
 export function sameModuloWhitespace(actual: string, expected: string): [string, string] {
-  // 只折叠 `serialize` 会折叠的那五个字符，**不能用 `\s`、也不能 trim**：`\s` 含 U+00A0 与窄空格，
-  // trim 会吃掉首尾——那样的话「把 NBSP 错折成普通空格」两侧都会变成同一个普通空格，
-  // 比较结果相等，用例就再也抓不到它了（Codex 在 #122 指出）。
-  // 这个口径下放宽的严格只有「HTML 空白的数量」，语义空白与首尾边界仍然逐字符比较
+  // Collapse only the five characters `serialize` collapses, **neither `\s` nor trim**: `\s` includes U+00A0 and the narrow spaces,
+  // and trim would eat the ends — then “an NBSP wrongly collapsed to an ordinary space” would become the same ordinary space on both sides,
+  // the comparison would pass, and the case could never catch it again (Codex on #122).
+  // Under this rule the only strictness relaxed is “the count of HTML whitespace”; semantic whitespace and the end boundaries are still compared character for character
   const collapse = (s: string) => s.replace(/[\t\n\f\r ]+/g, ' ')
   return [collapse(actual), collapse(expected)]
 }

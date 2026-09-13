@@ -24,7 +24,7 @@ describe('splitFigures', () => {
     const original = doc.querySelector(`figure[${SPLIT_ATTR}]`)!
     const clone = original.nextElementSibling!
     expect(clone.classList.contains(SPLIT_CLASS)).toBe(true)
-    expect(clone.classList.contains(T_CLASS)).toBe(true) // // the pairing rule puts it in the right column by this
+    expect(clone.classList.contains(T_CLASS)).toBe(true) // the pairing rule puts it in the right column by this
     // The copy: the graphic is still there, the source caption is gone, only the translation remains
     expect(clone.querySelector('img')).not.toBeNull()
     expect(clone.querySelectorAll('.ltx_caption')).toHaveLength(1)
@@ -164,7 +164,7 @@ describe('a mirror is no translation (issue #46, measured on 2312.17141)', () =>
       + '<figcaption class="ltx_caption" data-axt-id="c" data-axt-state="pending">Figure.</figcaption></figure>')
     expect(splitFigures(doc)).toBe(0)
     expect(doc.querySelector('.axt-split')).toBeNull()
-    expect(doc.querySelectorAll('.axt-mirror')).toHaveLength(1) // // the mirror stays
+    expect(doc.querySelectorAll('.axt-mirror')).toHaveLength(1) // the mirror stays
   })
 
   describe('the image overlay (DESIGN §15.2)', () => {
@@ -215,14 +215,14 @@ describe('a mirror is no translation (issue #46, measured on 2312.17141)', () =>
       overlayOn(doc)
       expect(splitFigures(doc)).toBe(1)
       expect(doc.querySelectorAll(`.${MIRROR_CLASS}`)).toHaveLength(0)
-      expect(doc.querySelectorAll('figure')).toHaveLength(2) // // original + copy
+      expect(doc.querySelectorAll('figure')).toHaveLength(2) // original + copy
     })
 
     it('dropStaleSplits: outside side a copy with a stale signature is dropped and the original\'s mark removed; an equal signature is left alone', () => {
       const doc = docOf(figure())
       splitFigures(doc)
       expect(dropStaleSplits(doc)).toBe(0)
-      overlayOn(doc) // // the overlay arrived only after side → only, and went into the original
+      overlayOn(doc) // the overlay arrived only after side → only, and went into the original
       expect(dropStaleSplits(doc)).toBe(1)
       expect(doc.querySelector(`.${SPLIT_CLASS}`)).toBeNull()
       expect(doc.querySelector(`[${SPLIT_ATTR}]`)).toBeNull()

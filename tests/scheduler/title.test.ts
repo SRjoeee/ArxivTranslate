@@ -5,7 +5,7 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0))
 const docWith = (title: string) => new DOMParser().parseFromString(`<!doctype html><html><head><title>${title}</title></head><body></body></html>`, 'text/html')
 
 describe('translateTitle', () => {
-  it('开始时翻一次标题；停止时恢复原文（§7.1 恢复后逐节点相等）', async () => {
+  it('translates the title once at the start; restores the original on stop (§7.1: equal node for node after restore)', async () => {
     const doc = docWith('A Paper')
     const before = doc.documentElement.outerHTML
     const calls: string[] = []
@@ -18,7 +18,7 @@ describe('translateTitle', () => {
     expect(doc.documentElement.outerHTML).toBe(before)
   })
 
-  it('拿不到译文（null）就保持原标题；会话已结束的结果丢掉', async () => {
+  it('with no translation (null) the original title stays; a result after the session ended is dropped', async () => {
     const doc = docWith('A Paper')
     translateTitle(doc, { translate: async () => null, isCurrent: () => true })
     await tick()
@@ -32,7 +32,7 @@ describe('translateTitle', () => {
     t2.stop()
   })
 
-  it('页面自己改了标题就重翻；我们写的译文不会触发重翻', async () => {
+  it('a title changed by the page itself is retranslated; our own translation triggers no retranslation', async () => {
     const doc = docWith('A Paper')
     const calls: string[] = []
     const title = translateTitle(doc, { translate: async text => { calls.push(text); return `译:${text}` }, isCurrent: () => true })
@@ -44,11 +44,11 @@ describe('translateTitle', () => {
     expect(calls).toEqual(['A Paper', 'Changed by page'])
     expect(doc.title).toBe('译:Changed by page')
     title.stop()
-    // 页面改过的那个才是"原文"
+    // What the page changed it to is the “original”
     expect(doc.title).toBe('Changed by page')
   })
 
-  it('翻译抛错：标题不变，不抛出', async () => {
+  it('the translation throws: the title unchanged, nothing thrown', async () => {
     const doc = docWith('A Paper')
     const title = translateTitle(doc, { translate: async () => { throw new Error('boom') }, isCurrent: () => true })
     await tick()
@@ -57,7 +57,7 @@ describe('translateTitle', () => {
     expect(doc.title).toBe('A Paper')
   })
 
-  it('空标题什么都不做', async () => {
+  it('an empty title does nothing', async () => {
     const doc = docWith('')
     const calls: string[] = []
     const title = translateTitle(doc, { translate: async text => { calls.push(text); return 'x' }, isCurrent: () => true })

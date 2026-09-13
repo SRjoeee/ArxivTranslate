@@ -109,7 +109,7 @@ describe('createPrep', () => {
 
   it('before the block marks are written the mirror does not count as run: that pass mirrors nothing, the next one after the marks does', () => {
     const doc = docOf(EQUATION)
-    const blocks = extract(doc) // // deliberately no markBlocks
+    const blocks = extract(doc) // deliberately no markBlocks
     const prep = createPrep(doc, { isSide: () => true, columnWidth: () => 484 })
     prep.touchAll()
     flush()
@@ -227,7 +227,7 @@ describe('createPrep × the image overlay (DESIGN §15.2)', () => {
     const blocks = extract(doc)
     markBlocks(blocks)
     renderText(blocks.find(b => b.el.id === 'c1') as TextBlock, frag(doc, '图 1。'))
-    splitFigures(doc) // // once split under side
+    splitFigures(doc) // once split under side
     expect(doc.querySelector(`.${SPLIT_CLASS}`)).not.toBeNull()
     const prep = createPrep(doc, { isSide: () => false, columnWidth: () => 484 })
     const target = overlayOn(doc)

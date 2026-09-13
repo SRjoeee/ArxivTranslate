@@ -21,7 +21,7 @@ describe('fitTables', () => {
   it('display formulas with their mirrors scale by column like tables: only the outermost table.ltx_eqn_table is marked, the tr.ltx_equation rows of a group are not counted on their own', () => {
     const doc = eqnDoc()
     const r = fitTables(doc, { naturalWidth: () => 800, columnWidth: () => 436 })
-    expect(r).toEqual({ fitted: 0, scrolled: 1 }) // // 436/800 = 0.545 < 0.7 → scroll
+    expect(r).toEqual({ fitted: 0, scrolled: 1 }) // 436/800 = 0.545 < 0.7 → scroll
     const [original, mirror] = Array.from(doc.querySelectorAll('table'))
     expect(fitOf(original!)).toBe(FIT_SCROLL)
     expect(fitOf(mirror!)).toBe(FIT_SCROLL)
@@ -172,7 +172,7 @@ describe('batched reads and writes, and the cache (issue #46)', () => {
     const natural = vi.fn(() => 551)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 700 })
-    expect(natural).toHaveBeenCalledTimes(4) // // two passes × two tables each
+    expect(natural).toHaveBeenCalledTimes(4) // two passes × two tables each
     expect(fitOf(originals(doc)[0]!)).toBeNull()
   })
 
@@ -184,7 +184,7 @@ describe('batched reads and writes, and the cache (issue #46)', () => {
     const fresh = original.nextElementSibling!.cloneNode(true) as Element
     original.nextElementSibling!.replaceWith(fresh)
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(4) // // two passes × two tables each
+    expect(natural).toHaveBeenCalledTimes(4) // two passes × two tables each
     expect(fitOf(fresh)).toBe('85')
   })
 
@@ -195,7 +195,7 @@ describe('batched reads and writes, and the cache (issue #46)', () => {
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
     expect(fitOf(originals(doc)[0]!)).toBeNull()
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(4) // // two passes × two tables each
+    expect(natural).toHaveBeenCalledTimes(4) // two passes × two tables each
     expect(fitOf(originals(doc)[0]!)).toBe('85')
   })
 
@@ -258,7 +258,7 @@ describe('fonts finishing loading must invalidate the cache (Codex on #84)', () 
     expect(scheduled).toHaveBeenCalledTimes(1)
     width = 700
     fitTables(doc, { naturalWidth: natural, columnWidth: () => 484 })
-    expect(natural).toHaveBeenCalledTimes(4) // // two passes × two tables each
+    expect(natural).toHaveBeenCalledTimes(4) // two passes × two tables each
     expect(fitOf(originals(doc)[0]!)).toBe(FIT_SCROLL) // 484/700 = 0.69 < 0.7
     off()
   })

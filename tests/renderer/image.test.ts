@@ -164,7 +164,7 @@ describe('clearImageEverywhere (§15.5)', () => {
     expect(doc.querySelector(`.axt-split .${IMG_CLASS}`)?.getAttribute(FOR_ATTR)).toBeNull()
 
     expect(clearImage(target)).toBe(true)
-    expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(1) // // the copy inside the clone is still there
+    expect(doc.querySelectorAll(`.${IMG_CLASS}`)).toHaveLength(1) // the copy inside the clone is still there
 
     renderImage(target, [{ x: 0, y: 0, w: 0.3, h: 0.05, lines: 1, source: 'Static', text: '静态' }])
     expect(clearImageEverywhere(target)).toBe(2)

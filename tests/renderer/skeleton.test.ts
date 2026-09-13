@@ -17,7 +17,7 @@ describe('skeleton', () => {
     const lines = skeleton.querySelectorAll(`.${SKELETON_LINE_CLASS}`)
     expect(lines).toHaveLength(1)
     expect((lines[0] as HTMLElement).style.width).toBe('62%')
-    cancelSkeletonAnimation(skeleton) // // not attached to the document, so afterEach cannot reach it; cleaned up here
+    cancelSkeletonAnimation(skeleton) // not attached to the document, so afterEach cannot reach it; cleaned up here
   })
 
   it('the line count is estimated from the source length, the last line short: it reads like a paragraph, not a block', () => {

@@ -10,54 +10,54 @@ const reason = (translated: string) => {
 }
 
 describe('validate', () => {
-  it('恒等与语序调换都通过', () => {
+  it('identity and reordering both pass', () => {
     expect(reason('令 <x id="1"/> 为 <t id="2">粗体</t>，见 <x id="3"/>。')).toBe('ok')
     expect(reason('<x id="3"/> 之后，<t id="2">粗体</t> 与 <x id="1"/>')).toBe('ok')
   })
 
-  it('容忍常见写法变体', () => {
+  it('tolerates common spelling variants', () => {
     expect(reason('<x id="1" /> a <t id=\'2\'>b</t> c <x id=3></x>')).toBe('ok')
   })
 
-  it('丢失 void 或 paired', () => {
+  it('a void or a paired missing', () => {
     expect(reason('令 <x id="1"/> 为 <t id="2">粗体</t>。')).toBe('missing')
     expect(reason('<x id="1"/> a <x id="3"/>')).toBe('missing')
   })
 
-  it('重复', () => {
+  it('duplicated', () => {
     expect(reason('<x id="1"/><x id="1"/> <t id="2">a</t> <x id="3"/>')).toBe('duplicate')
     expect(reason('<x id="1"/> <t id="2">a</t><t id="2">b</t> <x id="3"/>')).toBe('duplicate')
   })
 
-  it('未知 id', () => {
+  it('an unknown id', () => {
     expect(reason('<x id="1"/> <t id="2">a</t> <x id="3"/> <x id="9"/>')).toBe('unknown')
   })
 
-  it('paired 未闭合或多余闭合', () => {
+  it('a paired unclosed or closed once too often', () => {
     expect(reason('<x id="1"/> <t id="2">a <x id="3"/>')).toBe('unbalanced')
     expect(reason('<x id="1"/> <t id="2">a</t></t> <x id="3"/>')).toBe('unbalanced')
   })
 
-  it('void 与 paired 种类互换', () => {
+  it('void and paired kinds swapped', () => {
     expect(reason('<t id="1">x</t> <t id="2">a</t> <x id="3"/>')).toBe('kind-mismatch')
     expect(reason('<x id="1"/> <x id="2"/> <x id="3"/>')).toBe('kind-mismatch')
   })
 
-  it('paired 嵌套合法', () => {
+  it('paired nesting is valid', () => {
     const b = serialize(el('<p class="ltx_p"><span class="ltx_text">A <em class="ltx_emph">B</em></span></p>'))
     expect(validate('<t id="1">甲 <t id="2">乙</t></t>', b).ok).toBe(true)
     expect(validate('<t id="2">乙</t><t id="1">甲</t>', b).ok).toBe(true)
   })
 
-  it('失败结果带 detail', () => {
+  it('a failure result carries detail', () => {
     const r = validate('nothing', block())
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.detail).toMatch(/1/)
   })
 })
 
-describe('expectationsFromText（issue #42：期望从请求文本反推，不跨消息传 accept）', () => {
-  it('反推出的期望与 serialize 的结果等价：同一段译文两边判一样', () => {
+describe('expectationsFromText (issue #42: the expectations are derived from the request text, no accept passed across messages)', () => {
+  it('the derived expectations are equivalent to serialize\'s result: the same translation is judged alike on both sides', () => {
     const b = block()
     const derived = expectationsFromText(b.text)
     expect([...derived.slots.keys()].sort()).toEqual([...b.slots.keys()].sort())
@@ -74,21 +74,21 @@ describe('expectationsFromText（issue #42：期望从请求文本反推，不�
     }
   })
 
-  it('嵌套的 paired 也认得出来', () => {
+  it('nested paired are recognised too', () => {
     const b = serialize(el('<p class="ltx_p"><span class="ltx_text">A <em class="ltx_emph">B</em></span></p>'))
     const derived = expectationsFromText(b.text)
     expect([...derived.paired].sort()).toEqual([...b.paired].sort())
     expect(derived.slots.size).toBe(b.slots.size)
   })
 
-  it('runs 路径的纯文本没有槽位：译文里凭空冒出的标签会被判 unknown，不许进缓存', () => {
+  it('the runs path\'s plain text has no slots: a tag appearing from nowhere in the translation is judged unknown and may not enter the cache', () => {
     const derived = expectationsFromText('a plain run without placeholders')
     expect(derived.slots.size).toBe(0)
     expect(validate('一段纯译文', derived).ok).toBe(true)
     expect(validate('一段 <x id="1"/> 译文', derived)).toMatchObject({ ok: false, reason: 'unknown' })
   })
 
-  it('多余的 </t> 不算槽位，扫描不被它带偏', () => {
+  it('an extra </t> is no slot, and the scan is not led astray by it', () => {
     expect(expectationsFromText('a </t> b <x id="4"/>')).toMatchObject({ slots: new Map([[4, null]]), paired: new Set() })
   })
 })

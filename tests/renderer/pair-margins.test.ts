@@ -90,7 +90,7 @@ describe('reads and writes apart (issue #46): the tidy layer puts every read bef
     const t = doc.querySelector('.axt-t') as HTMLElement
     const plan = readPairMargins(doc)
     expect(plan.pairs).toHaveLength(1)
-    expect(t.style.marginTop).toBe('') // // the read phase writes nothing
+    expect(t.style.marginTop).toBe('') // the read phase writes nothing
     const changed = writePairMargins(plan)
     const again = docOf('<div class="ltx_para"><p class="ltx_p" style="margin-top: 8px">A</p><p class="ltx_p axt-t" data-axt-for="a">译</p></div>')
     expect(changed).toBe(alignPairMargins(again))

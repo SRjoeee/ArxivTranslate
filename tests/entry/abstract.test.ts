@@ -4,56 +4,56 @@ import { describe, expect, it } from 'vitest'
 import { ABS_LINK_CLASS, AUTO_TRANSLATE_HASH, injectBilingualLink, relabelBilingualLink } from '@/core/abstract/link'
 import { LOCALES } from '@/locales'
 
-// 摘要页的双语入口（issue #146）。fixture 是真实的 arxiv.org/abs 页面：插入点靠的是 arXiv 自己的
-// 标记，只有对着真标记测才说明得了问题
+// The bilingual entry on the abstract page (issue #146). The fixture is a real arxiv.org/abs page: the insertion point relies on arXiv's own
+// markup, and only a test against the real markup says anything
 const PAGE = readFileSync(join(import.meta.dirname, '../fixtures/abs/1706.03762.html'), 'utf8')
 const pageOf = (html = PAGE) => new DOMParser().parseFromString(html, 'text/html')
-// 文案来自语言包（UI.md §6）：这里取中文那份，链接的行为与写什么字无关
+// The copy comes from the locale pack (UI.md §6): the Chinese one is taken here; the link's behaviour does not depend on the words
 const LABEL = LOCALES['zh-CN'].S.page.abstractLink(LOCALES['zh-CN'].S.brand)
 
-describe('摘要页的双语入口（#146）', () => {
-  it('换界面语言之后，已经插好的那条链接跟着改写（Codex 在 #161 指出）', () => {
+describe('the bilingual entry on the abstract page (#146)', () => {
+  it('after a change of interface language the link already inserted is rewritten (Codex on #161)', () => {
     const doc = pageOf()
     expect(injectBilingualLink(doc, LABEL)).toBe(true)
     const en = LOCALES.en.S.page.abstractLink(LOCALES.en.S.brand)
     expect(relabelBilingualLink(doc, en)).toBe(true)
     expect(doc.querySelector(`.${ABS_LINK_CLASS}`)?.textContent).toBe(en)
-    // 没有这条链接的页面上什么也不做，不抛错
+    // On a page without this link nothing happens, and nothing throws
     expect(relabelBilingualLink(pageOf(), en)).toBe(false)
   })
 
-  it('插在 arXiv 自己的 HTML 链接后面，指向它给的那个 URL 加上自动开始的 hash', () => {
+  it('inserted after arXiv\'s own HTML link, pointing at the URL it gives plus the auto-start hash', () => {
     const doc = pageOf()
     const html = doc.querySelector<HTMLAnchorElement>('#latexml-download-link')!
     expect(injectBilingualLink(doc, LABEL)).toBe(true)
 
     const link = doc.querySelector<HTMLAnchorElement>(`.${ABS_LINK_CLASS}`)!
     expect(link.textContent).toBe(LABEL)
-    // **用 arXiv 给的 href**：它带着版本号（v7），自己拼 id 会指到错的版本
+    // **The href arXiv gives**: it carries the version (v7); an id assembled by hand would point at the wrong version
     expect(link.getAttribute('href')).toBe(`${html.href}${AUTO_TRANSLATE_HASH}`)
     expect(link.getAttribute('href')).toContain('/html/1706.03762v7')
-    // 位置：紧跟在 HTML 那一条后面，还在同一个列表里
+    // The position: right after the HTML entry, still in the same list
     expect(html.closest('li')!.nextElementSibling!.contains(link)).toBe(true)
     expect(link.closest('ul')).toBe(html.closest('ul'))
   })
 
-  it('没有 HTML 版的论文什么都不插', () => {
-    // 那类论文的摘要页上根本没有这个元素——不是「链接指向空」，是整条不存在
+  it('a paper without an HTML version gets nothing inserted', () => {
+    // Such a paper's abstract page has no such element at all — not “a link pointing nowhere”, the whole entry is absent
     const doc = pageOf()
     doc.querySelector('#latexml-download-link')!.closest('li')!.remove()
     expect(injectBilingualLink(doc, LABEL)).toBe(false)
     expect(doc.querySelector(`.${ABS_LINK_CLASS}`)).toBeNull()
   })
 
-  it('跑第二遍不会插出第二条', () => {
+  it('a second run does not insert a second link', () => {
     const doc = pageOf()
     expect(injectBilingualLink(doc, LABEL)).toBe(true)
     expect(injectBilingualLink(doc, LABEL)).toBe(false)
     expect(doc.querySelectorAll(`.${ABS_LINK_CLASS}`)).toHaveLength(1)
   })
 
-  it('除了插进去的那一条，页面一个字节都没动', () => {
-    // 摘要页不归 §7.1 管（那条讲的是全文页），但同一套规矩：只加自己的节点，不碰别人的
+  it('apart from the inserted line the page did not change by one byte', () => {
+    // The abstract page is outside §7.1 (that speaks of the full-text page), but the same rule: add our own node only, touch nobody else's
     const doc = pageOf()
     const before = doc.body.outerHTML
     injectBilingualLink(doc, LABEL)

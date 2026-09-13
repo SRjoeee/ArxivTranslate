@@ -73,7 +73,7 @@ describe('derivePopupView (UI.md §4)', () => {
   })
   it('P4 translating: the button says it and keeps the shortcut, the rows stay open, no counts anywhere', () => {
     const v = view('P4')
-    // ⌥T restores a translated page, so the badge stays on this face of the button too（用户 2026-09-11）
+    // ⌥T restores a translated page, so the badge stays on this face of the button too (the owner, 2026-09-11)
     expect(v.primary).toEqual({ label: '显示原文', action: 'restore', disabled: false, shortcut: '⌥T' })
     expect(v.note).toBeNull()
     expect(JSON.stringify(v)).not.toMatch(/24|31/)
@@ -152,9 +152,9 @@ describe('derivePopupView (UI.md §4)', () => {
   })
   it('P14 helper missing on macOS: install text plus the id the guided install needs', () => {
     const v = view('P14')
-    // 带着 extensionId 才有得装：命令要按这个 id 拼（引导本身在 HelperSetup 里，§15.4）
+    // Only with an extensionId is there anything to install: the command is built from that id (the guide itself is in HelperSetup, §15.4)
     expect(v.helper).toEqual({ text: '图片翻译需要安装识别助手', step: 'install', extensionId: 'abcdefghijklmnopabcdefghijklmnop' })
-    // 非 macOS 只有一行说明，没有可按的东西——安装脚本在别处会立刻退出
+    // Outside macOS there is one line of explanation and nothing to press — the install script exits at once elsewhere
     expect(derivePopupView({ ...input('P14'), platform: 'other' }).helper).toEqual({ text: '图片翻译目前仅支持 macOS', step: null })
     expect(derivePopupView({ ...input('P14'), config: { ...input('P14').config!, image: { enabled: false, modes: [] } } }).helper).toBeNull()
   })
@@ -178,11 +178,11 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(v.style.value).toBe('与原文相同')
     expect(v.menu!.kind).toBe('style')
     expect(v.menu!.search).toBe(false)
-    // 最后一行不是样式，是去设置页管理它们的入口（S-P-83），与服务菜单的「管理翻译服务…」同一个角色
+    // The last row is not a style but the way in to managing them on the settings page (S-P-83), the same role as the service menu's “Manage services…”
     expect(v.menu!.items.map(i => i.id)).toEqual([...c.appearance.styles.map(p => p.id), MANAGE_STYLES])
     expect(v.menu!.items.at(-1)).toMatchObject({ id: MANAGE_STYLES, selected: false })
     expect(v.menu!.items.filter(i => i.selected).map(i => i.id)).toEqual([c.appearance.activeStyle])
-    // 入口不带预览：它不是一种样式
+    // The entry has no preview: it is not a style
     expect(v.menu!.items.at(-1)!.preview).toBeUndefined()
   })
   it('P15 prompt menu lists the built-ins and the reader\'s own', () => {

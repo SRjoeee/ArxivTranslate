@@ -120,7 +120,7 @@ describe('the old failure widget has to vanish when the retry starts (Codex on #
     markPartial(block)
     expect(block.el.getAttribute(STATE_ATTR)).toBe('translated')
     expect(doc.querySelectorAll(`.${T_CLASS}`)).toHaveLength(1)
-    expect(doc.querySelectorAll(`.${ERROR_CLASS}`)).toHaveLength(0) // // the crux: no widget
+    expect(doc.querySelectorAll(`.${ERROR_CLASS}`)).toHaveLength(0) // the crux: no widget
 
     renderPending(block)
     expect(block.el.getAttribute(STATE_ATTR)).toBe('pending')

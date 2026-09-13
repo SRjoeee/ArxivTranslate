@@ -83,7 +83,7 @@ describe('in-page anchors land on the translation in only mode (issue #44)', () 
     markBlocks(blocks)
     const target = doc.getElementById('tgt')!
     const block = blocks.find(b => b.el === target) as TextBlock
-    renderPending(block) // // only the skeleton, no translation yet
+    renderPending(block) // only the skeleton, no translation yet
     layout(doc, [target])
     const scrolled: Element[] = []
     for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }
@@ -91,7 +91,7 @@ describe('in-page anchors land on the translation in only mode (issue #44)', () 
     const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
     doc.getElementById('link')!.dispatchEvent(event)
     expect(scrolled).toEqual([])
-    expect(event.defaultPrevented).toBe(false) // // with no stand-in it goes back to the browser
+    expect(event.defaultPrevented).toBe(false) // with no stand-in it goes back to the browser
     off()
 
     // The failure widget likewise
@@ -204,7 +204,7 @@ describe('in-page anchors land on the translation in only mode (issue #44)', () 
     expect(fig.hasAttribute(SPLIT_ATTR)).toBe(true)
     const clone = fig.nextElementSibling!
     expect(clone.classList.contains('axt-split')).toBe(true)
-    expect(clone.id).toBe('') // // the clone is stripped of its id: an anchor cannot point at it
+    expect(clone.id).toBe('') // the clone is stripped of its id: an anchor cannot point at it
     // only mode: the original (with the caption and its translation inside) is hidden whole, the clone shows
     layout(doc, [fig, cap, ...[...fig.querySelectorAll('*')]])
     const scrolled: Element[] = []
@@ -231,7 +231,7 @@ describe('in-page anchors land on the translation in only mode (issue #44)', () 
     // That line in the clone carries data-axt-split-of, pointing back at the original id
     const innerCopy = clone.querySelector('[data-axt-split-of="eq"]')!
     expect(innerCopy).not.toBeNull()
-    expect(innerCopy.id).toBe('') // // not an id, so no duplicate
+    expect(innerCopy.id).toBe('') // not an id, so no duplicate
     layout(doc, [fig, ...[...fig.querySelectorAll('*')]])
     const scrolled: Element[] = []
     for (const el of [...doc.querySelectorAll('*')]) el.scrollIntoView = () => { scrolled.push(el) }

@@ -189,7 +189,7 @@ describe('localizeNotes', () => {
     // The copy has no translation to hold and stays as it is (not wrapped in .axt-note-s: only only mode, hiding the source, needs that)
     expect(copy(doc).querySelector('.axt-note-t')).toBeNull()
     expect(copy(doc).textContent).toContain('https://chat.openai.com')
-    expect(localizeNotes(doc)).toBe(0) // // idempotent
+    expect(localizeNotes(doc)).toBe(0) // idempotent
   })
 
   // Codex on #163: a block whose translation equals its source byte for byte has its whole .axt-t hidden in stack mode

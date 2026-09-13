@@ -23,22 +23,22 @@ function segmentsOf(): { segment: Segment; unit: string }[] {
   return out
 }
 
-describe('哪些块该切句（§8.6）', () => {
-  it('参考文献块一律不切', () => {
-    // 切句器实测的精度明确不含参考文献：期刊缩写（`Sci. Rep. 14 (2024)`、`Theor. Comput. Sci.`）
-    // 会切出假边界，而假边界把高亮打在半句上，比没有高亮更糟。模块文档写着调用方不得在那里
-    // 运行它（Codex 在 #137 指出服务层把每个块都切了）
+describe('which blocks get sentence-cut (§8.6)', () => {
+  it('reference blocks are never cut', () => {
+    // The measured precision of the sentence cutter explicitly excludes references: journal abbreviations (`Sci. Rep. 14 (2024)`, `Theor. Comput. Sci.`)
+    // cut false boundaries, and a false boundary puts the highlight on half a sentence, worse than no highlight. The module documentation says callers must not
+    // run it there (Codex on #137: the service layer was cutting every block)
     const all = segmentsOf()
     const bib = all.filter(s => s.unit === 'bibblock' || s.unit === 'bibitem')
     expect(bib.length).toBeGreaterThan(20)
     expect(bib.filter(s => cutsOf(s.segment, 'tags') !== undefined)).toEqual([])
-    // 而正文里确实有该切的
+    // While the body text does have what should be cut
     expect(all.filter(s => s.unit === 'para' || s.unit === 'p').some(s => cutsOf(s.segment, 'tags') !== undefined)).toBe(true)
   })
 
-  it('单句块给空数组，不该对齐的才给 undefined', () => {
-    // 空数组说的是「这一块只有一句，整段对整段」——那是安全的对齐，而且单句块占正文一大半。
-    // 与「这一块不该对齐」混为一谈，等于把它们全部排除在高亮之外（Codex 在 #137 指出）
+  it('a single-sentence block gives an empty array; only what must not be aligned gives undefined', () => {
+    // The empty array says “this block has one sentence, whole against whole” — a safe alignment, and single-sentence blocks are most of the body text.
+    // Conflated with “this block must not be aligned”, they would all be excluded from the highlight (Codex on #137)
     const all = segmentsOf()
     const single = all.filter(s => s.unit !== 'bibblock' && s.unit !== 'bibitem' && cutsOf(s.segment, 'tags')?.length === 0)
     expect(single.length).toBeGreaterThan(20)
@@ -68,16 +68,16 @@ describe('哪些块该切句（§8.6）', () => {
     expect(cuts('shown by Gopalan et\u00a0al. <cite class="ltx_cite ltx_citemacro_cite">[GHSY12]</cite>, which reduces to the bound.')).toHaveLength(0)
   })
 
-  it('只有 tags 这条路切', () => {
+  it('only the tags path cuts', () => {
     const one = segmentsOf().find(s => cutsOf(s.segment, 'tags') !== undefined)!
     expect(cutsOf(one.segment, 'runs')).toBeUndefined()
     expect(cutsOf(one.segment, 'markers')).toBeUndefined()
   })
 
-  it('切点带上了块的上下文，而不是裸看线上文本', () => {
-    // 服务层只有线上文本，分不清「注解」与「公式」，也看不到占位符后面藏着的句号；
-    // 这一层有槽位，能把两者告诉切句器。**对比一下**：不带上下文时结果会变，
-    // 否则这条接线等于没接（Codex 在 #137 指出服务层是裸调的）
+  it('the cut points carry the block\'s context rather than looking at the bare wire text', () => {
+    // The service layer has only the wire text, cannot tell an “annotation” from a “formula”, and cannot see the full stop hidden behind a placeholder;
+    // this layer has the slots and can tell the cutter both. **Compare**: without the context the result changes,
+    // or this wiring would amount to nothing (Codex on #137: the service layer was calling it bare)
     let differ = 0
     let compared = 0
     for (const { segment, unit } of segmentsOf()) {

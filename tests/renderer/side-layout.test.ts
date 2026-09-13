@@ -98,7 +98,7 @@ describe('side mode\'s container coverage', () => {
         else single++
       }
     }
-    expect(multi).toBeGreaterThan(0) // // the fixtures hold both kinds, so this test is no empty run
+    expect(multi).toBeGreaterThan(0) // the fixtures hold both kinds, so this test is no empty run
     expect(single).toBeGreaterThan(0)
   })
 
@@ -173,8 +173,8 @@ describe('side mode\'s container coverage', () => {
       <span class="ltx_note_content"><span class="ltx_p">note</span
       ><span class="ltx_p ${T_CLASS}" data-axt-for="1">脚注译文</span></span></span></span></div>`)
     const content = doc.querySelector('.ltx_note_content')!
-    expect(content.matches(container)).toBe(true) // // by the selector alone it qualifies as a container
-    expect(isSideContainer(content)).toBe(false) // // the subtree exclusion keeps it out
+    expect(content.matches(container)).toBe(true) // by the selector alone it qualifies as a container
+    expect(isSideContainer(content)).toBe(false) // the subtree exclusion keeps it out
   })
 
   it('one copy of a footnote: once the translation is copied into the copy, the original is hidden by the style', () => {
