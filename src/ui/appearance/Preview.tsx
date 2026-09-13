@@ -5,24 +5,24 @@
 // iframe has a real `<html>` to write the attributes on, so what is shown here is what the page
 // gets; it also isolates the rules from the settings page itself.
 import { appearanceSheet } from '@/core/renderer'
+import { BLUR_ATTR, ON_ATTR, UNDERLINE_ATTR } from '@/core/renderer/attrs'
+import { T_CLASS } from '@/core/marks'
 import type { HighlightProfile, Look, StyleProfile } from '@/config/appearance'
 import { O } from '@/ui/strings'
-
-
 
 export function Preview({ style, highlight, band = false, height = 96 }: { style: StyleProfile; highlight: HighlightProfile; band?: boolean; height?: number }) {
   const look: Look = { style, highlight }
   const attrs = [
-    'data-axt-on',
-    style.underline === 'none' ? '' : `data-axt-underline="${style.underline}"`,
-    style.blur ? 'data-axt-blur' : '',
+    ON_ATTR,
+    style.underline === 'none' ? '' : `${UNDERLINE_ATTR}="${style.underline}"`,
+    style.blur ? BLUR_ATTR : '',
   ].filter(Boolean).join(' ')
   // The band is an absolutely positioned box on <body> in the real page; here one span is enough
   // to show the colour at its strength, which is the only thing this profile decides
   const body = band
     ? `<p>${O.reading.previewSource.replace('bounded', '<span class="band">bounded</span>')}</p>`
-      + `<p class="axt-t" lang="zh-CN">${O.reading.previewTarget.replace('有界的', '<span class="band">有界的</span>')}</p>`
-    : `<p>${O.reading.previewSource}</p><p class="axt-t" lang="zh-CN">${O.reading.previewTarget}</p>`
+      + `<p class="${T_CLASS}" lang="zh-CN">${O.reading.previewTarget.replace('有界的', '<span class="band">有界的</span>')}</p>`
+    : `<p>${O.reading.previewSource}</p><p class="${T_CLASS}" lang="zh-CN">${O.reading.previewTarget}</p>`
   const srcDoc = `<!doctype html><html ${attrs}><head><meta charset="utf-8">`
     + `<style>${appearanceSheet(look)}`
     + 'body{margin:0;padding:10px 12px;font:14px/1.7 system-ui;color:#1e1e24;background:#fff}'
