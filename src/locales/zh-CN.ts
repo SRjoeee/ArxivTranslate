@@ -243,7 +243,7 @@ const O = {
       edit: '编辑',
       editTitle: '编辑提示词',
       remove: '删除',
-      removeConfirm: (name: string) => `删除提示词「${name}」？`,
+      removeConfirm: '确认删除',
       create: '新建',
       createTitle: '新建提示词',
       /** 导入提示词文件失败的两种情形（providers/prompt-file.ts 只报是哪一种） */

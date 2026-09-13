@@ -83,17 +83,17 @@ describe('PromptManager: changes are updates of the stored prompts', () => {
   it('a deletion removes the prompt from the list as stored, keeping what was added elsewhere', async () => {
     const seen: PromptsConfig = { patterns: [template('a')], promptId: 'a' }
     const updates: PromptsUpdate[] = []
-    // happy-dom has no confirm; the manager asks before deleting
-    const asked = window.confirm
-    window.confirm = () => true
     const mounted = await mountElement(createElement(PromptManager, { value: seen, onChange: (update: PromptsUpdate) => { updates.push(update) } }))
+    // Two clicks, as every destructive action on the settings page (ui/Confirm.tsx): the first arms, the second deletes
     buttonNamed(mounted.container, O.prompts.manager.remove)?.click()
+    await mounted.flush()
+    expect(updates).toHaveLength(0)
+    buttonNamed(mounted.container, O.prompts.manager.removeConfirm)?.click()
     await mounted.flush()
     expect(updates).toHaveLength(1)
     const next = updates[0]!({ patterns: [template('a'), template('b')], promptId: 'a' })
     expect(next.patterns.map(p => p.id)).toEqual(['b'])
     expect(next.promptId).not.toBe('a')
-    window.confirm = asked
     await mounted.unmount()
   })
 })
