@@ -136,8 +136,8 @@ describe('derivePopupView (UI.md §4)', () => {
   it('the session chain and the saved chain are never confused: an unknown session shows as unknown, the decision reads the saved one', () => {
     // Codex on #185: the popup used to hand the view one status, the saved chain standing in for a session that had
     // not answered — its hand-over would have been shown as the running page's
-    const demoted = { id: 'svc-1', displayName: 'LLM', kind: 'auth' as const, message: 'User not found.' }
-    const handedOver = { ...input('P6').session!, engine: { id: 'google-web', displayName: 'Google', demoted } }
+    const demoted = { id: 'svc-1', kind: 'auth' as const, message: 'User not found.' }
+    const handedOver = { ...input('P6').session!, engine: { id: 'google-web', demoted } }
     const on = { ...input('P6'), saved: handedOver, session: null }
     const unknown = derivePopupView(on)
     expect(unknown.note).toBeNull()

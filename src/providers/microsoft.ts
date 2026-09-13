@@ -105,10 +105,9 @@ async function translateTexts(
   signal?: AbortSignal,
 ): Promise<{ text: string; alignment?: SentenceAlignment }[]> {
   const doFetch = deps.fetch ?? globalThis.fetch
-  // Upstream's handling: auto means letting the endpoint detect, the parameter left empty. **Unreachable on our side
-  // today** — `TranslateRequest.source` is the literal `'en'` (arXiv is English throughout). Kept per CLAUDE.md's “what
-  // adds no burden travels with the module”; ready for when the source language is opened up
-  const query = new URLSearchParams({ from: from === 'auto' ? '' : from, to, isEnterpriseClient: 'false' })
+  // Upstream also accepted 'auto' (an empty `from` lets the endpoint detect); `TranslateRequest.source` is the literal
+  // `'en'` here (arXiv is English throughout), so that branch went (ADR-0001 §9)
+  const query = new URLSearchParams({ from, to, isEnterpriseClient: 'false' })
   let response: Response
   try {
     response = await doFetch(`${ENDPOINT}?${query}`, {
@@ -175,7 +174,6 @@ async function translateTexts(
 export function createMicrosoftProvider(targetLanguage: string, deps: MicrosoftDeps = {}): TranslationProvider {
   return {
     id: 'microsoft',
-    displayName: 'Microsoft translation (free)',
     kind: 'mt',
     // `sentLen` is native, so the service inserts no sentence markers for it (§8.6)
   reportsSentences: true,

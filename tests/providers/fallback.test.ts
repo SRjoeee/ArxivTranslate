@@ -5,7 +5,6 @@ import type { ProviderErrorKind, TranslationProvider } from '@/providers/types'
 
 const provider = (id: string): TranslationProvider => ({
   id,
-  displayName: id.toUpperCase(),
   kind: 'llm',
   wireFormats: ['tags'] as const,
   maxBatchChars: 1000,
@@ -53,7 +52,7 @@ describe('createFallbackService', () => {
 
     const res = await service.translate(call)
     expect(res.ok && res.result.provider).toBe('google-web')
-    const demoted = { id: 'llm', displayName: 'LLM', kind: 'auth' as const, message: 'User not found.' }
+    const demoted = { id: 'llm', kind: 'auth' as const, message: 'User not found.' }
     expect(service.status()).toEqual({
       configuredId: 'llm',
       activeId: 'google-web',

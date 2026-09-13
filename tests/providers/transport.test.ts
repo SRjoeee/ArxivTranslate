@@ -14,7 +14,7 @@ const req: TranslateRequest = { segments: [{ id: 'a', text: 'x' }], source: 'en'
 
 function mockProvider(translate: TranslationProvider['translate'], extra: Partial<TranslationProvider> = {}): TranslationProvider {
   return {
-    id: 'mock', displayName: 'Mock', kind: 'llm', wireFormats: ['tags'] as const, maxBatchChars: 1000, maxBatchItems: 4,
+    id: 'mock', kind: 'llm', wireFormats: ['tags'] as const, maxBatchChars: 1000, maxBatchItems: 4,
     isAvailable: async () => true,
     translate,
     ...extra,
@@ -565,7 +565,6 @@ describe('createLocalTransport: translation', () => {
 describe('createLocalTransport: status', () => {
   const engine = (id: string, available: boolean): TranslationProvider => ({
     id,
-    displayName: id === 'google-web' ? 'Google web translation (free)' : id,
     kind: 'mt',
     wireFormats: ['tags'] as const,
     maxBatchChars: 1000,
@@ -589,7 +588,7 @@ describe('createLocalTransport: status', () => {
       promptId: 'default',
       chain: [SVC.id, 'google-web'],
       demotions: [],
-      engine: { id: SVC.id, displayName: SVC.id },
+      engine: { id: SVC.id },
     })
   })
 
@@ -606,7 +605,7 @@ describe('createLocalTransport: status', () => {
     const t = await withChain([engine('chrome-builtin', false), engine('google-web', true)])
     const r = await t.status()
     expect(r.available).toBe(false)
-    expect(r.fallback).toEqual({ id: 'google-web', displayName: 'Google web translation (free)' })
+    expect(r.fallback).toEqual({ id: 'google-web' })
   })
 
   it('with the whole chain unavailable no demotion is reported: the button should be grey then', async () => {
@@ -627,12 +626,12 @@ describe('createLocalTransport: status', () => {
     const failing = { ...engine(SVC.id, true), translate: async () => { throw new ProviderError('auth', 'bad key') } }
     const ok = { ...engine('google-web', true), translate: async (r: TranslateRequest) => ({ segments: r.segments, provider: 'google-web' }) }
     const t = await withChain([failing, ok])
-    expect((await t.status()).engine).toEqual({ id: SVC.id, displayName: SVC.id })
+    expect((await t.status()).engine).toEqual({ id: SVC.id })
     expect((await t.translate({ request: req })).ok).toBe(true)
     expect((await t.status()).engine).toEqual({
       id: 'google-web',
-      displayName: 'Google web translation (free)',
-      demoted: { id: SVC.id, displayName: SVC.id, kind: 'auth', message: 'bad key' },
+
+      demoted: { id: SVC.id, kind: 'auth', message: 'bad key' },
     })
   })
 })

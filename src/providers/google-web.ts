@@ -70,7 +70,6 @@ async function translateHtml(items: string[], from: string, to: string, deps: Go
 export function createGoogleWebProvider(deps: GoogleWebDeps = {}): TranslationProvider {
   return {
     id: 'google-web',
-    displayName: 'Google web translation (free)',
     kind: 'mt',
     // Keeps both (measured: tags 100%, markers 98.9%), tags first: it also keeps inline styling. Precisely because it
     // keeps both, it stays on the chain as the fallback when Microsoft is chosen (the intersection negotiation of §8.5)

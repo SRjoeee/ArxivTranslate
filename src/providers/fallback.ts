@@ -15,7 +15,6 @@ export interface FallbackStep {
 
 export interface DemotedInfo {
   id: string
-  displayName: string
   kind: ProviderErrorKind
   message: string
 }
@@ -94,14 +93,14 @@ export function createFallbackService(
   }
 
   const demote = (step: FallbackStep, error: { kind: ProviderErrorKind; message: string }): void => {
-    const info: DemotedInfo = { id: step.provider.id, displayName: step.provider.displayName, kind: error.kind, message: error.message }
+    const info: DemotedInfo = { id: step.provider.id, kind: error.kind, message: error.message }
     demotions.set(step.provider.id, {
       info,
       // A configuration problem does not heal itself: demoted for good this session, no request wasted on trying (PERMANENT_ERROR_KINDS)
       ...(isPermanentErrorKind(error.kind) ? {} : { until: now() + cooldownMs }),
     })
     lastDemoted = info
-    console.warn(`[axt] ${step.provider.displayName} demoted (${error.kind}): ${error.message}`)
+    console.warn(`[axt] ${step.provider.id} demoted (${error.kind}): ${error.message}`)
   }
 
   const translate = async (call: TranslateCall): Promise<TranslateMessageResponse> => {

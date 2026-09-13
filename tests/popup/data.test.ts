@@ -51,7 +51,7 @@ vi.mock('@/shared/messages', async importOriginal => ({
 import { usePopupData } from '@/entrypoints/popup/data'
 import { applyLocaleFrom } from '@/ui/apply-locale'
 
-const status = (id: string): ProviderStatus => ({ providerId: id, chosen: id, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags', targetLanguage: 'cmn', promptId: 'default', revision: id, chain: [id], demotions: [], engine: { id, displayName: id } })
+const status = (id: string): ProviderStatus => ({ providerId: id, chosen: id, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags', targetLanguage: 'cmn', promptId: 'default', revision: id, chain: [id], demotions: [], engine: { id } })
 const page = (state: 'on' | 'stopped', session: string | null): PageStatus => ({ paper: '2401.00001', mode: 'side', preference: 'side', progress: { state, total: 1, requested: 1, done: 1, failed: 0, cached: 0, inFlight: 0 }, session, epoch: 'd#1' })
 const savedAsks = () => wire.asks.filter(a => !a.message.scope)
 

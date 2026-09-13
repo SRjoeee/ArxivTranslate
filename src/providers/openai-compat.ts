@@ -51,7 +51,6 @@ export function createOpenAICompatProvider(
   const hasKey = () => config.apiKey.trim().length > 0 || isLoopback(config.baseURL)
   return {
     id: config.id ?? 'openai-compat',
-    displayName: config.name ?? 'LLM',
     kind: 'llm',
     // tags only: the protocol block of the prompt (PROTOCOL_BLOCK in prompt.ts) teaches exactly these tags
     wireFormats: WIRE_FORMATS['openai-compat'],

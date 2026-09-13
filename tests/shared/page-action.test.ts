@@ -60,7 +60,7 @@ describe('savedFromStatus', () => {
 
   it('takes all three from the one status: the chain\'s revision, whether the chosen service resolved to itself and runs, whether a fallback stands by', () => {
     expect(savedFromStatus(status())).toEqual({ revision: 'r9', canRun: true, fallback: false })
-    expect(savedFromStatus(status({ fallback: { id: 'google-web', displayName: 'Google' } }))).toEqual({ revision: 'r9', canRun: true, fallback: true })
+    expect(savedFromStatus(status({ fallback: { id: 'google-web' } }))).toEqual({ revision: 'r9', canRun: true, fallback: true })
     expect(savedFromStatus(status({ available: false }))).toEqual({ revision: 'r9', canRun: false, fallback: false })
   })
 

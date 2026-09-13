@@ -45,7 +45,7 @@ describe('createMessageTransport', () => {
   })
 
   it('status passes axt:provider-status straight through; a failure has to propagate, and start() refuses to start by it', async () => {
-    const { sent, send } = recorder(() => ({ providerId: 'mock', available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, chain: ['mock'], engine: { id: 'mock', displayName: 'Mock' } }))
+    const { sent, send } = recorder(() => ({ providerId: 'mock', available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags' as const, chain: ['mock'], engine: { id: 'mock' } }))
     expect((await createMessageTransport(send).status()).providerId).toBe('mock')
     expect(sent).toEqual([{ type: 'axt:provider-status' }])
     const dead = recorder(() => { throw new Error('background not responding') })

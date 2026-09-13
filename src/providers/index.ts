@@ -75,7 +75,7 @@ export async function buildChain(
       const candidate = create(config)
       if (candidate.id === primary.id) continue
       if (format !== undefined && !candidate.wireFormats.includes(format)) {
-        console.warn(`[axt] ${candidate.displayName} does not support this session's wire format ${format}; not joining the fallback chain`)
+        console.warn(`[axt] ${candidate.id} does not support this session's wire format ${format}; not joining the fallback chain`)
         continue
       }
       if (!(await candidate.isAvailable())) continue

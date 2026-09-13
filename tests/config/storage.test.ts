@@ -76,7 +76,6 @@ describe('provider selection', () => {
     // A reader's service becomes an engine carrying that service's id and name
     const llm = getProvider({ ...DEFAULT_CONFIG, provider: SVC.id, services: [SVC] })
     expect(llm.id).toBe(SVC.id)
-    expect(llm.displayName).toBe(SVC.name)
     expect(llm.kind).toBe('llm')
     // A service the reader deleted while it was chosen: the shipped default, not a crash
     expect(getProvider({ ...DEFAULT_CONFIG, provider: 'svc-gone0000', services: [] }).id).toBe('microsoft')

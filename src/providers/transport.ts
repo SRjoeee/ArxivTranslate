@@ -17,9 +17,8 @@ import type { ProviderErrorKind, TranslationProvider } from './types'
 /** The engine actually in use right now and the latest hand-over reason (§8.5); the popup explains by it why the translation changed engine */
 export interface EngineStatus {
   id: string
-  displayName: string
   /** The engine that was put aside for this one; `id` lets the popup name it the way it names services (UI.md §2) */
-  demoted?: { id: string; displayName: string; kind: ProviderErrorKind; message: string }
+  demoted?: { id: string; kind: ProviderErrorKind; message: string }
 }
 
 export interface ProviderStatus {
@@ -37,7 +36,7 @@ export interface ProviderStatus {
    * With the first choice unavailable, the first usable engine on the fallback chain (§8.5). With it a translation can
    * run — the popup's “translate” button decides by it, or “Google on the chain as fallback, yet the button greyed out” shows up (Codex on #50)
    */
-  fallback?: { id: string; displayName: string }
+  fallback?: { id: string }
   model?: string
   /** What the content side needs to plan batches and choose the render path (§2 item 3) */
   maxBatchChars: number
@@ -188,7 +187,7 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
     if (!available) {
       for (const engine of chain.slice(1)) {
         if (await engine.isAvailable()) {
-          fallback = { id: engine.id, displayName: engine.displayName }
+          fallback = { id: engine.id }
           break
         }
       }
@@ -211,9 +210,8 @@ export async function createLocalTransport(config: Config, deps: LocalTransportD
       demotions: live.demotions.map(d => ({ id: d.id, kind: d.kind })),
       engine: {
         id: active.id,
-        displayName: active.displayName,
         ...(live.activeId !== live.configuredId && live.demoted
-          ? { demoted: { id: live.demoted.id, displayName: live.demoted.displayName, kind: live.demoted.kind, message: live.demoted.message } }
+          ? { demoted: { id: live.demoted.id, kind: live.demoted.kind, message: live.demoted.message } }
           : {}),
       },
     }

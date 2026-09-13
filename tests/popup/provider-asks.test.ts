@@ -15,7 +15,7 @@ function deferred<T>() {
 
 const tick = () => new Promise<void>(resolve => setTimeout(resolve, 0))
 
-const status = (id: string): ProviderStatus => ({ providerId: id, chosen: id, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags', targetLanguage: 'cmn', promptId: 'default', revision: id, chain: [id], demotions: [], engine: { id, displayName: id } })
+const status = (id: string): ProviderStatus => ({ providerId: id, chosen: id, available: true, maxBatchChars: 1, maxBatchItems: 1, renderPath: 'tags', targetLanguage: 'cmn', promptId: 'default', revision: id, chain: [id], demotions: [], engine: { id } })
 
 function harness(ttlMs = 5_000) {
   let clock = 0
