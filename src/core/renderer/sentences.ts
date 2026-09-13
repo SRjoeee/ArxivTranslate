@@ -113,9 +113,9 @@ function remember(source: Element, target: Element): void {
  */
 export function registerSentences(source: Element, target: Element, sourceSpans: readonly WireSpan[], targetSpans: readonly WireSpan[] | undefined, alignment: SentenceAlignment | undefined): void {
   if (!alignment || !targetSpans) {
-    // 这一轮没有对齐，之前登记过的（包括还挂在屏幕上的拆图副本）就都作废了：它们记的是上一轮的
-    // 句边界。**光删索引不够**——副本自己也是 `maps` 的键，指针直接落在副本上时照样查得到那份
-    // 陈旧的记录（Codex 在 #148 指出）
+    // No alignment this round: everything registered before (split copies still on screen included) is void — it
+    // recorded the previous round's sentence boundaries. **Removing the index is not enough** — a copy is itself a key
+    // of `maps`, and a pointer landing on the copy would still find the stale record (Codex on #148)
     for (const ref of targetsOf.get(source) ?? []) {
       const previous = ref.deref()
       if (previous) maps.delete(previous)
@@ -129,9 +129,11 @@ export function registerSentences(source: Element, target: Element, sourceSpans:
     target: { root: target, spans: targetSpans, index: indexSpans(targetSpans) },
   }
   maps.set(target, map)
-  // 同一个原文重新翻了一遍：之前那些译文——尤其是**还挂在屏幕上、签名没变所以没被重建**的拆图
-  // 副本——记的还是上一轮的句边界。译文正文一样时（副本能留下来正说明这一点）它们的 span 仍然
-  // 对得上，只把句边界换成这一版；对不上就忘掉，宁可不高亮也不按错的配对高亮（Codex 在 #148 指出）
+  // The same original translated once more: the earlier translations — above all the split copies **still on screen,
+  // unchanged in signature and so not rebuilt** — still record the previous round's sentence boundaries. With the same
+  // translation text (a copy surviving shows exactly that) their spans still line up, so only the boundaries are
+  // replaced by this version's; otherwise they are forgotten — no highlight beats a highlight on the wrong pairing
+  // (Codex on #148)
   const span = (side: SentenceSide) => side.spans[side.spans.length - 1]?.to ?? 0
   for (const ref of targetsOf.get(source) ?? []) {
     const previous = ref.deref()
@@ -162,9 +164,10 @@ export function mirrorSentences(target: Element, copy: Element, twin: (node: Nod
   const moved = (span: WireSpan): WireSpan => {
     const node = twin(span.node)
     if (!node) return span
-    // 分支写开而不是一把 spread：联合类型经过 spread 会被展宽，`kind` 的字面量类型就丢了。
-    // 文本 span 的 node 是 `Text`——同构的克隆里对应位置一定同类型，但**查一下再用**，
-    // 不合就留着原来那个（它至多让这一段不亮，而不是把偏移算到别的节点上）
+    // Branches spelled out rather than one spread: a union type widens through a spread and the literal type of
+    // `kind` is lost. A text span's node is a `Text` — the same position in an isomorphic clone has the same type, but
+    // **checked before use**; a mismatch keeps the old one (at worst this span does not light up, rather than offsets
+    // being computed against another node)
     if (span.kind !== 'text') return { ...span, node }
     return node.nodeType === Node.TEXT_NODE ? { ...span, node: node as Text } : span
   }
@@ -177,7 +180,7 @@ export function mirrorSentences(target: Element, copy: Element, twin: (node: Nod
 function movedOnto(span: WireSpan, twin: (node: Node) => Node | undefined): WireSpan {
   const node = twin(span.node)
   if (!node) return span
-  // 分支写开而不是一把 spread：联合类型经过 spread 会被展宽，`kind` 的字面量类型就丢了
+  // Branches spelled out rather than one spread: a union type widens through a spread and the literal type of `kind` is lost
   if (span.kind !== 'text') return { ...span, node }
   return node.nodeType === Node.TEXT_NODE ? { ...span, node: node as Text } : span
 }
@@ -206,11 +209,12 @@ export function mirrorPair(target: Element, copies: { source: Element; target: E
 }
 
 /**
- * 这个译文节点此刻的句子登记状况，给拆图的签名用。
+ * This translation node's sentence registration as it stands, for the split-figure signature.
  *
- * 拆图按译文正文的签名决定要不要重建副本。正文没变、但句子登记从「没有」变成「有」时，副本会被
- * 原样留下，而它从来没被镜像过——悬停原文落到藏起来的原件上、悬停副本什么也查不到（Codex 在 #148
- * 指出这个反向的转换）。把登记状况编进签名，这种转换就会走正常的重建 + 镜像那条路
+ * Split figures decide by the translation text's signature whether to rebuild a copy. With the text unchanged but
+ * the registration going from “none” to “some”, the copy would be left as it is, never mirrored — hovering the
+ * original lands on the hidden original, hovering the copy finds nothing (Codex on #148 pointed out the reverse
+ * transition). With the registration in the signature, that transition takes the normal rebuild + mirror path
  */
 export function sentenceSignatureOf(el: Element): string {
   const map = maps.get(el)

@@ -1,7 +1,9 @@
-// 失败态的小部件（DESIGN §7.6）：失败块旁边一个"重试"按钮与带原因的"！"，放在 Shadow DOM 里不受站点样式影响。
-// 对应 Read Frog 的 components/translation/error/*（React + jotai + @tabler/icons + base-ui，每个失败块一个 React root）；
-// 那套依赖与逐块 React root 是负担（它自己吃过 #1831 的泄漏亏），这里用几十行原生 DOM 做同样的两个控件（§12 的取舍）。
-// 与 §7.1 一致：它只是原块的下一个兄弟，restore 删掉宿主节点就干净了。
+// The failure widget (DESIGN §7.6): a “retry” button beside the failed block and an exclamation mark carrying the reason, in a
+// Shadow DOM out of the site's styles. The counterpart of Read Frog's components/translation/error/* (React + jotai
+// + @tabler/icons + base-ui, one React root per failed block); those dependencies and a root per block are a burden
+// (it took the leak of its own #1831), so a few dozen lines of plain DOM make the same two controls (the trade-off
+// of §12). In keeping with §7.1: it is only the original block's next sibling, and restore removing the host is all
+// the clean-up there is.
 import type { Block } from '@/core/extractor'
 import { T_CLASS } from '@/core/marks'
 import { S, parseFatal, reasonText } from '@/ui/strings'
@@ -9,7 +11,7 @@ import { ERROR_CLASS, FOR_ATTR } from './attrs'
 import { translationShell } from './shell'
 import { clearTranslation, setState } from './translation'
 
-/** 原始诊断留在属性里：`restore()` 按注入标记整体清掉，它不进界面 */
+/** The raw diagnostic stays in an attribute: `restore()` clears it with the injected marks as a whole, and it never reaches the interface */
 export const REASON_ATTR = 'data-axt-reason'
 
 const STYLE = `
@@ -19,7 +21,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .mark { color: var(--axt-failed-color, rgba(220, 38, 38, 0.9)); font-weight: 700; cursor: help; }
 `
 
-/** 删掉块旁边的失败小部件（重试开始时）；返回是否删掉了 */
+/** Remove the failure widget beside a block (when a retry starts); returns whether one was removed */
 export function clearFailed(block: Block): boolean {
   const parent = block.el.parentElement
   if (!parent) return false
@@ -34,8 +36,9 @@ export function clearFailed(block: Block): boolean {
 }
 
 /**
- * 失败：删掉 pending / 旧译文、标 failed（红线照旧），再插小部件。
- * 点"重试"时按钮禁用并调 retry；小部件由 renderPending 在插圆环之前删掉（见那里）
+ * Failure: remove the pending node or the old translation, mark failed (the red line as before), then insert the
+ * widget. Clicking “retry” disables the button and calls retry; renderPending removes the widget before inserting
+ * the ring (see there)
  */
 export function renderFailed(block: Block, reason: string, retry: () => void): Element {
   clearTranslation(block)
@@ -44,11 +47,11 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
   const host = doc.createElement('span')
   host.className = `${T_CLASS} ${ERROR_CLASS}`
   host.setAttribute(FOR_ATTR, block.id)
-  // 说明行的小部件不能作 `<tbody>` 的 `<span>` 子节点：那不合表格的内容模型，
-  // 浏览器会把它挪到表外（Codex 在 #168 指出）。用与译文同一套外壳包成 `<tr><td>…</td></tr>`
+  // The widget of a description row cannot be a `<span>` child of `<tbody>`: that breaks the table content model and
+  // the browser moves it out of the table (Codex on #168). Wrap it as `<tr><td>…</td></tr>` with the translation's own shell
   const { node: outer, slot } = translationShell(block)
   const widget = outer === slot ? null : outer
-  // 读者看到的是按界面语言写的那一句；`kind: 诊断` 里的后半段留着给诊断，不显示（Codex 在 #161 指出）
+  // The reader sees the sentence in the interface's language; the tail of `kind: diagnostic` is kept for diagnosis, not shown (Codex on #161)
   const kind = parseFatal(reason)
   host.title = reasonText(kind.kind) || S.page.retry
   host.setAttribute(REASON_ATTR, reason)
@@ -68,7 +71,7 @@ export function renderFailed(block: Block, reason: string, retry: () => void): E
   mark.textContent = '！'
   root.append(style, button, mark)
   if (widget) {
-    // 外壳自己带 class / data-axt-for，配对与清理都按它来；host 只是里面的那个小部件
+    // The shell carries the class / data-axt-for itself: pairing and clean-up go by it; host is only the widget inside
     widget.className = host.className
     widget.setAttribute(FOR_ATTR, block.id)
     host.classList.remove(T_CLASS)
@@ -92,7 +95,7 @@ export function relabelFailed(doc: Document): number {
     const root = (host as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot
     const button = root?.querySelector('button')
     if (button) button.textContent = S.page.retry
-    // 悬停看到的那句同样要跟着换：它是从 kind 算出来的，原始诊断还留在属性里（Codex 在 #161 指出）
+    // The sentence shown on hover must follow too: it is derived from kind, and the raw diagnostic stays in the attribute (Codex on #161)
     const reason = host.getAttribute(REASON_ATTR)
     if (reason === null) continue
     host.title = reasonText(parseFatal(reason).kind) || S.page.retry

@@ -3,12 +3,12 @@
 // rule builders so config/appearance.ts can import them without a cycle.
 
 /**
- * 用户写的是**声明块**，不是完整规则：整段插进一对花括号中间。
- * 因此 `}` 要拒——它会提前闭合我们的规则，后面的内容就变成了作用于整页的规则；
- * `@`（at 规则）与 `<`（`</style>`）同理。这不是安全边界（用户本来就能装任何扩展），
- * 是防手滑：一个多余的花括号会把整篇论文的排版改掉，而且很难看出原因。
+ * What the reader writes is a **declaration block**, not a whole rule: it goes between one pair of braces.
+ * So `}` is refused — it would close our rule early and turn what follows into rules over the whole page; `@` (an
+ * at-rule) and `<` (`</style>`) likewise. Not a security boundary (the reader can install any extension anyway) but
+ * a guard against slips: one stray brace would change the whole paper's layout, and the cause is hard to spot.
  */
-/** 拒绝的理由**是哪一种**；句子在语言包里，这一层不认识界面语言（Codex 在 #161 指出） */
+/** **Which kind** of refusal; the sentences live in the locale pack, and this layer knows no interface language (Codex on #161) */
 export type CssRejection = 'closeBrace' | 'openBrace' | 'atRule' | 'angle'
 
 export function sanitizeCustomCss(css: string): { ok: true; css: string } | { ok: false; reason: CssRejection } {
@@ -20,14 +20,15 @@ export function sanitizeCustomCss(css: string): { ok: true; css: string } | { ok
   return { ok: true, css: trimmed }
 }
 
-/** 上限放到能装下一条 color-mix()；设置页的取色器产出的是 7 个字符的 #rrggbb */
+/** The cap leaves room for one color-mix(); the settings page's colour picker produces a 7-character #rrggbb */
 export const COLOR_MAX = 64
 
 /**
- * CSS 命名颜色。逐个用真实 Chrome 的 `CSS.supports('color', name)` 核验过，不是凭记忆写的。
- * 不收 `inherit` / `initial` / `unset` / `revert`：`CSS.supports` 认它们（属性层面合法），但它们不是颜色。
- * 用静态表而不是 `CSS.supports`，因为后者在 service worker 里不存在（schema 校验要在那边跑），
- * 而且 happy-dom 的实现对任何字符串都返回 true——拿它写测试会得到一条什么都不验的断言
+ * The CSS named colours. Each checked against a real Chrome's `CSS.supports('color', name)`, not written from memory.
+ * `inherit` / `initial` / `unset` / `revert` are not admitted: `CSS.supports` accepts them (valid at the property
+ * level) but they are not colours. A static table rather than `CSS.supports` because the latter does not exist in a
+ * service worker (the schema validation runs there), and happy-dom's returns true for any string — a test written
+ * on it would assert nothing
  */
 const NAMED_COLORS = new Set(`
   aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown
@@ -47,10 +48,11 @@ const NAMED_COLORS = new Set(`
   violet wheat white whitesmoke yellow yellowgreen
 `.trim().split(/\s+/))
 
-// 三个分支：十六进制（只认 3/4/6/8 位）、命名颜色（精确表）、颜色函数。
-// **函数分支只做词法检查**，不验语法：Chrome 支持相对颜色 `rgb(from red r g b)` 与嵌套 `color-mix()`，
-// 用正则去验参数只会把合法的新写法挡在外面——那比放过一个不生效的值更糟。
-// 这一层的硬要求是「不能开出新声明、不能闭合规则」（注入安全），那由字符集与整串锚定保证
+// Three branches: hexadecimal (3/4/6/8 digits only), a named colour (the exact table), a colour function.
+// **The function branch is lexical only** and validates no syntax: Chrome supports relative colours
+// `rgb(from red r g b)` and nested `color-mix()`, and a regex over the arguments would only shut out valid new
+// forms — worse than letting an ineffective value through. This layer's hard requirement is “cannot open a new
+// declaration, cannot close the rule” (injection safety), which the character set and the whole-string anchoring guarantee
 const COLOR_FN_RE = /^(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix)\([0-9a-z\s.%,/+-]*\)$/i
 const HEX_RE = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i
 const isColor = (v: string) => HEX_RE.test(v) || NAMED_COLORS.has(v.toLowerCase()) || COLOR_FN_RE.test(v)
@@ -58,8 +60,8 @@ const isColor = (v: string) => HEX_RE.test(v) || NAMED_COLORS.has(v.toLowerCase(
 export function sanitizeColor(value: string): { ok: true; color: string } | { ok: false; reason: string } {
   const trimmed = value.trim()
   if (trimmed === '') return { ok: true, color: '' }
-  if (trimmed.length > COLOR_MAX) return { ok: false, reason: '颜色值太长' }
-  if (!isColor(trimmed)) return { ok: false, reason: '不是有效的颜色值，例如 #1565c0 或 oklch(0.6 0.1 250)' }
+  if (trimmed.length > COLOR_MAX) return { ok: false, reason: 'colour value too long' }
+  if (!isColor(trimmed)) return { ok: false, reason: 'not a valid colour value, such as #1565c0 or oklch(0.6 0.1 250)' }
   return { ok: true, color: trimmed }
 }
 
