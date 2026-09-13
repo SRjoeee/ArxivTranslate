@@ -41,7 +41,14 @@ export const pollsBackground = (helper: HelperStatus | null): boolean => helper?
 
 export interface PopupInput {
   page: PageStatus | null
-  provider: ProviderStatus | null
+  /** The saved settings' chain: what a translation started now would run on; null until asked or when the ask failed */
+  saved: ProviderStatus | null
+  /**
+   * The running session's own chain — its engine, its hand-overs — while the page is on; null when the page is off
+   * or its status has not come back. Never stood in for by `saved`: the two can describe different chains after a
+   * change saved elsewhere, and an unknown session shows as unknown (Codex on #185)
+   */
+  session: ProviderStatus | null
   config: Config | null
   /** The offline service's language pack; null until asked */
   pack: PackState | null
@@ -150,7 +157,7 @@ function cannotRunWhy(config: Config, pack: PackState | null): string {
 }
 
 export function derivePopupView(input: PopupInput): PopupView {
-  const { page, provider, config, pack, helper, platform, menu, shortcut, extensionId, savedRevision } = input
+  const { page, saved, session, config, pack, helper, platform, menu, shortcut, extensionId, savedRevision } = input
   if (page === null) return empty()
   if (config === null) return { ...empty(), empty: false, mode: { value: page.preference, note: null } }
 
@@ -158,18 +165,18 @@ export function derivePopupView(input: PopupInput): PopupView {
   const on = progress.state === 'on'
   const paused = progress.state === 'stopped' && progress.fatal !== undefined
   const canRun = runnable(config, pack)
-  const demoted = on ? provider?.engine.demoted : undefined
+  const demoted = on ? session?.engine.demoted : undefined
   // The page runs on settings other than the saved ones. A change made here restarts the page at
   // once (data.ts), so this is what is left: a choice that cannot start, and a change made from
   // another tab, which leaves this page pinned to the session it began (Codex on #157). Either way
   // the reader is offered 重新翻译 — enabled when the saved settings can actually run. The rule is
   // the toggle's too (shared/page-action.ts): the page's revision against the saved settings' digest
-  const decision = pageDecision(page, { revision: savedRevision, canRun, fallback: !!provider?.fallback }) ?? { action: 'translate' as const, behind: false, enabled: canRun || !!provider?.fallback }
+  const decision = pageDecision(page, { revision: savedRevision, canRun, fallback: !!saved?.fallback }) ?? { action: 'translate' as const, behind: false, enabled: canRun || !!saved?.fallback }
   const { action, behind } = decision
   const named = (id: string) => serviceName(id, config.services)
 
-  const service: Row = demoted && provider
-    ? { value: named(provider.engine.id), replaced: named(demoted.id) }
+  const service: Row = demoted && session
+    ? { value: named(session.engine.id), replaced: named(demoted.id) }
     : { value: named(config.provider) }
   const language: Row = { value: languageName(config.targetLanguage) }
   // The prompt decides how an LLM translates; the free services do not read it
@@ -178,10 +185,10 @@ export function derivePopupView(input: PopupInput): PopupView {
   const style: Row = { value: profileName(activeStyle(config.appearance)) }
 
   const note: Note | null = paused ? { text: S.note.paused(reasonText(parseFatal(progress.fatal ?? '').kind)), settings: true }
-    : demoted && provider ? { text: S.note.replaced(named(demoted.id), reasonText(demoted.kind), named(provider.engine.id)), settings: true }
+    : demoted && session ? { text: S.note.replaced(named(demoted.id), reasonText(demoted.kind), named(session.engine.id)), settings: true }
     : page.images?.fatal ? { text: S.note.imagesPaused(reasonText(parseFatal(page.images.fatal).kind)), settings: true }
     : !canRun && (!on || behind)
-      ? { text: !on && provider?.fallback ? S.note.willFallback(cannotRunWhy(config, pack), named(provider.fallback.id)) : S.note.cannotRun(cannotRunWhy(config, pack)), settings: true }
+      ? { text: !on && saved?.fallback ? S.note.willFallback(cannotRunWhy(config, pack), named(saved.fallback.id)) : S.note.cannotRun(cannotRunWhy(config, pack)), settings: true }
       : null
 
   const failedCount = progress.failed + (page.images?.failed ?? 0)

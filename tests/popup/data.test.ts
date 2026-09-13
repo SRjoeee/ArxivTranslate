@@ -74,14 +74,31 @@ describe('usePopupData', () => {
     expect(hook.current().input.page?.progress.state).toBe('on')
     expect(savedAsks()).toHaveLength(1)
     await hook.run(() => savedAsks()[0]?.answer.reject(new Error('the chain did not settle')))
-    expect(hook.current().input.provider).toBeNull()
+    expect(hook.current().input.saved).toBeNull()
     // The reader restores from the popup; the page reports itself stopped
     wire.page = async () => page('stopped', null)
     await hook.run(() => hook.current().actions.restore())
     expect(hook.current().input.page?.progress.state).toBe('stopped')
     expect(savedAsks()).toHaveLength(2)
+    // With the barrier: made while a configuration change's ask waits on its read, an ask without it would answer
+    // first from the previous chain and, being the newer ask, keep the answer (the sixth local pass)
+    expect(savedAsks()[1]?.message.fresh).toBe(true)
     await hook.run(() => savedAsks()[1]?.answer.resolve(status('google-web')))
-    expect(hook.current().input.provider?.providerId).toBe('google-web')
+    expect(hook.current().input.saved?.providerId).toBe('google-web')
+    await hook.unmount()
+  })
+
+  it('a page that is on shows its session chain only once it has answered — never the saved chain in its place', async () => {
+    wire.page = async () => page('on', 's1')
+    const hook = await mountHook(usePopupData)
+    await hook.run(() => savedAsks()[0]?.answer.resolve(status('saved-chain')))
+    expect(hook.current().input.saved?.providerId).toBe('saved-chain')
+    expect(hook.current().input.session).toBeNull()
+    const poll = wire.asks.find(a => a.message.scope === 's1')
+    if (poll) {
+      await hook.run(() => poll.answer.resolve(status('session-chain')))
+      expect(hook.current().input.session?.providerId).toBe('session-chain')
+    }
     await hook.unmount()
   })
 

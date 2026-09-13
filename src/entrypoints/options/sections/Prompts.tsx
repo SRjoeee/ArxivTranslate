@@ -13,7 +13,18 @@ export function Prompts({ data }: { data: OptionsData }) {
   const { config, patch } = data
   // The glossary is text on the page and entries in storage: pasting a batch beats editing rows
   const [text, setText] = useState<string | null>(null)
-  useEffect(() => { if (config && text === null) setText(formatGlossaryText(config.glossary)) }, [config, text])
+  // The text follows the stored glossary: the first read, and a change saved elsewhere (Codex on #185) — except while
+  // it is the reader's own. Text that parses to the stored entries stays under their cursor however it is laid out,
+  // and a draft that does not parse or fit yet is theirs to finish; the entries it saves later are their later word
+  useEffect(() => {
+    if (!config) return
+    if (text !== null) {
+      const local = parseGlossary(text)
+      const fits = local.issues.length === 0 && configSchema.shape.glossary.safeParse(local.entries).success
+      if (!fits || formatGlossaryText(local.entries) === formatGlossaryText(config.glossary)) return
+    }
+    setText(formatGlossaryText(config.glossary))
+  }, [config, text])
   const parsed = text === null ? null : parseGlossary(text)
   // A table can parse line by line and still break the schema's limits (200 entries, per-field
   // length, 6000 characters in all). Writing it would reject silently and leave the reader looking

@@ -208,9 +208,11 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
   const session = page?.session ?? null
   // The saved settings' chain is asked whenever the page is not running — at mount, and again when it stops. A page
   // that is on shows its session's chain and the polling below stops with it: had the first ask failed, nothing would
-  // ask again, and the button would stay disabled after 显示原文 (the local review of S1, fourth pass)
+  // ask again, and the button would stay disabled after 显示原文 (the local review of S1, fourth pass). Asked `fresh`:
+  // an ask without the barrier, made while a configuration change's ask waits on its read, would answer first from
+  // the previous chain and, being the newer ask, keep the answer (sixth pass)
   useEffect(() => {
-    if (!on) void loadProvider()
+    if (!on) void loadProvider(undefined, true)
   }, [on, loadProvider])
   // Paused while a grant takes effect: the background has to be left alone to idle out (view-model.ts says why)
   const askBackground = pollsBackground(helper)
@@ -350,7 +352,7 @@ export function usePopupData(): { input: PopupInput; error: string | null; actio
     helperStatus: setHelper,
   }
 
-  // A page that is on shows its session's chain (its hand-overs); anything else the saved settings' chain
-  const provider = page?.progress.state === 'on' && sessionProvider ? sessionProvider : savedProvider
-  return { input: { page, provider, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id, savedRevision }, error, actions }
+  // The view gets both: the session's chain only while the page is on — unknown until it answers, never the saved
+  // chain in its place (Codex on #185) — and the saved settings' chain for what a start would run on
+  return { input: { page, saved: savedProvider, session: on ? sessionProvider : null, config, pack, helper, platform, menu, shortcut, extensionId: browser.runtime.id, savedRevision }, error, actions }
 }

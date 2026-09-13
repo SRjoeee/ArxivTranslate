@@ -133,6 +133,23 @@ describe('derivePopupView (UI.md §4)', () => {
     expect(behind.secondary).toEqual({ label: '显示原文', action: 'restore' })
     expect(derivePopupView({ ...on, savedRevision: null }).primary).toMatchObject({ action: 'restore' })
   })
+  it('the session chain and the saved chain are never confused: an unknown session shows as unknown, the decision reads the saved one', () => {
+    // Codex on #185: the popup used to hand the view one status, the saved chain standing in for a session that had
+    // not answered — its hand-over would have been shown as the running page's
+    const demoted = { id: 'svc-1', displayName: 'LLM', kind: 'auth' as const, message: 'User not found.' }
+    const handedOver = { ...input('P6').session!, engine: { id: 'google-web', displayName: 'Google', demoted } }
+    const on = { ...input('P6'), saved: handedOver, session: null }
+    const unknown = derivePopupView(on)
+    expect(unknown.note).toBeNull()
+    expect(unknown.service).toEqual({ value: input('P6').config!.services[0]!.name })
+    const known = derivePopupView({ ...on, session: handedOver })
+    expect(known.note?.text).toContain('Google')
+    expect(known.service.replaced).toBeDefined()
+    // Whether a start is enabled without a runnable choice is the saved chain's fallback, whatever a session says
+    const idle = input('P7')
+    expect(derivePopupView({ ...idle, session: { ...idle.saved!, fallback: undefined } }).primary.disabled).toBe(false)
+    expect(derivePopupView({ ...idle, saved: { ...idle.saved!, fallback: undefined }, session: idle.saved }).primary.disabled).toBe(true)
+  })
   it('P14 helper missing on macOS: install text plus the id the guided install needs', () => {
     const v = view('P14')
     // 带着 extensionId 才有得装：命令要按这个 id 拼（引导本身在 HelperSetup 里，§15.4）

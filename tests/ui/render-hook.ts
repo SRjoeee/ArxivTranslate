@@ -1,6 +1,6 @@
 // A hook mounted in a real React root over happy-dom, for the data layers of the popup and the settings page: they
 // are hooks, and what they promise — which ask publishes, when a reload waits — is only visible through one
-import { act, createElement } from 'react'
+import { type ReactElement, act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -40,6 +40,30 @@ export async function mountHook<T>(use: () => T): Promise<MountedHook<T>> {
     current: () => latest as T,
     flush,
     run: async action => { await act(async () => { await action() }); await flush() },
+    unmount: async () => { await act(async () => { root.unmount() }); container.remove() },
+  }
+}
+
+export interface MountedElement {
+  container: HTMLElement
+  /** Render another element into the same root and settle */
+  rerender(element: ReactElement): Promise<void>
+  flush(): Promise<void>
+  unmount(): Promise<void>
+}
+
+/** A component mounted in a real React root over happy-dom, for what a section shows */
+export async function mountElement(element: ReactElement): Promise<MountedElement> {
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const flush = async () => { await act(async () => { await tick() }) }
+  await act(async () => { root.render(element) })
+  await flush()
+  return {
+    container,
+    rerender: async next => { await act(async () => { root.render(next) }); await flush() },
+    flush,
     unmount: async () => { await act(async () => { root.unmount() }); container.remove() },
   }
 }

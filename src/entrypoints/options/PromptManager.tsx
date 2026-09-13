@@ -14,7 +14,7 @@ import { drafts } from '@/ui/drafts'
 // a whole UI stack for a dozen fields is not worth it, so this is the settings page's plain React.
 // A change is handed to the parent, which writes it to storage straight away — the page has no save button.
 
-type EditorMode = 'view' | 'copy' | 'edit' | 'new'
+export type EditorMode = 'view' | 'copy' | 'edit' | 'new'
 type Field = 'systemPrompt' | 'prompt'
 
 /** Read at render, not at import: this module is evaluated before the pack is chosen (ui/strings.ts) */
@@ -30,6 +30,17 @@ const field = { display: 'block', width: '100%', boxSizing: 'border-box' as cons
 const small = { display: 'block', color: 'var(--axt-fg-2)', fontSize: 12 }
 const row = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--axt-line)' }
 const button = { font: 'inherit', fontSize: 12 }
+
+/**
+ * The list with the draft saved into it. An edit replaces its template in place — or, when the template is no longer
+ * in the list (deleted in another tab while this editor was open, and the list followed), appends it: the save is the
+ * reader's later word on that prompt, and a save that persisted nothing while reporting success would have lost the
+ * draft without a trace (the local review of S1, sixth pass). A new template and a copy always append
+ */
+export function withSaved(patterns: readonly PromptTemplate[], mode: EditorMode, draft: PromptTemplate): PromptTemplate[] {
+  if (mode === 'edit' && patterns.some(p => p.id === draft.id)) return patterns.map(p => (p.id === draft.id ? draft : p))
+  return [...patterns, draft]
+}
 
 export function PromptManager({ value, onChange }: { value: PromptsConfig; onChange: (next: PromptsConfig) => void }) {
   const [editor, setEditor] = useState<{ mode: EditorMode; draft: PromptTemplate } | null>(null)
@@ -60,8 +71,7 @@ export function PromptManager({ value, onChange }: { value: PromptsConfig; onCha
     const { mode, draft } = editor
     if (!draft.name.trim()) return setMessage(O.prompts.manager.nameEmpty)
     if (!draft.prompt.trim()) return setMessage(O.prompts.manager.promptEmpty)
-    const patterns = mode === 'edit' ? value.patterns.map(p => (p.id === draft.id ? draft : p)) : [...value.patterns, draft]
-    onChange({ patterns, promptId: mode === 'copy' ? draft.id : value.promptId })
+    onChange({ patterns: withSaved(value.patterns, mode, draft), promptId: mode === 'copy' ? draft.id : value.promptId })
     setEditor(null)
     setMessage(mode === 'edit' ? O.prompts.manager.saved : O.prompts.manager.added)
   }
